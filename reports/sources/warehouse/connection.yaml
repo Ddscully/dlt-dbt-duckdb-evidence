@@ -1,0 +1,6 @@
+name: warehouse
+type: duckdb
+options:
+  # Path is relative to this source directory -> repo-root data/warehouse.duckdb.
+  # Run `just run` first so the file exists before `evidence build`.
+  filename: ../../../data/warehouse.duckdb

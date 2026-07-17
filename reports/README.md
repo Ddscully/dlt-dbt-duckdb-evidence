@@ -3,31 +3,44 @@
 [Evidence.dev](https://evidence.dev) — "BI as code". SQL + markdown compile to a
 static site, deployable free to GitHub Pages.
 
-## Scaffold it
+This folder is a working Evidence project wired to the repo's DuckDB warehouse.
+
+## Prerequisites
+
+Build the warehouse first (Evidence reads `../data/warehouse.duckdb`):
 
 ```bash
-npx degit evidence-dev/template reports   # one-time, into this folder
-cd reports && npm install
+just run        # ingest -> dbt build -> polars transform
 ```
 
-Point Evidence at the DuckDB warehouse in `evidence/connection.yaml`:
+## Develop / build
 
-```yaml
-name: warehouse
-type: duckdb
-options:
-  filename: ../../data/warehouse.duckdb
+```bash
+cd reports
+npm install       # first time
+npm run dev       # local preview at http://localhost:3000
+npm run build     # static site -> build/ (deploy to GitHub Pages)
 ```
+
+Or from the repo root: `just report`.
+
+## How it's wired
+
+- `sources/warehouse/connection.yaml` — DuckDB source pointing at the warehouse file.
+- `sources/warehouse/*.sql` — source queries that read the dbt/Polars outputs
+  (`marts.fct_emissions_energy`, `analytics.co2_intensity`). Referenced in pages
+  as `warehouse.emissions_energy`, `warehouse.co2_intensity`.
+- `pages/index.md` — the dashboard: renewables vs. life expectancy (bubble),
+  CO₂ intensity by income group over time (line), and a most-efficient table,
+  with a year selector.
 
 ## Pages (`pages/`)
 
-Each `.md` page runs SQL against the marts and renders charts, e.g.:
+Add a `.md` file per page; each runs SQL against the `warehouse` source and
+renders charts. See the [Evidence docs](https://docs.evidence.dev) for components.
 
-- **CO₂ per \$ of GDP by income group over time** — `marts.fct_emissions_energy`
-- **Renewables adoption vs. life expectancy** — join in a WDI mart
-- **Carbon-efficiency ranking** — `analytics.co2_intensity` (Polars output)
+## Deploying to GitHub Pages
 
-```bash
-npm run dev      # local preview
-npm run build    # static site -> build/ (deploy to GitHub Pages)
-```
+The site is fully static. In CI, run `just run` (to produce the DuckDB file),
+then `npm --prefix reports ci && npm --prefix reports run build`, and publish
+`reports/build/`.
