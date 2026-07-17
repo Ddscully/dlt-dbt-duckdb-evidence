@@ -29,7 +29,7 @@ where year = ${inputs.year.value}
 <Grid cols=3>
     <BigValue data={kpis} value=n_countries title="Countries reporting"/>
     <BigValue data={kpis} value=avg_life_expectancy fmt="0.0" title="Avg life expectancy (yrs)"/>
-    <BigValue data={kpis} value=avg_renewables fmt="0.0\%" title="Avg renewables share"/>
+    <BigValue data={kpis} value=avg_renewables fmt='0.0"%"' title="Avg renewables share"/>
 </Grid>
 
 ## Renewables adoption vs. life expectancy
@@ -42,7 +42,7 @@ select
     country_name,
     income_group,
     region,
-    renewables_share_pct,
+    renewables_share_pct as renewables_share,
     life_expectancy,
     population,
     co2_per_capita
@@ -54,7 +54,7 @@ where year = ${inputs.year.value}
 
 <BubbleChart
     data={renew_vs_life}
-    x=renewables_share_pct
+    x=renewables_share
     y=life_expectancy
     size=population
     series=income_group
