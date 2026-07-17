@@ -3,8 +3,10 @@ version: 2
 models:
   - name: fct_emissions_energy
     description: >
-      Country-year fact combining OWID emissions & energy and World Bank WDI
-      (GDP, life expectancy, population, poverty) with World Bank classifications.
+      Country-year fact combining OWID emissions & energy, World Bank WDI
+      (GDP, life expectancy, population, poverty, internet, urbanisation, forest,
+      renewable electricity, energy imports) and Eurostat household electricity
+      prices (EU only), with World Bank classifications.
     columns:
       - name: country_iso3
         tests: [not_null]
@@ -16,3 +18,11 @@ models:
         description: GDP per capita, current US$ (WDI NY.GDP.PCAP.CD).
       - name: life_expectancy
         description: Life expectancy at birth, years (WDI SP.DYN.LE00.IN).
+      - name: internet_users_pct
+        description: Individuals using the internet, % of population (WDI IT.NET.USER.ZS).
+      - name: renew_elec_pct
+        description: Renewable electricity output, % of total (WDI EG.ELC.RNEW.ZS).
+      - name: electricity_price_eur_kwh
+        description: >
+          Household electricity price, EUR/kWh incl. all taxes, medium band DC
+          (Eurostat nrg_pc_204). Null for non-EU/EEA countries.

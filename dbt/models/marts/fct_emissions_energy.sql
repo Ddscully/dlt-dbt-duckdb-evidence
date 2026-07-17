@@ -9,6 +9,9 @@ energy as (
 wdi as (
     select * from {{ ref('stg_wdi') }}
 ),
+eu_prices as (
+    select * from {{ ref('stg_eu_electricity_prices') }}
+),
 country as (
     select * from {{ ref('stg_country') }}
 )
@@ -32,8 +35,16 @@ select
     w.gdp_usd,
     w.life_expectancy,
     w.population,
-    w.poverty_rate
+    w.poverty_rate,
+    w.internet_users_pct,
+    w.urban_pop_pct,
+    w.forest_area_pct,
+    w.renew_elec_pct,
+    w.energy_imports_pct,
+    -- EU household electricity price, EUR/kWh (Eurostat; null outside the EU/EEA)
+    p.electricity_price_eur_kwh
 from co2 c
-left join energy  e on c.country_iso3 = e.country_iso3 and c.year = e.year
-left join wdi     w on c.country_iso3 = w.country_iso3 and c.year = w.year
-left join country d on c.country_iso3 = d.country_iso3
+left join energy    e on c.country_iso3 = e.country_iso3 and c.year = e.year
+left join wdi       w on c.country_iso3 = w.country_iso3 and c.year = w.year
+left join eu_prices p on c.country_iso3 = p.country_iso3 and c.year = p.year
+left join country   d on c.country_iso3 = d.country_iso3

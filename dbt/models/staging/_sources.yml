@@ -9,3 +9,4 @@ sources:
       - name: owid_energy
       - name: wb_country
       - name: wb_wdi
+      - name: eu_elec_prices

@@ -31,7 +31,8 @@ must run from the `dbt/` directory (that's where `profiles.yml` lives).
 
 ## Warehouse schemas (one DuckDB file: `data/warehouse.duckdb`)
 
-- `raw` — dlt landing tables: `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`
+- `raw` — dlt landing tables: `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`,
+  `eu_elec_prices`
 - `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain
 - `marts` — dbt tables, `fct_emissions_energy` (the wide join)
 - `analytics` — Polars output, `co2_intensity`
@@ -57,6 +58,12 @@ ISO3 country code + year. The country dimension (`stg_country`) supplies
 - **World Bank WDI** is fetched long (one row per indicator/country/year) and
   pivoted to wide columns in `stg_wdi.sql`. Add indicators in two places:
   `WB_WDI_INDICATORS` in `ingest/pipeline.py` and a `max(case …)` in `stg_wdi.sql`.
+- **Eurostat is JSON-stat** — a flat `value` dict keyed by a row-major index over
+  all dimensions. `eu_elec_prices` filters every dimension but `geo`/`time`
+  server-side, then walks that grid (see `pipeline.py`). Its `geo` codes are ISO2
+  *except* `EL`=Greece (GR) and `UK`=UK (GB); `stg_eu_electricity_prices.sql`
+  remaps those, joins `stg_country` for ISO3, and averages the two half-years to
+  annual. EU/EEA only, so the mart column is null for the rest of the world.
 
 ## Verifying changes
 

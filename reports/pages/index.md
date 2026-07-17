@@ -89,6 +89,57 @@ order by year
     yAxisTitle="kg CO₂ per $ GDP"
 />
 
+## Does more renewable energy mean cheaper power? (EU, <Value data={years} column=year/>)
+
+Household electricity prices (incl. all taxes, Eurostat) against each EU country's
+**renewable share of energy** for the selected year. The relationship is famously
+messy — grid, tax and policy choices dominate.
+
+```sql eu_price_vs_renew
+select
+    country_name,
+    income_group,
+    renewables_share_pct as renewables_share,
+    electricity_price_eur_kwh,
+    population
+from warehouse.emissions_energy
+where year = ${inputs.year.value}
+  and electricity_price_eur_kwh is not null
+  and renewables_share_pct is not null
+```
+
+<ScatterPlot
+    data={eu_price_vs_renew}
+    x=renewables_share
+    y=electricity_price_eur_kwh
+    series=income_group
+    xAxisTitle="Renewables share of energy (%)"
+    yAxisTitle="Household electricity price (€/kWh)"
+    tooltipTitle=country_name
+/>
+
+## Most expensive EU electricity (<Value data={years} column=year/>)
+
+```sql eu_prices
+select
+    country_name,
+    electricity_price_eur_kwh,
+    renewables_share_pct,
+    internet_users_pct
+from warehouse.emissions_energy
+where year = ${inputs.year.value}
+  and electricity_price_eur_kwh is not null
+order by electricity_price_eur_kwh desc
+limit 10
+```
+
+<DataTable data={eu_prices} rows=10>
+    <Column id=country_name title="Country"/>
+    <Column id=electricity_price_eur_kwh title="€ / kWh" fmt="0.000"/>
+    <Column id=renewables_share_pct title="Renewables %" fmt="0.0"/>
+    <Column id=internet_users_pct title="Internet users %" fmt="0.0"/>
+</DataTable>
+
 ## Most carbon-efficient economies (<Value data={years} column=year/>)
 
 Lowest CO₂ per \$ of GDP among countries reporting in the selected year.
@@ -119,5 +170,6 @@ limit 10
 
 <small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
 <a href="https://github.com/owid/energy-data">OWID Energy</a>,
-<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>,
+<a href="https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204">Eurostat electricity prices</a>.
 Built with dbt, DuckDB, Polars & Evidence.</small>
