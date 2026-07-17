@@ -1,0 +1,12 @@
+# Local dbt profile — points the DuckDB adapter at the file dlt wrote.
+# Kept in-repo (no secrets) so the demo runs with zero setup.
+modern_data_stack:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "../data/warehouse.duckdb"
+      threads: 4
+      extensions:
+        - httpfs
+        - parquet

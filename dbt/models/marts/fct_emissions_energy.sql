@@ -1,0 +1,39 @@
+-- Wide country-year fact joining emissions + energy + WDI onto the country dim.
+-- Grain: one row per (country_iso3, year).
+with co2 as (
+    select * from {{ ref('stg_co2') }}
+),
+energy as (
+    select * from {{ ref('stg_energy') }}
+),
+wdi as (
+    select * from {{ ref('stg_wdi') }}
+),
+country as (
+    select * from {{ ref('stg_country') }}
+)
+
+select
+    c.country_iso3,
+    d.country_name,
+    d.region,
+    d.income_group,
+    c.year,
+    -- emissions
+    c.co2_mt,
+    c.co2_per_capita,
+    c.co2_per_gdp,
+    -- energy
+    e.primary_energy_twh,
+    e.renewables_share_pct,
+    e.fossil_share_pct,
+    -- economic / social (World Bank WDI)
+    w.gdp_per_capita_usd,
+    w.gdp_usd,
+    w.life_expectancy,
+    w.population,
+    w.poverty_rate
+from co2 c
+left join energy  e on c.country_iso3 = e.country_iso3 and c.year = e.year
+left join wdi     w on c.country_iso3 = w.country_iso3 and c.year = w.year
+left join country d on c.country_iso3 = d.country_iso3

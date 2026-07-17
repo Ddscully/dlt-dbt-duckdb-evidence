@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Landing tables loaded by the dlt pipeline.
+    schema: raw
+    tables:
+      - name: owid_co2
+      - name: owid_energy
+      - name: wb_country
+      - name: wb_wdi

@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: fct_emissions_energy
+    description: >
+      Country-year fact combining OWID emissions & energy and World Bank WDI
+      (GDP, life expectancy, population, poverty) with World Bank classifications.
+    columns:
+      - name: country_iso3
+        tests: [not_null]
+      - name: year
+        tests: [not_null]
+      - name: income_group
+        description: World Bank income group (dimension attribute for grouping marts).
+      - name: gdp_per_capita_usd
+        description: GDP per capita, current US$ (WDI NY.GDP.PCAP.CD).
+      - name: life_expectancy
+        description: Life expectancy at birth, years (WDI SP.DYN.LE00.IN).

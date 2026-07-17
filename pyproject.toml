@@ -1,0 +1,37 @@
+[project]
+name = "modern-data-stack"
+version = "0.1.0"
+description = "A public demo of a modern, lightweight data-engineering & BI stack: dlt → DuckDB → dbt → Polars → Evidence."
+readme = "README.md"
+authors = [{ name = "Daniel Scully", email = "daycent@proton.me" }]
+requires-python = ">=3.12"
+
+# Runtime dependencies (the pipeline itself)
+dependencies = [
+    "dlt[duckdb]>=1.5",   # EL: API/file ingestion into DuckDB with schema inference
+    "duckdb>=1.1",        # in-process analytical warehouse
+    "polars>=1.17",       # heavy/columnar transforms in Python
+    "dbt-duckdb>=1.9",    # T: dbt adapter targeting the DuckDB file
+]
+
+[dependency-groups]
+# `uv sync --group dev` — tooling that isn't needed to run the pipeline
+dev = [
+    "sqlfluff>=3.3",       # SQL linter/formatter (dbt templater)
+    "pre-commit>=4.0",     # git hooks
+    "harlequin>=2.1",      # terminal SQL IDE for DuckDB
+]
+notebook = [
+    "marimo>=0.10",        # reactive notebooks for the Polars exploration layer
+]
+
+[project.scripts]
+mds = "modern_data_stack:main"
+
+[build-system]
+requires = ["uv_build>=0.11.29,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+# keep dev/notebook groups out of the default sync if desired:
+# default-groups = ["dev"]
