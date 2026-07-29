@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import dlt
@@ -37,7 +38,18 @@ DUCKDB_PATH = os.environ.get("WAREHOUSE_PATH") or str(REPO_ROOT / "data" / "ware
 
 OWID_CO2 = "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv"
 OWID_ENERGY = "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv"
-WB_COUNTRY_API = "https://api.worldbank.org/v2/country?format=json&per_page=400"
+
+# Page size for the World Bank API (its documented maximum is 32 000, but large
+# pages occasionally time out — 10 000 with pagination is the safer trade).
+WB_PER_PAGE = 10_000
+
+
+def wb_country_url(page: int = 1) -> str:
+    """The WB /country request URL for one page (also used by the recorder)."""
+    return f"https://api.worldbank.org/v2/country?format=json&per_page={WB_PER_PAGE}&page={page}"
+
+
+WB_COUNTRY_API = wb_country_url()
 
 # Eurostat: electricity prices for household consumers, medium consumption band
 # DC (2 500–4 999 kWh/yr), all taxes included, in EUR/kWh. Filtered server-side to
@@ -66,10 +78,6 @@ WB_WDI_INDICATORS = {
     "EG.ELC.RNEW.ZS": "renew_elec_pct",  # Renewable electricity output, % of total
     "EG.IMP.CONS.ZS": "energy_imports_pct",  # Energy imports (net), % of energy use
 }
-
-# Page size for the World Bank API (its documented maximum is 32 000, but large
-# pages occasionally time out — 10 000 with pagination is the safer trade).
-WB_PER_PAGE = 10_000
 
 
 def _csv_source(url: str) -> str:
@@ -115,9 +123,21 @@ def owid_energy():
 
 @dlt.resource(name="wb_country", write_disposition="replace")
 def wb_country():
-    # World Bank returns [metadata, [records...]]
-    payload = _get_json(WB_COUNTRY_API, timeout=60)
-    yield payload[1]
+    # Paginated like wb_wdi: the dimension table fits on one page today, but
+    # nothing guarantees it stays under WB_PER_PAGE rows forever, and a second
+    # page arriving with no pagination would be silently truncated.
+    page = 1
+    while True:
+        payload = _get_json(wb_country_url(page), timeout=60)
+        # World Bank returns [metadata, [records...]]; anything else is an
+        # error object served with a 200.
+        if not (isinstance(payload, list) and len(payload) == 2):
+            raise RuntimeError(f"unexpected World Bank payload for /country: {payload!r:.300}")
+        meta, rows = payload
+        yield rows or []
+        if page >= int(meta.get("pages", 1)):
+            break
+        page += 1
 
 
 def wdi_url(code: str, page: int = 1) -> str:
@@ -128,30 +148,45 @@ def wdi_url(code: str, page: int = 1) -> str:
     )
 
 
+def _fetch_wdi_indicator(code: str) -> list[dict]:
+    """All rows for one WDI indicator, paginating until `meta.pages` is exhausted."""
+    rows_out: list[dict] = []
+    page = 1
+    while True:
+        payload = _get_json(wdi_url(code, page))
+        # World Bank returns [metadata, [records...]]; anything else is an
+        # error object served with a 200.
+        if not (isinstance(payload, list) and len(payload) == 2):
+            raise RuntimeError(f"unexpected World Bank payload for {code}: {payload!r:.300}")
+        meta, rows = payload
+        rows_out.extend(
+            {
+                "indicator": code,
+                "country_iso3": row.get("countryiso3code"),
+                "year": int(row["date"]) if row.get("date") else None,
+                "value": row.get("value"),
+            }
+            for row in rows or []
+        )
+        if page >= int(meta.get("pages", 1)):
+            break
+        page += 1
+    return rows_out
+
+
 @dlt.resource(name="wb_wdi", write_disposition="replace")
 def wb_wdi():
     # Paginated: a single 20k-row page used to cover every indicator, but the
     # series grow by ~270 rows a year and were already at 87% of that cap, so
     # the next few years would have silently truncated the oldest indicators.
-    for code in WB_WDI_INDICATORS:
-        page = 1
-        while True:
-            payload = _get_json(wdi_url(code, page))
-            # World Bank returns [metadata, [records...]]; anything else is an
-            # error object served with a 200.
-            if not (isinstance(payload, list) and len(payload) == 2):
-                raise RuntimeError(f"unexpected World Bank payload for {code}: {payload!r:.300}")
-            meta, rows = payload
-            for row in rows or []:
-                yield {
-                    "indicator": code,
-                    "country_iso3": row.get("countryiso3code"),
-                    "year": int(row["date"]) if row.get("date") else None,
-                    "value": row.get("value"),
-                }
-            if page >= int(meta.get("pages", 1)):
-                break
-            page += 1
+    #
+    # Each indicator's fetch (and its pages) is independent of the others and
+    # only hits the World Bank API — nothing here touches the DuckDB writer
+    # lock — so a small thread pool fetches them concurrently instead of one
+    # blocking call at a time.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for rows in pool.map(_fetch_wdi_indicator, WB_WDI_INDICATORS):
+            yield rows
 
 
 @dlt.resource(name="eu_elec_prices", write_disposition="replace")

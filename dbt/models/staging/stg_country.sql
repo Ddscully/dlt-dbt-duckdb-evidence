@@ -5,7 +5,7 @@ with source as (
     select * from {{ source('raw', 'wb_country') }}
 ),
 
-overrides as (
+country_overrides as (
     select * from {{ ref('country_overrides') }}
 ),
 
@@ -35,9 +35,16 @@ manual as (
         cast(null as varchar) as capital_city,
         cast(null as double) as longitude,
         cast(null as double) as latitude
-    from overrides as o
+    from country_overrides as o
     -- the World Bank wins if it ever starts publishing one of these
-    where o.country_iso3 not in (select w.country_iso3 from world_bank as w)
+    -- (the `is not null` guards NOT IN's three-valued logic: a single null
+    -- country_iso3 in world_bank would otherwise make the predicate UNKNOWN
+    -- for every row and silently drop all overrides)
+    where o.country_iso3 not in (
+        select w.country_iso3
+        from world_bank as w
+        where w.country_iso3 is not null
+    )
 )
 
 select * from world_bank

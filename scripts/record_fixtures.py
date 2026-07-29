@@ -109,10 +109,15 @@ def record_wdi() -> None:
         rows: list[dict] = []
         page = 1
         while True:
-            meta, payload = _get_json(wdi_url(code, page))
+            payload = _get_json(wdi_url(code, page))
+            # World Bank returns [metadata, [records...]]; anything else is an
+            # error object served with a 200 (e.g. a retired indicator code).
+            if not (isinstance(payload, list) and len(payload) == 2):
+                raise RuntimeError(f"unexpected World Bank payload for {code}: {payload!r:.300}")
+            meta, page_rows = payload
             rows += [
                 row
-                for row in payload or []
+                for row in page_rows or []
                 if row.get("countryiso3code") in COUNTRIES
                 and row.get("date")
                 and int(row["date"]) >= WDI_MIN_YEAR

@@ -201,6 +201,7 @@ inner join base_year b on e.country_iso3 = b.country_iso3
 where b.gdp_constant_usd is not null
   and e.gdp_constant_usd is not null
   and b.co2_mt > 100
+  and e.co2_mt is not null
 ```
 
 <ScatterPlot

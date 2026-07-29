@@ -18,7 +18,7 @@ there is no shell script to keep in sync.
 # `context` parameter's annotation object, and a stringified one fails its check.
 
 from collections.abc import Mapping
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 import dagster as dg
@@ -199,7 +199,7 @@ def mart_covers_recent_years() -> dg.AssetCheckResult:
     notices a dashboard has gone flat.
     """
     max_year = _scalar("select max(year) from marts.fct_emissions_energy")
-    current_year = _scalar("select year(current_date)")
+    current_year = date.today().year
     lag = current_year - max_year
     return dg.AssetCheckResult(
         passed=lag <= 2,
