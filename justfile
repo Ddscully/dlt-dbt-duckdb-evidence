@@ -90,7 +90,7 @@ lint: dbt-deps
 
 # Build the Evidence dashboard (requires Node; see reports/README.md)
 report:
-    cd reports && npm install && npm run build
+    cd reports && npm install && npm run sources && npm run build
 
 # Evidence caches each source's schema keyed on the source SQL, so a `select *`
 # that gains columns looks unchanged and validation fails against the stale schema.

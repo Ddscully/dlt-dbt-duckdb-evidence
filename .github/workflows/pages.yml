@@ -82,9 +82,17 @@ jobs:
           printf '\ndeployment:\n  basePath: /%s\n' \
             '${{ github.event.repository.name }}' >> reports/evidence.config.yaml
 
-      # reports/.evidence/ is gitignored, so this always starts from a cold
-      # cache and can't hit the stale-schema problem `just report-clean` exists
-      # to fix locally.
+      # `evidence build` does NOT run the sources — it reads whatever parquet
+      # `reports/.evidence/` already holds. That directory is gitignored, so CI
+      # always starts cold and a build without this step deploys a site whose
+      # every query fails with "Table with name emissions_energy does not
+      # exist". --strict turns a broken warehouse into a red build instead of a
+      # green deploy of an empty dashboard.
+      - name: Extract the source data
+        run: npm --prefix reports run sources:strict
+
+      # Cold cache also means this can't hit the stale-schema problem that
+      # `just report-clean` exists to fix locally.
       - name: Build the site
         run: npm --prefix reports run build
 

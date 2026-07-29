@@ -1,7 +1,26 @@
-# Modern Data Stack Demo
+# dlt → dbt → DuckDB → Evidence
 
-A small, end-to-end demonstration of a **modern, lightweight data-engineering & BI stack** —
-everything runs locally with `uv`, no cloud warehouse required.
+### 📊 [**See the live dashboard →**](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
+
+A data pipeline that answers one question: **how does a country's energy mix
+relate to its emissions and its people's wellbeing?**
+
+It pulls CO₂, energy and development data for ~200 countries from
+[Our World in Data](https://github.com/owid/co2-data), the
+[World Bank](https://databank.worldbank.org/source/world-development-indicators)
+and [Eurostat](https://ec.europa.eu/eurostat), cleans and joins it, derives a
+few metrics, and publishes the charts above. The whole thing rebuilds itself
+from the live sources on every push — the dashboard you're looking at was built
+by a robot, not exported by hand.
+
+<sub>Nothing to install to look at the numbers — just follow the link. The rest
+of this README is for people who want to run or read the pipeline.</sub>
+
+---
+
+Under the hood it's an end-to-end demonstration of a **modern, lightweight
+data-engineering & BI stack**. Everything runs locally with `uv` against a single
+DuckDB file — no cloud warehouse, no credentials, no bill.
 
 ```
 dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
@@ -9,6 +28,11 @@ dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 └──────────────── Dagster ─────────────────┘
         one asset graph, scheduled
 ```
+
+Read it in whatever order suits you: [what the dashboard
+shows](#published-dashboard), [how the layers fit
+together](#orchestration), [how it's tested](#tests), or just
+[`just setup && just run`](#quickstart).
 
 ## Stack
 
@@ -178,16 +202,31 @@ no ceiling because small petrostates legitimately reach 780 t/person.
 
 ## Published dashboard
 
-`.github/workflows/pages.yml` deploys the Evidence site to GitHub Pages at
-**https://ddscully.github.io/dlt-dbt-duckdb-evidence/**. It runs the pipeline
-against the **live** sources rather than the fixtures (a published dashboard
-showing the 17-country test slice would be worse than none), on every push to
-`main`, weekly, and on demand.
+### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-Two things to know:
+Two pages, both built from `marts.fct_emissions_energy` and
+`analytics.co2_intensity`:
+
+| Page | What's on it |
+|------|--------------|
+| **Overview** | Pick a year: renewables share vs. life expectancy for every country (bubbles sized by population, coloured by income group), CO₂ intensity by income group over time, and the headline counts. |
+| **Five findings** | The things the data actually says once it's joined — including that rich countries cut emissions while growing, and how far the energy/longevity relationship flattens out at the top. |
+
+`.github/workflows/pages.yml` builds it. It runs the pipeline against the
+**live** sources rather than the fixtures (a published dashboard showing the
+17-country test slice would be worse than none), on every push to `main`,
+weekly, and on demand — so the site is never more than a week behind whatever
+OWID and the World Bank are publishing.
+
+Three things to know if you're copying this setup:
 
 - Pages has to be enabled once by hand: **Settings → Pages → Source → GitHub
   Actions**.
+- **`evidence build` does not run the sources.** It renders against whatever
+  parquet `reports/.evidence/` already holds, which locally is a warm cache and
+  in CI is nothing at all — so the workflow runs `npm run sources:strict` first.
+  Skip it and you deploy a perfectly working site where every chart says
+  *Table with name emissions_energy does not exist*. `just report` runs both.
 - Project Pages serve from a subpath, so the workflow appends
   `deployment.basePath` to `reports/evidence.config.yaml` at build time. It's
   injected rather than committed because a base path set in the file also

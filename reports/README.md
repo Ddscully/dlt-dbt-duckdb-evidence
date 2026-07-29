@@ -19,10 +19,17 @@ just run        # ingest -> dbt build -> polars transform
 cd reports
 npm install       # first time
 npm run dev       # local preview at http://localhost:3000
+npm run sources   # extract the warehouse tables -> .evidence/ parquet
 npm run build     # static site -> build/ (deploy to GitHub Pages)
 ```
 
-Or from the repo root: `just report`.
+Or from the repo root: `just report` (which runs both).
+
+**`npm run build` does not run the sources.** It renders against whatever
+parquet `.evidence/` already holds, and `.evidence/` is gitignored — so a build
+from a fresh clone succeeds and produces a site where every chart reads
+*Table with name emissions_energy does not exist*. `npm run dev` extracts them
+for you, which is why this only ever bites in CI.
 
 ## How it's wired
 
@@ -43,5 +50,7 @@ renders charts. See the [Evidence docs](https://docs.evidence.dev) for component
 ## Deploying to GitHub Pages
 
 The site is fully static. In CI, run `just run` (to produce the DuckDB file),
-then `npm --prefix reports ci && npm --prefix reports run build`, and publish
-`reports/build/`.
+then `npm --prefix reports ci`, `npm --prefix reports run sources:strict` and
+`npm --prefix reports run build`, and publish `reports/build/`. That's what
+`.github/workflows/pages.yml` does; `--strict` makes a missing or empty
+warehouse fail the build rather than deploy an empty dashboard.
