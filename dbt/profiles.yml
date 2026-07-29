@@ -1,11 +1,15 @@
 # Local dbt profile — points the DuckDB adapter at the file dlt wrote.
 # Kept in-repo (no secrets) so the demo runs with zero setup.
+#
+# WAREHOUSE_PATH overrides the target file so a fixture run can use a throwaway
+# warehouse; it must be absolute, since this path is resolved from `dbt/` while
+# the Python layers resolve theirs from the repo root.
 modern_data_stack:
   target: dev
   outputs:
     dev:
       type: duckdb
-      path: "../data/warehouse.duckdb"
+      path: "{{ env_var('WAREHOUSE_PATH', '../data/warehouse.duckdb') }}"
       threads: 4
       extensions:
         - httpfs

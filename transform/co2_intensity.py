@@ -8,14 +8,16 @@ Run:  uv run python -m transform.co2_intensity
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import duckdb
 import polars as pl
 
-# Anchored to the repo root, not the cwd — see ingest/pipeline.py.
+# Anchored to the repo root, not the cwd, and overridable by WAREHOUSE_PATH —
+# see ingest/pipeline.py for both.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DUCKDB_PATH = str(REPO_ROOT / "data" / "warehouse.duckdb")
+DUCKDB_PATH = os.environ.get("WAREHOUSE_PATH") or str(REPO_ROOT / "data" / "warehouse.duckdb")
 
 
 def build_co2_intensity(df: pl.DataFrame) -> pl.DataFrame:

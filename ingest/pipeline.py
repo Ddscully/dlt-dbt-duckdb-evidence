@@ -7,11 +7,16 @@ Sources (all freely licensed, country + year keyed):
   - World Bank countries  https://api.worldbank.org/v2/country?format=json  (dimension table)
   - Eurostat prices       https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204  (EU only)
 
+Set ``INGEST_FIXTURES=1`` to read checked-in payloads instead of the live
+endpoints — see `ingest/fixtures.py`. That's what CI does on pull requests.
+
 Run:  uv run python -m ingest.pipeline
 """
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from pathlib import Path
 
@@ -19,10 +24,16 @@ import dlt
 import polars as pl
 import requests
 
+from ingest import fixtures
+
 # Anchored to the repo root, not the cwd — the Dagster daemon and the CLI don't
 # necessarily run from the project directory.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DUCKDB_PATH = str(REPO_ROOT / "data" / "warehouse.duckdb")
+
+# WAREHOUSE_PATH lets a fixture run target a throwaway file instead of the real
+# warehouse. It must be absolute: dbt resolves its own copy of this from `dbt/`,
+# and `just test-pipeline` passes an absolute path for exactly that reason.
+DUCKDB_PATH = os.environ.get("WAREHOUSE_PATH") or str(REPO_ROOT / "data" / "warehouse.duckdb")
 
 OWID_CO2 = "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv"
 OWID_ENERGY = "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv"
@@ -61,6 +72,11 @@ WB_WDI_INDICATORS = {
 WB_PER_PAGE = 10_000
 
 
+def _csv_source(url: str) -> str:
+    """The CSV to hand Polars: the live URL, or a fixture path when offline."""
+    return str(fixtures.path_for(url)) if fixtures.enabled() else url
+
+
 def _get_json(url: str, *, timeout: int = 120, retries: int = 3) -> dict | list:
     """GET + parse JSON with a few retries — the World Bank & Eurostat APIs
     occasionally return a transient error page or non-JSON body.
@@ -69,6 +85,9 @@ def _get_json(url: str, *, timeout: int = 120, retries: int = 3) -> dict | list:
     `raise_for_status()` an HTML/JSON error body would parse fine and be handed
     on as if it were data.
     """
+    if fixtures.enabled():
+        return json.loads(fixtures.path_for(url).read_text())
+
     last: Exception | None = None
     for attempt in range(retries):
         try:
@@ -86,12 +105,12 @@ def _get_json(url: str, *, timeout: int = 120, retries: int = 3) -> dict | list:
 # (empty for the first rows) are typed as numbers, not strings.
 @dlt.resource(name="owid_co2", write_disposition="replace")
 def owid_co2():
-    yield pl.read_csv(OWID_CO2, infer_schema_length=None).to_dicts()
+    yield pl.read_csv(_csv_source(OWID_CO2), infer_schema_length=None).to_dicts()
 
 
 @dlt.resource(name="owid_energy", write_disposition="replace")
 def owid_energy():
-    yield pl.read_csv(OWID_ENERGY, infer_schema_length=None).to_dicts()
+    yield pl.read_csv(_csv_source(OWID_ENERGY), infer_schema_length=None).to_dicts()
 
 
 @dlt.resource(name="wb_country", write_disposition="replace")
@@ -99,6 +118,14 @@ def wb_country():
     # World Bank returns [metadata, [records...]]
     payload = _get_json(WB_COUNTRY_API, timeout=60)
     yield payload[1]
+
+
+def wdi_url(code: str, page: int = 1) -> str:
+    """The WDI request URL for one indicator page (also used by the recorder)."""
+    return (
+        f"https://api.worldbank.org/v2/country/all/indicator/{code}"
+        f"?format=json&per_page={WB_PER_PAGE}&page={page}"
+    )
 
 
 @dlt.resource(name="wb_wdi", write_disposition="replace")
@@ -109,11 +136,7 @@ def wb_wdi():
     for code in WB_WDI_INDICATORS:
         page = 1
         while True:
-            url = (
-                f"https://api.worldbank.org/v2/country/all/indicator/{code}"
-                f"?format=json&per_page={WB_PER_PAGE}&page={page}"
-            )
-            payload = _get_json(url)
+            payload = _get_json(wdi_url(code, page))
             # World Bank returns [metadata, [records...]]; anything else is an
             # error object served with a 200.
             if not (isinstance(payload, list) and len(payload) == 2):

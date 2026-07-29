@@ -26,6 +26,9 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
 | `just materialize` | same pipeline, ordered by the asset graph |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
+| `just test` | `pytest` — mocked-payload unit tests, no network |
+| `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
+| `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
 | `just lint` | `sqlfluff lint dbt/models` |
 | `just sql` | open the warehouse in Harlequin |
 | `just notebook` | marimo exploration notebook |
@@ -155,6 +158,39 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
   shouldn't start hammering public APIs on a timer.
 - Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile).
   Only `dagster.yaml` is checked in.
+
+## Testing (`tests/`)
+
+Two tiers, and the split is the point — see [`tests/README.md`](tests/README.md).
+
+- `just test` — mocked-payload unit tests over the ingest/transform logic. No
+  network, no warehouse, ~1s.
+- `just test-pipeline` — the real modules end to end with `INGEST_FIXTURES=1`,
+  serving all five sources from `tests/fixtures/ingest/`. This is what CI runs,
+  so a red PR build means the repo broke, not that OWID was down.
+
+Gotchas:
+
+- **`WAREHOUSE_PATH` overrides the DuckDB file** for `ingest`, `transform` *and*
+  dbt's profile. It must be **absolute**: dbt resolves its path from `dbt/`, the
+  Python layers from the repo root. `just test-pipeline` sets it to a temp file —
+  without that, a fixture run overwrites the real warehouse with the 17-country
+  slice.
+- **Fixtures filter rows, never columns.** Column-trimming would let a renamed
+  upstream field pass CI against a fixture that matches a `stg_` model no longer
+  matching reality. The OWID fixtures are gzipped CSV, not Parquet, so they still
+  go through `pl.read_csv(..., infer_schema_length=None)`.
+- **`fixtures.path_for()` raises on an unmapped URL** rather than falling back to
+  the network — otherwise "offline CI" quietly becomes "CI that's online
+  sometimes". `tests/test_fixtures.py` asserts every URL the pipeline can build
+  resolves to a file that exists.
+- **dlt wraps anything a resource generator raises** in `ResourceExtractionError`,
+  so tests asserting on ingest errors match that, not the underlying exception.
+- **Adding a WDI indicator means re-recording** (`just record-fixtures`), on top
+  of the two places listed above.
+- `.github/workflows/nightly.yml` runs the same graph against the *live* sources
+  daily and opens (or comments on) a `nightly-failure` issue. That's the signal
+  that the fixtures have drifted from reality.
 
 ## Verifying changes
 

@@ -24,7 +24,8 @@ dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 | [**marimo**](https://marimo.io/) | reactive notebook for exploration |
 | [**Harlequin**](https://harlequin.sh/) | terminal SQL IDE for DuckDB |
 | [**sqlfluff**](https://sqlfluff.com/) + pre-commit | SQL linting / CI rigor |
-| **GitHub Actions** | run the pipeline + tests on every PR |
+| [**pytest**](https://docs.pytest.org/) | unit tests over the ingest/transform logic |
+| **GitHub Actions** | fixture-backed pipeline run on every PR, live run nightly |
 
 ## Data sources
 
@@ -101,6 +102,8 @@ it from the UI if you want it running.
 │   ├── models/marts   # joined fact/dim tables (fct_*)
 │   └── macros/        # generate_schema_name -> clean schema names
 ├── transform/         # Polars: derived metrics -> schema `analytics`
+├── tests/             # pytest + the recorded API fixtures CI runs against
+├── scripts/           # record_fixtures.py — re-record those fixtures
 ├── notebooks/         # marimo reactive notebooks
 ├── reports/           # Evidence dashboard (BI as code)
 ├── docs/STYLE_GUIDE.md # SQL + model conventions (the lint rules and the rest)
@@ -136,3 +139,18 @@ just report     # build the Evidence dashboard
 ```
 
 No `just`? The recipes map to plain commands — see the [`justfile`](./justfile).
+
+## Tests
+
+```bash
+just test           # pytest — mocked payloads, no network, ~1s
+just test-pipeline  # the whole pipeline against recorded fixtures, ~30s
+```
+
+CI on a pull request runs both, plus the Dagster asset graph and the asset
+checks, entirely offline: `INGEST_FIXTURES=1` serves all five sources from
+`tests/fixtures/ingest/`. A red build therefore means *this repo* broke, not that
+OWID was rate-limiting. A separate nightly workflow runs the same graph against
+the live endpoints and opens an issue when a source has moved — which is the cue
+to fix the pipeline and `just record-fixtures`. Details in
+[`tests/README.md`](./tests/README.md).

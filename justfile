@@ -28,6 +28,26 @@ transform:
 # Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
 run: ingest dbt-build transform
 
+# Unit tests — mocked API payloads, no network, no warehouse
+test:
+    uv run pytest
+
+# The whole pipeline against checked-in fixtures, into a throwaway warehouse.
+# This is what CI runs on a pull request: deterministic, offline, ~30s.
+test-pipeline:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export INGEST_FIXTURES=1
+    export WAREHOUSE_PATH="$(mktemp -d)/warehouse.duckdb"
+    echo "fixture warehouse: $WAREHOUSE_PATH"
+    uv run python -m ingest.pipeline
+    cd dbt && uv run dbt build && cd ..
+    uv run python -m transform.co2_intensity
+
+# Re-record the fixtures from the live APIs (hits the network; commit the diff)
+record-fixtures:
+    uv run python -m scripts.record_fixtures
+
 # Dagster UI on :3000 — asset graph, run history, freshness, checks
 dagster:
     mkdir -p "$DAGSTER_HOME"

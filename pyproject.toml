@@ -21,6 +21,7 @@ dev = [
     "pre-commit>=4.0",     # git hooks
     "harlequin>=2.1",      # terminal SQL IDE for DuckDB
     "sqlfluff-templater-dbt>=3.3",  # .sqlfluff sets templater = dbt; useless without this
+    "pytest>=8.3",         # unit tests over the ingest/transform logic (see tests/)
 ]
 notebook = [
     "marimo>=0.10",        # reactive notebooks for the Polars exploration layer
@@ -44,6 +45,21 @@ build-backend = "uv_build"
 [tool.uv]
 # keep dev/notebook groups out of the default sync if desired:
 # default-groups = ["dev"]
+
+[tool.ruff]
+# The Python here was written to ~100 columns and `.sqlfluff` caps SQL at 120;
+# ruff's 88-column default would reflow every existing file on first run.
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `ingest`, `transform` and `scripts` are top-level directories, not installed
+# packages (only src/modern_data_stack is). Everything else reaches them via
+# `python -m` from the repo root; pytest needs telling.
+pythonpath = ["."]
+# The unit tests mock every HTTP call; `just test-pipeline` is the integration
+# path and runs the real modules against checked-in fixtures instead.
+addopts = "-q"
 
 [tool.dagster]
 # Lets `uv run dagster dev` find the code location with no extra flags.

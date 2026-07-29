@@ -1,5 +1,10 @@
 name: ci
 
+# Fast, deterministic, offline. Every network call the pipeline makes is served
+# from `tests/fixtures/ingest/` (see ingest/fixtures.py), so a red build here
+# means this repo broke — not that OWID was rate-limiting. The live sources are
+# exercised once a day by `nightly.yml` instead.
+
 on:
   push:
     branches: [main]
@@ -8,6 +13,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Serve every source from the recorded fixtures.
+      INGEST_FIXTURES: "1"
+      # Absolute, because dbt resolves this from dbt/ and Python from the root.
+      WAREHOUSE_PATH: ${{ github.workspace }}/data/warehouse.duckdb
+      DAGSTER_HOME: ${{ github.workspace }}/.dagster
     steps:
       - uses: actions/checkout@v4
 
@@ -19,6 +30,11 @@ jobs:
       - name: Sync deps
         run: uv sync --group dev --group orchestration
 
+      # Mocked-payload unit tests over the parsing logic: retry/raise, WDI
+      # pagination, the Eurostat stride walk, the Polars transform.
+      - name: Unit tests
+        run: uv run pytest
+
       # Parses the dbt manifest and resolves the whole asset graph, so a broken
       # ref, a renamed source or a dangling asset key fails before any I/O.
       - name: Validate Dagster definitions
@@ -27,10 +43,8 @@ jobs:
           uv run dagster definitions validate -m orchestration.definitions
 
       # Runs ingest -> dbt build + test -> Polars in asset-graph order, and
-      # evaluates the asset checks alongside dbt's tests.
+      # evaluates the asset checks alongside dbt's tests — all against fixtures.
       - name: Materialize the asset graph
-        env:
-          DAGSTER_HOME: ${{ github.workspace }}/.dagster
         run: |
           mkdir -p "$DAGSTER_HOME"
           uv run dagster job execute -m orchestration.definitions -j full_refresh
