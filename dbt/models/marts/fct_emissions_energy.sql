@@ -37,6 +37,7 @@ select
     -- economic / social (World Bank WDI)
     w.gdp_per_capita_usd,
     w.gdp_usd,
+    w.gdp_constant_usd,
     w.life_expectancy,
     w.population,
     w.poverty_rate,

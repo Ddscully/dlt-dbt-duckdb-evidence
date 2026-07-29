@@ -72,11 +72,10 @@ emissions each dollar of economic output carries.
 select
     year,
     income_group,
-    avg(co2_per_gdp) as avg_co2_per_gdp
-from warehouse.emissions_energy
+    avg(co2_per_gdp_const_usd) as avg_co2_per_gdp
+from warehouse.co2_intensity
 where income_group is not null
-  and co2_per_gdp is not null
-  and year between 1990 and 2022
+  and year >= 1990
 group by year, income_group
 order by year
 ```
@@ -148,20 +147,19 @@ Lowest CO₂ per \$ of GDP among countries reporting in the selected year.
 select
     country_name,
     income_group,
-    co2_per_gdp,
+    co2_per_gdp_const_usd,
     gdp_per_capita_usd,
     renewables_share_pct
-from warehouse.emissions_energy
+from warehouse.co2_intensity
 where year = ${inputs.year.value}
-  and co2_per_gdp is not null
-order by co2_per_gdp asc
+order by co2_per_gdp_const_usd asc
 limit 10
 ```
 
 <DataTable data={cleanest} rows=10>
     <Column id=country_name title="Country"/>
     <Column id=income_group title="Income group"/>
-    <Column id=co2_per_gdp title="CO₂ / $ GDP" fmt="0.000"/>
+    <Column id=co2_per_gdp_const_usd title="CO₂ / $ GDP" fmt="0.000"/>
     <Column id=gdp_per_capita_usd title="GDP per capita" fmt="usd0"/>
     <Column id=renewables_share_pct title="Renewables %" fmt="0.0"/>
 </DataTable>

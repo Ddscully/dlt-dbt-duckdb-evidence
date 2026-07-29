@@ -147,7 +147,10 @@ FCT_EMISSIONS_ENERGY = get_asset_key_for_model([dbt_models], "fct_emissions_ener
     group_name="analytics",
     kinds={"polars", "duckdb"},
     freshness_policy=MODELLED_FRESHNESS,
-    description="CO2 per $ GDP, dense-ranked within each (income group, year) cohort.",
+    description=(
+        "CO2 per $ GDP (derived from World Bank GDP, not OWID's shorter "
+        "co2_per_gdp), dense-ranked within each (income group, year) cohort."
+    ),
 )
 def co2_intensity(context: AssetExecutionContext) -> dg.MaterializeResult:
     rows = run_co2_intensity()

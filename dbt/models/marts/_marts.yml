@@ -12,10 +12,32 @@ models:
         tests: [not_null]
       - name: year
         tests: [not_null]
+      - name: region
+        description: >
+          World Bank region, trimmed (the API pads 'Sub-Saharan Africa ' and
+          'Latin America & Caribbean '). Null only for Antarctica; the other
+          ISO3 codes the World Bank omits are filled by the
+          `country_overrides` seed.
       - name: income_group
-        description: World Bank income group (dimension attribute for grouping marts).
+        description: >
+          World Bank income group (dimension attribute for grouping marts).
+          Null for the territories in `country_overrides`, which the World Bank
+          does not classify.
+      - name: co2_per_gdp
+        description: >
+          OWID's kg CO2 per 2011 international-$ (PPP). Ends in 2022 and covers
+          164 countries — for a current, fuller series use
+          `co2_per_gdp_const_usd` in `analytics.co2_intensity`.
       - name: gdp_per_capita_usd
         description: GDP per capita, current US$ (WDI NY.GDP.PCAP.CD).
+      - name: gdp_usd
+        description: >
+          GDP, current US$ (WDI NY.GDP.MKTP.CD). Moves with inflation and the
+          exchange rate — use `gdp_constant_usd` for anything measured over time.
+      - name: gdp_constant_usd
+        description: >
+          GDP, constant 2015 US$ (WDI NY.GDP.MKTP.KD). The real-terms series;
+          denominator for carbon intensity in `analytics.co2_intensity`.
       - name: life_expectancy
         description: Life expectancy at birth, years (WDI SP.DYN.LE00.IN).
       - name: internet_users_pct

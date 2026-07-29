@@ -19,12 +19,35 @@ DUCKDB_PATH = str(REPO_ROOT / "data" / "warehouse.duckdb")
 
 
 def build_co2_intensity(df: pl.DataFrame) -> pl.DataFrame:
-    """Rank carbon efficiency within each (income group, year) cohort."""
+    """Rank carbon efficiency within each (income group, year) cohort.
+
+    Intensity is derived here rather than taken from OWID's `co2_per_gdp`,
+    which is carried through the mart but stops in 2022 and only ever covered
+    164 countries. Recomputing from World Bank GDP tracks the mart's own
+    coverage — ~197 countries through 2024.
+
+    The denominator is **constant 2015 US$** (`NY.GDP.MKTP.KD`), not current
+    US$. Current-dollar GDP moves with inflation and the exchange rate, so it
+    measures currency as much as carbon: on that basis Japan cut emissions 21%
+    between 2010 and 2024 and still scored 10% *worse*, because the yen fell
+    28% against the dollar over the same span.
+
+    Note the basis differs from OWID's column (kg CO2 per 2011 international-$,
+    PPP), so levels aren't comparable between the two and ranking uses only the
+    derived column.
+    """
+    kg_per_mt = 1e9  # co2_mt is million tonnes; 1 Mt = 1e9 kg
     return (
-        df.filter(pl.col("co2_per_gdp").is_not_null())
+        df.with_columns(
+            pl.when(pl.col("gdp_constant_usd") > 0)
+            .then(pl.col("co2_mt") * kg_per_mt / pl.col("gdp_constant_usd"))
+            .otherwise(None)
+            .alias("co2_per_gdp_const_usd"),
+        )
+        .filter(pl.col("co2_per_gdp_const_usd").is_not_null())
         .with_columns(
             # rank carbon efficiency within each income group per year
-            pl.col("co2_per_gdp")
+            pl.col("co2_per_gdp_const_usd")
             .rank(method="dense")
             .over(["income_group", "year"])
             .alias("co2_intensity_rank"),

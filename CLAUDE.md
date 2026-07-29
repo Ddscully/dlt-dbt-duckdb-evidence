@@ -100,6 +100,28 @@ ISO3 country code + year. The country dimension (`stg_country`) supplies
 - **World Bank JSON is snake_cased by dlt**: API `iso2Code`/`capitalCity`/
   `incomeLevel.value` land as `iso2_code`/`capital_city`/`income_level__value`.
   Verify column names against `information_schema.columns` before writing SQL.
+- **The World Bank doesn't list every ISO3 OWID emits for.** Taiwan (~286 Mt CO2,
+  bigger than the Netherlands) and ten small territories arrive with a null
+  `region`, so any `where region is not null` silently drops them from regional
+  rollups. `dbt/seeds/country_overrides.csv` fills them in and `stg_country`
+  unions it in. Antarctica is deliberately left out — a null `region` should mean
+  "not a country". Coordinates use `try_cast`: the API sends `''` for territories.
+- **World Bank region names are padded** — `'Sub-Saharan Africa '` and
+  `'Latin America & Caribbean '` come back with a trailing space. `stg_country`
+  trims them, so join and group on the trimmed values.
+- **Two carbon-intensity columns, different bases.** `fct_emissions_energy.co2_per_gdp`
+  is OWID's kg CO2 per 2011 international-$ (PPP) and stops in 2022 / 164
+  countries. `analytics.co2_intensity.co2_per_gdp_const_usd` is derived in
+  `transform/co2_intensity.py` and tracks the mart — ~197 countries through 2024,
+  but only back to 1960, where WDI starts. Levels aren't comparable between the
+  two; the rank uses only the derived one.
+- **Divide by `gdp_constant_usd`, never `gdp_usd`, for anything measured over
+  time.** `gdp_usd` (`NY.GDP.MKTP.CD`) is *current* US$, so it moves with
+  inflation and the exchange rate: on that basis Japan cut emissions 21% from
+  2010–2024 and still scored 10% *worse* on carbon intensity, purely because the
+  yen fell 28% against the dollar. `gdp_constant_usd` (`NY.GDP.MKTP.KD`, constant
+  2015 US$) is the real-terms series. Current US$ is fine for single-year
+  cross-sections, wrong for trends.
 - **World Bank WDI** is fetched long (one row per indicator/country/year) and
   pivoted to wide columns in `stg_wdi.sql`. Add indicators in two places:
   `WB_WDI_INDICATORS` in `ingest/pipeline.py` and a `max(case …)` in `stg_wdi.sql`.

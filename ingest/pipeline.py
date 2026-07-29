@@ -42,6 +42,10 @@ EU_ELEC_PRICES_API = (
 WB_WDI_INDICATORS = {
     "NY.GDP.PCAP.CD": "gdp_per_capita_usd",  # GDP per capita, current US$
     "NY.GDP.MKTP.CD": "gdp_usd",  # GDP, current US$
+    # Constant-price GDP is what carbon intensity is divided by: current US$
+    # moves with inflation and the exchange rate, which made a 21% emissions
+    # cut in Japan look like a 10% intensity *rise* on a depreciating yen.
+    "NY.GDP.MKTP.KD": "gdp_constant_usd",  # GDP, constant 2015 US$
     "SP.DYN.LE00.IN": "life_expectancy",  # Life expectancy at birth, years
     "SP.POP.TOTL": "population",  # Population, total
     "SI.POV.DDAY": "poverty_rate",  # Poverty headcount at $2.15/day, % of pop

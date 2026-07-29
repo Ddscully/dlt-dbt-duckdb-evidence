@@ -9,6 +9,7 @@ select
     year,
     max(case when indicator = 'NY.GDP.PCAP.CD' then value end) as gdp_per_capita_usd,
     max(case when indicator = 'NY.GDP.MKTP.CD' then value end) as gdp_usd,
+    max(case when indicator = 'NY.GDP.MKTP.KD' then value end) as gdp_constant_usd,
     max(case when indicator = 'SP.DYN.LE00.IN' then value end) as life_expectancy,
     max(case when indicator = 'SP.POP.TOTL' then value end) as population,
     max(case when indicator = 'SI.POV.DDAY' then value end) as poverty_rate,
