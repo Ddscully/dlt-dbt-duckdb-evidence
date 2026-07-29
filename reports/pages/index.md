@@ -10,11 +10,11 @@ produced by the dbt + Polars pipeline in this repo.
 ```sql years
 select distinct year
 from warehouse.emissions_energy
-where year between 1990 and 2022
+where year >= 1990
 order by year desc
 ```
 
-<Dropdown data={years} name=year value=year defaultValue=2019 title="Year"/>
+<Dropdown data={years} name=year value=year defaultValue={2024} title="Year"/>
 
 ```sql kpis
 select
@@ -34,7 +34,7 @@ where year = ${inputs.year.value}
 
 ## Renewables adoption vs. life expectancy
 
-Each bubble is a country in <Value data={years} column=year/>, sized by population
+Each bubble is a country in {inputs.year.label}, sized by population
 and colored by World Bank income group.
 
 ```sql renew_vs_life
@@ -88,7 +88,7 @@ order by year
     yAxisTitle="kg CO₂ per $ GDP"
 />
 
-## Does more renewable energy mean cheaper power? (EU, <Value data={years} column=year/>)
+## Does more renewable energy mean cheaper power? (EU, {inputs.year.label})
 
 Household electricity prices (incl. all taxes, Eurostat) against each EU country's
 renewable share of energy for the selected year. The relationship is messy; grid,
@@ -117,7 +117,7 @@ where year = ${inputs.year.value}
     tooltipTitle=country_name
 />
 
-## Most expensive EU electricity (<Value data={years} column=year/>)
+## Most expensive EU electricity ({inputs.year.label})
 
 ```sql eu_prices
 select
@@ -139,7 +139,7 @@ limit 10
     <Column id=internet_users_pct title="Internet users %" fmt="0.0"/>
 </DataTable>
 
-## Most carbon-efficient economies (<Value data={years} column=year/>)
+## Most carbon-efficient economies ({inputs.year.label})
 
 Lowest CO₂ per dollar of GDP among countries reporting in the selected year.
 
