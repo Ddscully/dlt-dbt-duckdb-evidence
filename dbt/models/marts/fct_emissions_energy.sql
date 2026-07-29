@@ -3,15 +3,19 @@
 with co2 as (
     select * from {{ ref('stg_co2') }}
 ),
+
 energy as (
     select * from {{ ref('stg_energy') }}
 ),
+
 wdi as (
     select * from {{ ref('stg_wdi') }}
 ),
+
 eu_prices as (
     select * from {{ ref('stg_eu_electricity_prices') }}
 ),
+
 country as (
     select * from {{ ref('stg_country') }}
 )
@@ -43,8 +47,8 @@ select
     w.energy_imports_pct,
     -- EU household electricity price, EUR/kWh (Eurostat; null outside the EU/EEA)
     p.electricity_price_eur_kwh
-from co2 c
-left join energy    e on c.country_iso3 = e.country_iso3 and c.year = e.year
-left join wdi       w on c.country_iso3 = w.country_iso3 and c.year = w.year
-left join eu_prices p on c.country_iso3 = p.country_iso3 and c.year = p.year
-left join country   d on c.country_iso3 = d.country_iso3
+from co2 as c
+left join energy as e on c.country_iso3 = e.country_iso3 and c.year = e.year
+left join wdi as w on c.country_iso3 = w.country_iso3 and c.year = w.year
+left join eu_prices as p on c.country_iso3 = p.country_iso3 and c.year = p.year
+left join country as d on c.country_iso3 = d.country_iso3

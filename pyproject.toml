@@ -20,6 +20,7 @@ dev = [
     "sqlfluff>=3.3",       # SQL linter/formatter (dbt templater)
     "pre-commit>=4.0",     # git hooks
     "harlequin>=2.1",      # terminal SQL IDE for DuckDB
+    "sqlfluff-templater-dbt>=3.3",  # .sqlfluff sets templater = dbt; useless without this
 ]
 notebook = [
     "marimo>=0.10",        # reactive notebooks for the Polars exploration layer

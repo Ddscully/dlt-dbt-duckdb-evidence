@@ -12,7 +12,7 @@ mapped as (
             when 'EL' then 'GR'   -- Eurostat uses EL for Greece
             when 'UK' then 'GB'   -- ... and UK for the United Kingdom
             else geo
-        end                          as country_iso2,
+        end as country_iso2,
         year,
         price_eur_kwh
     from source
@@ -21,13 +21,16 @@ mapped as (
 ),
 
 country as (
-    select country_iso2, country_iso3 from {{ ref('stg_country') }}
+    select
+        country_iso2,
+        country_iso3
+    from {{ ref('stg_country') }}
 )
 
 select
     c.country_iso3,
     m.year,
     avg(m.price_eur_kwh) as electricity_price_eur_kwh
-from mapped m
-inner join country c on m.country_iso2 = c.country_iso2
+from mapped as m
+inner join country as c on m.country_iso2 = c.country_iso2
 group by c.country_iso3, m.year

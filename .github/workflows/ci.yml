@@ -28,5 +28,7 @@ jobs:
       - name: Polars transforms
         run: uv run python -m transform.co2_intensity
 
+      # From dbt/: the dbt templater opens the warehouse via the profile's
+      # relative path without chdir'ing into the project first.
       - name: Lint SQL
-        run: uv run sqlfluff lint dbt/models
+        run: cd dbt && uv run sqlfluff lint models
