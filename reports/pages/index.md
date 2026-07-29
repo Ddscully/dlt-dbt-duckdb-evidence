@@ -58,6 +58,12 @@ where year = ${inputs.year.value}
     y=life_expectancy
     size=population
     series=income_group
+    seriesColors={{
+        'High income': ['#2a78d6', '#3987e5'],
+        'Upper middle income': ['#eda100', '#c98500'],
+        'Lower middle income': ['#e87ba4', '#d55181'],
+        'Low income': ['#008300', '#008300']
+    }}
     xAxisTitle="Renewables share of energy (%)"
     yAxisTitle="Life expectancy (years)"
     tooltipTitle=country_name
@@ -85,6 +91,12 @@ order by year
     x=year
     y=avg_co2_per_gdp
     series=income_group
+    seriesColors={{
+        'High income': ['#2a78d6', '#3987e5'],
+        'Upper middle income': ['#eda100', '#c98500'],
+        'Lower middle income': ['#e87ba4', '#d55181'],
+        'Low income': ['#008300', '#008300']
+    }}
     yAxisTitle="kg CO₂ per $ GDP"
 />
 
@@ -112,6 +124,12 @@ where year = ${inputs.year.value}
     x=renewables_share
     y=electricity_price_eur_kwh
     series=income_group
+    seriesColors={{
+        'High income': ['#2a78d6', '#3987e5'],
+        'Upper middle income': ['#eda100', '#c98500'],
+        'Lower middle income': ['#e87ba4', '#d55181'],
+        'Low income': ['#008300', '#008300']
+    }}
     xAxisTitle="Renewables share of energy (%)"
     yAxisTitle="Household electricity price (€/kWh)"
     tooltipTitle=country_name

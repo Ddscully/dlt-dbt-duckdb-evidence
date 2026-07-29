@@ -82,6 +82,10 @@ order by p.peak_year
     y=pct_from_peak
     size=mt_latest
     series=status
+    seriesColors={{
+        'Past peak': ['#2a78d6', '#3987e5'],
+        'Still rising': ['#eb6834', '#d95926']
+    }}
     xFmt="0"
     yFmt="0"
     xAxisTitle="Year emissions peaked"
@@ -209,6 +213,10 @@ where b.gdp_constant_usd is not null
     y=co2_change
     size=co2_mt
     series=decoupled
+    seriesColors={{
+        'Cut emissions while growing': ['#2a78d6', '#3987e5'],
+        'Did not': ['#eb6834', '#d95926']
+    }}
     xFmt="0"
     yFmt="0"
     xAxisTitle="Real GDP change 2005–2023 (%)"
@@ -259,10 +267,16 @@ order by rung, measure
     x=income_group
     y=pct
     series=measure
+    seriesColors={{
+        'Share of CO₂': ['#1baf7a', '#199e70'],
+        'Share of population': ['#eda100', '#c98500']
+    }}
     type=grouped
     swapXY=true
     sort=false
     yFmt="0"
+    labels=true
+    labelFmt="0"
     xAxisTitle="World Bank income group"
     yAxisTitle="Share of world total (%)"
 />
@@ -325,6 +339,10 @@ limit 12
     x=country_name
     y=change_mt
     series=direction
+    seriesColors={{
+        'Removed': ['#2a78d6', '#3987e5'],
+        'Added': ['#eb6834', '#d95926']
+    }}
     swapXY=true
     sort=false
     yFmt="0"
