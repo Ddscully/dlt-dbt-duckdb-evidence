@@ -147,6 +147,10 @@ just test           # pytest — mocked payloads, no network, ~1s
 just test-pipeline  # the whole pipeline against recorded fixtures, ~30s
 ```
 
+Contributors should also run `uv run pre-commit install` once — ruff, SQL lint
+and whitespace hooks. CI runs the same hooks over every file, so a PR that skips
+them fails there instead.
+
 CI on a pull request runs both, plus the Dagster asset graph and the asset
 checks, entirely offline: `INGEST_FIXTURES=1` serves all five sources from
 `tests/fixtures/ingest/`. A red build therefore means *this repo* broke, not that
@@ -175,10 +179,10 @@ no ceiling because small petrostates legitimately reach 780 t/person.
 ## Published dashboard
 
 `.github/workflows/pages.yml` deploys the Evidence site to GitHub Pages at
-`https://<user>.github.io/<repo>/`. It runs the pipeline against the **live**
-sources rather than the fixtures (a published dashboard showing the 17-country
-test slice would be worse than none), on every push to `main`, weekly, and on
-demand.
+**https://ddscully.github.io/dlt-dbt-duckdb-evidence/**. It runs the pipeline
+against the **live** sources rather than the fixtures (a published dashboard
+showing the 17-country test slice would be worse than none), on every push to
+`main`, weekly, and on demand.
 
 Two things to know:
 

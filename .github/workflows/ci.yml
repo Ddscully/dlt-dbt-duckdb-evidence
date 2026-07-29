@@ -53,3 +53,10 @@ jobs:
       # relative path without chdir'ing into the project first.
       - name: Lint SQL
         run: cd dbt && uv run sqlfluff lint models
+
+      # ruff, formatting and whitespace. The same hooks contributors get from
+      # `uv run pre-commit install`, run here because an outside PR arrives
+      # from a clone where nobody ran that. Last, since it's the cheapest
+      # failure to fix and the least interesting one to learn about first.
+      - name: Pre-commit hooks
+        run: uv run pre-commit run --all-files --show-diff-on-failure
