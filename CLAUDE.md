@@ -25,7 +25,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just run` | ingest → dbt-build → transform (shell ordering) |
 | `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
 | `just materialize` | same pipeline, ordered by the asset graph |
-| `just materialize-select 'raw/wb_wdi+'` | one asset + everything downstream |
+| `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
 | `just lint` | `sqlfluff lint dbt/models` |
 | `just sql` | open the warehouse in Harlequin |
 | `just notebook` | marimo exploration notebook |

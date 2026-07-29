@@ -75,14 +75,14 @@ the graph moves with it.
 ```bash
 just dagster                              # UI on :3000 — graph, runs, freshness, checks
 just materialize                          # whole graph, headless
-just materialize-select 'raw/wb_wdi+'     # one source + everything downstream
+just materialize-select 'raw/wb_wdi*'     # one source + everything downstream
 ```
 
 What that buys over the shell chain:
 
 | | |
 |---|---|
-| **Selective rebuilds** | `raw/wb_wdi+` reloads one API and rebuilds only what depends on it. dlt refreshes just that resource, so its four siblings keep their data. |
+| **Selective rebuilds** | `raw/wb_wdi*` reloads one API and rebuilds only what depends on it. dlt refreshes just that resource, so its four siblings keep their data. (`*` is all downstream; a bare `+` is only one layer.) |
 | **Freshness policies** | Raw assets warn after 2 days and fail after 7; modelled assets are expected by 08:00 UTC daily. A schedule that quietly stops firing turns assets stale in the UI instead of leaving no trace. |
 | **Asset checks** | dbt's `not_null` tests show up as checks on the model they guard, next to Python checks dbt can't express (every WDI indicator present, mart reaching a recent year, dense ranks with no gaps). |
 | **Lineage that can't drift** | The graph is derived from the dbt manifest and the dlt source, not maintained alongside them. |

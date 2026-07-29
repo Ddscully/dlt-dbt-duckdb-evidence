@@ -38,7 +38,7 @@ materialize:
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster job execute -m orchestration.definitions -j full_refresh
 
-# Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi+'` (+ = downstream)
+# Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi*'` (* = all downstream, + = one layer)
 materialize-select selection:
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster asset materialize \
