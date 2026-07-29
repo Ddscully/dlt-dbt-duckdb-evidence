@@ -21,7 +21,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just setup` | `uv sync --group dev --group notebook --group orchestration` |
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (models + 60 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (models + 65 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just run` | ingest → dbt-build → transform (shell ordering) |
@@ -82,12 +82,31 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 - `raw` — dlt landing tables: `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`,
   `eu_elec_prices`
 - `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain
-- `marts` — dbt tables, `fct_emissions_energy` (the wide join)
+- `marts` — dbt tables: `dim_country_year` (the country-year spine) and
+  `fct_emissions_energy` (the wide join, built on the spine)
 - `analytics` — Polars output, `co2_intensity`
 
 Grain of every fact/staging model is **`(country_iso3, year)`**; joins are on
 ISO3 country code + year. The country dimension (`stg_country`) supplies
 `region` and `income_group`.
+
+**The fact hangs off the spine, not off a source.** `dim_country_year` is
+`stg_country` × every year the data covers (bounds read from the sources, so both
+ends move); `fct_emissions_energy` inner-joins it to the union of country-years
+any source reports, then left-joins each source onto that. Consequences worth
+knowing:
+
+- A country-year only one source reports still reaches the mart — 11 small
+  territories have World Bank data but no OWID emissions, and Eurostat/WDI run a
+  year ahead of OWID CO2. Expect nulls in the columns the others don't cover;
+  chart queries have to filter for what they need.
+- The dimension is authoritative for *what a country is*. Codes it doesn't carry
+  can't reach the mart, which is how the World Bank's aggregates (`WLD`, `EUU`)
+  and Antarctica stay out.
+- `max(year)` on the mart now reports whichever source is furthest ahead, so the
+  `mart_covers_recent_years` check measures it per source column instead.
+- The spine itself is the full cross join (~63k rows against the mart's ~43k).
+  Left-join a fact onto it to see coverage gaps as rows.
 
 ## Data-quality gates (`dbt/models/**/_*.yml`)
 

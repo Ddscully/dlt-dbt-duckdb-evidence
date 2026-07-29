@@ -56,13 +56,32 @@ and are stable; `raw` columns are whatever dlt inferred.
 
 ## Grain and coverage
 
-Everything is `(country_iso3, year)`. Two coverage facts that produce confusing
+Everything is `(country_iso3, year)`. Three coverage facts that produce confusing
 query results if you don't know them:
 
-- `fct_emissions_energy` left-joins off `stg_co2`, so a country-year absent from
-  OWID CO2 is absent from the mart, no matter what the other sources have.
+- `fct_emissions_energy` sits on the `dim_country_year` spine and left-joins each
+  source onto it, so a row exists wherever *any* source reports. Whole columns are
+  null in the country-years the rest don't cover — `count(*)` is not a count of
+  countries reporting the metric you're actually reading. Filter on the column.
+- The mart's `max(year)` is whichever source is furthest ahead (currently Eurostat
+  and WDI, a year past OWID CO2). For "the latest year of X", use
+  `max(year) filter (where X is not null)`.
 - `electricity_price_eur_kwh` is EU/EEA only — null for most of the world by
   design, not by bug.
+
+`dim_country_year` is the *complete* set of country-years, so it's the way to ask
+what's missing rather than what's there:
+
+```sql
+-- country-years the warehouse has no emissions for
+select d.country_name, count(*) as missing_years
+from marts.dim_country_year as d
+left join marts.fct_emissions_energy as f
+    on d.country_iso3 = f.country_iso3 and d.year = f.year
+where f.co2_mt is null and d.year between 1990 and 2024
+group by d.country_name
+order by missing_years desc;
+```
 
 ## If the warehouse is missing or stale
 

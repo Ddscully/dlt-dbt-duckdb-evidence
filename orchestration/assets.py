@@ -193,18 +193,42 @@ def wdi_indicators_all_present() -> dg.AssetCheckResult:
 
 @dg.asset_check(asset=FCT_EMISSIONS_ENERGY)
 def mart_covers_recent_years() -> dg.AssetCheckResult:
-    """The mart should reach within two years of today.
+    """Every source feeding the mart should reach within two years of today.
 
     A source that silently stops updating shows up here long before anyone
-    notices a dashboard has gone flat.
+    notices a dashboard has gone flat. It is measured per column because the
+    mart sits on a country-year spine: a bare `max(year)` reports whichever
+    source is furthest ahead and hides the one that stalled. One column per
+    source is enough — the columns from a given source move together.
     """
-    max_year = _scalar("select max(year) from marts.fct_emissions_energy")
+    columns = {
+        "co2_mt": "owid_co2",
+        "primary_energy_twh": "owid_energy",
+        "gdp_constant_usd": "wb_wdi",
+        "electricity_price_eur_kwh": "eu_elec_prices",
+    }
+    selects = ", ".join(f"max(year) filter (where {col} is not null)" for col in columns)
+    con = duckdb.connect(DUCKDB_PATH, read_only=True)
+    try:
+        max_years = con.sql(f"select {selects} from marts.fct_emissions_energy").fetchone()
+    finally:
+        con.close()
+
     current_year = date.today().year
-    lag = current_year - max_year
+    # a source with no rows at all has no max year — that's the worst case, not a pass
+    lags = {
+        source: (current_year - year if year is not None else None)
+        for source, year in zip(columns.values(), max_years, strict=True)
+    }
     return dg.AssetCheckResult(
-        passed=lag <= 2,
+        passed=all(lag is not None and lag <= 2 for lag in lags.values()),
         severity=dg.AssetCheckSeverity.WARN,
-        metadata={"max_year": max_year, "years_behind": lag},
+        metadata={
+            "max_year_by_source": {
+                source: year for source, year in zip(columns.values(), max_years, strict=True)
+            },
+            "years_behind": lags,
+        },
     )
 
 

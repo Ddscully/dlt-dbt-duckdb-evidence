@@ -8,9 +8,13 @@ This dashboard is built entirely from the `marts.fct_emissions_energy` table
 produced by the dbt + Polars pipeline in this repo.
 
 ```sql years
+-- The mart sits on a country-year spine, so its latest year is whichever source
+-- is furthest ahead (Eurostat prices, 2025). Offer the years this page can
+-- actually populate rather than every year that exists.
 select distinct year
 from warehouse.emissions_energy
 where year >= 1990
+  and life_expectancy is not null
 order by year desc
 ```
 

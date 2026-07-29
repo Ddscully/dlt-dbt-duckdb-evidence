@@ -1,6 +1,10 @@
--- Wide country-year fact joining emissions + energy + WDI onto the country dim.
+-- Wide country-year fact: emissions + energy + WDI + EU prices on the spine.
 -- Grain: one row per (country_iso3, year).
-with co2 as (
+with spine as (
+    select * from {{ ref('dim_country_year') }}
+),
+
+co2 as (
     select * from {{ ref('stg_co2') }}
 ),
 
@@ -16,16 +20,38 @@ eu_prices as (
     select * from {{ ref('stg_eu_electricity_prices') }}
 ),
 
-country as (
-    select * from {{ ref('stg_country') }}
+-- The country-years at least one source actually reports. The spine is a full
+-- cross join, so without this the fact would carry an all-null row for
+-- (Kosovo, 1750) and ~20k of its friends; `dim_country_year` is where you go
+-- looking for those gaps.
+observed as (
+    select
+        country_iso3,
+        year
+    from co2
+    union
+    select
+        country_iso3,
+        year
+    from energy
+    union
+    select
+        country_iso3,
+        year
+    from wdi
+    union
+    select
+        country_iso3,
+        year
+    from eu_prices
 )
 
 select
-    c.country_iso3,
-    d.country_name,
-    d.region,
-    d.income_group,
-    c.year,
+    s.country_iso3,
+    s.country_name,
+    s.region,
+    s.income_group,
+    s.year,
     -- emissions
     c.co2_mt,
     c.co2_per_capita,
@@ -48,8 +74,9 @@ select
     w.energy_imports_pct,
     -- EU household electricity price, EUR/kWh (Eurostat; null outside the EU/EEA)
     p.electricity_price_eur_kwh
-from co2 as c
-left join energy as e on c.country_iso3 = e.country_iso3 and c.year = e.year
-left join wdi as w on c.country_iso3 = w.country_iso3 and c.year = w.year
-left join eu_prices as p on c.country_iso3 = p.country_iso3 and c.year = p.year
-left join country as d on c.country_iso3 = d.country_iso3
+from spine as s
+inner join observed as o on s.country_iso3 = o.country_iso3 and s.year = o.year
+left join co2 as c on s.country_iso3 = c.country_iso3 and s.year = c.year
+left join energy as e on s.country_iso3 = e.country_iso3 and s.year = e.year
+left join wdi as w on s.country_iso3 = w.country_iso3 and s.year = w.year
+left join eu_prices as p on s.country_iso3 = p.country_iso3 and s.year = p.year

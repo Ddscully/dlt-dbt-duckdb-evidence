@@ -360,6 +360,8 @@ country added over eight years.
 <small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
 <a href="https://github.com/owid/energy-data">OWID Energy</a>,
 <a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.
-Coverage caveats: the mart's grain follows OWID CO₂, so a country-year absent there
-is absent here; <code>renewables_share_pct</code> covers 79 countries (96.7% of
-world emissions); Antarctica is the only row without a region.</small>
+Coverage caveats: the mart sits on a country-year spine, so a row exists wherever
+any source reports and the columns the others don't cover are null — the charts
+above filter for what they need. <code>renewables_share_pct</code> covers 79
+countries (96.7% of world emissions); 11 small territories have World Bank data
+but no OWID emissions.</small>

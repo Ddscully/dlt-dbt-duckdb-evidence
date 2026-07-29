@@ -89,12 +89,19 @@ then open `just dagster` and confirm the new asset has an edge into `staging`.
 ## 5. Mart column — `dbt/models/marts/fct_emissions_energy.sql`
 
 Add an import CTE, a `left join` on `(country_iso3, year)`, and the column in the
-right source group with a `--` comment. Left joins hang off `stg_co2`, so a
-country-year missing from OWID CO2 is missing from the mart entirely — if your
-source has broader coverage than OWID, say so in the YAML description rather than
-assuming it survives the join.
+right source group with a `--` comment. The left joins hang off
+`dim_country_year`, the spine — so coverage wider than the other sources' survives
+— but **add your staging model to the `observed` CTE as well**, or the mart keeps
+only the country-years the existing four report and your extra rows are filtered
+out before you see them.
 
-Update `dbt/models/marts/_marts.yml`, then `just dbt-build`.
+The spine is `stg_country` × the year range, so a country the dimension doesn't
+carry can't reach the mart at all. If your source has ISO3 codes the World Bank
+omits, they belong in `dbt/seeds/country_overrides.csv` (step 3's territory
+problem), not in a wider join.
+
+Update `dbt/models/marts/_marts.yml`, then `just dbt-build`. Note the partial
+coverage in the column's YAML description either way — that's the convention.
 
 ## 6. Downstream
 

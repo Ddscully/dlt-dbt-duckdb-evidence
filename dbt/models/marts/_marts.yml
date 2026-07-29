@@ -1,16 +1,54 @@
 version: 2
 
 models:
+  - name: dim_country_year
+    description: >
+      Country-year spine: `stg_country` crossed with every year the warehouse
+      covers (the span is read from the sources, so both ends move with the
+      data). Grain is one row per (country_iso3, year), and it is the *complete*
+      set of them — left-join a fact onto this to see coverage gaps as rows
+      instead of inferring them from what's missing.
+      `fct_emissions_energy` is built on it, filtered to the country-years at
+      least one source reports.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+    columns:
+      - name: country_iso3
+        description: >
+          ISO3 code, from the country dimension. Codes the sources emit but the
+          dimension doesn't carry (World Bank aggregates like `WLD`, and
+          Antarctica) are not countries and so are not here — which is what
+          keeps them out of the fact.
+        data_tests: [not_null]
+      - name: year
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1750, max_value: 2030}
+      - name: region
+        description: World Bank region, trimmed. Never null — see `stg_country`.
+        data_tests: [not_null]
+      - name: income_group
+        description: >
+          World Bank income group. Null for the territories in
+          `country_overrides`, which the World Bank does not classify.
+
   - name: fct_emissions_energy
     description: >
       Country-year fact combining OWID emissions & energy, World Bank WDI
       (GDP, life expectancy, population, poverty, internet, urbanisation, forest,
       renewable electricity, energy imports) and Eurostat household electricity
       prices (EU only), with World Bank classifications.
+
+      Built on `dim_country_year`: every measure is a left join off the spine, so
+      a country-year that only OWID energy or only WDI reports arrives with the
+      other sources' columns null instead of being dropped.
     data_tests:
-      # The grain contract. Every join in this model is a left join off
-      # `stg_co2`, so a duplicate on either side of any of the four would fan
-      # rows out here without changing the row count of anything upstream.
+      # The grain contract. Every join in this model is a left join off the
+      # spine, so a duplicate on either side of any of the four would fan rows
+      # out here without changing the row count of anything upstream.
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [country_iso3, year]
@@ -25,9 +63,9 @@ models:
       - name: region
         description: >
           World Bank region, trimmed (the API pads 'Sub-Saharan Africa ' and
-          'Latin America & Caribbean '). Null only for Antarctica; the other
-          ISO3 codes the World Bank omits are filled by the
-          `country_overrides` seed.
+          'Latin America & Caribbean '). Comes from the spine, so never null —
+          the ISO3 codes the World Bank omits are filled by the
+          `country_overrides` seed and Antarctica isn't in the dimension at all.
       - name: income_group
         description: >
           World Bank income group (dimension attribute for grouping marts).
