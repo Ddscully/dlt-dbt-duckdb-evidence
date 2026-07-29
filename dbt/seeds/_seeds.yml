@@ -1,0 +1,25 @@
+version: 2
+
+seeds:
+  - name: country_overrides
+    description: >
+      Manual country-dimension entries for ISO3 codes that OWID reports
+      emissions for but the World Bank `/country` endpoint does not list, so
+      they arrive with a null `region` and vanish from every regional rollup.
+
+      Taiwan is the only material one — ~286 Mt CO2 in 2024, larger than the
+      Netherlands — but the territories are included so that `region is null`
+      means "genuinely not a country" rather than "not in the World Bank list".
+
+      `region` is geographic fact and is filled for every row. `income_group` is
+      a World Bank classification that these entries genuinely do not have, so
+      it is left null rather than invented; Taiwan is the exception, being
+      unambiguously high income by every other source.
+
+      Antarctica (ATA) is deliberately absent: OWID reports ~0 Mt for research
+      stations, but it is not a country and should not join a region.
+    columns:
+      - name: country_iso3
+        tests: [not_null, unique]
+      - name: region
+        tests: [not_null]
