@@ -65,7 +65,7 @@ where year = ${inputs.year.value}
 
 ## Carbon intensity of the economy, over time
 
-Average **CO₂ per \$ of GDP** by income group — a rough measure of how much
+Average **CO₂ per dollar of GDP** by income group — a rough measure of how much
 emissions each dollar of economic output carries.
 
 ```sql co2_intensity_by_income
@@ -141,7 +141,7 @@ limit 10
 
 ## Most carbon-efficient economies (<Value data={years} column=year/>)
 
-Lowest CO₂ per \$ of GDP among countries reporting in the selected year.
+Lowest CO₂ per dollar of GDP among countries reporting in the selected year.
 
 ```sql cleanest
 select
