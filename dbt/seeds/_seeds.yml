@@ -20,6 +20,6 @@ seeds:
       stations, but it is not a country and should not join a region.
     columns:
       - name: country_iso3
-        tests: [not_null, unique]
+        data_tests: [not_null, unique]
       - name: region
-        tests: [not_null]
+        data_tests: [not_null]

@@ -39,7 +39,7 @@ jobs:
       # ref, a renamed source or a dangling asset key fails before any I/O.
       - name: Validate Dagster definitions
         run: |
-          cd dbt && uv run dbt parse && cd ..
+          cd dbt && uv run dbt deps && uv run dbt parse && cd ..
           uv run dagster definitions validate -m orchestration.definitions
 
       # Runs ingest -> dbt build + test -> Polars in asset-graph order, and

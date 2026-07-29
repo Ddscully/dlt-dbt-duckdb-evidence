@@ -4,6 +4,16 @@ sources:
   - name: raw
     description: Landing tables loaded by the dlt pipeline.
     schema: raw
+    # Freshness here measures when *we* last loaded, not when the upstream
+    # publisher last updated: dlt stamps every row with `_dlt_load_id`, a unix
+    # epoch as a string. So `dbt source freshness` answers "has the pipeline
+    # run recently", which is the failure this catches — a stopped schedule or a
+    # source that has been erroring long enough for the dashboard to go stale.
+    # The sources themselves publish annually, hence the generous thresholds.
+    loaded_at_field: "to_timestamp(cast(_dlt_load_id as double))"
+    freshness:
+      warn_after: {count: 7, period: day}
+      error_after: {count: 30, period: day}
     tables:
       - name: owid_co2
       - name: owid_energy

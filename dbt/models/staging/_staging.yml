@@ -1,0 +1,201 @@
+version: 2
+
+models:
+  # Every fact-shaped staging model is one row per (country_iso3, year). That
+  # grain is what the mart's four left joins assume, so it is asserted here
+  # rather than left as a comment: a duplicate upstream row would otherwise
+  # fan out `fct_emissions_energy` silently.
+  #
+  # Test args go under `arguments:` — the flat form is deprecated in dbt 1.10
+  # and removed in Fusion.
+  - name: stg_co2
+    description: >
+      OWID CO2, one row per (country_iso3, year). Aggregate rows ("World",
+      "Europe", income groupings) are dropped by the 3-letter ISO filter.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "length(country_iso3) = 3"
+    columns:
+      - name: country_iso3
+        data_tests: [not_null]
+      - name: year
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1750, max_value: 2030}
+      - name: co2_mt
+        description: Territorial CO2 emissions, million tonnes.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: co2_per_capita
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: share_global_co2
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+
+  - name: stg_energy
+    description: OWID energy, one row per (country_iso3, year).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "length(country_iso3) = 3"
+    columns:
+      - name: country_iso3
+        data_tests: [not_null]
+      - name: year
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1750, max_value: 2030}
+      - name: primary_energy_twh
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: renewables_share_pct
+        description: Renewables as a share of primary energy, percent.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: fossil_share_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+
+  - name: stg_wdi
+    description: >
+      World Bank WDI pivoted from long (one row per indicator/country/year) to
+      one row per (country_iso3, year) with a column per indicator. Adding an
+      indicator means editing `WB_WDI_INDICATORS` in `ingest/pipeline.py`, the
+      `max(case ...)` list here, and re-recording the fixtures.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "length(country_iso3) = 3"
+    columns:
+      - name: country_iso3
+        data_tests: [not_null]
+      - name: year
+        # WDI starts in 1960; anything earlier means the pivot has picked up a
+        # dimension that isn't the year.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1960, max_value: 2030}
+      - name: gdp_constant_usd
+        description: >
+          GDP in constant 2015 US$ (NY.GDP.MKTP.KD). The real-terms denominator
+          for anything measured over time.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: gdp_usd
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: life_expectancy
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: population
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: poverty_rate
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: internet_users_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: urban_pop_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: forest_area_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: renew_elec_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+
+  - name: stg_eu_electricity_prices
+    description: >
+      Eurostat household electricity prices averaged from semi-annual to annual,
+      one row per (country_iso3, year). EU/EEA only.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+    columns:
+      - name: country_iso3
+        data_tests: [not_null]
+      - name: year
+        data_tests:
+          - not_null
+          # The series starts in 2007; nothing earlier should survive the
+          # JSON-stat grid walk.
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 2007, max_value: 2030}
+      - name: electricity_price_eur_kwh
+        description: >
+          EUR per kWh including all taxes, medium consumption band DC. The whole
+          series sits under 0.60; a value above 1 would mean the JSON-stat index
+          walk has drifted onto another unit or currency.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1, inclusive: false}
+
+  - name: stg_country
+    description: >
+      Country dimension, one row per country_iso3: World Bank `/country` plus
+      the `country_overrides` seed for the ISO3 codes it omits.
+    columns:
+      - name: country_iso3
+        data_tests: [not_null, unique]
+      - name: country_iso2
+        data_tests: [not_null, unique]
+      - name: country_name
+        data_tests: [not_null]
+      - name: region
+        description: >
+          Trimmed World Bank region. Never null here; the mart has one null
+          region (Antarctica), which arrives from OWID and has no dimension row.
+        data_tests: [not_null]
+      - name: income_group
+        description: >
+          Null for the `country_overrides` territories the World Bank does not
+          classify, so this is deliberately not tested for nullity.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - High income
+                  - Upper middle income
+                  - Lower middle income
+                  - Low income
+      - name: latitude
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -90, max_value: 90}
+      - name: longitude
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -180, max_value: 180}

@@ -17,9 +17,20 @@ setup:
 ingest:
     uv run python -m ingest.pipeline
 
+# Install dbt packages (dbt_utils) into dbt/dbt_packages/ — gitignored, so this
+# is needed once per clone and after any packages.yml change
+dbt-deps:
+    cd dbt && uv run dbt deps
+
 # T: build + test dbt models
-dbt-build:
+dbt-build: dbt-deps
     cd dbt && uv run dbt build
+
+# Is the warehouse stale? Compares dlt's `_dlt_load_id` against the thresholds
+# in models/staging/_sources.yml (warn at 7 days, error at 30). This measures
+# when the pipeline last ran, not when the publishers last updated.
+dbt-freshness: dbt-deps
+    cd dbt && uv run dbt source freshness
 
 # Polars derived metrics
 transform:
@@ -41,7 +52,7 @@ test-pipeline:
     export WAREHOUSE_PATH="$(mktemp -d)/warehouse.duckdb"
     echo "fixture warehouse: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
-    cd dbt && uv run dbt build && cd ..
+    cd dbt && uv run dbt deps && uv run dbt build && cd ..
     uv run python -m transform.co2_intensity
 
 # Re-record the fixtures from the live APIs (hits the network; commit the diff)
@@ -74,7 +85,7 @@ notebook:
 
 # Lint SQL — from dbt/, because the dbt templater opens the warehouse via the
 # profile's relative path (`../data/…`) without chdir'ing into the project first
-lint:
+lint: dbt-deps
     cd dbt && uv run sqlfluff lint models
 
 # Build the Evidence dashboard (requires Node; see reports/README.md)

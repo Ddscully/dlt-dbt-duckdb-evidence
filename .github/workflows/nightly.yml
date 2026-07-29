@@ -40,6 +40,12 @@ jobs:
       - name: Sync deps
         run: uv sync --group dev --group orchestration
 
+      # dbt/dbt_packages/ and dbt/target/ are gitignored, and `prepare_if_dev`
+      # only fires under `dagster dev` — so outside the UI the manifest has to
+      # be built explicitly before the asset graph can load.
+      - name: Install dbt packages and parse the project
+        run: cd dbt && uv run dbt deps && uv run dbt parse
+
       - name: Materialize the asset graph against live sources
         run: |
           mkdir -p "$DAGSTER_HOME"

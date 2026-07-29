@@ -50,6 +50,12 @@ jobs:
 
       # ingest -> dbt build + test -> Polars, in asset-graph order. Produces
       # data/warehouse.duckdb, which is what Evidence's source connection reads.
+      # dbt/dbt_packages/ and dbt/target/ are gitignored, and `prepare_if_dev`
+      # only fires under `dagster dev` — so outside the UI the manifest has to
+      # be built explicitly before the asset graph can load.
+      - name: Install dbt packages and parse the project
+        run: cd dbt && uv run dbt deps && uv run dbt parse
+
       - name: Build the warehouse from live sources
         run: |
           mkdir -p "$DAGSTER_HOME"

@@ -20,7 +20,9 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 |---------|--------------|
 | `just setup` | `uv sync --group dev --group notebook --group orchestration` |
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
-| `just dbt-build` | `cd dbt && uv run dbt build` (models + tests) |
+| `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
+| `just dbt-build` | `dbt deps` then `dbt build` (models + 60 tests) |
+| `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just run` | ingest → dbt-build → transform (shell ordering) |
 | `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
@@ -85,6 +87,34 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 Grain of every fact/staging model is **`(country_iso3, year)`**; joins are on
 ISO3 country code + year. The country dimension (`stg_country`) supplies
 `region` and `income_group`.
+
+## Data-quality gates (`dbt/models/**/_*.yml`)
+
+`dbt_utils` is the project's only dbt package; it exists for
+`unique_combination_of_columns` (the `(country_iso3, year)` grain contract on
+every fact-shaped staging model and the mart) and `accepted_range` (percentages
+in 0–100, non-negative money/tonnage, per-source year bounds, EU electricity
+under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epoch.
+
+- **`dbt deps` is not optional any more.** `dbt/dbt_packages/` is gitignored, so
+  a fresh clone must run it before `dbt build`, `dbt parse` or `sqlfluff`. The
+  justfile recipes depend on `dbt-deps`; the three workflows run it explicitly.
+  `dbt_project.prepare_if_dev()` covers it under `dagster dev` only — outside the
+  UI, `dbt deps && dbt parse` has to happen before the asset graph will load at
+  all, because the manifest lives in the gitignored `dbt/target/`.
+- **Test args go under `arguments:`, and the key is `data_tests:`.** The flat
+  `tests: [- some_test: {arg: …}]` form is deprecated in dbt 1.10 and gone in
+  Fusion; the whole project uses the new spelling, so match it.
+- **Tests are calibrated to fail on bugs, not on reality.** `income_group` is
+  nullable on purpose (the `country_overrides` territories have no World Bank
+  classification) and `co2_per_capita` has a floor but no ceiling (small
+  petrostates legitimately reach 780 t/person). Before tightening a bound,
+  check the actual distribution — the fixture slice is 17 countries and will
+  happily pass a threshold the full 200+ would break.
+- **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
+  stamped at ingest, so a freshness failure means the pipeline stopped running.
+  It is tautologically green in CI (which loads and then checks), which is why
+  it is a `just` recipe rather than a workflow step.
 
 ## Conventions & gotchas (learned the hard way)
 

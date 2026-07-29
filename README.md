@@ -155,6 +155,23 @@ the live endpoints and opens an issue when a source has moved — which is the c
 to fix the pipeline and `just record-fixtures`. Details in
 [`tests/README.md`](./tests/README.md).
 
+### Data-quality gates
+
+`just dbt-build` runs 60 dbt tests alongside the models, and Dagster surfaces
+each one as an asset check on the model it guards:
+
+| Gate | What it catches |
+|------|-----------------|
+| `dbt_utils.unique_combination_of_columns` on `(country_iso3, year)` | The grain contract, on every fact-shaped staging model and the mart. `fct_emissions_energy` is four left joins off `stg_co2`, so one duplicated upstream row would fan the mart out silently. |
+| `dbt_utils.accepted_range` | Percentages inside 0–100, non-negative money and tonnage, years inside each source's real span (WDI starts in 1960, Eurostat in 2007), EU electricity under €1/kWh. Unit and index-arithmetic bugs land outside these long before anyone notices a wrong chart. |
+| `not_null` / `unique` / `accepted_values` | The country dimension: one row per ISO3, a region for every row, income groups from the World Bank's four. |
+| `dbt source freshness` (`just dbt-freshness`) | Whether the warehouse is stale. dlt stamps every row with `_dlt_load_id`, a unix epoch, so this measures when the *pipeline* last ran (warn at 7 days, error at 30) rather than when the publishers last updated. |
+
+The tests are deliberately calibrated to fail on a bug rather than on reality:
+`income_group` is left nullable because the `country_overrides` territories
+genuinely have no World Bank classification, and `co2_per_capita` has a floor but
+no ceiling because small petrostates legitimately reach 780 t/person.
+
 ## Published dashboard
 
 `.github/workflows/pages.yml` deploys the Evidence site to GitHub Pages at
