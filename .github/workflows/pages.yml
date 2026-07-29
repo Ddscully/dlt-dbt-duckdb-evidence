@@ -1,0 +1,99 @@
+name: pages
+
+# Publishes the Evidence dashboard to GitHub Pages.
+#
+# Unlike `ci.yml`, this runs against the LIVE sources. The published site is the
+# point of the repo, and a dashboard built from `tests/fixtures/ingest/` would
+# show the 17-country slice rather than the world. That means this workflow can
+# go red when an upstream source moves — `nightly.yml` is what alerts on that;
+# here the previous deployment simply stays up.
+#
+# Requires Pages to be enabled once, with Settings -> Pages -> Source set to
+# "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, 06:40 UTC Monday. The sources publish annually, so a nightly
+    # rebuild would burn Actions minutes to republish identical numbers.
+    - cron: "40 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it: a half-deployed site is
+# worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # No INGEST_FIXTURES: see the note at the top.
+      DAGSTER_HOME: ${{ github.workspace }}/.dagster
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync deps
+        run: uv sync --group orchestration
+
+      # ingest -> dbt build + test -> Polars, in asset-graph order. Produces
+      # data/warehouse.duckdb, which is what Evidence's source connection reads.
+      - name: Build the warehouse from live sources
+        run: |
+          mkdir -p "$DAGSTER_HOME"
+          uv run dagster job execute -m orchestration.definitions -j full_refresh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: reports/package-lock.json
+
+      - name: Install Evidence
+        run: npm --prefix reports ci
+
+      # Project Pages serve from https://<user>.github.io/<repo>/, so every
+      # asset and link needs that prefix. Evidence reads it from
+      # `deployment.basePath` in evidence.config.yaml and has no env-var
+      # equivalent, so it's appended here at build time instead of committed —
+      # a committed basePath would break `npm run dev` on localhost.
+      # Delete this step if you move the site to a custom domain or a
+      # <user>.github.io repo, where the site is served from the root.
+      - name: Set the Pages base path
+        run: |
+          printf '\ndeployment:\n  basePath: /%s\n' \
+            '${{ github.event.repository.name }}' >> reports/evidence.config.yaml
+
+      # reports/.evidence/ is gitignored, so this always starts from a cold
+      # cache and can't hit the stale-schema problem `just report-clean` exists
+      # to fix locally.
+      - name: Build the site
+        run: npm --prefix reports run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: reports/build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

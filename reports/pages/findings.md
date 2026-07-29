@@ -1,15 +1,15 @@
 ---
 title: Five Findings
-description: What the warehouse actually says about emissions, growth and energy — the patterns that survived a look at the data.
+description: Five patterns in the warehouse data on emissions, growth and energy.
 ---
 
 Five things that stood out when querying `marts.fct_emissions_energy` and
-`analytics.co2_intensity` directly. Each one is the query, not a summary of one —
-these charts re-run against the warehouse every time the site is built.
+`analytics.co2_intensity` directly. Every chart below is the query itself, re-run
+against the warehouse each time the site is built.
 
-A note on units before the numbers: anything measured **over time** here divides by
-`gdp_constant_usd` (constant 2015 US dollars), never `gdp_usd`. Current dollars move
-with inflation and exchange rates, which is enough to invert the sign of a country's
+A note on units first. Anything measured over time divides by `gdp_constant_usd`
+(constant 2015 US dollars) rather than `gdp_usd`. Current dollars move with
+inflation and exchange rates, which is enough to flip the sign of a country's
 apparent progress.
 
 ```sql headline
@@ -27,13 +27,13 @@ where region is not null and co2_mt is not null
     <BigValue data={headline} value=world_co2_2023 fmt="#,##0" title="World CO₂ 2023 (Mt)"/>
 </Grid>
 
-## 1. Emissions peak in a wave, and the wave is still moving
+## 1. Peak emissions arrive in sequence, and some countries haven't reached one
 
 Every large emitter has a year in which its CO₂ output peaked. Sorted by that year,
-the data lays out an almost perfect development sequence: Western Europe in the
-1970s, the post-Soviet bloc in 1990, the US and southern Europe in 2005, Japan in
-2013, and a cluster of Asian and Middle Eastern economies that have **not peaked at
-all** — their maximum is the most recent year in the data.
+the sequence tracks development: Western Europe in the 1970s, the post-Soviet bloc
+in 1990, the US and southern Europe in 2005, Japan in 2013. A cluster of Asian and
+Middle Eastern economies has yet to peak, so their maximum is the most recent year
+in the data.
 
 ```sql peaks
 with series as (
@@ -90,8 +90,8 @@ order by p.peak_year
 />
 
 Bubble size is 2024 emissions. The UK peaked in 1971 and is 53% below it. The eight
-countries that haven't peaked all overplot at the same point — the right-hand edge
-at zero — because for them the peak year *is* 2024; the table below separates them.
+countries that haven't peaked overplot at a single point, the right-hand edge at
+zero, because their peak year is 2024. The table below separates them.
 
 <DataTable data={peaks} rows=12>
     <Column id=country_name title="Country"/>
@@ -101,10 +101,10 @@ at zero — because for them the peak year *is* 2024; the table below separates 
     <Column id=pct_from_peak title="vs peak" fmt='0.0"%"' contentType=delta/>
 </DataTable>
 
-## 2. Energy buys longevity, then abruptly stops buying it
+## 2. Energy buys longevity, up to a point
 
 Grouping countries by primary energy consumed per person against life expectancy
-produces one of the sharpest saturation curves in the warehouse.
+produces a clear saturation curve.
 
 ```sql energy_life
 with base as (
@@ -154,10 +154,10 @@ order by band_order
     labelFmt="0.0"
 />
 
-Moving from the lowest band to 30–60k kWh is worth about **15 years of life**.
-Moving from there to the top band costs 2.8× the energy and 2.7× the CO₂ per
-person — and buys **half a year**. Whatever the highest-consuming countries spend
-their marginal energy on, longevity isn't it.
+Moving from the lowest band to 30–60k kWh is worth about 15 years of life. Moving
+from there to the top band costs 2.8× the energy and 2.7× the CO₂ per person, and
+buys half a year. Past roughly 30k kWh per person, extra energy stops showing up in
+life expectancy.
 
 <DataTable data={energy_life} rows=5>
     <Column id=energy_band title="Energy per person"/>
@@ -166,11 +166,10 @@ their marginal energy on, longevity isn't it.
     <Column id=avg_co2_per_capita title="CO₂ / person (t)" fmt="0.0"/>
 </DataTable>
 
-## 3. Decoupling is real — on a real-terms basis
+## 3. Decoupling is real, on a real-terms basis
 
-Plotting change in emissions against change in **inflation-adjusted** GDP,
-2005–2023. Anything in the lower-right quadrant grew its economy while cutting
-emissions.
+Plotting change in emissions against change in inflation-adjusted GDP, 2005–2023.
+Anything in the lower-right quadrant grew its economy while cutting emissions.
 
 ```sql decoupling
 with base_year as (
@@ -219,10 +218,9 @@ where b.gdp_constant_usd is not null
     <ReferenceLine y=0 label="No change in emissions" labelPosition=aboveEnd/>
 </ScatterPlot>
 
-The US grew **42%** in real terms while cutting emissions **20%**; the UK grew 26%
-and cut 46%. Worth flagging what this measure can't see: these are *territorial*
-emissions, so production moved offshore counts against the importing country's
-ledger, not the consumer's.
+The US grew 42% in real terms while cutting emissions 20%; the UK grew 26% and cut
+46%. One limit of the measure: these are territorial emissions, so production moved
+offshore counts against the producing country's ledger, not the consumer's.
 
 ## 4. Emissions track income, not headcount
 
@@ -269,9 +267,9 @@ order by rung, measure
     yAxisTitle="Share of world total (%)"
 />
 
-The two bars diverge in opposite directions at each end of the scale. High-income
-countries hold 17% of the world's people and 37% of its emissions. Low-income
-countries — 727 million people — account for **0.6%**.
+The two bars diverge at each end of the scale. High-income countries hold 17% of
+the world's people and 37% of its emissions. Low-income countries, with 727 million
+people, account for 0.6%.
 
 ```sql income_table
 select
@@ -293,10 +291,10 @@ order by t_per_person desc
     <Column id=t_per_person title="t CO₂ / person" fmt="0.00"/>
 </DataTable>
 
-## 5. The cuts are real and the arithmetic still loses
+## 5. The cuts are real, and the world total still rises
 
-Absolute change in emissions, 2015–2023 — the same period in which most of the
-reductions above were achieved.
+Absolute change in emissions, 2015–2023, the period covering most of the reductions
+above.
 
 ```sql absolute_change
 with base_year as (
@@ -334,10 +332,10 @@ limit 12
     yAxisTitle="Change in CO₂, 2015–2023 (Mt)"
 />
 
-China added **2,314 Mt** over the period. The United States, Japan, Germany and the
-UK between them removed about 1,005 Mt. The percentage reductions in finding 3 are
-genuine; they are also, in absolute tonnes, less than half of what one country
-added over eight years.
+China added 2,314 Mt over the period. The United States, Japan, Germany and the UK
+between them removed about 1,005 Mt. The percentage reductions in finding 3 are
+genuine, and in absolute tonnes they still come to less than half of what one
+country added over eight years.
 
 ---
 

@@ -1,6 +1,6 @@
 # Evidence dashboard
 
-[Evidence.dev](https://evidence.dev) — "BI as code". SQL + markdown compile to a
+[Evidence.dev](https://evidence.dev) is "BI as code": SQL + markdown compile to a
 static site, deployable free to GitHub Pages.
 
 This folder is a working Evidence project wired to the repo's DuckDB warehouse.
@@ -26,13 +26,14 @@ Or from the repo root: `just report`.
 
 ## How it's wired
 
-- `sources/warehouse/connection.yaml` — DuckDB source pointing at the warehouse file.
-- `sources/warehouse/*.sql` — source queries that read the dbt/Polars outputs
+- `sources/warehouse/connection.yaml`: DuckDB source pointing at the warehouse file.
+- `sources/warehouse/*.sql`: source queries that read the dbt/Polars outputs
   (`marts.fct_emissions_energy`, `analytics.co2_intensity`). Referenced in pages
   as `warehouse.emissions_energy`, `warehouse.co2_intensity`.
-- `pages/index.md` — the dashboard: renewables vs. life expectancy (bubble),
+- `pages/index.md`: the dashboard, with renewables vs. life expectancy (bubble),
   CO₂ intensity by income group over time (line), and a most-efficient table,
-  with a year selector.
+  all driven by a year selector.
+- `pages/findings.md`: five written-up findings from the same two tables.
 
 ## Pages (`pages/`)
 

@@ -1,11 +1,11 @@
 ---
 title: Emissions, Energy & Development
-description: Exploring CO₂, energy mix, and human development across countries — built from OWID + World Bank data.
+description: CO₂, energy mix and human development across countries, built from OWID and World Bank data.
 ---
 
-How does a country's **energy mix** relate to **emissions** and **human development**?
-This dashboard is built entirely from the `marts.fct_emissions_energy` table produced
-by the dbt + Polars pipeline in this repo.
+How does a country's energy mix relate to its emissions and human development?
+This dashboard is built entirely from the `marts.fct_emissions_energy` table
+produced by the dbt + Polars pipeline in this repo.
 
 ```sql years
 select distinct year
@@ -34,8 +34,8 @@ where year = ${inputs.year.value}
 
 ## Renewables adoption vs. life expectancy
 
-Each bubble is a country in **<Value data={years} column=year/>**, sized by population and
-colored by World Bank income group.
+Each bubble is a country in <Value data={years} column=year/>, sized by population
+and colored by World Bank income group.
 
 ```sql renew_vs_life
 select
@@ -65,8 +65,8 @@ where year = ${inputs.year.value}
 
 ## Carbon intensity of the economy, over time
 
-Average **CO₂ per dollar of GDP** by income group — a rough measure of how much
-emissions each dollar of economic output carries.
+Average CO₂ per dollar of GDP by income group: roughly, how much emissions each
+dollar of economic output carries.
 
 ```sql co2_intensity_by_income
 select
@@ -91,8 +91,8 @@ order by year
 ## Does more renewable energy mean cheaper power? (EU, <Value data={years} column=year/>)
 
 Household electricity prices (incl. all taxes, Eurostat) against each EU country's
-**renewable share of energy** for the selected year. The relationship is famously
-messy — grid, tax and policy choices dominate.
+renewable share of energy for the selected year. The relationship is messy; grid,
+tax and policy choices dominate.
 
 ```sql eu_price_vs_renew
 select

@@ -154,3 +154,31 @@ OWID was rate-limiting. A separate nightly workflow runs the same graph against
 the live endpoints and opens an issue when a source has moved — which is the cue
 to fix the pipeline and `just record-fixtures`. Details in
 [`tests/README.md`](./tests/README.md).
+
+## Published dashboard
+
+`.github/workflows/pages.yml` deploys the Evidence site to GitHub Pages at
+`https://<user>.github.io/<repo>/`. It runs the pipeline against the **live**
+sources rather than the fixtures (a published dashboard showing the 17-country
+test slice would be worse than none), on every push to `main`, weekly, and on
+demand.
+
+Two things to know:
+
+- Pages has to be enabled once by hand: **Settings → Pages → Source → GitHub
+  Actions**.
+- Project Pages serve from a subpath, so the workflow appends
+  `deployment.basePath` to `reports/evidence.config.yaml` at build time. It's
+  injected rather than committed because a base path set in the file also
+  applies to `npm run dev`, which breaks local preview on `localhost:3000`.
+
+## License
+
+Code is [MIT](./LICENSE). The data is not this project's to license: OWID's
+[CO₂](https://github.com/owid/co2-data) and
+[energy](https://github.com/owid/energy-data) datasets are CC BY 4.0, World Bank
+WDI is CC BY 4.0, and Eurostat data carries its own
+[reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright).
+Nothing upstream is redistributed here: the pipeline fetches it at run time, and
+the checked-in fixtures under `tests/fixtures/ingest/` are small excerpts kept
+for offline testing.
