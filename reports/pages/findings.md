@@ -155,9 +155,9 @@ order by band_order
 />
 
 Moving from the lowest band to 30–60k kWh is worth about **15 years of life**.
-Moving from there to the top band costs nearly triple the energy and roughly double
-the CO₂ per person — and buys **half a year**. Whatever the highest-consuming
-countries spend their marginal energy on, longevity isn't it.
+Moving from there to the top band costs 2.8× the energy and 2.7× the CO₂ per
+person — and buys **half a year**. Whatever the highest-consuming countries spend
+their marginal energy on, longevity isn't it.
 
 <DataTable data={energy_life} rows=5>
     <Column id=energy_band title="Energy per person"/>
