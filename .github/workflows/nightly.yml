@@ -52,7 +52,8 @@ jobs:
           uv run dagster job execute -m orchestration.definitions -j full_refresh
 
       # A build artifact, not a release: handy for diffing what the live sources
-      # actually returned on the day the run went red.
+      # actually returned on the day the run went red. `release-data.yml` is the
+      # durable, versioned, publicly downloadable version of the same file.
       - name: Upload the warehouse
         if: always()
         uses: actions/upload-artifact@v4

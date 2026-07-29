@@ -30,8 +30,8 @@ dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 ```
 
 Read it in whatever order suits you: [what the dashboard
-shows](#published-dashboard), [how the layers fit
-together](#orchestration), [how it's tested](#tests), or just
+shows](#published-dashboard), [the data as a download](#published-data), [how the
+layers fit together](#orchestration), [how it's tested](#tests), or just
 [`just setup && just run`](#quickstart).
 
 ## Stack
@@ -127,7 +127,7 @@ it from the UI if you want it running.
 │   └── macros/        # generate_schema_name -> clean schema names
 ├── transform/         # Polars: derived metrics -> schema `analytics`
 ├── tests/             # pytest + the recorded API fixtures CI runs against
-├── scripts/           # record_fixtures.py — re-record those fixtures
+├── scripts/           # record_fixtures.py, export_warehouse.py (the release)
 ├── notebooks/         # marimo reactive notebooks
 ├── reports/           # Evidence dashboard (BI as code)
 ├── docs/STYLE_GUIDE.md # SQL + model conventions (the lint rules and the rest)
@@ -232,6 +232,53 @@ Three things to know if you're copying this setup:
   injected rather than committed because a base path set in the file also
   applies to `npm run dev`, which breaks local preview on `localhost:3000`.
 
+## Published data
+
+### 👉 [Latest snapshot](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest)
+
+The dashboard is one consumer of the warehouse; the warehouse itself is
+published too, so you can use the joined data without running any of this.
+Each release carries the whole DuckDB file plus a Parquet per modelled table,
+`manifest.json` (row counts, year coverage, SHA-256 per asset) and `SHA256SUMS`.
+
+Query it where it sits — DuckDB reads a remote database over HTTPS:
+
+```sql
+INSTALL httpfs; LOAD httpfs;
+ATTACH 'https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest/download/warehouse.duckdb'
+       AS warehouse (READ_ONLY);
+SELECT country_name, year, co2_mt, renewables_share_pct
+FROM warehouse.marts.fct_emissions_energy
+WHERE year = 2024;
+```
+
+Or take a single table as a flat file, no DuckDB required:
+
+```sql
+SELECT * FROM read_parquet('https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest/download/marts__fct_emissions_energy.parquet');
+```
+
+`.github/workflows/release-data.yml` builds it from the live sources monthly (the
+publishers update annually) or on demand, and `scripts/export_warehouse.py`
+packages it — `just export-data` does the same thing locally, into `data/export/`.
+Tags are dated, `data-YYYY-MM-DD`; `releases/latest/download/…` always resolves
+to the newest one, so the URLs above never go stale.
+
+Three things to know if you're copying this setup:
+
+- **Alias it `warehouse`.** dbt writes the `staging` views with fully-qualified
+  SQL, and DuckDB names a catalog after its file, so those views only resolve
+  under that name. `ATTACH … AS wh` reads the `marts` and `analytics` *tables*
+  fine and makes every view raise `Catalog "warehouse" does not exist`. Same
+  reason the export copies the file as `warehouse.duckdb` rather than
+  `snapshot-2026-07-30.duckdb`.
+- **The copy is made with `COPY FROM DATABASE`, not `cp`.** It's consistent
+  whatever state the source was left in (a crashed run leaves a `.wal` beside
+  it) and compacted, which is most of why 32 MB of warehouse ships as 29 MB.
+- **The DuckDB file has a storage format**; it was written by whatever version
+  the workflow resolved, recorded in `manifest.json`. Older clients may refuse
+  it. The Parquet files have no such constraint, which is why both ship.
+
 ## License
 
 Code is [MIT](./LICENSE). The data is not this project's to license: OWID's
@@ -239,6 +286,11 @@ Code is [MIT](./LICENSE). The data is not this project's to license: OWID's
 [energy](https://github.com/owid/energy-data) datasets are CC BY 4.0, World Bank
 WDI is CC BY 4.0, and Eurostat data carries its own
 [reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright).
-Nothing upstream is redistributed here: the pipeline fetches it at run time, and
-the checked-in fixtures under `tests/fixtures/ingest/` are small excerpts kept
-for offline testing.
+
+All four permit redistribution with attribution, which is what the data releases
+above rely on — every one ships an `ATTRIBUTION.md` naming the publisher and
+licence per source, and the release notes repeat it. Attribute them, not this
+repo, for the numbers; the joins and derived metrics are the only part that's
+ours. Nothing upstream is redistributed in the repository *itself*: the pipeline
+fetches it at run time, and the checked-in fixtures under
+`tests/fixtures/ingest/` are small excerpts kept for offline testing.

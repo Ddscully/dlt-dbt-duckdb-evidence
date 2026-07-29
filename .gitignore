@@ -14,6 +14,8 @@ wheels/
 data/*.duckdb
 data/*.duckdb.wal
 data/raw/
+# Publishable artifact built by `just export-data`; it lives in GitHub releases
+data/export/
 *.csv
 !dbt/seeds/*.csv
 

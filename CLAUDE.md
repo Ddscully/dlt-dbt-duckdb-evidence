@@ -28,6 +28,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
 | `just materialize` | same pipeline, ordered by the asset graph |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
+| `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
 | `just test` | `pytest` — mocked-payload unit tests, no network |
 | `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
 | `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
@@ -115,6 +116,30 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   stamped at ingest, so a freshness failure means the pipeline stopped running.
   It is tautologically green in CI (which loads and then checks), which is why
   it is a `just` recipe rather than a workflow step.
+
+## Publishing (`scripts/export_warehouse.py`)
+
+`just export-data` packages the built warehouse into `data/export/` (gitignored):
+a `COPY FROM DATABASE` copy of the DuckDB file, a zstd Parquet per table in
+`staging`/`marts`/`analytics`, `manifest.json`, `SHA256SUMS`, `ATTRIBUTION.md`
+and the release body. `.github/workflows/release-data.yml` runs it monthly (and
+on demand) after materializing the graph against live sources, and attaches the
+lot to a dated `data-YYYY-MM-DD` GitHub release.
+
+- **The published DuckDB file must be named `warehouse.duckdb` and attached as
+  `warehouse`.** DuckDB names a catalog after the file stem, and dbt writes the
+  `staging` views with fully-qualified SQL (`warehouse.raw.owid_co2`). Rename the
+  file or `ATTACH … AS wh` and the views raise `Catalog "warehouse" does not
+  exist` while the `marts`/`analytics` tables keep working — a confusing
+  half-broken artifact. `tests/test_export.py` guards it.
+- **Releases redistribute upstream data**, which the repo itself doesn't. All
+  four sources are CC BY 4.0 / Eurostat reuse, so attribution is the obligation:
+  `ATTRIBUTION` in the export script is the single source of truth for both the
+  shipped file and the release notes. Keep it in step with the README's licence
+  section when a source is added.
+- **`raw` ships in the DuckDB file but not as Parquet.** The flat files are the
+  modelled layers only; anyone who wants dlt's landing tables downloads the
+  database.
 
 ## Conventions & gotchas (learned the hard way)
 

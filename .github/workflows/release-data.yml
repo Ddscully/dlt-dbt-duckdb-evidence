@@ -1,0 +1,130 @@
+name: release-data
+
+# Publishes the built warehouse as a versioned GitHub release, so the data is
+# consumable without cloning the repo or re-running the pipeline:
+#
+#   ATTACH 'https://github.com/<owner>/<repo>/releases/latest/download/warehouse.duckdb'
+#          AS warehouse (READ_ONLY);
+#
+# Like `pages.yml` this builds from the LIVE sources — a published dataset made
+# of the 17-country fixture slice would be worse than none. `nightly.yml` is what
+# alerts when a source moves; a failure here just means the last release stands.
+#
+# Monthly, because OWID and the World Bank publish annually and a nightly
+# release would be 30 identical 29 MB uploads a month. Cut one on demand
+# (`gh workflow run release-data.yml`) when a source has actually updated.
+
+on:
+  schedule:
+    # 07:10 UTC on the 1st.
+    - cron: "10 7 1 * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (default: data-YYYY-MM-DD)"
+        required: false
+        type: string
+
+permissions:
+  contents: write # creates the tag, the release and its assets
+
+# Two runs uploading assets to the same dated tag would race.
+concurrency:
+  group: release-data
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      # No INGEST_FIXTURES: see the note at the top.
+      DAGSTER_HOME: ${{ github.workspace }}/.dagster
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync deps
+        run: uv sync --group orchestration
+
+      # dbt/dbt_packages/ and dbt/target/ are gitignored, and `prepare_if_dev`
+      # only fires under `dagster dev` — so outside the UI the manifest has to
+      # be built explicitly before the asset graph can load.
+      - name: Install dbt packages and parse the project
+        run: cd dbt && uv run dbt deps && uv run dbt parse
+
+      # ingest -> dbt build + test -> Polars, in asset-graph order. dbt's 60
+      # tests run inside `dbt build`, so a warehouse that fails its own
+      # data-quality gates never reaches the release.
+      - name: Build the warehouse from live sources
+        run: |
+          mkdir -p "$DAGSTER_HOME"
+          uv run dagster job execute -m orchestration.definitions -j full_refresh
+
+      # Writes data/export/: the DuckDB copy, a Parquet per modelled table,
+      # manifest.json, SHA256SUMS, ATTRIBUTION.md and the release body.
+      - name: Package the artifact
+        id: export
+        # Through the environment rather than interpolated into the script: it's
+        # a string a human typed into the dispatch form.
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          if [ -n "$TAG_INPUT" ]; then
+            uv run python -m scripts.export_warehouse --tag "$TAG_INPUT"
+          else
+            uv run python -m scripts.export_warehouse
+          fi
+          echo "tag=$(jq -r .tag data/export/manifest.json)" >> "$GITHUB_OUTPUT"
+
+      # Cheap insurance against publishing something unreadable: check the
+      # sums, then read a `staging` view back out of the copied database. The
+      # views are the part that can break — they store fully-qualified SQL
+      # against a catalog named `warehouse`, so both the file name and the
+      # ATTACH alias have to stay `warehouse`.
+      - name: Verify the artifact
+        working-directory: data/export
+        run: |
+          sha256sum -c SHA256SUMS
+          uv run --project "$GITHUB_WORKSPACE" python - <<'PY'
+          import duckdb
+
+          con = duckdb.connect()
+          con.execute("attach 'warehouse.duckdb' as warehouse (read_only)")
+          for relation in (
+              "warehouse.staging.stg_co2",
+              "warehouse.marts.fct_emissions_energy",
+              "warehouse.analytics.co2_intensity",
+              "'marts__fct_emissions_energy.parquet'",
+          ):
+              (rows,) = con.execute(f"select count(*) from {relation}").fetchone()
+              assert rows > 0, f"{relation} is empty"
+              print(f"{relation}: {rows:,} rows")
+          PY
+
+      # The notes are the release body, so they move out of the way and
+      # everything left in data/export/ becomes an asset. `--clobber` on the
+      # upload path so a same-day re-run replaces that day's assets rather than
+      # failing on "asset already exists".
+      - name: Publish the release
+        env:
+          TAG: ${{ steps.export.outputs.tag }}
+        run: |
+          mv data/export/RELEASE_NOTES.md release-notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file release-notes.md
+            gh release upload "$TAG" data/export/* --clobber
+          else
+            gh release create "$TAG" data/export/* \
+              --target "$GITHUB_SHA" \
+              --title "Warehouse snapshot ${TAG#data-}" \
+              --notes-file release-notes.md
+          fi
+          {
+            echo "## [$TAG](https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG)"
+            cat release-notes.md
+          } >> "$GITHUB_STEP_SUMMARY"

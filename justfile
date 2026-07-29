@@ -55,6 +55,12 @@ test-pipeline:
     cd dbt && uv run dbt deps && uv run dbt build && cd ..
     uv run python -m transform.co2_intensity
 
+# `.github/workflows/release-data.yml` runs this, then attaches the result to a
+# dated GitHub release.
+# Package data/export/ for publishing: DuckDB copy, Parquet, checksums, notes
+export-data:
+    uv run python -m scripts.export_warehouse
+
 # Re-record the fixtures from the live APIs (hits the network; commit the diff)
 record-fixtures:
     uv run python -m scripts.record_fixtures
