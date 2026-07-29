@@ -1,17 +1,17 @@
-# dlt → dbt → DuckDB → Evidence
+# Emissions, Energy & Development
 
 ### 📊 [**See the live dashboard →**](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
 A data pipeline that answers one question: **how does a country's energy mix
 relate to its emissions and its people's wellbeing?**
 
-It pulls CO₂, energy and development data for ~200 countries from
+It pulls CO₂, energy and development figures for ~200 countries from
 [Our World in Data](https://github.com/owid/co2-data), the
 [World Bank](https://databank.worldbank.org/source/world-development-indicators)
-and [Eurostat](https://ec.europa.eu/eurostat), cleans and joins it, derives a
-few metrics, and publishes the charts above. The whole thing rebuilds itself
-from the live sources on every push — the dashboard you're looking at was built
-by a robot, not exported by hand.
+and [Eurostat](https://ec.europa.eu/eurostat), cleans and joins them, derives a
+few metrics, and publishes the charts. No numbers are exported by hand: the
+whole thing rebuilds itself from the live sources on every push, so the site is
+never more than a week behind what those organisations publish.
 
 <sub>Nothing to install to look at the numbers — just follow the link. The rest
 of this README is for people who want to run or read the pipeline.</sub>
