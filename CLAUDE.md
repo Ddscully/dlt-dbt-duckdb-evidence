@@ -33,6 +33,44 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 Always run tools through `uv run` so they use the project venv. dbt commands
 must run from the `dbt/` directory (that's where `profiles.yml` lives).
 
+## Style guide
+
+SQL and model conventions live in [`docs/STYLE_GUIDE.md`](docs/STYLE_GUIDE.md) —
+naming, grain, import CTEs, column ordering, and where this project deliberately
+departs from [dbt Labs' style guide](https://docs.getdbt.com/best-practices/how-we-style/0-how-we-style-our-dbt-projects).
+The formatting half of it is enforced by [`.sqlfluff`](.sqlfluff); run
+`just lint` (pre-commit runs the same check).
+
+## Agent skills
+
+Vendor skills for each layer are declared in [`.claude/settings.json`](.claude/settings.json),
+so Claude Code offers to install them when you trust this repo. They carry the
+tool-level knowledge; this file and the project skills carry the repo-level
+knowledge.
+
+| Plugin | Covers |
+|--------|--------|
+| `dbt@dbt-agent-marketplace` | [dbt Labs' skills](https://github.com/dbt-labs/dbt-agent-skills) — models, tests, docs, debugging |
+| `dagster-expert@dagster` | [Dagster's skills](https://github.com/dagster-io/skills) — assets, automation, CLI |
+| `polars@polars` | [Polars' skill](https://github.com/polars-inc/skills) — idiomatic lazy-API Polars |
+| `duckdb-skills@duckdb-skills` | [DuckDB's skills](https://github.com/duckdb/duckdb-skills) — querying, file formats, docs search |
+
+Not enabled, but worth knowing about: `dbt-migration@dbt-agent-marketplace`
+(one-off dbt Core → Fusion work), `dignified-python@dagster`, and dltHub's
+[AI Workbench](https://github.com/dlt-hub/dlthub-ai-workbench)
+(`/plugin marketplace add dlt-hub/dlthub-ai-workbench`) — the workbench assumes
+its own scaffolding, so prefer the `adding-a-data-source` skill below for the
+pipeline that already exists here.
+
+Project skills in `.claude/skills/` cover the seams the vendor skills can't know:
+
+- **`adding-a-data-source`** — the cross-layer workflow (dlt resource → dbt
+  source → staging → mart → Dagster asset key → Evidence), including the
+  name-matching that silently splits the asset graph if you get it wrong.
+- **`querying-the-warehouse`** — read-only connections, the single-writer lock,
+  clean schema names, checking `raw` column names before writing SQL.
+- **`building-evidence-reports`** — the Evidence layer, which has no vendor skill.
+
 ## Warehouse schemas (one DuckDB file: `data/warehouse.duckdb`)
 
 - `raw` — dlt landing tables: `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`,

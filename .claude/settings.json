@@ -1,0 +1,22 @@
+{
+  "extraKnownMarketplaces": {
+    "dbt-agent-marketplace": {
+      "source": { "source": "github", "repo": "dbt-labs/dbt-agent-skills" }
+    },
+    "dagster": {
+      "source": { "source": "github", "repo": "dagster-io/skills" }
+    },
+    "polars": {
+      "source": { "source": "github", "repo": "polars-inc/skills" }
+    },
+    "duckdb-skills": {
+      "source": { "source": "github", "repo": "duckdb/duckdb-skills" }
+    }
+  },
+  "enabledPlugins": {
+    "dbt@dbt-agent-marketplace": true,
+    "dagster-expert@dagster": true,
+    "polars@polars": true,
+    "duckdb-skills@duckdb-skills": true
+  }
+}

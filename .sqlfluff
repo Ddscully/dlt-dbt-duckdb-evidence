@@ -1,12 +1,51 @@
+# SQL lint rules. The conventions these can't check live in docs/STYLE_GUIDE.md.
+# Loosely follows dbt Labs' own config (github.com/dbt-labs/jaffle-shop/.sqlfluff),
+# retargeted to duckdb — see the "deliberate deviations" table in the style guide.
 [sqlfluff]
 templater = dbt
 dialect = duckdb
 max_line_length = 120
+indent_unit = space
+# ST06: column ordering in `select *` expansions — the wide mart groups columns
+#       by source on purpose. RF04: keywords used as identifiers ("year").
 exclude_rules = ST06, RF04
 
 [sqlfluff:templater:dbt]
 project_dir = dbt
 profiles_dir = dbt
 
+[sqlfluff:indentation]
+tab_space_size = 4
+
+# Trailing commas, touching the preceding token.
+[sqlfluff:layout:type:comma]
+spacing_before = touch
+line_position = trailing
+
+# Everything lowercase.
 [sqlfluff:rules:capitalisation.keywords]
 capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.identifiers]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = lower
+
+# `as` spelled out when aliasing, both tables and columns.
+[sqlfluff:rules:aliasing.table]
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.column]
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.expression]
+allow_scalar = False
+
+# Name the columns in `group by` rather than `group by 1, 2` (dbt does the
+# opposite; both staging models that group already spell the columns out).
+[sqlfluff:rules:ambiguous.column_references]
+group_by_and_order_by_style = explicit

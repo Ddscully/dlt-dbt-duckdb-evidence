@@ -103,12 +103,26 @@ it from the UI if you want it running.
 ├── transform/         # Polars: derived metrics -> schema `analytics`
 ├── notebooks/         # marimo reactive notebooks
 ├── reports/           # Evidence dashboard (BI as code)
+├── docs/STYLE_GUIDE.md # SQL + model conventions (the lint rules and the rest)
 ├── docs/sessions/     # exported Claude Code session logs (project history)
 ├── data/              # warehouse.duckdb lives here (gitignored)
 ├── justfile           # orchestration recipes
 ├── CLAUDE.md          # guidance for Claude Code / contributors
+├── .claude/           # agent skills for this repo + vendor plugin declarations
 └── .github/workflows  # CI
 ```
+
+## Working on this with an AI agent
+
+`.claude/settings.json` declares the official agent-skill plugins for the stack —
+[dbt](https://github.com/dbt-labs/dbt-agent-skills),
+[Dagster](https://github.com/dagster-io/skills),
+[Polars](https://github.com/polars-inc/skills) and
+[DuckDB](https://github.com/duckdb/duckdb-skills) — so Claude Code offers to
+install them the first time you trust the repo. `.claude/skills/` adds three
+project-specific skills covering the seams between layers, and
+[`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) holds the conventions. See
+[CLAUDE.md](./CLAUDE.md#agent-skills) for the full picture.
 
 ## Quickstart
 
