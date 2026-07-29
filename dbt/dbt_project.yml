@@ -17,3 +17,9 @@ models:
     marts:
       +materialized: table
       +schema: marts
+
+snapshots:
+  modern_data_stack:
+    # The one schema that isn't reproducible from the sources — see
+    # snapshots/snap_co2_estimates.sql.
+    +schema: history

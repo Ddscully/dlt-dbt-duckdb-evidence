@@ -98,7 +98,7 @@ notebook:
 # Lint SQL — from dbt/, because the dbt templater opens the warehouse via the
 # profile's relative path (`../data/…`) without chdir'ing into the project first
 lint: dbt-deps
-    cd dbt && uv run sqlfluff lint models
+    cd dbt && uv run sqlfluff lint models snapshots
 
 # Build the Evidence dashboard (requires Node; see reports/README.md)
 report:

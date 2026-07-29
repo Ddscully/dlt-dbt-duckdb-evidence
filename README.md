@@ -90,7 +90,8 @@ The pipeline populates one DuckDB file (`data/warehouse.duckdb`) with these sche
 |--------|-----------|----------|
 | `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`) |
 | `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain |
-| `marts` | dbt (tables) | `dim_country_year` — the country-year spine; `fct_emissions_energy` — the wide joined fact |
+| `marts` | dbt (tables) | `dim_country_year` — the country-year spine; `fct_emissions_energy` — the wide joined fact; `fct_co2_estimate_versions` — revision history |
+| `history` | dbt (snapshot) | `snap_co2_estimates` — SCD2 versions of OWID's CO₂ numbers, the one table a rebuild can't reproduce |
 | `analytics` | Polars | derived metrics (`co2_intensity`) |
 
 ## Orchestration
@@ -100,11 +101,11 @@ want to know *why* a table is stale or rebuild only what a change touched.
 Dagster models the same pipeline as one asset graph instead:
 
 ```
-raw/owid_co2      ─┐
-raw/owid_energy   ─┤
-raw/wb_country    ─┼─▶ staging/stg_*  ─▶  marts/dim_country_year  ─▶  marts/fct_emissions_energy  ─▶  analytics/co2_intensity
-raw/wb_wdi        ─┤        (dbt)                  (dbt)                          (dbt)                       (Polars)
-raw/eu_elec_prices─┘
+raw/owid_co2      ─┐                   ┌─▶ marts/dim_country_year ─▶ marts/fct_emissions_energy ─▶ analytics/co2_intensity
+raw/owid_energy   ─┤                   │           (dbt)                       (dbt)                      (Polars)
+raw/wb_country    ─┼─▶ staging/stg_* ──┤
+raw/wb_wdi        ─┤       (dbt)       └─▶ history/snap_co2_estimates ─▶ marts/fct_co2_estimate_versions
+raw/eu_elec_prices─┘                            (dbt snapshot)                       (dbt)
       (dlt)
 ```
 
@@ -140,7 +141,8 @@ it from the UI if you want it running.
 ├── orchestration/     # Dagster: the pipeline as an asset graph + schedule
 ├── dbt/               # dbt-duckdb project
 │   ├── models/staging # 1:1 cleaned source views (stg_*)
-│   ├── models/marts   # the country-year spine (dim_*) + the joined fact (fct_*)
+│   ├── models/marts   # the country-year spine (dim_*) + the facts (fct_*)
+│   ├── snapshots/     # SCD2 history of OWID's CO2 estimates (schema `history`)
 │   └── macros/        # generate_schema_name -> clean schema names
 ├── transform/         # Polars: derived metrics -> schema `analytics`
 ├── tests/             # pytest + the recorded API fixtures CI runs against
@@ -202,7 +204,7 @@ to fix the pipeline and `just record-fixtures`. Details in
 
 ### Data-quality gates
 
-`just dbt-build` runs 65 dbt tests alongside the models, and Dagster surfaces
+`just dbt-build` runs 70 dbt tests alongside the models, and Dagster surfaces
 each one as an asset check on the model it guards:
 
 | Gate | What it catches |
@@ -228,6 +230,7 @@ Two pages, both built from `marts.fct_emissions_energy` and
 |------|--------------|
 | **Overview** | Pick a year: renewables share vs. life expectancy for every country (bubbles sized by population, coloured by income group), CO₂ intensity by income group over time, and the headline counts. |
 | **Five findings** | The things the data actually says once it's joined — including that rich countries cut emissions while growing, and how far the energy/longevity relationship flattens out at the top. |
+| **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. Empty on the published copy by construction — the build starts from an empty DuckDB file, and a snapshot can only record a revision it was there for. |
 
 `.github/workflows/pages.yml` builds it. It runs the pipeline against the
 **live** sources rather than the fixtures (a published dashboard showing the

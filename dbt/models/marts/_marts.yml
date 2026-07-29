@@ -35,6 +35,52 @@ models:
           World Bank income group. Null for the territories in
           `country_overrides`, which the World Bank does not classify.
 
+  - name: fct_co2_estimate_versions
+    description: >
+      Version history of OWID's CO2 estimates, summarised off the
+      `snap_co2_estimates` SCD2 snapshot: how many versions of each country-year
+      the warehouse has held, the first, the current, and the change.
+      Grain: one row per (country_iso3, year) in the snapshot, 1990 onwards.
+
+      `is_revised` is the interesting filter, and it is **all false on a
+      warehouse built from scratch** — a snapshot can only record a revision it
+      was present for. That is also why the published copy is unrevised: the
+      Pages and release workflows both start from an empty DuckDB file.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+    columns:
+      - name: country_iso3
+        data_tests: [not_null]
+      - name: year
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1990, max_value: 2030}
+      - name: is_revised
+        description: Whether the estimate has changed since it was first loaded.
+        data_tests: [not_null]
+      - name: version_count
+        description: Versions the snapshot holds for this country-year.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: first_loaded_at
+        description: >
+          `min(dbt_valid_from)` — when this country-year first entered the
+          snapshot, not when OWID first published it.
+      - name: last_revised_at
+        description: >
+          When the most recent version appeared. Null while `version_count` is 1,
+          since "revised at" would otherwise read as the first load.
+      - name: co2_mt_change
+        description: Latest estimate minus the first, million tonnes. Signed.
+      - name: co2_mt_change_pct
+        description: >
+          The same as a percentage of the first estimate. Null where the first
+          estimate was zero.
+
   - name: fct_emissions_energy
     description: >
       Country-year fact combining OWID emissions & energy, World Bank WDI

@@ -22,7 +22,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (models + 65 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (models, snapshot + 70 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just run` | ingest → dbt-build → transform (shell ordering) |
@@ -33,7 +33,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just test` | `pytest` — mocked-payload unit tests, no network |
 | `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
 | `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
-| `just lint` | `sqlfluff lint dbt/models` |
+| `just lint` | `sqlfluff lint dbt/models dbt/snapshots` |
 | `just sql` | open the warehouse in Harlequin |
 | `just notebook` | marimo exploration notebook |
 
@@ -83,8 +83,11 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 - `raw` — dlt landing tables: `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`,
   `eu_elec_prices`
 - `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain
-- `marts` — dbt tables: `dim_country_year` (the country-year spine) and
-  `fct_emissions_energy` (the wide join, built on the spine)
+- `marts` — dbt tables: `dim_country_year` (the country-year spine),
+  `fct_emissions_energy` (the wide join, built on the spine) and
+  `fct_co2_estimate_versions` (revision history, off the snapshot)
+- `history` — the dbt snapshot `snap_co2_estimates`: SCD2 versions of OWID's CO2
+  numbers. **The one table here that no rebuild can reproduce** — see below
 - `analytics` — Polars output, `co2_intensity`
 
 Grain of every fact/staging model is **`(country_iso3, year)`**; joins are on
@@ -108,6 +111,35 @@ knowing:
   `mart_covers_recent_years` check measures it per source column instead.
 - The spine itself is the full cross join (~63k rows against the mart's ~43k).
   Left-join a fact onto it to see coverage gaps as rows.
+
+## Snapshot history (`dbt/snapshots/`)
+
+`snap_co2_estimates` is an SCD2 snapshot of `stg_co2` (`co2_mt`,
+`co2_per_capita`, 1990 onwards, `check` strategy, `hard_deletes='invalidate'`).
+OWID restates published years; every other model overwrites the old number, so
+this is the only place a revision leaves a trace.
+`marts.fct_co2_estimate_versions` summarises it (first vs. current value,
+`is_revised`) and `reports/pages/restatements.md` renders it.
+
+- **A snapshot is state, not a build artifact.** `dbt build` appends to it; it
+  can't be recomputed from the sources, and deleting `data/warehouse.duckdb`
+  destroys the history for good. Every other table here is disposable — this one
+  isn't, which is also why it's narrow (two columns, 1990+) rather than the whole
+  fact.
+- **CI, Pages and the release all start from an empty file**, so in those
+  contexts every row is version 1 and `is_revised` is uniformly false. The
+  restatements page renders an explicit "nothing revised yet" branch for that
+  case; it is the honest state, not a broken build.
+- **Verify a snapshot change by simulating a revision**, not by waiting for OWID:
+  build, `update raw.owid_co2 set co2 = co2 * 1.05 where iso_code = 'DEU' and
+  year = 2019` in a throwaway warehouse, build again, and check
+  `fct_co2_estimate_versions`. Don't do it in the real warehouse — the fake
+  version stays in the history even after you re-ingest.
+- **Evidence can't write a zero-row source to parquet** ("too small to be a
+  Parquet file", and the build fails). That's why
+  `sources/warehouse/co2_estimate_versions.sql` selects every country-year and
+  the page filters on `is_revised` itself, rather than the source pre-filtering
+  to the revised ones.
 
 ## Data-quality gates (`dbt/models/**/_*.yml`)
 
@@ -157,9 +189,11 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   `ATTRIBUTION` in the export script is the single source of truth for both the
   shipped file and the release notes. Keep it in step with the README's licence
   section when a source is added.
-- **`raw` ships in the DuckDB file but not as Parquet.** The flat files are the
-  modelled layers only; anyone who wants dlt's landing tables downloads the
-  database.
+- **`raw` and `history` ship in the DuckDB file but not as Parquet.** The flat
+  files are the modelled layers only (`PUBLISHED_SCHEMAS`); anyone who wants
+  dlt's landing tables or the snapshot downloads the database. The published
+  snapshot always holds one version per row anyway — the workflow builds from
+  scratch.
 
 ## Conventions & gotchas (learned the hard way)
 

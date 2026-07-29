@@ -1,0 +1,102 @@
+---
+title: Restatements
+description: What changed in the numbers themselves — CO₂ estimates OWID has revised since this warehouse first loaded them.
+---
+
+Emissions data is not a fixed record. Countries resubmit inventories, OWID
+recalculates, and the figure published for 2019 is not necessarily the figure you
+will read for 2019 next year. Every model in this project overwrites the old
+number on each run, so a revision would normally leave no trace at all.
+
+The `snap_co2_estimates` dbt snapshot keeps them. It stores one row per
+`(country_iso3, year, version)` with the window each version was valid for, and
+`marts.fct_co2_estimate_versions` reads the first and the current version back
+off it.
+
+```sql summary
+select
+    count(*)                                     as country_years,
+    count(*) filter (where is_revised)           as revised,
+    count(distinct case when is_revised then country_iso3 end) as countries_revised,
+    min(first_loaded_at)                         as watching_since
+from warehouse.co2_estimate_versions
+```
+
+<Grid cols=3>
+    <BigValue data={summary} value=country_years title="Country-years tracked" fmt=num0/>
+    <BigValue data={summary} value=revised title="Revised since first load" fmt=num0/>
+    <BigValue data={summary} value=watching_since title="Watching since" fmt="yyyy-mm-dd"/>
+</Grid>
+
+```sql biggest
+select
+    country_name,
+    region,
+    year,
+    first_co2_mt,
+    latest_co2_mt,
+    co2_mt_change,
+    co2_mt_change_pct,
+    version_count,
+    last_revised_at
+from warehouse.co2_estimate_versions
+where is_revised
+order by abs(co2_mt_change) desc
+limit 25
+```
+
+{#if biggest.length > 0}
+
+## Largest revisions
+
+Sorted by the size of the change in absolute tonnes. A positive change means the
+current estimate is *higher* than the one this warehouse first recorded.
+
+<DataTable data={biggest} rows=25>
+    <Column id=country_name title="Country"/>
+    <Column id=year title="Year" fmt="0"/>
+    <Column id=first_co2_mt title="First (Mt)" fmt="0.0"/>
+    <Column id=latest_co2_mt title="Now (Mt)" fmt="0.0"/>
+    <Column id=co2_mt_change title="Change (Mt)" fmt="0.0"/>
+    <Column id=co2_mt_change_pct title="Change" fmt='0.0"%"'/>
+    <Column id=version_count title="Versions" fmt="0"/>
+</DataTable>
+
+<ScatterPlot
+    data={biggest}
+    x=year
+    y=co2_mt_change_pct
+    series=region
+    xFmt="0"
+    yFmt='0.0"%"'
+    xAxisTitle="Year restated"
+    yAxisTitle="Change vs. first estimate"
+    tooltipTitle=country_name
+/>
+
+{:else}
+
+## Nothing revised yet
+
+Every country-year above is on version 1, and on a warehouse that was just built
+that is what it *should* say: a snapshot can only record a revision it was
+present for. The first run stores version 1 of everything, and a row becomes
+revised the first time a later run finds a different number.
+
+That makes the snapshot the one table here that isn't reproducible from the
+sources — rebuild the warehouse from scratch and the history is gone. It is also
+why the published copy of this page shows nothing: both the
+[Pages build](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/pages.yml)
+and the [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/release-data.yml)
+start from an empty DuckDB file. Run the pipeline locally a few weeks apart and
+this page fills in.
+
+{/if}
+
+---
+
+<small>Source: <a href="https://github.com/owid/co2-data">OWID CO₂</a>, snapshotted
+by dbt (<code>history.snap_co2_estimates</code>, SCD2, <code>check</code> strategy on
+<code>co2_mt</code> and <code>co2_per_capita</code>, 1990 onwards).
+<code>first_loaded_at</code> is when <em>this warehouse</em> first saw the number,
+not when OWID first published it.</small>

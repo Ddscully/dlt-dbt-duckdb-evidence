@@ -131,6 +131,10 @@ class FolderGroupDbtTranslator(DagsterDbtTranslator):
     """Group dbt assets by their folder (`staging`, `marts`) and give them a freshness policy."""
 
     def get_group_name(self, dbt_resource_props: Mapping[str, Any]) -> str | None:
+        # Snapshots live directly in `snapshots/`, so there's no folder to take —
+        # and the default would name the group after the snapshot itself.
+        if dbt_resource_props.get("resource_type") == "snapshot":
+            return dbt_resource_props.get("schema")
         fqn = dbt_resource_props.get("fqn") or []
         # fqn is [project, <subfolders...>, name]
         return fqn[1] if len(fqn) > 2 else super().get_group_name(dbt_resource_props)

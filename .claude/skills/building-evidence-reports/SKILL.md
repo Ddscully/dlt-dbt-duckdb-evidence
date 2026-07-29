@@ -28,6 +28,26 @@ just report-clean   # rm -rf .evidence build && npm install && npm run sources &
 not `just report`. `just report` is only safe when the warehouse schema is
 unchanged.
 
+## A source query must return rows
+
+A source that comes back empty is written as a 0-byte parquet and the *build*
+fails on it: `Invalid Input Error: File 'warehouse_x.parquet' too small to be a
+Parquet file`. So don't put the interesting filter in the source — select the
+whole table there and filter in the page's own SQL block, where an empty result
+is fine (components render their empty state). `co2_estimate_versions.sql` is
+the example: unfiltered source, `where is_revised` on the page.
+
+Pair that with an explicit empty branch when the table can legitimately be
+empty:
+
+````markdown
+{#if biggest.length > 0}
+<DataTable data={biggest}/>
+{:else}
+Nothing recorded yet — and here's why that's expected.
+{/if}
+````
+
 ## How it's wired
 
 | Path | Role |

@@ -17,9 +17,9 @@ warehouse. They cover the parts of the pipeline that have actually broken:
 
 Runs the real `ingest → dbt build → transform` into a throwaway DuckDB file with
 `INGEST_FIXTURES=1`, so dlt's schema inference, both of its load calls (replace
-then merge), every dbt model, seed and test, and the Polars layer all execute —
-offline and deterministically. This is what `.github/workflows/ci.yml` runs (via
-the Dagster asset graph, so the asset checks are evaluated too).
+then merge), every dbt model, seed, snapshot and test, and the Polars layer all
+execute — offline and deterministically. This is what `.github/workflows/ci.yml`
+runs (via the Dagster asset graph, so the asset checks are evaluated too).
 
 It sets `WAREHOUSE_PATH` to a temp file. Don't drop that: without it a fixture
 run overwrites `data/warehouse.duckdb` with the 17-country slice.

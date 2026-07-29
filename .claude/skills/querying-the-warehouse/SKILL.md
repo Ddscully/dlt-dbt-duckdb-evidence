@@ -83,6 +83,19 @@ group by d.country_name
 order by missing_years desc;
 ```
 
+## `history` is not rebuildable
+
+`history.snap_co2_estimates` is a dbt snapshot: SCD2 versions of OWID's CO2
+numbers, appended to on every `dbt build`. Every other table in the file can be
+recreated from the sources; this one can't. Don't delete the warehouse to fix an
+unrelated problem without meaning to throw the revision history away, and don't
+hand-edit `raw.owid_co2` in the real warehouse to test something — the snapshot
+records the fake version permanently. Use a `WAREHOUSE_PATH` copy for that.
+
+Query it through `marts.fct_co2_estimate_versions` (first vs. current value per
+country-year, `is_revised`) rather than the raw SCD2 table, unless you need the
+individual validity windows.
+
 ## If the warehouse is missing or stale
 
 It's gitignored and rebuilt by the pipeline: `just run` (or `just materialize`

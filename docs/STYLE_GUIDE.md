@@ -59,7 +59,7 @@ That contract drives most of the naming below.
 
 - **[convention]** `snake_case` everywhere — schemas, tables, columns.
 - **[convention]** Model prefixes: `stg_` for staging views, `fct_` for facts,
-  `dim_` for dimensions. Underscores only, never dots.
+  `dim_` for dimensions, `snap_` for snapshots. Underscores only, never dots.
 - **[convention]** Join keys keep the same name in every model that has them:
   `country_iso3` and `year`. Not `iso3`, not `iso_code`, not `country_code`.
   Renaming to the contract is the staging layer's job — `stg_co2` maps OWID's
