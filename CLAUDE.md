@@ -20,6 +20,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 |---------|--------------|
 | `just setup` | `uv sync --group dev --group notebook --group orchestration` |
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
+| `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
 | `just dbt-build` | `dbt deps` then `dbt build` (models + 65 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
@@ -171,6 +172,39 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   re-inference each run. Don't remove that without a reason. It's
   `drop_resources` and not `drop_sources` because Dagster can run a subset of the
   source: `drop_sources` would wipe the four tables that *weren't* selected.
+- **Four resources `replace`, `wb_wdi` `merge`s — and that's two loads, not one.**
+  `refresh` is an argument to `run()`, not a property of a resource, so a single
+  run can't refresh the replace tables while leaving the incremental one alone:
+  `drop_resources` would take `raw.wb_wdi` and its watermark with it. Hence
+  `load_groups()` in `ingest/pipeline.py`, which both `main()` and the Dagster
+  asset iterate — replace resources with `refresh=REFRESH`, then `wb_wdi`
+  without. It takes the selected resource names so materialising one asset still
+  runs exactly one load. Add a resource to `public_indicators()` and it must go
+  in `FULL_REFRESH_RESOURCES` or `INCREMENTAL_RESOURCES` too; a test asserts the
+  two cover the source exactly.
+- **WDI's incremental window is 5 years, and that's about restatements.** The
+  watermark (`max_year_by_indicator`, in dlt's resource state — one entry per
+  indicator, so a newly added code still pulls its whole series) is *not* the
+  fetch floor: `wdi_start_year()` subtracts `WDI_LOOKBACK_YEARS`, because the
+  World Bank revises years it has already published. Merging on
+  `(indicator, country_iso3, year)` is what makes the partial fetch safe. Two
+  things it gives up, both deliberate: a country-year the World Bank *withdraws*
+  stays in `raw.wb_wdi` until a full reload, and a restatement older than the
+  window is never seen — `just ingest-wdi-full` (`INGEST_WDI_FULL=1`) is the
+  escape hatch. dlt resets its own state when the destination is empty, so
+  deleting the warehouse still gives you a full load; dropping *just* the raw
+  table does not.
+- **dlt state is keyed on the pipeline *name*, not the destination.** So a
+  fixture run would otherwise hand its WDI watermark to the next real run, which
+  would fetch a five-year window into a warehouse that has no history —
+  `build_pipeline()` appends `_fixtures` to the name under `INGEST_FIXTURES=1`
+  for exactly that reason. (dlt does reset state when the destination is empty,
+  which is why this only bites when the real warehouse already exists.)
+- **`wb_wdi`'s column types are declared, not inferred** (`WDI_COLUMNS`). It's
+  the one resource whose schema isn't dropped and re-inferred each run, and
+  `value` mixes counts with ratios — a lookback window that happened to hold only
+  integers would infer bigint and shunt the next ratio into a
+  `value__v_double` variant column.
 - **Polars CSV type inference** defaults to the first 100 rows. OWID's early rows
   are empty for most metrics, so `pl.read_csv(..., infer_schema_length=None)` is
   required or numeric columns land as VARCHAR.

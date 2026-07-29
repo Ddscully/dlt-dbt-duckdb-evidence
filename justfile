@@ -17,6 +17,12 @@ setup:
 ingest:
     uv run python -m ingest.pipeline
 
+# Same, but re-fetch the whole WDI series instead of the incremental window.
+# For a World Bank restatement older than the 5-year lookback (or to rebuild
+# history after the raw table was dropped out from under the watermark).
+ingest-wdi-full:
+    INGEST_WDI_FULL=1 uv run python -m ingest.pipeline
+
 # Install dbt packages (dbt_utils) into dbt/dbt_packages/ — gitignored, so this
 # is needed once per clone and after any packages.yml change
 dbt-deps:

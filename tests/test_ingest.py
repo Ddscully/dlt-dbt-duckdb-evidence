@@ -9,12 +9,13 @@ call to exercise. The end-to-end path lives in `just test-pipeline`.
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import pytest
 import requests
 from dlt.extract.exceptions import ResourceExtractionError
 
-from ingest import pipeline
+from ingest import fixtures, pipeline
 
 
 class FakeResponse:
@@ -111,7 +112,12 @@ def _wdi_page(page: int, pages: int, rows: list[dict]) -> list:
 
 
 def _wdi_row(iso3: str, date: str, value: float | None) -> dict:
-    return {"countryiso3code": iso3, "date": date, "value": value}
+    return {
+        "country": {"id": iso3[:2], "value": iso3},
+        "countryiso3code": iso3,
+        "date": date,
+        "value": value,
+    }
 
 
 def test_wb_wdi_follows_pagination(monkeypatch):
@@ -152,11 +158,128 @@ def test_wb_wdi_normalises_row_shape(monkeypatch):
     rows = list(pipeline.wb_wdi())
     assert rows[0] == {
         "indicator": "SP.POP.TOTL",
+        "country_code": "KE",
         "country_iso3": "KEN",
         "year": 1999,
         "value": None,
     }
     assert rows[1]["year"] is None and rows[1]["country_iso3"] is None
+    # the merge key comes from `country.id`, so a payload without it is a null
+    # key — declared non-nullable in WDI_COLUMNS, so the load fails loudly
+    assert rows[1]["country_code"] is None
+
+
+def test_wb_wdi_merge_key_survives_the_aggregate_rows(monkeypatch):
+    """The World Bank's aggregate series ("Arab World", "World") carry an empty
+    `countryiso3code`, so keying the merge on it would collide five rows onto
+    `(indicator, '', year)` and keep one at random."""
+    aggregates = [
+        {"country": {"id": "1A", "value": "Arab World"}, "countryiso3code": "", "date": "2020"},
+        {"country": {"id": "WLD", "value": "World"}, "countryiso3code": "", "date": "2020"},
+    ]
+    monkeypatch.setattr(pipeline, "_get_json", lambda url, **kw: _wdi_page(1, 1, aggregates))
+    monkeypatch.setattr(pipeline, "WB_WDI_INDICATORS", {"SP.POP.TOTL": "population"})
+
+    keys = {tuple(row[col] for col in pipeline.WDI_PRIMARY_KEY) for row in pipeline.wb_wdi()}
+    assert len(keys) == 2
+
+
+def test_wdi_url_asks_for_the_whole_series_by_default():
+    assert "date=" not in pipeline.wdi_url("SP.POP.TOTL")
+
+
+def test_wdi_url_adds_the_date_window():
+    url = pipeline.wdi_url("SP.POP.TOTL", 1, 2021)
+    assert f"&date=2021:{date.today().year}" in url
+    # the fixture route keys on the indicator code, so the window mustn't move it
+    assert fixtures.path_for(url).name == "wb_wdi_SP.POP.TOTL.json"
+
+
+def test_wdi_start_year_is_a_lookback_window_not_the_watermark():
+    """Restatements are the whole reason for the window: asking for `> 2025`
+    would never see the World Bank revise 2023."""
+    assert pipeline.wdi_start_year(None) is None  # first load: everything
+    assert pipeline.wdi_start_year(2025) == 2025 - pipeline.WDI_LOOKBACK_YEARS + 1
+
+
+def _state(monkeypatch, state: dict) -> dict:
+    """Stand in for dlt's per-resource state, which is only real inside a run."""
+    monkeypatch.setattr(pipeline.dlt.current, "resource_state", lambda: state)
+    return state
+
+
+def _serve_wdi(monkeypatch, rows_by_indicator: dict[str, list[dict]]) -> list[str]:
+    """Serve one page per indicator, recording the URLs asked for."""
+    calls: list[str] = []
+
+    def fake_get_json(url, **kwargs):
+        calls.append(url)
+        code = url.split("/indicator/")[1].split("?")[0]
+        return _wdi_page(1, 1, rows_by_indicator[code])
+
+    monkeypatch.setattr(pipeline, "_get_json", fake_get_json)
+    monkeypatch.setattr(
+        pipeline, "WB_WDI_INDICATORS", {code: code.lower() for code in rows_by_indicator}
+    )
+    return calls
+
+
+def test_wb_wdi_first_load_fetches_everything_and_records_a_watermark(monkeypatch):
+    state = _state(monkeypatch, {})
+    calls = _serve_wdi(
+        monkeypatch,
+        {"SP.POP.TOTL": [_wdi_row("USA", "2024", 1.0), _wdi_row("USA", "2023", 2.0)]},
+    )
+
+    list(pipeline.wb_wdi())
+    assert all("date=" not in url for url in calls)
+    assert state[pipeline.WDI_WATERMARK_KEY] == {"SP.POP.TOTL": 2024}
+
+
+def test_wb_wdi_incremental_load_asks_only_for_the_lookback_window(monkeypatch):
+    """The point of the exercise: a run with a watermark re-fetches five years,
+    not sixty-five."""
+    state = _state(monkeypatch, {pipeline.WDI_WATERMARK_KEY: {"SP.POP.TOTL": 2025}})
+    calls = _serve_wdi(monkeypatch, {"SP.POP.TOTL": [_wdi_row("USA", "2025", 1.0)]})
+
+    list(pipeline.wb_wdi())
+    assert all(f"&date={2025 - pipeline.WDI_LOOKBACK_YEARS + 1}:" in url for url in calls)
+    # the window can't drag the watermark backwards
+    assert state[pipeline.WDI_WATERMARK_KEY] == {"SP.POP.TOTL": 2025}
+
+
+def test_wb_wdi_watermarks_are_per_indicator(monkeypatch):
+    """A newly added indicator has no watermark, so it gets its whole series
+    while the established ones stay on the window.
+
+    The failure this prevents is silent: one watermark for the whole table would
+    give the new column five years of history and no error anywhere.
+    """
+    _state(monkeypatch, {pipeline.WDI_WATERMARK_KEY: {"SP.POP.TOTL": 2025}})
+    calls = _serve_wdi(
+        monkeypatch,
+        {
+            "SP.POP.TOTL": [_wdi_row("USA", "2025", 1.0)],
+            "NEW.CODE": [_wdi_row("USA", "1960", 2.0)],
+        },
+    )
+
+    list(pipeline.wb_wdi())
+    windowed = [url for url in calls if "date=" in url]
+    assert len(windowed) == 1 and "SP.POP.TOTL" in windowed[0]
+
+
+def test_wb_wdi_full_reload_env_var_ignores_the_watermark(monkeypatch):
+    state = _state(monkeypatch, {pipeline.WDI_WATERMARK_KEY: {"SP.POP.TOTL": 2025}})
+    monkeypatch.setenv("INGEST_WDI_FULL", "1")
+    calls = _serve_wdi(
+        monkeypatch,
+        {"SP.POP.TOTL": [_wdi_row("USA", "1960", 1.0), _wdi_row("USA", "2025", 2.0)]},
+    )
+
+    list(pipeline.wb_wdi())
+    assert all("date=" not in url for url in calls)  # the whole series again
+    assert state[pipeline.WDI_WATERMARK_KEY] == {"SP.POP.TOTL": 2025}
 
 
 def test_wb_wdi_rejects_error_object_served_with_200(monkeypatch):
@@ -176,6 +299,34 @@ def test_wb_wdi_rejects_error_object_served_with_200(monkeypatch):
 
     with pytest.raises(ResourceExtractionError, match="unexpected World Bank payload"):
         list(pipeline.wb_wdi())
+
+
+# --------------------------------------------------------------------------- #
+# load_groups — the replace/merge split
+# --------------------------------------------------------------------------- #
+
+
+def test_load_groups_refreshes_only_the_replace_resources():
+    """`refresh="drop_resources"` would drop `wb_wdi`'s table and watermark, so
+    the merge resource has to load in its own call, without it."""
+    groups = dict((tuple(names), kwargs) for names, kwargs in pipeline.load_groups())
+    assert groups[pipeline.FULL_REFRESH_RESOURCES] == {"refresh": pipeline.REFRESH}
+    assert groups[pipeline.INCREMENTAL_RESOURCES] == {}
+
+
+def test_load_groups_covers_every_resource_in_the_source_exactly_once():
+    """A resource missing from both tuples would silently stop being loaded."""
+    listed = [name for names, _ in pipeline.load_groups() for name in names]
+    assert sorted(listed) == sorted(r.name for r in pipeline.public_indicators().resources.values())
+    assert len(listed) == len(set(listed))
+
+
+def test_load_groups_drops_groups_the_selection_empties():
+    """Dagster materialising one raw asset must not run a load with no
+    resources in it."""
+    assert pipeline.load_groups(["wb_wdi"]) == [(["wb_wdi"], {})]
+    assert pipeline.load_groups(["owid_co2"]) == [(["owid_co2"], {"refresh": pipeline.REFRESH})]
+    assert pipeline.load_groups([]) == []
 
 
 # --------------------------------------------------------------------------- #

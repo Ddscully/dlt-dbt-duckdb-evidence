@@ -63,6 +63,7 @@ All country + year keyed, freely licensed, small enough to run locally.
 | OWID Energy | country-year (fact) | https://github.com/owid/energy-data |
 | World Bank WDI — GDP, life expectancy, population, poverty | country-year (fact) | https://databank.worldbank.org/source/world-development-indicators |
 | World Bank countries — region & income group | country (dimension) | https://api.worldbank.org/v2/country?format=json |
+| Eurostat — household electricity prices (EU/EEA) | country-half-year (fact) | https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204 |
 
 Joins are on **ISO country code + year**, yielding marts like
 *"CO₂ per \$ of GDP by income group over time"* and *"renewables adoption vs. life expectancy."*
@@ -71,13 +72,23 @@ country-year spine (`dim_country_year`) rather than off whichever source happens
 to be widest — a country-year only Eurostat or only the World Bank reports still
 lands, with the other columns null.
 
+Four of the five load with dlt's `replace` disposition — small enough that a full
+reload every run is the honest default, and it keeps dlt re-inferring the schema
+so an upstream type change fails loudly. WDI is the counter-example: it's the
+biggest pull (~190k rows across 11 indicators) and loads with `merge` on
+`(indicator, country_iso3, year)` over a five-year window. The window is a
+lookback rather than "everything newer than last time" because the World Bank
+restates published years, and the two dispositions load in two `run()` calls
+because `refresh` is a property of a run — refreshing the replace tables in the
+same call would drop the incremental one's history along with its watermark.
+
 ## Warehouse layout
 
 The pipeline populates one DuckDB file (`data/warehouse.duckdb`) with these schemas:
 
 | Schema | Written by | Contents |
 |--------|-----------|----------|
-| `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`) |
+| `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`) |
 | `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain |
 | `marts` | dbt (tables) | `dim_country_year` — the country-year spine; `fct_emissions_energy` — the wide joined fact |
 | `analytics` | Polars | derived metrics (`co2_intensity`) |

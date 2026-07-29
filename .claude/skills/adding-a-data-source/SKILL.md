@@ -20,8 +20,12 @@ see "Adding a WDI indicator" at the bottom. That's a two-line change.
 
 ## 1. dlt resource — `ingest/pipeline.py`
 
-Add a `@dlt.resource(name="<resource>", write_disposition="replace")` function
-and register it in the `public_indicators()` source.
+Add a `@dlt.resource(name="<resource>", write_disposition="replace")` function,
+register it in the `public_indicators()` source, **and add its name to
+`FULL_REFRESH_RESOURCES`** (or `INCREMENTAL_RESOURCES` if it merges — see below).
+`load_groups()` loads only what those tuples name, so a resource missing from
+both is extracted by nothing; `tests/test_ingest.py` asserts they cover the
+source exactly.
 
 - The `name=` you pick becomes the raw table name **and** the second element of
   the Dagster asset key (`raw/<resource>`). Choose it once and don't rename it
@@ -34,6 +38,13 @@ and register it in the `public_indicators()` source.
   *widens* types, so a column that lands wrong is not fixed by re-running. It's
   `drop_resources` and not `drop_sources` because Dagster can materialize a
   subset — `drop_sources` would wipe the tables that weren't selected.
+- **`replace` is the default answer.** These sources are small and a full reload
+  keeps the schema honest. Reach for `merge` only when the pull is genuinely
+  expensive, and then copy `wb_wdi` wholesale: a primary key that really is the
+  grain, declared `columns={...}` types (the schema is no longer re-inferred, so
+  inference can't save you), a *lookback window* rather than a high-water mark if
+  the publisher restates, and the name in `INCREMENTAL_RESOURCES` so it loads in
+  the un-refreshed call.
 
 Run `just ingest` and look at the real column names before writing any SQL:
 
@@ -138,3 +149,8 @@ Two places, both required:
 Then the mart column (step 5) and the report (step 6). The
 `wdi_indicators_all_present` asset check will fail if the API returns 200 with an
 empty series for the new code, which is the common failure mode.
+
+`wb_wdi` is loaded incrementally, but the watermarks are kept **per indicator**,
+so a code that isn't in the state yet is fetched in full — you get the whole
+series, not the last five years. Nothing to do about it beyond re-recording the
+fixtures (`just record-fixtures`), which the offline tests need anyway.

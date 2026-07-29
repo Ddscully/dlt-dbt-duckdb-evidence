@@ -28,7 +28,7 @@ from dagster_dbt import DagsterDbtTranslator, DbtCliResource, dbt_assets, get_as
 from dagster_dlt import DagsterDltResource, DagsterDltTranslator, dlt_assets
 from dagster_dlt.translator import DltResourceTranslatorData
 
-from ingest.pipeline import REFRESH, WB_WDI_INDICATORS, build_pipeline, public_indicators
+from ingest.pipeline import WB_WDI_INDICATORS, build_pipeline, load_groups, public_indicators
 from orchestration.resources import dbt_project
 from transform.co2_intensity import DUCKDB_PATH, run as run_co2_intensity
 
@@ -62,7 +62,11 @@ RAW_DESCRIPTIONS = {
     "owid_co2": "Our World in Data CO2 & GHG emissions, country-year (CSV).",
     "owid_energy": "Our World in Data energy production/consumption, country-year (CSV).",
     "wb_country": "World Bank country dimension: region, income group, capital (JSON API).",
-    "wb_wdi": "World Bank WDI indicators, long-format (JSON API, paginated).",
+    "wb_wdi": (
+        "World Bank WDI indicators, long-format (JSON API, paginated). Loaded "
+        "incrementally: `merge` on (indicator, country_iso3, year) over a "
+        "5-year lookback window, not a full reload."
+    ),
     "eu_elec_prices": "Eurostat nrg_pc_204 household electricity prices, EU/EEA (JSON-stat).",
 }
 
@@ -101,8 +105,21 @@ class RawSchemaDltTranslator(DagsterDltTranslator):
 def raw_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
     # One op for all five resources: DuckDB takes a single writer, so fanning
     # these out into parallel steps would just make them fight over the file.
-    # dlt still loads only the resources whose assets were selected.
-    yield from dlt.run(context=context, refresh=REFRESH)
+    #
+    # Two loads inside it, though, because `refresh` is a run-level argument:
+    # the replace resources want their schema dropped and re-inferred, and
+    # `wb_wdi` merges into what's already there and would lose its incremental
+    # watermark to the same drop. `load_groups` is shared with the CLI so both
+    # paths split it the same way, and it takes the selection so materialising
+    # one asset still runs one load.
+    selected = {key.path[-1] for key in context.selected_asset_keys}
+    for names, kwargs in load_groups(selected):
+        context.log.info("loading %s (%s)", ", ".join(names), kwargs or "incremental")
+        yield from dlt.run(
+            context=context,
+            dlt_source=public_indicators().with_resources(*names),
+            **kwargs,
+        )
 
 
 # --------------------------------------------------------------------------- #
