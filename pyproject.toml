@@ -25,6 +25,14 @@ dev = [
 notebook = [
     "marimo>=0.10",        # reactive notebooks for the Polars exploration layer
 ]
+# `uv sync --group orchestration` — the Dagster asset graph in orchestration/.
+# The pipeline still runs without these (`just run`).
+orchestration = [
+    "dagster>=1.13.15",           # asset graph, schedules, freshness policies
+    "dagster-dbt>=0.29.15",       # dbt manifest -> assets + tests as asset checks
+    "dagster-dlt>=0.29.15",       # dlt resources -> assets, with subset loading
+    "dagster-webserver>=1.13.15", # the UI behind `just dagster`
+]
 
 [project.scripts]
 mds = "modern_data_stack:main"
@@ -36,3 +44,8 @@ build-backend = "uv_build"
 [tool.uv]
 # keep dev/notebook groups out of the default sync if desired:
 # default-groups = ["dev"]
+
+[tool.dagster]
+# Lets `uv run dagster dev` find the code location with no extra flags.
+module_name = "orchestration.definitions"
+code_location_name = "modern_data_stack"

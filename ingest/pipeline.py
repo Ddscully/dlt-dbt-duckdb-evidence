@@ -13,12 +13,16 @@ Run:  uv run python -m ingest.pipeline
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import dlt
 import polars as pl
 import requests
 
-DUCKDB_PATH = "data/warehouse.duckdb"
+# Anchored to the repo root, not the cwd — the Dagster daemon and the CLI don't
+# necessarily run from the project directory.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DUCKDB_PATH = str(REPO_ROOT / "data" / "warehouse.duckdb")
 
 OWID_CO2 = "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv"
 OWID_ENERGY = "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv"
@@ -161,15 +165,24 @@ def public_indicators():
     return [owid_co2(), owid_energy(), wb_country(), wb_wdi(), eu_elec_prices()]
 
 
-def main() -> None:
-    pipeline = dlt.pipeline(
+# Drop + re-infer the schema of the resources actually being loaded, so type or
+# column changes at the source aren't masked by dlt's persisted (widen-only)
+# schema. Unlike `drop_sources` this is safe when only part of the source runs,
+# which is what Dagster does when you materialise a single raw asset.
+REFRESH = "drop_resources"
+
+
+def build_pipeline() -> dlt.Pipeline:
+    """The one dlt pipeline definition, shared by the CLI and the Dagster assets."""
+    return dlt.pipeline(
         pipeline_name="modern_data_stack",
         destination=dlt.destinations.duckdb(DUCKDB_PATH),
         dataset_name="raw",
     )
-    # drop_sources = re-infer the schema from source each run, so type/column
-    # changes at the source aren't masked by dlt's persisted (widen-only) schema.
-    info = pipeline.run(public_indicators(), refresh="drop_sources")
+
+
+def main() -> None:
+    info = build_pipeline().run(public_indicators(), refresh=REFRESH)
     print(info)
 
 

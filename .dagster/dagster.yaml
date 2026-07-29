@@ -1,0 +1,12 @@
+# Dagster instance config. `just dagster` / `just materialize` point
+# DAGSTER_HOME at this directory; run + event storage land beside this file
+# (SQLite, gitignored), so the demo needs no external services.
+telemetry:
+  enabled: false
+
+# Keep the local run history from growing without bound.
+retention:
+  schedule:
+    purge_after_days: 30
+  sensor:
+    purge_after_days: 7

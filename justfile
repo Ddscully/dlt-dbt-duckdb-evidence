@@ -3,12 +3,15 @@
 
 set dotenv-load := true
 
+# Dagster keeps its run/event storage here (gitignored except dagster.yaml).
+export DAGSTER_HOME := justfile_directory() / ".dagster"
+
 default:
     @just --list
 
 # One-time: install runtime + dev deps into the uv-managed venv
 setup:
-    uv sync --group dev --group notebook
+    uv sync --group dev --group notebook --group orchestration
 
 # EL: pull public sources into DuckDB
 ingest:
@@ -22,8 +25,24 @@ dbt-build:
 transform:
     uv run python -m transform.co2_intensity
 
-# Full pipeline, end to end
+# Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
 run: ingest dbt-build transform
+
+# Dagster UI on :3000 — asset graph, run history, freshness, checks
+dagster:
+    mkdir -p "$DAGSTER_HOME"
+    uv run --group orchestration dagster dev
+
+# Full pipeline, ordered by the asset graph and recorded in the Dagster instance
+materialize:
+    mkdir -p "$DAGSTER_HOME"
+    uv run --group orchestration dagster job execute -m orchestration.definitions -j full_refresh
+
+# Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi+'` (+ = downstream)
+materialize-select selection:
+    mkdir -p "$DAGSTER_HOME"
+    uv run --group orchestration dagster asset materialize \
+        -m orchestration.definitions --select '{{ selection }}'
 
 # Open the warehouse in Harlequin (terminal SQL IDE)
 sql:

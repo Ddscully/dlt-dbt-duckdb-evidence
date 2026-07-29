@@ -27,6 +27,12 @@ dbt/.user.yml
 .dlt/secrets.toml
 **/.dlt/pipelines/
 
+# Dagster instance: run/event storage, compute logs (DAGSTER_HOME).
+# The checked-in dagster.yaml is config; everything beside it is state.
+.dagster/*
+!.dagster/dagster.yaml
+.tmp_dagster_home_*/
+
 # Evidence
 reports/.evidence/
 reports/build/

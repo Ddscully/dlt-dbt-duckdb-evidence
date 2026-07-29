@@ -17,16 +17,23 @@ jobs:
           enable-cache: true
 
       - name: Sync deps
-        run: uv sync --group dev
+        run: uv sync --group dev --group orchestration
 
-      - name: Ingest sources
-        run: uv run python -m ingest.pipeline
+      # Parses the dbt manifest and resolves the whole asset graph, so a broken
+      # ref, a renamed source or a dangling asset key fails before any I/O.
+      - name: Validate Dagster definitions
+        run: |
+          cd dbt && uv run dbt parse && cd ..
+          uv run dagster definitions validate -m orchestration.definitions
 
-      - name: dbt build + test
-        run: cd dbt && uv run dbt build
-
-      - name: Polars transforms
-        run: uv run python -m transform.co2_intensity
+      # Runs ingest -> dbt build + test -> Polars in asset-graph order, and
+      # evaluates the asset checks alongside dbt's tests.
+      - name: Materialize the asset graph
+        env:
+          DAGSTER_HOME: ${{ github.workspace }}/.dagster
+        run: |
+          mkdir -p "$DAGSTER_HOME"
+          uv run dagster job execute -m orchestration.definitions -j full_refresh
 
       # From dbt/: the dbt templater opens the warehouse via the profile's
       # relative path without chdir'ing into the project first.
