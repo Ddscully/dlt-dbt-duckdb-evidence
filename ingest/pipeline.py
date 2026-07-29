@@ -48,19 +48,30 @@ WB_WDI_INDICATORS = {
     "EG.IMP.CONS.ZS": "energy_imports_pct",  # Energy imports (net), % of energy use
 }
 
+# Page size for the World Bank API (its documented maximum is 32 000, but large
+# pages occasionally time out — 10 000 with pagination is the safer trade).
+WB_PER_PAGE = 10_000
+
 
 def _get_json(url: str, *, timeout: int = 120, retries: int = 3) -> dict | list:
     """GET + parse JSON with a few retries — the World Bank & Eurostat APIs
-    occasionally return a transient non-JSON error page."""
+    occasionally return a transient error page or non-JSON body.
+
+    A non-2xx status is retried and ultimately raised: without the
+    `raise_for_status()` an HTML/JSON error body would parse fine and be handed
+    on as if it were data.
+    """
     last: Exception | None = None
     for attempt in range(retries):
-        resp = requests.get(url, timeout=timeout)
         try:
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
             return resp.json()
-        except ValueError as exc:  # includes JSONDecodeError
+        except (requests.RequestException, ValueError) as exc:  # ValueError = JSONDecodeError
             last = exc
-            time.sleep(1.5 * (attempt + 1))
-    raise RuntimeError(f"non-JSON response from {url}: {last}")
+            if attempt < retries - 1:
+                time.sleep(1.5 * (attempt + 1))
+    raise RuntimeError(f"failed to fetch JSON from {url}: {last}")
 
 
 # infer_schema_length=None scans the whole file so sparse numeric columns
@@ -84,20 +95,32 @@ def wb_country():
 
 @dlt.resource(name="wb_wdi", write_disposition="replace")
 def wb_wdi():
-    # One request per indicator; per_page large enough to avoid pagination.
+    # Paginated: a single 20k-row page used to cover every indicator, but the
+    # series grow by ~270 rows a year and were already at 87% of that cap, so
+    # the next few years would have silently truncated the oldest indicators.
     for code in WB_WDI_INDICATORS:
-        url = (
-            f"https://api.worldbank.org/v2/country/all/indicator/{code}"
-            "?format=json&per_page=20000"
-        )
-        payload = _get_json(url)
-        for row in payload[1] or []:
-            yield {
-                "indicator": code,
-                "country_iso3": row.get("countryiso3code"),
-                "year": int(row["date"]) if row.get("date") else None,
-                "value": row.get("value"),
-            }
+        page = 1
+        while True:
+            url = (
+                f"https://api.worldbank.org/v2/country/all/indicator/{code}"
+                f"?format=json&per_page={WB_PER_PAGE}&page={page}"
+            )
+            payload = _get_json(url)
+            # World Bank returns [metadata, [records...]]; anything else is an
+            # error object served with a 200.
+            if not (isinstance(payload, list) and len(payload) == 2):
+                raise RuntimeError(f"unexpected World Bank payload for {code}: {payload!r:.300}")
+            meta, rows = payload
+            for row in rows or []:
+                yield {
+                    "indicator": code,
+                    "country_iso3": row.get("countryiso3code"),
+                    "year": int(row["date"]) if row.get("date") else None,
+                    "value": row.get("value"),
+                }
+            if page >= int(meta.get("pages", 1)):
+                break
+            page += 1
 
 
 @dlt.resource(name="eu_elec_prices", write_disposition="replace")
