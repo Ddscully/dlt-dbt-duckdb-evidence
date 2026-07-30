@@ -25,8 +25,17 @@ updates:
 
   # uv.lock is committed, so a lockfile refresh is a reviewable diff rather than
   # something that silently differs between a contributor's machine and CI.
+  #
+  # `lockfile-only` because the bounds in pyproject.toml are minimum-supported
+  # versions, not pins — `duckdb>=1.1` and `polars>=1.17` sit far below what
+  # actually resolves, on purpose. Dependabot's default for uv raises the lower
+  # bound instead, and its first run did exactly that: PR #2 pushed
+  # `dlt[duckdb]>=1.5` to `>=1.29.1`, dropping support for two dozen releases in
+  # exchange for nothing, since the lock already resolved there. It would have
+  # done the same to the other three on every upstream release.
   - package-ecosystem: uv
     directory: /
+    versioning-strategy: lockfile-only
     schedule:
       interval: monthly
     open-pull-requests-limit: 1
@@ -36,6 +45,10 @@ updates:
 
   # Evidence and its adapters. `reports/`, not the root — that's where
   # package.json and package-lock.json live.
+  #
+  # Deliberately *not* lockfile-only, unlike uv above: these are `^` ranges, so
+  # the major is the pin and an Evidence 40 -> 41 bump is a real upgrade worth
+  # seeing as a PR. Lockfile-only would silently cap the site at 40.x forever.
   - package-ecosystem: npm
     directory: /reports
     schedule:
