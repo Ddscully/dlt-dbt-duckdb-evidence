@@ -81,6 +81,15 @@ test-pipeline:
 export-data:
     uv run python -m scripts.export_warehouse
 
+# Copy `history` out of a published release into this warehouse, so `dbt build`
+# appends to that snapshot instead of starting a new one. release-data.yml runs
+# this before it builds; locally it's how you get real revision history without
+# waiting a month for OWID:
+#   gh release download --pattern warehouse.duckdb --dir prev
+#   just restore-history prev/warehouse.duckdb
+restore-history from:
+    uv run python -m scripts.restore_history {{ from }}
+
 # Re-record the fixtures from the live APIs (hits the network; commit the diff)
 record-fixtures:
     uv run python -m scripts.record_fixtures

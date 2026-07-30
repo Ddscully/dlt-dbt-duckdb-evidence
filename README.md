@@ -357,6 +357,12 @@ Three things to know if you're copying this setup:
 - **The DuckDB file has a storage format**; it was written by whatever version
   the workflow resolved, recorded in `manifest.json`. Older clients may refuse
   it. The Parquet files have no such constraint, which is why both ship.
+- **`history` is inherited, not rebuilt.** Everything else in the file is built
+  from scratch each time, but the SCD2 snapshot of OWID's CO₂ estimates is the
+  one table that can't be — a revision only leaves a trace if you were holding
+  the previous number. So each release downloads its predecessor and copies
+  `history` in before it builds (`scripts/restore_history.py`), and the releases
+  accumulate a genuine revision log. `manifest.json` reports how much of one.
 
 ## License
 

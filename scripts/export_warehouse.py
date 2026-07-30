@@ -147,6 +147,39 @@ def _loaded_at(con: duckdb.DuckDBPyConnection) -> str | None:
     return row[0].astimezone(UTC).isoformat() if row and row[0] else None
 
 
+def _history(con: duckdb.DuckDBPyConnection) -> dict | None:
+    """How much revision history the published snapshot carries.
+
+    `release-data.yml` restores `history` from the previous release before it
+    builds (see `scripts/restore_history.py`), so this grows release over
+    release. `None` when there is no snapshot to describe at all — an export of
+    a warehouse whose mart wasn't built, rather than one that has simply never
+    seen a revision, which reports zero.
+    """
+    try:
+        row = con.execute(
+            """
+            select
+                count(*) as country_years,
+                count(*) filter (where is_revised) as revised,
+                sum(version_count) as versions,
+                min(first_loaded_at) as watching_since
+            from marts.fct_co2_estimate_versions
+            """
+        ).fetchone()
+    except duckdb.Error:
+        return None
+    if not row or not row[0]:
+        return None
+    country_years, revised, versions, since = row
+    return {
+        "country_years": country_years,
+        "revised": revised,
+        "versions": versions,
+        "watching_since": since.astimezone(UTC).isoformat(timespec="seconds") if since else None,
+    }
+
+
 def snapshot_warehouse(duckdb_path: Path, dest: Path) -> None:
     """Write a compacted, WAL-free copy of the warehouse to `dest`.
 
@@ -205,6 +238,23 @@ def release_notes(manifest: dict, repo: str, tag: str) -> str:
 
     def size(n: int) -> str:
         return f"{n / 1e6:.1f} MB" if n >= 1e6 else f"{n / 1e3:.0f} kB"
+
+    # The snapshot is the one table a rebuild can't reproduce, so say plainly how
+    # much of it there is — including when the answer is "none yet".
+    history = manifest.get("history")
+    if history and history["revised"]:
+        revisions = history["versions"] - history["country_years"]
+        history_note = (
+            f"{revisions:,} restatement{'s' if revisions != 1 else ''} across "
+            f"{history['revised']:,} of {history['country_years']:,} country-years, "
+            f"first recorded {(history.get('watching_since') or '')[:10] or 'unknown'}"
+        )
+    elif history:
+        history_note = (
+            f"{history['country_years']:,} country-years, all on version 1 — nothing restated yet"
+        )
+    else:
+        history_note = "none — this snapshot is empty"
 
     rows = [
         f"| `{t['file']}` | `{t['table']}` | {t['rows']:,} | "
@@ -265,6 +315,10 @@ it for `{base}/download/{tag}/…`.
 - **Written by DuckDB {manifest["duckdb_version"]}.** Older clients may not read
   the storage format; the Parquet files have no such constraint.
 - **Data last landed:** {manifest.get("data_loaded_at") or "unknown"}.
+- **Revision history:** {history_note}. OWID restates published years;
+  `history.snap_co2_estimates` (in the DuckDB file, not the Parquet) keeps every
+  version it has served and `marts.fct_co2_estimate_versions` summarises them.
+  Each release carries the previous one's history forward, so this accumulates.
 - **`co2_per_gdp` vs. `co2_per_gdp_const_usd`** are different bases (OWID's 2011
   international-$ PPP vs. constant 2015 US$ derived here) and their levels are
   not comparable. Divide by `gdp_constant_usd`, never `gdp_usd`, for anything
@@ -306,6 +360,7 @@ def run(
             "tag": tag,
             "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "data_loaded_at": _loaded_at(con),
+            "history": _history(con),
             "git_sha": _git_sha(),
             "duckdb_version": duckdb.__version__,
             "grain": "(country_iso3, year)",

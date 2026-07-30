@@ -74,9 +74,46 @@ jobs:
       - name: Install dbt packages and parse the project
         run: cd dbt && uv run dbt deps && uv run dbt parse
 
+      # `history.snap_co2_estimates` is the one table a rebuild cannot
+      # reproduce, and every release used to start from an empty file — so the
+      # published snapshot held one version per row forever and the Restatements
+      # page shipped permanently empty. Copying the previous release's `history`
+      # in *before* the build makes `dbt snapshot` compare this month's numbers
+      # against last month's, so the releases accumulate a real revision log.
+      #
+      # Only the "no previous release" case is allowed to skip. A download or
+      # restore that fails is fatal: continuing would silently reset the history
+      # to empty and the next release would inherit that, which is exactly the
+      # failure this step exists to prevent.
+      - name: Carry snapshot history forward from the previous release
+        id: history
+        run: |
+          prev=$(gh release list --limit 30 --json tagName \
+            --jq '[.[].tagName | select(startswith("data-"))] | first // empty')
+          if [ -z "$prev" ]; then
+            echo "No previous data-* release — the snapshot starts empty."
+            echo "restored_rows=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Restoring history from $prev"
+          gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
+          uv run python -m scripts.restore_history prev-release/warehouse.duckdb
+          uv run python - <<'PY' >> "$GITHUB_OUTPUT"
+          import duckdb
+
+          con = duckdb.connect("data/warehouse.duckdb", read_only=True)
+          (rows,) = con.execute("select count(*) from history.snap_co2_estimates").fetchone()
+          print(f"restored_rows={rows}")
+          PY
+          rm -rf prev-release
+
       # ingest -> dbt build + test -> Polars, in asset-graph order. dbt's 60
       # tests run inside `dbt build`, so a warehouse that fails its own
       # data-quality gates never reaches the release.
+      #
+      # The warehouse file already exists at this point when history was
+      # restored. That's fine for dlt: it keys "fresh destination" on its own
+      # bookkeeping inside `raw`, which a history-only file doesn't have.
       - name: Build the warehouse from live sources
         run: |
           mkdir -p "$DAGSTER_HOME"
@@ -105,9 +142,13 @@ jobs:
       # ATTACH alias have to stay `warehouse`.
       - name: Verify the artifact
         working-directory: data/export
+        env:
+          RESTORED_ROWS: ${{ steps.history.outputs.restored_rows }}
         run: |
           sha256sum -c SHA256SUMS
           uv run --project "$GITHUB_WORKSPACE" python - <<'PY'
+          import os
+
           import duckdb
 
           con = duckdb.connect()
@@ -121,6 +162,16 @@ jobs:
               (rows,) = con.execute(f"select count(*) from {relation}").fetchone()
               assert rows > 0, f"{relation} is empty"
               print(f"{relation}: {rows:,} rows")
+
+          # The snapshot can only grow. If it came back smaller than what was
+          # carried forward, the restore didn't reach the build and this release
+          # would publish a history that silently lost its earlier versions.
+          restored = int(os.environ.get("RESTORED_ROWS") or 0)
+          (rows,) = con.execute(
+              "select count(*) from warehouse.history.snap_co2_estimates"
+          ).fetchone()
+          assert rows >= restored, f"history shrank: {rows:,} rows, {restored:,} restored"
+          print(f"warehouse.history.snap_co2_estimates: {rows:,} rows ({restored:,} carried forward)")
           PY
 
       # The notes are the release body, so they move out of the way and

@@ -76,6 +76,16 @@ The snapshot stores one row per `(country_iso3, year, version)` with the window
 each version was valid for, and `marts.fct_co2_estimate_versions` reads the first
 and the current version back off it.
 
+It is also the one table here that a rebuild cannot reproduce, and this site is
+rebuilt from empty on every push. So the history is carried in rather than
+recomputed: the
+[Pages build](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/pages.yml)
+copies `history` out of the most recent
+[data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases)
+before it builds, and the release does the same from the release before it.
+"Watching since" above is therefore the date that chain started, not the date of
+this build.
+
 {:else}
 
 ## Nothing revised yet
@@ -89,12 +99,15 @@ valid for, and `marts.fct_co2_estimate_versions` reads the first and the current
 version back off it.
 
 That makes the snapshot the one table here that isn't reproducible from the
-sources. Rebuild the warehouse from scratch and the history is gone. It is also
-why the published copy of this page shows nothing: both the
+sources. Rebuild the warehouse from scratch and the history is gone — which is
+why it is carried in rather than recomputed: the
 [Pages build](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/pages.yml)
-and the [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/release-data.yml)
-start from an empty DuckDB file. Run the pipeline locally a few weeks apart and
-this page fills in.
+copies `history` out of the most recent
+[data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases)
+before it builds, and the release does the same from the release before it. So an
+empty table here means nothing has been restated since that chain began — not
+that nothing is being watched. Before the first data release was cut there was
+nothing to carry, and the page was empty for that reason instead.
 
 {/if}
 

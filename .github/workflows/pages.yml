@@ -92,6 +92,30 @@ jobs:
       # gitignored, and without the extraction this would deploy a site whose
       # every query reads "Table with name emissions_energy does not exist".
       # --strict makes an empty warehouse a red build instead.
+      # The Restatements page can only show revisions the snapshot was present
+      # for, and this job builds from an empty file — so the published page sat
+      # permanently in its "nothing revised yet" branch. `release-data.yml`
+      # accumulates that history across monthly releases; borrowing the newest
+      # one here means the page shows what OWID has actually restated since.
+      #
+      # Soft-failing on purpose, unlike release-data.yml: there the snapshot is
+      # the artifact and losing it is permanent, here it is a read-only display.
+      # A missing release should cost one section of one page, not the deploy.
+      - name: Borrow snapshot history from the latest data release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(gh release list --limit 30 --json tagName \
+            --jq '[.[].tagName | select(startswith("data-"))] | first // empty')
+          if [ -z "$prev" ]; then
+            echo "No data-* release yet — the Restatements page will show version 1 only."
+            exit 0
+          fi
+          gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
+          uv run python -m scripts.restore_history prev-release/warehouse.duckdb
+          rm -rf prev-release
+
       - name: Build the warehouse and the site from live sources
         run: |
           mkdir -p "$DAGSTER_HOME"

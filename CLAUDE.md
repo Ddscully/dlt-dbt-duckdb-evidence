@@ -35,6 +35,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
 | `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
+| `just restore-history prev/warehouse.duckdb` | copy `history` out of a published release so `dbt build` appends to that snapshot |
 | `just test` | `pytest` — mocked-payload unit tests, no network |
 | `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
 | `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
@@ -213,10 +214,17 @@ this is the only place a revision leaves a trace.
   destroys the history for good. Every other table here is disposable — this one
   isn't, which is also why it's narrow (two columns, 1990+) rather than the whole
   fact.
-- **CI, Pages and the release all start from an empty file**, so in those
-  contexts every row is version 1 and `is_revised` is uniformly false. The
-  restatements page renders an explicit "nothing revised yet" branch for that
-  case; it is the honest state, not a broken build.
+- **The published history is carried, not rebuilt** (`scripts/restore_history.py`,
+  `just restore-history`). Every workflow builds from an empty file, so the
+  release and the site used to hold one version per row forever.
+  `release-data.yml` now downloads the previous `data-*` release and copies its
+  `history` schema in *before* the graph runs, so `dbt snapshot` compares this
+  month's numbers against last month's; `pages.yml` borrows the same file so the
+  Restatements page shows real revisions. Details in *Publishing* below.
+- **CI still starts from an empty file**, so there every row is version 1 and
+  `is_revised` is uniformly false. The restatements page renders an explicit
+  "nothing revised yet" branch for that case; it is the honest state, not a
+  broken build.
 - **Verify a snapshot change by simulating a revision**, not by waiting for OWID:
   build, `update raw.owid_co2 set co2 = co2 * 1.05 where iso_code = 'DEU' and
   year = 2019` in a throwaway warehouse, build again, and check
@@ -340,9 +348,31 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   section when a source is added.
 - **`raw` and `history` ship in the DuckDB file but not as Parquet.** The flat
   files are the modelled layers only (`PUBLISHED_SCHEMAS`); anyone who wants
-  dlt's landing tables or the snapshot downloads the database. The published
-  snapshot always holds one version per row anyway — the workflow builds from
-  scratch.
+  dlt's landing tables or the snapshot downloads the database.
+- **Each release carries the previous one's `history` forward**
+  (`scripts/restore_history.py`), which is what makes the published snapshot
+  accumulate a real revision log instead of holding one version per row forever.
+  The restore runs *before* the graph, writing a history-only DuckDB file that
+  dlt then lands `raw` into — safe because dlt keys "is this destination fresh?"
+  on its own bookkeeping inside `raw`, not on the file existing (verified: a
+  fixture load into a restored file still fetched the full WDI series, not a
+  five-year window).
+  - **Only "no previous release" may skip.** A failed download or restore is
+    fatal in `release-data.yml`: continuing would publish an empty history that
+    the *next* release then inherits, which is the exact failure the step
+    prevents. The verify step asserts the shipped snapshot is no smaller than
+    what was carried in. `pages.yml` runs the same step `continue-on-error`,
+    because there the snapshot is a read-only display and a missing release
+    should cost one section of one page, not the deploy.
+  - **It refuses to overwrite a destination that already holds history**, so
+    running it against the real warehouse can't destroy months of local versions
+    — `--force` if that is genuinely what you want. It also rejects a source
+    table lacking dbt's SCD2 columns, which would otherwise fail later and much
+    less legibly inside `dbt build`.
+  - Verified end to end against fixtures rather than by waiting for OWID: export
+    release 1, restore into a fresh warehouse, restate three country-years in
+    `raw.owid_co2`, rebuild — 595 snapshot rows became 598 and
+    `fct_co2_estimate_versions` showed the three at version 2.
 
 ## Conventions & gotchas (learned the hard way)
 
