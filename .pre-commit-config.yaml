@@ -6,11 +6,27 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/sqlfluff/sqlfluff
-    rev: 3.3.0
+  # Deliberately not the upstream sqlfluff hook. That one installs its own copy of
+  # sqlfluff into an isolated env, which drifted from the venv's: 3.3.0 there
+  # rejected an `order by` inside a window clause that the venv's 4.2.2 accepts, so
+  # a tree that passed `just lint` failed on commit. Running the recipe itself
+  # means there is one sqlfluff — pinned once, in pyproject.toml — and it can't
+  # drift again.
+  #
+  # It also has to run from `dbt/`: the templater opens a dbt connection, and
+  # profiles.yml resolves `../data/warehouse.duckdb` relative to the cwd. The
+  # upstream hook runs at the repo root and dies on a path one directory too high.
+  #
+  # `pass_filenames: false` because the recipe lints the whole tree; `files`
+  # decides whether it runs at all.
+  - repo: local
     hooks:
       - id: sqlfluff-lint
-        additional_dependencies: [dbt-duckdb, sqlfluff-templater-dbt]
+        name: sqlfluff-lint (just lint)
+        entry: just lint
+        language: system
+        pass_filenames: false
+        files: ^dbt/(models|snapshots)/.*\.sql$
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

@@ -17,10 +17,16 @@ dependencies = [
 [dependency-groups]
 # `uv sync --group dev` — tooling that isn't needed to run the pipeline
 dev = [
-    "sqlfluff>=3.3",       # SQL linter/formatter (dbt templater)
+    # Pinned exactly, and the pin is duplicated as the sqlfluff `rev` in
+    # .pre-commit-config.yaml — pre-commit installs the linter into its own
+    # isolated env, so a floating range here means `just lint` and the commit
+    # hook can disagree about the same file. They did: 3.3.0 flagged an LT14
+    # (`order by` in a window clause) that 4.2.2 accepts, so a tree that passed
+    # `just lint` failed on commit. Bump both together or not at all.
+    "sqlfluff==4.2.2",     # SQL linter/formatter (dbt templater)
+    "sqlfluff-templater-dbt==4.2.2",  # .sqlfluff sets templater = dbt; useless without this
     "pre-commit>=4.0",     # git hooks
     "harlequin>=2.1",      # terminal SQL IDE for DuckDB
-    "sqlfluff-templater-dbt>=3.3",  # .sqlfluff sets templater = dbt; useless without this
     "pytest>=8.3",         # unit tests over the ingest/transform logic (see tests/)
 ]
 notebook = [

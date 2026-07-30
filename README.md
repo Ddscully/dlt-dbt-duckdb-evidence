@@ -240,7 +240,7 @@ to fix the pipeline and `just record-fixtures`. Details in
 
 ### Data-quality gates
 
-`just dbt-build` runs 70 dbt tests alongside the models, and Dagster surfaces
+`just dbt-build` runs 113 dbt tests alongside the models, and Dagster surfaces
 each one as an asset check on the model it guards:
 
 | Gate | What it catches |
@@ -259,13 +259,20 @@ no ceiling because small petrostates legitimately reach 780 t/person.
 
 ### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-Three pages, all built from `marts.fct_emissions_energy` and
-`analytics.co2_intensity`:
+Five pages, built from the modelled layers — `marts.fct_emissions_energy` and
+`analytics.co2_intensity` for the findings, plus `dim_country_year`,
+`fct_co2_estimate_versions`, `fct_eu_electricity_prices_semiannual` and the
+`analytics.pipeline_*` tables for the rest. No year is hardcoded: every page reads
+the latest year each metric family can actually populate from
+`sources/warehouse/latest_years.sql`, because coverage doesn't end in the same year
+for all of them.
 
 | Page | What's on it |
 |------|--------------|
-| **Home** | The things the data actually says once it's joined — including that rich countries cut emissions while growing, and how far the energy/longevity relationship flattens out at the top. |
-| **Explore** | Pick a year: renewables share vs. life expectancy for every country (bubbles sized by population, coloured by income group), CO₂ intensity by income group over time, and the headline counts. |
+| **Home** — Seven Findings | Seven write-ups on the joined data: when each country's emissions peaked, that the cleanup happened in electricity and coal is most of it, real-terms decoupling, whether it's just offshoring (it isn't, mostly), emissions tracking income rather than headcount, cumulative vs. current responsibility, and carbon intensity falling while absolute tonnes rise. |
+| **Explore** | Pick a year: clean electricity vs. life expectancy, carbon intensity of the economy over time, EU electricity prices against grid cleanliness, grid carbon intensity, the most carbon-efficient economies — and what averaging Eurostat's half-year prices into an annual figure costs. |
+| **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
+| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 113 dbt tests with their stored failure counts — the observability tables from `transform/pipeline_status.py`. |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. Empty on the published copy by construction — the build starts from an empty DuckDB file, and a snapshot can only record a revision it was there for. |
 
 `.github/workflows/pages.yml` builds it. It runs the pipeline against the

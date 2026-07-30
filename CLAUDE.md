@@ -23,7 +23,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (models, snapshot + 70 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (models, snapshot + 113 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -49,7 +49,18 @@ SQL and model conventions live in [`docs/STYLE_GUIDE.md`](docs/STYLE_GUIDE.md) �
 naming, grain, import CTEs, column ordering, and where this project deliberately
 departs from [dbt Labs' style guide](https://docs.getdbt.com/best-practices/how-we-style/0-how-we-style-our-dbt-projects).
 The formatting half of it is enforced by [`.sqlfluff`](.sqlfluff); run
-`just lint` (pre-commit runs the same check).
+`just lint` (pre-commit runs the same check — literally: the hook is a `local`
+one whose entry is `just lint`).
+
+- **sqlfluff is pinned exactly** (`sqlfluff==4.2.2` in `pyproject.toml`) and lives
+  in exactly one place. Don't restore the upstream `sqlfluff/sqlfluff` pre-commit
+  hook: it installs its own copy, which is how the repo ended up with 3.3.0
+  rejecting an `order by` inside a window clause that the venv's 4.2.2 accepts —
+  `just lint` passed and the commit hook failed on the same file. It also can't
+  run from `dbt/`, so the dbt templater resolves `profiles.yml`'s
+  `../data/warehouse.duckdb` one directory too high and dies before linting.
+- CI lints via the same venv, so it agrees on rules. It does still lint a narrower
+  path than the recipe (`models`, not `models snapshots`).
 
 ## Agent skills
 
@@ -206,7 +217,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   tests. It's gitignored, so `build_tests` degrades to bare table names when it's
   absent rather than failing.
 - **It excludes its own output from the inventory.** Otherwise the table count is
-  10 on a first build and 13 on every later one, for no change in the warehouse.
+  12 on a first build and 15 on every later one, for no change in the warehouse.
 - **It must run after `dbt build`** — it reads `dbt_test__audit` and the
   manifest, neither of which exists before one.
 

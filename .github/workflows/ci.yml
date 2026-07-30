@@ -58,9 +58,11 @@ jobs:
           cd data/export && sha256sum -c SHA256SUMS
 
       # From dbt/: the dbt templater opens the warehouse via the profile's
-      # relative path without chdir'ing into the project first.
+      # relative path without chdir'ing into the project first. Same paths as
+      # `just lint` and the pre-commit hook (which runs that recipe) — a narrower
+      # set here would mean CI passing SQL a contributor's commit hook rejects.
       - name: Lint SQL
-        run: cd dbt && uv run sqlfluff lint models
+        run: cd dbt && uv run sqlfluff lint models snapshots
 
       # ruff, formatting and whitespace. The same hooks contributors get from
       # `uv run pre-commit install`, run here because an outside PR arrives

@@ -1474,8 +1474,8 @@ dev = [
     { name = "harlequin", specifier = ">=2.1" },
     { name = "pre-commit", specifier = ">=4.0" },
     { name = "pytest", specifier = ">=8.3" },
-    { name = "sqlfluff", specifier = ">=3.3" },
-    { name = "sqlfluff-templater-dbt", specifier = ">=3.3" },
+    { name = "sqlfluff", specifier = "==4.2.2" },
+    { name = "sqlfluff-templater-dbt", specifier = "==4.2.2" },
 ]
 notebook = [{ name = "marimo", specifier = ">=0.10" }]
 orchestration = [

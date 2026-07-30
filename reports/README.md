@@ -35,14 +35,21 @@ for you, which is why this only ever bites in CI.
 
 - `sources/warehouse/connection.yaml`: DuckDB source pointing at the warehouse file.
 - `sources/warehouse/*.sql`: source queries that read the dbt/Polars outputs
-  (`marts.fct_emissions_energy`, `analytics.co2_intensity`). Referenced in pages
-  as `warehouse.emissions_energy`, `warehouse.co2_intensity`.
+  (`marts.fct_emissions_energy`, `analytics.co2_intensity`,
+  `marts.fct_eu_electricity_prices_semiannual`, the spine, the snapshot summary
+  and the `pipeline_*` tables). Referenced in pages as
+  `warehouse.emissions_energy`, `warehouse.co2_intensity`,
+  `warehouse.eu_electricity_prices_semiannual`, and so on — the filename is the
+  reference name.
 - `pages/index.md`: the home page — seven written-up findings from the same two
   tables.
 - `pages/dashboard.md`: the interactive dashboard, with clean electricity vs. life
   expectancy (bubble), CO₂ intensity by income group over time (line), a grid
   carbon-intensity ranking and a most-efficient table, all driven by a year
-  selector.
+  selector. Its last section is the exception: EU prices half by half, from the
+  semi-annual fact, deliberately covering the whole series rather than the
+  selected year — the annual average the other charts use hides moves of 300%+
+  inside a single year.
 - `pages/coverage.md`: what each source actually covers, built by left-joining
   `marts.fct_emissions_energy` onto the `dim_country_year` spine so a gap is a
   row rather than an absence. Read this before writing a `where` clause against
