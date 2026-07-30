@@ -27,14 +27,21 @@ on:
 
 permissions:
   contents: write # creates the tag, the release and its assets
-  # `contents: write` was enough until 2026-07-30, when `gh release create` started
-  # returning 403 "Resource not accessible by integration" on a workflow file that
-  # had not changed since the release it published the day before — with
-  # `Contents: write` still logged in the run's token permissions. Immutable
-  # releases attest the release as it is created, and the attestation needs its own
-  # two scopes; without them the create call is refused rather than downgraded.
-  id-token: write # OIDC token the attestation is signed against
-  attestations: write # write the provenance attestation itself
+  # `contents: write` alone was enough until 2026-07-30, when `gh release create`
+  # began returning 403 "Resource not accessible by integration" — on a workflow
+  # file unchanged since the release it cut the day before, with `Contents: write`
+  # still logged in the run's own token permissions, no ruleset, no tag protection
+  # and `default_workflow_permissions: write` on the repo. It failed twice, twelve
+  # minutes apart, and succeeded on the next run with these two added.
+  #
+  # What is verified is the requirement, not the reason: the successful run logs
+  # `Attestations: write` where the failed ones logged only Contents and Metadata,
+  # and the release GitHub produced reports `immutable: false` — so this is *not*
+  # the immutable-releases flow, whatever else it is. `id-token` went in at the
+  # same time and was never isolated; dropping either one costs a ~7-minute run to
+  # retest, so they stay together unless something forces the question.
+  id-token: write
+  attestations: write
 
 # Two runs uploading assets to the same dated tag would race.
 concurrency:
