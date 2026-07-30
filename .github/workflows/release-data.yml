@@ -27,6 +27,14 @@ on:
 
 permissions:
   contents: write # creates the tag, the release and its assets
+  # `contents: write` was enough until 2026-07-30, when `gh release create` started
+  # returning 403 "Resource not accessible by integration" on a workflow file that
+  # had not changed since the release it published the day before — with
+  # `Contents: write` still logged in the run's token permissions. Immutable
+  # releases attest the release as it is created, and the attestation needs its own
+  # two scopes; without them the create call is refused rather than downgraded.
+  id-token: write # OIDC token the attestation is signed against
+  attestations: write # write the provenance attestation itself
 
 # Two runs uploading assets to the same dated tag would race.
 concurrency:
