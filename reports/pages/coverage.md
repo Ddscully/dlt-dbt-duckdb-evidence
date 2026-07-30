@@ -3,47 +3,24 @@ title: Coverage
 description: What the warehouse knows, what it doesn't, and where the two facts differ by column.
 ---
 
-Every chart on the other pages filters for the columns it needs, and the filters
-are not interchangeable. This page is the reason why: the four sources disagree
-about which countries exist, which years they cover, and how far forward they run.
-
-`marts.fct_emissions_energy` is built on a **spine** — `marts.dim_country_year`,
-the full cross join of the country dimension with every year the warehouse
-covers. That is what makes coverage answerable at all. Left-join the fact onto
-the spine and a gap comes back as a row you can count, instead of an absence you
-have to infer from what isn't there.
+The four sources disagree about which countries exist, which years they cover,
+and how far forward they run. That is why every chart on the other pages filters
+for the columns it needs, and why those filters are not interchangeable.
 
 ```sql latest_years
 select * from warehouse.latest_years
 ```
 
-```sql spine_summary
-select
-    (select count(*) from warehouse.country_year_spine)  as spine_rows,
-    (select count(*) from warehouse.emissions_energy)    as fact_rows,
-    (select count(distinct country_iso3) from warehouse.country_year_spine) as countries,
-    (select count(*) from warehouse.country_year_spine)
-        - (select count(*) from warehouse.emissions_energy) as unreported
-```
-
-<Grid cols=4>
-    <BigValue data={spine_summary} value=countries title="Countries in the dimension"/>
-    <BigValue data={spine_summary} value=spine_rows fmt="#,##0" title="Possible country-years"/>
-    <BigValue data={spine_summary} value=fact_rows fmt="#,##0" title="At least one source reports"/>
-    <BigValue data={spine_summary} value=unreported fmt="#,##0" title="No source reports"/>
-</Grid>
-
 ## How many countries each series actually covers
 
-The single most useful chart on this site for anyone writing a query against the
-warehouse. Each line is the number of countries reporting a column in that year.
+Each line is the number of countries reporting a column in that year.
 
 ```sql coverage_by_year
 -- Six series, short labels: eight paginates the legend, which makes half the
 -- lines unidentifiable. The rest are in the table below.
 --
 -- Capped at the latest electricity year rather than max(year), because the very
--- last year in the mart carries Eurostat prices and almost nothing else — every
+-- last year in the mart carries Eurostat prices and almost nothing else. Every
 -- line dropping to zero on the same tick reads as a rendering fault and drowns
 -- out the two real features. Where each series *ends* is the `To` column below.
 with bounded as (
@@ -86,15 +63,15 @@ query in this repo:
 
 1. **The renewables ceiling.** `renewables_share_pct` flatlines at 79 countries
    in every year since 1965. OWID's broad-coverage series is the *electricity*
-   mix, not the primary-energy mix — which is why the findings and dashboard
-   pages use `carbon_intensity_elec_g_kwh` and `low_carbon_share_elec_pct`
-   (about 210 countries) wherever coverage matters.
+   mix, not the primary-energy mix, which is why the findings and explore pages
+   use `carbon_intensity_elec_g_kwh` and `low_carbon_share_elec_pct` (about 210
+   countries) wherever coverage matters.
 2. **The last-year cliff.** `primary_energy_twh` falls off a cliff in the most
    recent year, from ~210 countries to 79. Anything cut to "the latest year"
    without checking loses two thirds of its sample; the findings page reads a
    per-metric latest year from `sources/warehouse/latest_years.sql` for exactly
    this reason.
-3. **The sources end at different times** — read the `To` column below rather
+3. **The sources end at different times.** Read the `To` column below rather
    than the chart, which is capped for legibility. EU electricity prices already
    run a year ahead of everything else and consumption-based CO₂ a year behind,
    so the mart's `max(year)` is the leader, not the consensus.
@@ -132,12 +109,29 @@ order by countries desc
 
 ## Two different kinds of gap
 
-### A country-year no source reports at all
+```sql spine_summary
+select
+    (select count(*) from warehouse.country_year_spine)  as spine_rows,
+    (select count(*) from warehouse.emissions_energy)    as fact_rows,
+    (select count(distinct country_iso3) from warehouse.country_year_spine) as countries,
+    (select count(*) from warehouse.country_year_spine)
+        - (select count(*) from warehouse.emissions_energy) as unreported
+```
 
-These never reach the fact — the mart inner-joins the spine to the union of what
-the sources cover, so they exist only in `dim_country_year`. Almost all of them
-are the deep past: the spine starts in 1750 because OWID's emissions series does,
-and in 1750 that series is a handful of countries.
+<Grid cols=4>
+    <BigValue data={spine_summary} value=countries title="Countries in the dimension"/>
+    <BigValue data={spine_summary} value=spine_rows fmt="#,##0" title="Possible country-years"/>
+    <BigValue data={spine_summary} value=fact_rows fmt="#,##0" title="At least one source reports"/>
+    <BigValue data={spine_summary} value=unreported fmt="#,##0" title="No source reports"/>
+</Grid>
+
+`marts.fct_emissions_energy` is built on a **spine**, `marts.dim_country_year`,
+the full cross join of the country dimension with every year the warehouse
+covers. That is what makes coverage answerable at all: left-join the fact onto
+the spine and a gap comes back as a row you can count, instead of an absence you
+have to infer from what isn't there.
+
+### A country-year no source reports at all
 
 ```sql gap_by_era
 select
@@ -174,8 +168,12 @@ order by ord
     yAxisTitle="Country-years no source reports"
 />
 
-From 1990 on the spine is essentially complete. The gap is a statement about
-history, not about the pipeline.
+These never reach the fact. The mart inner-joins the spine to the union of what
+the sources cover, so they exist only in `dim_country_year`. Almost all of them
+are the deep past: the spine starts in 1750 because OWID's emissions series does,
+and in 1750 that series is a handful of countries. From 1990 on the spine is
+essentially complete, so the gap is a statement about history rather than about
+the pipeline.
 
 ### A country-year in the fact where one source is silent
 
@@ -206,7 +204,7 @@ order by population desc
 </DataTable>
 
 **OWID emissions, no World Bank GDP.** The mirror image, and a more consequential
-one — every intensity and decoupling measure on this site divides by
+one. Every intensity and decoupling measure on this site divides by
 `gdp_constant_usd`, so these countries are silently absent from all of them.
 Taiwan is the one that matters at scale: it emits more than the Netherlands and
 is not a World Bank member.
@@ -232,13 +230,14 @@ order by co2_mt desc
 The dimension is authoritative for *what counts as a country*, so two things are
 missing on purpose rather than by omission:
 
-- **World Bank aggregates** — `WLD`, `EUU`, `OED` and the rest. WDI returns them
+- **World Bank aggregates**: `WLD`, `EUU`, `OED` and the rest. WDI returns them
   in the same series as real countries; the dimension doesn't carry them, so the
   inner join to the spine keeps them out of every rollup on this site.
 - **Antarctica.** OWID emits about 0.2 Mt of emissions for it. A null `region`
-  should mean "not a country", and Antarctica is the case that proves the rule —
-  unlike Taiwan and ten small territories, which *are* countries the World Bank
-  simply doesn't list, and which `dbt/seeds/country_overrides.csv` puts back.
+  should mean "not a country", and Antarctica is the case that proves the rule.
+  Taiwan and ten small territories are the opposite case: they *are* countries
+  the World Bank simply doesn't list, and `dbt/seeds/country_overrides.csv` puts
+  them back.
 
 ---
 

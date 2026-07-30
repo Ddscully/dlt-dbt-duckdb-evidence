@@ -125,7 +125,7 @@ def source_tables(sources_dir: Path = SOURCES_DIR) -> set[str]:
 
 
 def page_routes(pages_dir: Path = PAGES_DIR, build_dir: Path = BUILD_DIR) -> dict[str, Path]:
-    """`{"index": build/index.html, "dashboard": build/dashboard/index.html, …}`.
+    """`{"index": build/index.html, "findings": build/findings/index.html, …}`.
 
     The asset check reads this: `evidence build` exits 0 whether or not it emitted
     a page for every markdown file, so "the build succeeded" is not the same claim

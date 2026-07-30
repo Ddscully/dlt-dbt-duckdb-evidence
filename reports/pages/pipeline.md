@@ -1,18 +1,11 @@
 ---
 title: Pipeline
-description: The state of the pipeline that built this site — load times, layer sizes, and every dbt test.
+description: The state of the pipeline that built this site, from load times to layer sizes and every dbt test.
 ---
 
 Every other page reports on the data. This one reports on the machinery: when
 each source last loaded, how many rows survived each layer, and the current state
 of all the tests.
-
-None of it is instrumentation added for the purpose. dlt stamps `_dlt_load_id` on
-every landing row, dbt stores each failing test row in a `dbt_test__audit` table,
-and `information_schema` knows the shape of every layer. `transform/pipeline_status.py`
-walks all three into `analytics.pipeline_sources`, `pipeline_tables` and
-`pipeline_tests`, because two of them need dynamic SQL over a variable table list
-and one needs a file that lives outside the database.
 
 ```sql test_summary
 select
@@ -39,18 +32,6 @@ select
 
 ## Source freshness
 
-`loaded_at` comes from dlt's `_dlt_load_id`, a unix epoch stamped at ingest. It
-measures **our load, not the publisher's release** — a stale timestamp here means
-the pipeline stopped running, not that OWID stopped publishing. That is also why
-it is tautologically green on a freshly built copy of this site: the build loads
-the data and then reports on the load.
-
-Note the two distinct timestamps. Four resources load with `replace` and
-`wb_wdi` loads with `merge`, and `refresh` is an argument to a dlt *run* rather
-than a property of a resource — so a single run cannot refresh the first group
-while leaving the incremental one alone. It is two loads, seconds apart, and this
-table is where that shows up.
-
 ```sql sources
 select source_table, rows, year_min, year_max, loaded_at
 from warehouse.pipeline_sources
@@ -65,6 +46,18 @@ order by rows desc
     <Column id=loaded_at title="Loaded" fmt="yyyy-mm-dd hh:mm"/>
 </DataTable>
 
+`loaded_at` comes from dlt's `_dlt_load_id`, a unix epoch stamped at ingest. It
+measures **our load, not the publisher's release**: a stale timestamp here means
+the pipeline stopped running, not that OWID stopped publishing. That is also why
+it is tautologically green on a freshly built copy of this site, since the build
+loads the data and then reports on the load.
+
+Note the two distinct timestamps. Four resources load with `replace` and `wb_wdi`
+loads with `merge`, and `refresh` is an argument to a dlt *run* rather than a
+property of a resource, so a single run cannot refresh the first group while
+leaving the incremental one alone. It is two loads, seconds apart, and this table
+is where that shows up.
+
 ## What each layer holds
 
 ```sql tables
@@ -72,14 +65,6 @@ select layer, table_name, rows, year_min, year_max
 from warehouse.pipeline_tables
 order by layer, table_name
 ```
-
-`marts.dim_country_year` is larger than the fact it feeds, and that is the design:
-the spine is the complete cross join, the fact is the part of it any source
-reports. The difference is the subject of the [coverage page](/coverage).
-
-`history.snap_co2_estimates` is the one table here a rebuild cannot reproduce.
-Every other row below is derivable from the sources; the snapshot is accumulated
-state, and deleting the warehouse destroys it for good.
 
 <DataTable data={tables} rows=10>
     <Column id=layer title="Layer"/>
@@ -89,17 +74,21 @@ state, and deleting the warehouse destroys it for good.
     <Column id=year_max title="To" fmt="0"/>
 </DataTable>
 
-## Test coverage
+`marts.dim_country_year` is larger than the fact it feeds, and that is the
+design: the spine is the complete cross join, the fact is the part of it any
+source reports. The difference is the subject of the [coverage page](/coverage).
 
-`dbt_project.yml` sets `+store_failures: true` project-wide, so a test does not
-just return a count — it leaves the offending rows behind in
-`dbt_test__audit.<test_name>`. A red check gives you the rows, not a number.
+`history.snap_co2_estimates` is the one table here a rebuild cannot reproduce.
+Every other row above is derivable from the sources; the snapshot is accumulated
+state, and deleting the warehouse destroys it for good.
+
+## Test coverage
 
 ```sql tests_by_model
 -- `n_tests`, not `tests`. A column called `tests` collides with something inside
 -- Evidence's chart components: the BarChart renders its axis, categories and
 -- value labels perfectly and simply draws no bars, with no error anywhere. The
--- only fix is the rename. `rows` behaves the same way — fine in a DataTable,
+-- only fix is the rename. `rows` behaves the same way: fine in a DataTable,
 -- silently barless in a chart.
 select
     tested_model,
@@ -137,11 +126,16 @@ order by tests desc
 </DataTable>
 
 The distribution is deliberate. `accepted_range` dominates because the failure
-mode this warehouse actually has is a plausible-looking wrong number, not a
-missing one — a unit error, a percentage over 100, a year outside a source's
-range. The `unique_combination_of_columns` tests are the grain contract:
+mode this warehouse actually has is a plausible-looking wrong number rather than
+a missing one: a unit error, a percentage over 100, a year outside a source's
+range. The `unique_combination_of_columns` tests are the grain contract,
 `(country_iso3, year)` on every fact-shaped model, which is what catches a
 duplicate on either side of a join fanning rows out downstream.
+
+`dbt_project.yml` also sets `+store_failures: true` project-wide, so a test does
+not just return a count. It leaves the offending rows behind in
+`dbt_test__audit.<test_name>`, and a red check gives you the rows rather than a
+number.
 
 The bounds are calibrated to fail on bugs rather than on reality, which sometimes
 means *not* testing a column. `trade_co2_share` has no range test because its
@@ -171,18 +165,25 @@ see the exact rows that failed, rather than reproducing the test by hand.
 
 {:else}
 
-Nothing is failing. On a green build that is the expected state, and it is worth
-being explicit that this section is not broken — every one of the tests above
-holds, so every `dbt_test__audit` table is empty.
-
-If one were failing, this table would name it and point at the audit table
-holding the offending rows.
+Nothing is failing, which on a green build is the expected state. This section is
+not broken: every one of the tests above holds, so every `dbt_test__audit` table
+is empty. If one were failing, this table would name it and point at the audit
+table holding the offending rows.
 
 {/if}
+
+## Where these numbers come from
+
+None of this is instrumentation added for the purpose. dlt stamps `_dlt_load_id`
+on every landing row, dbt stores each failing test row in a `dbt_test__audit`
+table, and `information_schema` knows the shape of every layer.
+`transform/pipeline_status.py` walks all three into `analytics.pipeline_sources`,
+`pipeline_tables` and `pipeline_tests`, because two of them need dynamic SQL over
+a variable table list and one needs a file that lives outside the database.
 
 ---
 
 <small>Written by <code>transform/pipeline_status.py</code> (<code>just
 pipeline-status</code>, part of <code>just run</code> and the Dagster asset
-<code>analytics/pipeline_status</code>). A snapshot taken at build time, not a
-history — nothing here accumulates across runs.</small>
+<code>analytics/pipeline_status</code>). A snapshot taken at build time rather
+than a history: nothing here accumulates across runs.</small>
