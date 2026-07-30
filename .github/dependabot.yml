@@ -1,0 +1,46 @@
+version: 2
+
+# Why this exists: every action in `.github/workflows/` sat on a node20 major
+# until the runners started warning about it, and nothing in the repo would ever
+# have said so — CI was green the whole time. The three ecosystems below are the
+# ones with a pinned version somewhere in the tree.
+#
+# Monthly and grouped, to match the rest of the repo's cadence: the sources
+# publish annually, `release-data.yml` cuts a release on the 1st, and a stream of
+# one-dependency PRs would just train everyone to ignore the tab. Each ecosystem
+# gets at most one open PR carrying every bump it found.
+
+updates:
+  # `astral-sh/setup-uv` is pinned to an exact patch (it stopped publishing
+  # moving major tags at v8), so it can only ever be bumped by something like
+  # this. The rest track major tags and move on their own within a major.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # uv.lock is committed, so a lockfile refresh is a reviewable diff rather than
+  # something that silently differs between a contributor's machine and CI.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      python:
+        patterns: ["*"]
+
+  # Evidence and its adapters. `reports/`, not the root — that's where
+  # package.json and package-lock.json live.
+  - package-ecosystem: npm
+    directory: /reports
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      evidence:
+        patterns: ["*"]

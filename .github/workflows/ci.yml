@@ -20,10 +20,12 @@ jobs:
       WAREHOUSE_PATH: ${{ github.workspace }}/data/warehouse.duckdb
       DAGSTER_HOME: ${{ github.workspace }}/.dagster
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
+      # Pinned to the exact patch: setup-uv stopped publishing moving major/minor
+      # tags at v8, so `@v9` does not resolve. Bump it by hand.
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 

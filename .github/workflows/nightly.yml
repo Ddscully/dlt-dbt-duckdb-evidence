@@ -30,10 +30,12 @@ jobs:
       # No INGEST_FIXTURES here — that's the entire point of this workflow.
       DAGSTER_HOME: ${{ github.workspace }}/.dagster
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
+      # Pinned to the exact patch: setup-uv stopped publishing moving major/minor
+      # tags at v8, so `@v9` does not resolve. Bump it by hand.
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 
@@ -56,7 +58,7 @@ jobs:
       # durable, versioned, publicly downloadable version of the same file.
       - name: Upload the warehouse
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: warehouse-${{ github.run_id }}
           path: data/warehouse.duckdb
@@ -68,7 +70,7 @@ jobs:
       # ignore them. Subsequent failures comment on the existing thread.
       - name: Open or update the failure issue
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const label = 'nightly-failure';

@@ -38,10 +38,12 @@ jobs:
       # No INGEST_FIXTURES: see the note at the top.
       DAGSTER_HOME: ${{ github.workspace }}/.dagster
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
+      # Pinned to the exact patch: setup-uv stopped publishing moving major/minor
+      # tags at v8, so `@v9` does not resolve. Bump it by hand.
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 
@@ -54,9 +56,13 @@ jobs:
       - name: Install dbt packages and parse the project
         run: cd dbt && uv run dbt deps && uv run dbt parse
 
-      - uses: actions/setup-node@v4
+      # 24 is the active LTS; 20 went end-of-life in April 2026 and the runners
+      # now force node20 actions onto 24 anyway. `package.json` only asks for
+      # >=18, so this is the floor moving with upstream rather than a
+      # requirement — but keep it an even (LTS) major.
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: reports/package-lock.json
 
@@ -91,9 +97,9 @@ jobs:
           mkdir -p "$DAGSTER_HOME"
           uv run dagster job execute -m orchestration.definitions -j publish_site
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: reports/build
 
@@ -105,4 +111,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
