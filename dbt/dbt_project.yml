@@ -23,3 +23,9 @@ snapshots:
     # The one schema that isn't reproducible from the sources — see
     # snapshots/snap_co2_estimates.sql.
     +schema: history
+
+data_tests:
+  # A red check then links to the offending rows instead of just a count —
+  # each test's failures land in <schema>/dbt_test__audit.<test_name>.
+  +store_failures: true
+  +schema: dbt_test__audit

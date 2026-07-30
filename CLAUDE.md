@@ -160,6 +160,13 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Test args go under `arguments:`, and the key is `data_tests:`.** The flat
   `tests: [- some_test: {arg: …}]` form is deprecated in dbt 1.10 and gone in
   Fusion; the whole project uses the new spelling, so match it.
+- **Every test's failures are stored, not just counted.** `dbt_project.yml` sets
+  `data_tests: +store_failures: true` project-wide, into a
+  `dbt_test__audit` schema (one table per test, named after it). A red check in
+  CI or Dagster gives you `select * from dbt_test__audit.<test_name>` for the
+  offending rows instead of just a failure count — verified by breaking
+  `co2_mt`'s `accepted_range` in a throwaway warehouse and reading the row back
+  out of the audit table.
 - **Tests are calibrated to fail on bugs, not on reality.** `income_group` is
   nullable on purpose (the `country_overrides` territories have no World Bank
   classification) and `co2_per_capita` has a floor but no ceiling (small
