@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 
 # Runtime dependencies (the pipeline itself)
 dependencies = [
-    "dlt[duckdb]>=1.5",   # EL: API/file ingestion into DuckDB with schema inference
+    "dlt[duckdb]>=1.29.1",   # EL: API/file ingestion into DuckDB with schema inference
     "duckdb>=1.1",        # in-process analytical warehouse
     "polars>=1.17",       # heavy/columnar transforms in Python
     "dbt-duckdb>=1.9",    # T: dbt adapter targeting the DuckDB file
