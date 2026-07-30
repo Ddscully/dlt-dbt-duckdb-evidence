@@ -20,7 +20,7 @@ import os
 import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 
 import dlt
@@ -183,8 +183,10 @@ def wdi_url(code: str, page: int = 1, start_year: int | None = None) -> str:
         f"?format=json&per_page={WB_PER_PAGE}&page={page}"
     )
     if start_year is not None:
-        # the range needs both ends; the API tolerates a future one
-        url += f"&date={start_year}:{date.today().year}"
+        # the range needs both ends; the API tolerates a future one. UTC rather
+        # than the local clock so the URL a fixture is recorded against doesn't
+        # depend on which side of midnight the runner sits.
+        url += f"&date={start_year}:{datetime.now(UTC).year}"
     return url
 
 

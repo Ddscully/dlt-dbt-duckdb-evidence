@@ -17,12 +17,13 @@ dependencies = [
 [dependency-groups]
 # `uv sync --group dev` — tooling that isn't needed to run the pipeline
 dev = [
-    # Pinned exactly, and the pin is duplicated as the sqlfluff `rev` in
-    # .pre-commit-config.yaml — pre-commit installs the linter into its own
-    # isolated env, so a floating range here means `just lint` and the commit
-    # hook can disagree about the same file. They did: 3.3.0 flagged an LT14
-    # (`order by` in a window clause) that 4.2.2 accepts, so a tree that passed
-    # `just lint` failed on commit. Bump both together or not at all.
+    # Pinned exactly, and this is the *only* place it is pinned. The upstream
+    # sqlfluff pre-commit hook used to carry a second `rev`, and the two drifted:
+    # 3.3.0 there flagged an LT14 (`order by` in a window clause) that the venv's
+    # 4.2.2 accepts, so a tree that passed `just lint` failed on commit. The hook
+    # is now a `local` one that shells out to the recipe, so there is one copy.
+    # Don't reintroduce a second pin. (ruff is the other way round — it lives
+    # only in .pre-commit-config.yaml, and that `rev` is its single pin.)
     "sqlfluff==4.2.2",     # SQL linter/formatter (dbt templater)
     "sqlfluff-templater-dbt==4.2.2",  # .sqlfluff sets templater = dbt; useless without this
     "pre-commit>=4.0",     # git hooks
@@ -56,6 +57,43 @@ build-backend = "uv_build"
 # The Python here was written to ~100 columns and `.sqlfluff` caps SQL at 120;
 # ruff's 88-column default would reflow every existing file on first run.
 line-length = 100
+
+[tool.ruff.lint]
+# No `select`: this project runs ruff's own default rules, which 0.16 widened
+# from 59 to 413 (https://docs.astral.sh/ruff/default-rules/). The default set is
+# curated per release rather than fixed, so what holds it still is the exact
+# `rev` in .pre-commit-config.yaml — that file is the pin, and `pre-commit
+# autoupdate` is the only thing that can move the rule set. There is no second
+# copy of ruff to drift from it (unlike sqlfluff, it isn't in the dev group).
+#
+# 0.16 also *dropped* 18 opinionated pycodestyle/pyflakes rules from the default
+# set. They were enforced here before the widening and the tree still passes
+# them, so they go back explicitly rather than being lost to a version bump —
+# star imports and stray `==`/`is` comparisons are exactly what you want caught
+# in a repo where the linter is the only reviewer.
+extend-select = [
+    "E401", "E402",                                   # multiple / non-top-level imports
+    "E701", "E702", "E703",                           # colons and stray semicolons
+    "E711", "E712", "E713", "E714", "E721",           # comparison style
+    "E731", "E741", "E742", "E743",                   # lambda assignment, ambiguous names
+    "F403", "F405", "F406",                           # star imports
+    "F722",                                           # syntax error in forward annotation
+]
+
+[tool.ruff.lint.per-file-ignores]
+# marimo stores a notebook as a Python file where each cell is a function, and a
+# bare expression on the last line is how a cell renders its output — `df` at the
+# end of a cell *is* the chart. B018 ("useless expression") is right about the
+# syntax and wrong about the file: deleting it blanks the notebook.
+"notebooks/*.py" = ["B018"]
+
+[tool.ruff.lint.isort]
+# Keep `from x import a, run as b` on one statement. ruff's default splits the
+# aliased name onto a second `from x import …` line, which would have turned the
+# eight-line import block at the top of orchestration/assets.py into twelve and
+# separated `run as write_lake` from the module it comes from — noise, given the
+# `run as …` aliases exist precisely because four layers each export a `run()`.
+combine-as-imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

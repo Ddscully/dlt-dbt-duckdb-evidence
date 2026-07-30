@@ -9,7 +9,7 @@ call to exercise. The end-to-end path lives in `just test-pipeline`.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, datetime
 
 import pytest
 import requests
@@ -190,7 +190,7 @@ def test_wdi_url_asks_for_the_whole_series_by_default():
 
 def test_wdi_url_adds_the_date_window():
     url = pipeline.wdi_url("SP.POP.TOTL", 1, 2021)
-    assert f"&date=2021:{date.today().year}" in url
+    assert f"&date=2021:{datetime.now(UTC).year}" in url
     # the fixture route keys on the indicator code, so the window mustn't move it
     assert fixtures.path_for(url).name == "wb_wdi_SP.POP.TOTL.json"
 
@@ -309,7 +309,7 @@ def test_wb_wdi_rejects_error_object_served_with_200(monkeypatch):
 def test_load_groups_refreshes_only_the_replace_resources():
     """`refresh="drop_resources"` would drop `wb_wdi`'s table and watermark, so
     the merge resource has to load in its own call, without it."""
-    groups = dict((tuple(names), kwargs) for names, kwargs in pipeline.load_groups())
+    groups = {tuple(names): kwargs for names, kwargs in pipeline.load_groups()}
     assert groups[pipeline.FULL_REFRESH_RESOURCES] == {"refresh": pipeline.REFRESH}
     assert groups[pipeline.INCREMENTAL_RESOURCES] == {}
 
