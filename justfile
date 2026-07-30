@@ -38,12 +38,16 @@ dbt-build: dbt-deps
 dbt-freshness: dbt-deps
     cd dbt && uv run dbt source freshness
 
+# Write the year-partitioned Parquet archive to data/lake/ (gitignored)
+lake:
+    uv run python -m lake.archive
+
 # Polars derived metrics
 transform:
     uv run python -m transform.co2_intensity
 
 # Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
-run: ingest dbt-build transform
+run: ingest dbt-build transform lake
 
 # Unit tests — mocked API payloads, no network, no warehouse
 test:
@@ -56,10 +60,14 @@ test-pipeline:
     set -euo pipefail
     export INGEST_FIXTURES=1
     export WAREHOUSE_PATH="$(mktemp -d)/warehouse.duckdb"
+    # ...and the lake beside it, or a fixture run would overwrite data/lake/
+    # with the 17-country slice.
+    export LAKE_DIR="$(dirname "$WAREHOUSE_PATH")/lake"
     echo "fixture warehouse: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
     cd dbt && uv run dbt deps && uv run dbt build && cd ..
     uv run python -m transform.co2_intensity
+    uv run python -m lake.archive
 
 # `.github/workflows/release-data.yml` runs this, then attaches the result to a
 # dated GitHub release.

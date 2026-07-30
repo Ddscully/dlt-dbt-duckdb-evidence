@@ -1,8 +1,9 @@
 """The pipeline as a Dagster asset graph.
 
     raw/*  (dlt)  ->  staging/stg_*  ->  marts/fct_*  (dbt)  ->  analytics/co2_intensity  (Polars)
+                                                     \->  lake/parquet_archive  (DuckDB -> Parquet)
 
-The three layers are wired by *asset key*, not by ordering:
+The layers are wired by *asset key*, not by ordering:
 
 * the dlt resources are keyed ``["raw", <resource>]`` to match the asset keys
   dagster-dbt derives from `dbt/models/staging/_sources.yml`;
@@ -29,6 +30,7 @@ from dagster_dlt import DagsterDltResource, DagsterDltTranslator, dlt_assets
 from dagster_dlt.translator import DltResourceTranslatorData
 
 from ingest.pipeline import WB_WDI_INDICATORS, build_pipeline, load_groups, public_indicators
+from lake.archive import ARCHIVED_TABLES, LAKE_DIR, run as write_lake, table_dir
 from orchestration.resources import dbt_project
 from transform.co2_intensity import DUCKDB_PATH, run as run_co2_intensity
 
@@ -64,7 +66,7 @@ RAW_DESCRIPTIONS = {
     "wb_country": "World Bank country dimension: region, income group, capital (JSON API).",
     "wb_wdi": (
         "World Bank WDI indicators, long-format (JSON API, paginated). Loaded "
-        "incrementally: `merge` on (indicator, country_iso3, year) over a "
+        "incrementally: `merge` on (indicator, country_code, year) over a "
         "5-year lookback window, not a full reload."
     ),
     "eu_elec_prices": "Eurostat nrg_pc_204 household electricity prices, EU/EEA (JSON-stat).",
@@ -180,6 +182,45 @@ def co2_intensity(context: AssetExecutionContext) -> dg.MaterializeResult:
 
 
 # --------------------------------------------------------------------------- #
+# Layer 4 — the Parquet lake
+# --------------------------------------------------------------------------- #
+
+
+@dg.asset(
+    key=dg.AssetKey(["lake", "parquet_archive"]),
+    # The mart is downstream of every raw table, so depending on it is enough to
+    # order the archive after the whole warehouse.
+    deps=[FCT_EMISSIONS_ENERGY],
+    group_name="lake",
+    kinds={"duckdb", "parquet"},
+    freshness_policy=MODELLED_FRESHNESS,
+    description=(
+        "Year-partitioned Parquet copy of the raw and mart tables under "
+        "data/lake/ — partition pruning, portability, and a diff between runs "
+        "that shows which years upstream actually changed."
+    ),
+)
+def parquet_archive(context: AssetExecutionContext) -> dg.MaterializeResult:
+    summary = write_lake()
+    for table, stats in summary.items():
+        context.log.info(
+            "%s -> %s rows in %s partitions (%.1f MB)",
+            table,
+            stats["rows"],
+            stats["partitions"],
+            stats["bytes"] / 1e6,
+        )
+    return dg.MaterializeResult(
+        metadata={
+            "dagster/row_count": sum(s["rows"] for s in summary.values()),
+            "files": sum(s["files"] for s in summary.values()),
+            "bytes": sum(s["bytes"] for s in summary.values()),
+            "tables": summary,
+        }
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Asset checks — the ones dbt can't express
 # --------------------------------------------------------------------------- #
 
@@ -270,4 +311,42 @@ def co2_intensity_rank_is_dense() -> dg.AssetCheckResult:
     return dg.AssetCheckResult(passed=bad == 0, metadata={"bad_cohorts": bad})
 
 
-__all__ = ["FCT_EMISSIONS_ENERGY", "co2_intensity", "dbt_models", "raw_assets"]
+@dg.asset_check(asset=parquet_archive, blocking=True)
+def lake_matches_warehouse() -> dg.AssetCheckResult:
+    """Every archived table reads back from Parquet with the row count and year
+    span it has in the warehouse.
+
+    The failure mode this catches is a partial write: `COPY … PARTITION_BY` that
+    half-succeeded, or a stale partition left behind by an earlier run. Nothing
+    downstream reads the lake, so without a check a broken archive would sit
+    there looking materialised.
+    """
+    con = duckdb.connect(DUCKDB_PATH, read_only=True)
+    try:
+        mismatches = {}
+        for table in ARCHIVED_TABLES:
+            glob = f"{table_dir(LAKE_DIR, table)}/**/*.parquet"
+            warehouse = con.sql(f"select count(*), min(year), max(year) from {table}").fetchone()
+            archived = con.sql(
+                f"""
+                select count(*), min(year), max(year)
+                from read_parquet('{glob}', hive_partitioning = 1)
+                """
+            ).fetchone()
+            if warehouse != archived:
+                mismatches[table] = {"warehouse": list(warehouse), "lake": list(archived)}
+    finally:
+        con.close()
+    return dg.AssetCheckResult(
+        passed=not mismatches,
+        metadata={"tables_checked": len(ARCHIVED_TABLES), "mismatches": mismatches},
+    )
+
+
+__all__ = [
+    "FCT_EMISSIONS_ENERGY",
+    "co2_intensity",
+    "dbt_models",
+    "parquet_archive",
+    "raw_assets",
+]

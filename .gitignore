@@ -16,6 +16,8 @@ data/*.duckdb.wal
 data/raw/
 # Publishable artifact built by `just export-data`; it lives in GitHub releases
 data/export/
+# Parquet archive built by `just lake`; regenerated from the warehouse
+data/lake/
 *.csv
 !dbt/seeds/*.csv
 

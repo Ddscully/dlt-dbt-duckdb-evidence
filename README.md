@@ -46,6 +46,7 @@ layers fit together](#orchestration), [how it's tested](#tests), or just
 | [**dbt**](https://docs.getdbt.com/) (`dbt-duckdb`) | T — staging + marts, tests, docs |
 | [**Dagster**](https://dagster.io/) | orchestration — every layer as a software-defined asset |
 | [**Polars**](https://pola.rs/) | heavy columnar transforms / window logic in Python |
+| **Parquet** | hive-partitioned archive of the warehouse in `data/lake/` — pruning, portability, a diffable raw layer |
 | [**Evidence**](https://evidence.dev/) | BI-as-code dashboard, deployable to GitHub Pages |
 | [**marimo**](https://marimo.io/) | reactive notebook for exploration |
 | [**Harlequin**](https://harlequin.sh/) | terminal SQL IDE for DuckDB |
@@ -94,17 +95,44 @@ The pipeline populates one DuckDB file (`data/warehouse.duckdb`) with these sche
 | `history` | dbt (snapshot) | `snap_co2_estimates` — SCD2 versions of OWID's CO₂ numbers, the one table a rebuild can't reproduce |
 | `analytics` | Polars | derived metrics (`co2_intensity`) |
 
+### And a lake beside it: `data/lake/`
+
+`just lake` writes the year-keyed tables back out as hive-partitioned Parquet —
+`data/lake/<table>/year=<year>/data_0.parquet`, zstd, 762 files and ~27 MB today.
+Not because one DuckDB file is too small for the data, but because the file layout
+buys three things the single file can't:
+
+```sql
+-- reads one 47 kB file, not the table: ~23 ms vs ~50 ms for the whole archive
+select sum(co2) from read_parquet('data/lake/raw_owid_co2/**/*.parquet',
+                                  hive_partitioning = 1)
+where year = 2020;
+```
+
+- **Pruning.** The partition column is in the path, so `where year = …` never
+  opens the other 274 files.
+- **Portability.** Parquet outlives a DuckDB storage version, and every engine
+  reads it.
+- **A diffable raw layer.** The output is byte-identical run to run, so a
+  restatement upstream shows up as exactly one changed file out of 762 —
+  the DuckDB file differs everywhere, every time.
+
+It's an archive *of* the warehouse rather than a landing zone in front of it, and
+the trade-off it makes is deliberate: 275 partitions averaging 47 kB is far too
+many small files for a real lake on object storage. See
+[CLAUDE.md](CLAUDE.md#the-lake-lakearchivepy) for why it's arranged this way.
+
 ## Orchestration
 
-`just run` chains the three steps in a shell, which works right up until you
+`just run` chains the steps in a shell, which works right up until you
 want to know *why* a table is stale or rebuild only what a change touched.
 Dagster models the same pipeline as one asset graph instead:
 
 ```
-raw/owid_co2      ─┐                   ┌─▶ marts/dim_country_year ─▶ marts/fct_emissions_energy ─▶ analytics/co2_intensity
-raw/owid_energy   ─┤                   │           (dbt)                       (dbt)                      (Polars)
-raw/wb_country    ─┼─▶ staging/stg_* ──┤
-raw/wb_wdi        ─┤       (dbt)       └─▶ history/snap_co2_estimates ─▶ marts/fct_co2_estimate_versions
+raw/owid_co2      ─┐                   ┌─▶ marts/dim_country_year ─▶ marts/fct_emissions_energy ─┬─▶ analytics/co2_intensity
+raw/owid_energy   ─┤                   │           (dbt)                       (dbt)                │       (Polars)
+raw/wb_country    ─┼─▶ staging/stg_* ──┤                                                            └─▶ lake/parquet_archive
+raw/wb_wdi        ─┤       (dbt)       └─▶ history/snap_co2_estimates ─▶ marts/fct_co2_estimate_versions  (DuckDB → Parquet)
 raw/eu_elec_prices─┘                            (dbt snapshot)                       (dbt)
       (dlt)
 ```
@@ -145,6 +173,7 @@ it from the UI if you want it running.
 │   ├── snapshots/     # SCD2 history of OWID's CO2 estimates (schema `history`)
 │   └── macros/        # generate_schema_name -> clean schema names
 ├── transform/         # Polars: derived metrics -> schema `analytics`
+├── lake/              # DuckDB -> hive-partitioned Parquet in data/lake/
 ├── tests/             # pytest + the recorded API fixtures CI runs against
 ├── scripts/           # record_fixtures.py, export_warehouse.py (the release)
 ├── notebooks/         # marimo reactive notebooks

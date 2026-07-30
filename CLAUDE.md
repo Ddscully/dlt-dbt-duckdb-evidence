@@ -9,6 +9,7 @@ runs locally with `uv` against a single DuckDB file — no cloud warehouse.
 
 ```
 dlt (EL) → DuckDB → dbt (staging/marts) → Polars (heavy T) → Evidence (BI)
+                       └─▶ Parquet lake (data/lake/, partitioned by year)
                     all orchestrated by Dagster
 ```
 
@@ -25,7 +26,8 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just dbt-build` | `dbt deps` then `dbt build` (models, snapshot + 70 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
-| `just run` | ingest → dbt-build → transform (shell ordering) |
+| `just lake` | year-partitioned Parquet archive of the warehouse → `data/lake/` |
+| `just run` | ingest → dbt-build → transform → lake (shell ordering) |
 | `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
 | `just materialize` | same pipeline, ordered by the asset graph |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
@@ -168,6 +170,36 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   stamped at ingest, so a freshness failure means the pipeline stopped running.
   It is tautologically green in CI (which loads and then checks), which is why
   it is a `just` recipe rather than a workflow step.
+
+## The lake (`lake/archive.py`)
+
+`just lake` writes the year-keyed tables back out of DuckDB as hive-partitioned
+Parquet under `data/lake/<table>/year=<year>/data_0.parquet` (zstd, gitignored,
+762 files / ~27 MB today). It's part of `just run`, an asset
+(`lake/parquet_archive`) downstream of the mart, and `lake_matches_warehouse`
+checks the read-back row counts and year spans against the warehouse.
+
+- **It's an archive of the warehouse, not a landing zone in front of it.** dlt's
+  filesystem destination writes Parquet but can't partition by a data column;
+  DuckDB's `COPY … PARTITION_BY` can. Reversing the flow (lake first, dbt reading
+  it with `read_parquet`) would mean giving up dlt's schema inference and the
+  `raw` freshness checks — not worth it for a demo of file layout.
+- **`overwrite true` is not enough** and the archive deletes each table's
+  directory before writing. DuckDB only replaces the partitions it is *writing*,
+  so a year whose last row disappeared upstream would keep answering queries out
+  of a stale file. `tests/test_lake.py` pins that.
+- **Rewriting from empty still leaves the output byte-identical run to run**, so
+  the diff is meaningful: revising one country-year upstream changes exactly one
+  of the 762 files. That is the point of the layer — the DuckDB file differs
+  everywhere on every run, so it can't tell you what moved.
+- **275 partitions of ~47 kB is too many small files for a real lake** (~100 MB
+  per partition is the usual rule of thumb, and on object storage this would be
+  275 round trips). Year is the partition column anyway because it's the one every
+  query filters on, and pruning still measures: `where year = 2020` runs in ~23 ms
+  against ~50 ms for the whole archive.
+- **`LAKE_DIR` overrides the destination** the way `WAREHOUSE_PATH` does for the
+  warehouse — `just test-pipeline` points it at a temp directory so a fixture run
+  can't overwrite the real archive with the 17-country slice.
 
 ## Publishing (`scripts/export_warehouse.py`)
 
@@ -313,11 +345,11 @@ Two tiers, and the split is the point — see [`tests/README.md`](tests/README.m
 
 Gotchas:
 
-- **`WAREHOUSE_PATH` overrides the DuckDB file** for `ingest`, `transform` *and*
-  dbt's profile. It must be **absolute**: dbt resolves its path from `dbt/`, the
-  Python layers from the repo root. `just test-pipeline` sets it to a temp file —
-  without that, a fixture run overwrites the real warehouse with the 17-country
-  slice.
+- **`WAREHOUSE_PATH` overrides the DuckDB file** for `ingest`, `transform`, `lake`
+  *and* dbt's profile. It must be **absolute**: dbt resolves its path from `dbt/`,
+  the Python layers from the repo root. `just test-pipeline` sets it to a temp file
+  — without that, a fixture run overwrites the real warehouse with the 17-country
+  slice. `LAKE_DIR` is the same idea for `data/lake/`, and the recipe sets both.
 - **Fixtures filter rows, never columns.** Column-trimming would let a renamed
   upstream field pass CI against a fixture that matches a `stg_` model no longer
   matching reality. The OWID fixtures are gzipped CSV, not Parquet, so they still

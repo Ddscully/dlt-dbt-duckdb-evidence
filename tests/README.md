@@ -11,6 +11,7 @@ warehouse. They cover the parts of the pipeline that have actually broken:
 |---|---|
 | `test_ingest.py` | `_get_json` retry-then-raise, WDI pagination and the 200-with-an-error-body guard, the WDI incremental window (per-indicator watermarks, the full-reload escape hatch) and the replace/merge load split, the Eurostat JSON-stat stride arithmetic |
 | `test_transform.py` | the Polars intensity metric — Mt→kg conversion, the constant-USD denominator, dropped rows, dense per-cohort ranking |
+| `test_lake.py` | the Parquet archive: hive layout, read-back parity with the warehouse, and the stale-partition case DuckDB's `overwrite` doesn't cover |
 | `test_fixtures.py` | that every URL the pipeline can build resolves to a fixture that exists |
 
 ## `just test-pipeline` — integration against fixtures, ~30s
@@ -21,8 +22,9 @@ then merge), every dbt model, seed, snapshot and test, and the Polars layer all
 execute — offline and deterministically. This is what `.github/workflows/ci.yml`
 runs (via the Dagster asset graph, so the asset checks are evaluated too).
 
-It sets `WAREHOUSE_PATH` to a temp file. Don't drop that: without it a fixture
-run overwrites `data/warehouse.duckdb` with the 17-country slice.
+It sets `WAREHOUSE_PATH` to a temp file, and `LAKE_DIR` to a temp directory
+beside it. Don't drop either: without them a fixture run overwrites
+`data/warehouse.duckdb` and `data/lake/` with the 17-country slice.
 
 ## `tests/fixtures/ingest/` — the recorded payloads
 

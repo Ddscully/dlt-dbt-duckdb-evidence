@@ -83,6 +83,25 @@ group by d.country_name
 order by missing_years desc;
 ```
 
+## Querying the lake instead
+
+`just lake` mirrors the year-keyed tables into `data/lake/` as hive-partitioned
+Parquet, which is the better target for a one-off aggregate over a single year —
+and it needs no connection to the warehouse at all, so it works while the pipeline
+holds the writer lock:
+
+```bash
+uv run python -c "import duckdb; \
+  print(duckdb.sql(\"select sum(co2) from \
+    read_parquet('data/lake/raw_owid_co2/**/*.parquet', hive_partitioning=1) \
+    where year = 2020\").df())"
+```
+
+Directory names are the table names with the dot flattened (`raw.owid_co2` →
+`raw_owid_co2`), and `hive_partitioning=1` is what turns the `year=` path segment
+back into a column. The archive is regenerated from the warehouse, so if it looks
+stale, it is — run `just lake`.
+
 ## `history` is not rebuildable
 
 `history.snap_co2_estimates` is a dbt snapshot: SCD2 versions of OWID's CO2

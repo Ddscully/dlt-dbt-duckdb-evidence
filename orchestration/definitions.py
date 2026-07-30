@@ -30,11 +30,19 @@ daily_schedule = dg.ScheduleDefinition(
 )
 
 defs = dg.Definitions(
-    assets=[assets.raw_assets, assets.dbt_models, assets.co2_intensity],
+    # Listed explicitly: an asset defined in `assets.py` but missing here is not
+    # in the graph at all, and `AssetSelection.all()` won't tell you.
+    assets=[
+        assets.raw_assets,
+        assets.dbt_models,
+        assets.co2_intensity,
+        assets.parquet_archive,
+    ],
     asset_checks=[
         assets.wdi_indicators_all_present,
         assets.mart_covers_recent_years,
         assets.co2_intensity_rank_is_dense,
+        assets.lake_matches_warehouse,
     ],
     jobs=[full_refresh_job],
     schedules=[daily_schedule],
