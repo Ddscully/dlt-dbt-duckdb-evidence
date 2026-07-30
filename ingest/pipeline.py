@@ -91,6 +91,10 @@ WDI_PRIMARY_KEY = ("indicator", "country_code", "year")
 # How far back each incremental run re-fetches. See `wdi_start_year`.
 WDI_LOOKBACK_YEARS = 5
 
+# The first year the WDI series covers, and so the first year worth asking for.
+# The orchestration layer partitions `raw/wb_wdi` from here.
+WDI_FIRST_YEAR = 1960
+
 # Where the per-indicator watermarks live inside dlt's resource state.
 WDI_WATERMARK_KEY = "max_year_by_indicator"
 
@@ -171,12 +175,19 @@ def wb_country():
         page += 1
 
 
-def wdi_url(code: str, page: int = 1, start_year: int | None = None) -> str:
+def wdi_url(
+    code: str,
+    page: int = 1,
+    start_year: int | None = None,
+    end_year: int | None = None,
+) -> str:
     """The WDI request URL for one indicator page (also used by the recorder).
 
     `start_year` adds the API's `date` range filter, which is what makes the
     incremental load cheap — see `wdi_start_year`. Without it the request is the
-    whole series, 1960 onwards.
+    whole series, 1960 onwards. `end_year` closes the window at something other
+    than today, which is what a partition backfill asks for; the incremental
+    path leaves it open-ended.
     """
     url = (
         f"https://api.worldbank.org/v2/country/all/indicator/{code}"
@@ -186,7 +197,7 @@ def wdi_url(code: str, page: int = 1, start_year: int | None = None) -> str:
         # the range needs both ends; the API tolerates a future one. UTC rather
         # than the local clock so the URL a fixture is recorded against doesn't
         # depend on which side of midnight the runner sits.
-        url += f"&date={start_year}:{datetime.now(UTC).year}"
+        url += f"&date={start_year}:{end_year if end_year is not None else datetime.now(UTC).year}"
     return url
 
 
@@ -211,12 +222,14 @@ def wdi_full_reload_requested() -> bool:
     return os.environ.get("INGEST_WDI_FULL", "").lower() in {"1", "true", "yes"}
 
 
-def _fetch_wdi_indicator(code: str, start_year: int | None = None) -> list[dict]:
+def _fetch_wdi_indicator(
+    code: str, start_year: int | None = None, end_year: int | None = None
+) -> list[dict]:
     """All rows for one WDI indicator, paginating until `meta.pages` is exhausted."""
     rows_out: list[dict] = []
     page = 1
     while True:
-        payload = _get_json(wdi_url(code, page, start_year))
+        payload = _get_json(wdi_url(code, page, start_year, end_year))
         # World Bank returns [metadata, [records...]]; anything else is an
         # error object served with a 200.
         if not (isinstance(payload, list) and len(payload) == 2):
@@ -247,7 +260,7 @@ def _fetch_wdi_indicator(code: str, start_year: int | None = None) -> list[dict]
     primary_key=WDI_PRIMARY_KEY,
     columns=WDI_COLUMNS,
 )
-def wb_wdi():
+def wb_wdi(years: tuple[int, int] | None = None):
     """The one incremental resource: `merge` on `WDI_PRIMARY_KEY` with a lookback
     window, where the other four are full `replace` reloads.
 
@@ -256,6 +269,11 @@ def wb_wdi():
     that asks for five years still leaves 1960 onwards intact. What it gives up
     is `replace`'s guarantee that the table is exactly what the API just served:
     a country-year the World Bank *withdraws* stays here until a full reload.
+
+    `years` is the *backfill* path — an explicit `(first, last)` window asked for
+    verbatim, for every indicator, which is what a Dagster partition key means
+    here. The same merge key makes it re-runnable: loading 1995 twice leaves the
+    table exactly as it was after the first time.
     """
     # Paginated: a single 20k-row page used to cover every indicator, but the
     # series grow by ~270 rows a year and were already at 87% of that cap, so
@@ -268,27 +286,37 @@ def wb_wdi():
     watermarks = dlt.current.resource_state().setdefault(WDI_WATERMARK_KEY, {})
     full_reload = wdi_full_reload_requested()
 
+    def window(code: str) -> tuple[int | None, int | None]:
+        if years is not None:
+            return years
+        if full_reload:
+            return (None, None)
+        return (wdi_start_year(watermarks.get(code)), None)
+
     # Each indicator's fetch (and its pages) is independent of the others and
     # only hits the World Bank API — nothing here touches the DuckDB writer
     # lock — so a small thread pool fetches them concurrently instead of one
     # blocking call at a time.
     with ThreadPoolExecutor(max_workers=8) as pool:
         pending = {
-            code: pool.submit(
-                _fetch_wdi_indicator,
-                code,
-                None if full_reload else wdi_start_year(watermarks.get(code)),
-            )
+            code: pool.submit(_fetch_wdi_indicator, code, *window(code))
             for code in WB_WDI_INDICATORS
         }
         for code, future in pending.items():
             rows = future.result()
-            years = [row["year"] for row in rows if row["year"] is not None]
-            if years:
+            loaded = [row["year"] for row in rows if row["year"] is not None]
+            if loaded and years is None:
                 # Advanced only after a clean fetch, and committed by dlt only if
                 # the load succeeds — a half-failed run can't move the watermark
                 # past years that never landed.
-                watermarks[code] = max(years + [watermarks.get(code, 0)])
+                #
+                # A backfill deliberately doesn't touch it. The watermark means
+                # "everything up to here is loaded", and a partition run only
+                # claims its own window: backfilling 2020-2025 into an empty
+                # warehouse would otherwise leave a 2025 watermark, and the next
+                # incremental run would look back five years over sixty years of
+                # history that was never fetched.
+                watermarks[code] = max(loaded + [watermarks.get(code, 0)])
             yield rows
 
 
@@ -326,8 +354,14 @@ def eu_elec_prices():
 
 
 @dlt.source
-def public_indicators():
-    return [owid_co2(), owid_energy(), wb_country(), wb_wdi(), eu_elec_prices()]
+def public_indicators(wdi_years: tuple[int, int] | None = None):
+    """The five resources as one dlt source.
+
+    `wdi_years` is threaded through to `wb_wdi` rather than bound onto the
+    resource afterwards, so the Dagster asset can build a source for one
+    partition range with the same call the CLI makes for an incremental run.
+    """
+    return [owid_co2(), owid_energy(), wb_country(), wb_wdi(wdi_years), eu_elec_prices()]
 
 
 # Drop + re-infer the schema of the resources actually being loaded, so type or

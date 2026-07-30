@@ -195,6 +195,14 @@ def test_wdi_url_adds_the_date_window():
     assert fixtures.path_for(url).name == "wb_wdi_SP.POP.TOTL.json"
 
 
+def test_wdi_url_closes_the_window_when_given_an_end_year():
+    """A partition asks for one year, so the window needs a right-hand end — the
+    incremental path leaves it open at today."""
+    url = pipeline.wdi_url("SP.POP.TOTL", 1, 1995, 1995)
+    assert "&date=1995:1995" in url
+    assert fixtures.path_for(url).name == "wb_wdi_SP.POP.TOTL.json"
+
+
 def test_wdi_start_year_is_a_lookback_window_not_the_watermark():
     """Restatements are the whole reason for the window: asking for `> 2025`
     would never see the World Bank revise 2023."""
@@ -282,6 +290,56 @@ def test_wb_wdi_full_reload_env_var_ignores_the_watermark(monkeypatch):
     assert state[pipeline.WDI_WATERMARK_KEY] == {"SP.POP.TOTL": 2025}
 
 
+# --------------------------------------------------------------------------- #
+# wb_wdi — the partitioned (backfill) window
+# --------------------------------------------------------------------------- #
+
+
+def test_wb_wdi_partition_window_is_asked_for_verbatim(monkeypatch):
+    """A partition key means "load exactly these years", for every indicator —
+    including the ones that have a watermark, which the incremental path would
+    have windowed differently."""
+    _state(monkeypatch, {pipeline.WDI_WATERMARK_KEY: {"SP.POP.TOTL": 2025}})
+    calls = _serve_wdi(
+        monkeypatch,
+        {
+            "SP.POP.TOTL": [_wdi_row("USA", "1990", 1.0)],
+            "NEW.CODE": [_wdi_row("USA", "1990", 2.0)],
+        },
+    )
+
+    list(pipeline.wb_wdi((1990, 1995)))
+    assert all("&date=1990:1995" in url for url in calls)
+    assert len(calls) == 2  # one request per indicator, not one per year
+
+
+def test_wb_wdi_backfill_does_not_move_the_watermark(monkeypatch):
+    """The watermark means "everything up to here is loaded", which a backfill
+    of one window can't claim.
+
+    The failure it prevents: partitions 2020-2025 into an empty warehouse would
+    leave a 2025 watermark, and the next incremental run would look back five
+    years over sixty years of history that was never fetched.
+    """
+    state = _state(monkeypatch, {})
+    _serve_wdi(monkeypatch, {"SP.POP.TOTL": [_wdi_row("USA", "2025", 1.0)]})
+
+    list(pipeline.wb_wdi((2020, 2025)))
+    assert state[pipeline.WDI_WATERMARK_KEY] == {}
+
+
+def test_public_indicators_threads_the_window_to_the_resource(monkeypatch):
+    """The window reaches the resource through the *source*, which is what lets
+    the Dagster asset build a partitioned load with the same call the CLI makes
+    for an incremental one."""
+    _state(monkeypatch, {})
+    calls = _serve_wdi(monkeypatch, {"SP.POP.TOTL": [_wdi_row("USA", "1975", 1.0)]})
+
+    source = pipeline.public_indicators(wdi_years=(1975, 1975))
+    list(source.resources["wb_wdi"])
+    assert calls and all("&date=1975:1975" in url for url in calls)
+
+
 def test_wb_wdi_rejects_error_object_served_with_200(monkeypatch):
     """The World Bank answers a bad indicator code with a 200 and a message
     object, which `raise_for_status` can't catch.
@@ -315,7 +373,12 @@ def test_load_groups_refreshes_only_the_replace_resources():
 
 
 def test_load_groups_covers_every_resource_in_the_source_exactly_once():
-    """A resource missing from both tuples would silently stop being loaded."""
+    """A resource missing from both tuples would silently stop being loaded.
+
+    The two tuples are also what the two `@dlt_assets` blocks are built from
+    (the partitioned one is `INCREMENTAL_RESOURCES`), so this is what keeps the
+    split from dropping a resource out of the asset graph as well.
+    """
     listed = [name for names, _ in pipeline.load_groups() for name in names]
     assert sorted(listed) == sorted(r.name for r in pipeline.public_indicators().resources.values())
     assert len(listed) == len(set(listed))

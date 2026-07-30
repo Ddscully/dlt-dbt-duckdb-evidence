@@ -56,6 +56,9 @@ defs = dg.Definitions(
     # in the graph at all, and `AssetSelection.all()` won't tell you.
     assets=[
         assets.raw_assets,
+        # Separate from the four above because it is partitioned by year and
+        # Dagster gives a multi-asset one partitions_def for all of its assets.
+        assets.raw_wdi_asset,
         assets.dbt_models,
         assets.co2_intensity,
         assets.pipeline_status,

@@ -117,6 +117,21 @@ materialize-select selection:
     uv run --group orchestration dagster asset materialize \
         -m orchestration.definitions --select '{{ selection }}'
 
+# Re-load WDI for one year or a range of years: `just backfill-wdi 1995` or
+# `just backfill-wdi 1990 1995`. Asks the World Bank for exactly that window and
+# merges it in, so it is re-runnable — the same year loaded twice leaves the same
+# table. Only `raw/wb_wdi` is partitioned, so this can't pull the downstream
+# models along (the CLI rejects a range over unpartitioned assets); follow with
+# `just dbt-build` or `just materialize`.
+backfill-wdi start end='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$DAGSTER_HOME"
+    end="{{ end }}"
+    uv run --group orchestration dagster asset materialize \
+        -m orchestration.definitions --select 'raw/wb_wdi' \
+        --partition-range "{{ start }}...${end:-{{ start }}}"
+
 # Open the warehouse in Harlequin (terminal SQL IDE)
 sql:
     uv run harlequin data/warehouse.duckdb

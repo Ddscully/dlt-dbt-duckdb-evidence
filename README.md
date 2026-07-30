@@ -89,7 +89,10 @@ biggest pull (~190k rows across 11 indicators) and loads with `merge` on
 lookback rather than "everything newer than last time" because the World Bank
 restates published years, and the two dispositions load in two `run()` calls
 because `refresh` is a property of a run, so refreshing the replace tables in the
-same call would drop the incremental one's history along with its watermark.
+same call would drop the incremental one's history along with its watermark. A
+restatement older than the window doesn't need the whole series pulled again:
+WDI is partitioned by year in the asset graph, so `just backfill-wdi 1997`
+re-fetches exactly that year and merges it in.
 
 ## Warehouse layout
 
@@ -161,6 +164,7 @@ just dagster                              # UI on :3000: graph, runs, freshness,
 just materialize                          # whole graph, headless
 just materialize-site                     # ...plus the Evidence site (needs Node)
 just materialize-select 'raw/wb_wdi*'     # one source + everything downstream
+just backfill-wdi 1990 1995               # re-load WDI for a range of years
 ```
 
 The site is the one asset held out of the `full_refresh` job: it shells out to
@@ -173,6 +177,7 @@ What that buys over the shell chain:
 | | |
 |---|---|
 | **Selective rebuilds** | `raw/wb_wdi*` reloads one API and rebuilds only what depends on it. dlt refreshes just that resource, so its four siblings keep their data. (`*` is all downstream; a bare `+` is only one layer.) |
+| **Re-runnable backfills** | `raw/wb_wdi` is partitioned by year (1960 → now), so a World Bank restatement older than the five-year lookback is a unit of work you can point at instead of a 190k-row full reload. A range is one request per indicator, and `merge` on `(indicator, country_code, year)` makes re-running a year a no-op. It's the only partitioned asset: the other four sources are whole-file downloads with no per-year fetch to express. |
 | **Freshness policies** | Raw assets warn after 2 days and fail after 7; modelled assets are expected by 08:00 UTC daily. A schedule that quietly stops firing turns assets stale in the UI instead of leaving no trace. |
 | **Asset checks** | dbt's `not_null` tests show up as checks on the model they guard, next to Python checks dbt can't express (every WDI indicator present, mart reaching a recent year, dense ranks with no gaps). |
 | **Lineage that can't drift** | The graph is derived from the dbt manifest and the dlt source, not maintained alongside them. |

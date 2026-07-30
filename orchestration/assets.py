@@ -33,7 +33,15 @@ from dagster_dbt import DagsterDbtTranslator, DbtCliResource, dbt_assets, get_as
 from dagster_dlt import DagsterDltResource, DagsterDltTranslator, dlt_assets
 from dagster_dlt.translator import DltResourceTranslatorData
 
-from ingest.pipeline import WB_WDI_INDICATORS, build_pipeline, load_groups, public_indicators
+from ingest.pipeline import (
+    FULL_REFRESH_RESOURCES,
+    INCREMENTAL_RESOURCES,
+    WB_WDI_INDICATORS,
+    WDI_FIRST_YEAR,
+    build_pipeline,
+    load_groups,
+    public_indicators,
+)
 from lake.archive import ARCHIVED_TABLES, LAKE_DIR, run as write_lake, table_dir
 from orchestration.resources import dbt_project
 from scripts.build_report import (
@@ -110,28 +118,102 @@ class RawSchemaDltTranslator(DagsterDltTranslator):
         )
 
 
+# Yearly partitions, and only on `raw/wb_wdi` — see `raw_wdi_asset`. Dagster
+# requires every asset in a multi-asset to share one `partitions_def`, which is
+# why that resource sits in a second `@dlt_assets` block rather than beside the
+# other four.
+WDI_PARTITIONS = dg.TimeWindowPartitionsDefinition(
+    start=str(WDI_FIRST_YEAR),
+    fmt="%Y",
+    cron_schedule="0 0 1 1 *",
+    # The current year has to be a partition — it's the one anybody wants to
+    # re-run. A yearly window only closes on 1 January, so without the offset the
+    # newest partition is *last* year and today's data has nowhere to go.
+    end_offset=1,
+)
+
+
 @dlt_assets(
-    dlt_source=public_indicators(),
+    # The four `replace` resources. `wb_wdi` is loaded by the partitioned block
+    # below, and a resource in both would be loaded twice per refresh.
+    dlt_source=public_indicators().with_resources(*FULL_REFRESH_RESOURCES),
     dlt_pipeline=build_pipeline(),
     dagster_dlt_translator=RawSchemaDltTranslator(),
     name="ingest_public_indicators",
 )
 def raw_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
-    # One op for all five resources: DuckDB takes a single writer, so fanning
+    # One op for all four resources: DuckDB takes a single writer, so fanning
     # these out into parallel steps would just make them fight over the file.
     #
-    # Two loads inside it, though, because `refresh` is a run-level argument:
-    # the replace resources want their schema dropped and re-inferred, and
-    # `wb_wdi` merges into what's already there and would lose its incremental
-    # watermark to the same drop. `load_groups` is shared with the CLI so both
-    # paths split it the same way, and it takes the selection so materialising
-    # one asset still runs one load.
+    # `load_groups` is still what supplies the `run()` kwargs, rather than
+    # spelling `refresh=REFRESH` here — it is shared with the CLI so both paths
+    # split the dispositions the same way, and it takes the selection so
+    # materialising one asset still runs one load.
     selected = {key.path[-1] for key in context.selected_asset_keys}
     for names, kwargs in load_groups(selected):
-        context.log.info("loading %s (%s)", ", ".join(names), kwargs or "incremental")
+        context.log.info("loading %s (%s)", ", ".join(names), kwargs)
         yield from dlt.run(
             context=context,
             dlt_source=public_indicators().with_resources(*names),
+            **kwargs,
+        )
+
+
+@dlt_assets(
+    dlt_source=public_indicators().with_resources(*INCREMENTAL_RESOURCES),
+    dlt_pipeline=build_pipeline(),
+    dagster_dlt_translator=RawSchemaDltTranslator(),
+    name="ingest_wdi",
+    partitions_def=WDI_PARTITIONS,
+    # One run per *range*, not per year: the World Bank takes `&date=lo:hi`, so a
+    # 30-year backfill is 11 requests (one per indicator) rather than 330.
+    backfill_policy=dg.BackfillPolicy.single_run(),
+)
+def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
+    """WDI, the one source with a per-year fetch to express.
+
+    Partitioning the other four would be a fiction: they are whole-file
+    `replace` loads (two CSVs, a JSON-stat payload and a dimension table) with
+    no way to ask for one year. WDI's API takes a date range, its disposition is
+    `merge`, and its primary key includes `year` — so a partition here is a real
+    unit of work that can be re-run without duplicating a row.
+
+    Two paths into the same load, and the difference is only which window is
+    asked for:
+
+    * **partitioned** — an explicit year range, which is what a backfill from the
+      UI or `just backfill-wdi` sends. Loads exactly those years and leaves the
+      watermark alone.
+    * **unpartitioned** — the incremental lookback, i.e. what the daily schedule,
+      CI and the release workflow have always done. `full_refresh` contains this
+      asset and runs with no partition key, and *that has to keep working*:
+      three workflows execute that job on a bare checkout.
+
+    A partitioned asset in an unpartitioned run doesn't fail at plan time — it
+    fails inside the body, the first time it touches `context.partition_key`. So
+    the fallback is the guard below, not something the job definition provides.
+    """
+    years = None
+    # Both properties, because they are not the same question:
+    # `has_partition_key_range` is False for a run targeting a *single*
+    # partition, so testing it alone makes `--partition 1995` fall quietly
+    # through to the incremental branch — a run that says 1995 and loads the
+    # lookback window instead, successfully. `partition_key_range` itself is the
+    # one that covers both (start == end for a single key).
+    if context.has_partition_key or context.has_partition_key_range:
+        key_range = context.partition_key_range
+        years = (int(key_range.start), int(key_range.end))
+        context.log.info("loading wb_wdi for %s-%s (partition backfill)", *years)
+    else:
+        context.log.info("loading wb_wdi over its incremental lookback window")
+
+    # `load_groups` again rather than a bare `dlt.run(...)`: it is what asserts
+    # this resource loads *without* `refresh`, which would drop the table and the
+    # watermark with it.
+    for names, kwargs in load_groups(INCREMENTAL_RESOURCES):
+        yield from dlt.run(
+            context=context,
+            dlt_source=public_indicators(wdi_years=years).with_resources(*names),
             **kwargs,
         )
 
@@ -475,4 +557,5 @@ __all__ = [
     "parquet_archive",
     "pipeline_status",
     "raw_assets",
+    "raw_wdi_asset",
 ]

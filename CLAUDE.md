@@ -33,6 +33,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just materialize` | same pipeline, ordered by the asset graph (`full_refresh`, no Evidence) |
 | `just materialize-site` | `full_refresh` + the Evidence site (`publish_site`; needs Node) |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
+| `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — the partitioned `raw/wb_wdi` asset |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
 | `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
 | `just restore-history prev/warehouse.duckdb` | copy `history` out of a published release so `dbt build` appends to that snapshot |
@@ -403,8 +404,11 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   `(indicator, country_iso3, year)` is what makes the partial fetch safe. Two
   things it gives up, both deliberate: a country-year the World Bank *withdraws*
   stays in `raw.wb_wdi` until a full reload, and a restatement older than the
-  window is never seen — `just ingest-wdi-full` (`INGEST_WDI_FULL=1`) is the
-  escape hatch. dlt resets its own state when the destination is empty, so
+  window is never seen — `just ingest-wdi-full` (`INGEST_WDI_FULL=1`) re-fetches
+  everything, and `just backfill-wdi 1997` re-fetches exactly that year through
+  the partitioned asset. The window and the partitions sit *beside* each other on
+  purpose: the daily path stays cheap and unattended, and reaching further back
+  is an explicit act with a key you can point at. dlt resets its own state when the destination is empty, so
   deleting the warehouse still gives you a full load; dropping *just* the raw
   table does not.
 - **dlt state is keyed on the pipeline *name*, not the destination.** So a
@@ -517,9 +521,48 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 - **`orchestration/assets.py` must not use `from __future__ import annotations`.**
   Dagster inspects the `context` parameter's annotation *object*; a stringified
   annotation fails its check with a confusing "Cannot annotate `context`" error.
-- **Everything runs in one process** (`in_process_executor`, and all five dlt
-  resources in a single op). DuckDB takes one writer at a time, so parallel steps
-  would just fight over the file lock.
+- **Everything runs in one process** (`in_process_executor`, and the four
+  `replace` dlt resources in a single op). DuckDB takes one writer at a time, so
+  parallel steps would just fight over the file lock.
+- **`raw/wb_wdi` is partitioned by year and nothing else is** — which is why it
+  sits in its own `@dlt_assets` block (`ingest_wdi`). Dagster gives every asset
+  in a multi-asset the same `partitions_def`, and the other four sources are
+  whole-file `replace` downloads with no per-year fetch to express, so
+  partitioning them would be a fiction. WDI earns it: the API takes `&date=lo:hi`,
+  the disposition is `merge`, and `year` is in the primary key, so a partition is
+  a real re-runnable unit of work. The split is safe because both blocks are
+  built from `FULL_REFRESH_RESOURCES` / `INCREMENTAL_RESOURCES` and the covering
+  test in `tests/test_ingest.py` still holds those two to the source.
+  - **The asset has two paths and the unpartitioned one has to keep working.**
+    `full_refresh` contains this asset and `ci.yml` / `nightly.yml` /
+    `release-data.yml` execute that job with no partition key. A partitioned
+    asset in an unpartitioned run doesn't fail at plan time — it fails *inside
+    the body*, at the first touch of `context.partition_key`. So the fallback is
+    an explicit guard in the asset, not something the job gives you: no partition
+    means the incremental lookback, exactly as before.
+  - **Guard on `has_partition_key` *and* `has_partition_key_range`.**
+    `has_partition_key_range` is False for a run targeting a single partition, so
+    testing it alone makes `--partition 1995` fall through to the incremental
+    branch — and it *succeeds*, having loaded the wrong window. (Verified by
+    doing it.) `context.partition_key_range` itself covers both cases; it returns
+    `start == end` for one key.
+  - **A backfill deliberately doesn't move the WDI watermark.** The watermark
+    means "everything up to here is loaded", which a run over one window can't
+    claim: partitions 2020–2025 into an empty warehouse would otherwise leave a
+    2025 watermark and the next incremental run would look back five years over
+    sixty years that were never fetched.
+  - **`end_offset=1`, or the current year isn't a partition.** A yearly window
+    only closes on 1 January, so the newest partition would be last year — the
+    one you actually want to re-run wouldn't exist.
+  - `BackfillPolicy.single_run()` (which a `TimeWindowPartitionsDefinition` also
+    defaults to) is what makes a range one request per indicator instead of one
+    per year: 1990–2025 is 11 requests, not 396. It also means the CLI's
+    `--partition-range` refuses any selection that reaches the *unpartitioned*
+    downstream models, so `just backfill-wdi` targets `raw/wb_wdi` alone and you
+    rebuild after it.
+  - Partition status starts empty even though `raw.wb_wdi` holds the full series:
+    the rows came from unpartitioned runs. That's cosmetic — the merge key, not
+    Dagster's partition record, is what makes a re-run idempotent.
 - **The Evidence site is an asset, and it's the one asset excluded from
   `full_refresh`.** `reports/evidence_site` shells out to npm via
   `scripts/build_report.py`; `ci.yml`, `nightly.yml` and `release-data.yml` all run
