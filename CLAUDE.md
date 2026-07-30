@@ -61,14 +61,73 @@ one whose entry is `just lint`).
   `just lint` passed and the commit hook failed on the same file. It also can't
   run from `dbt/`, so the dbt templater resolves `profiles.yml`'s
   `../data/warehouse.duckdb` one directory too high and dies before linting.
-- CI lints via the same venv, so it agrees on rules. It does still lint a narrower
-  path than the recipe (`models`, not `models snapshots`).
+- CI lints via the same venv, so it agrees on rules, and over the same paths
+  (`models snapshots`) — a narrower set there would mean CI passing SQL a
+  contributor's commit hook rejects.
 - **The `just lint` hook means CI has to install `just`.** `ci.yml` runs
   `pre-commit run --all-files`, and a `local` hook whose entry is a recipe fails
   with "Executable `just` not found" on a runner that hasn't got it — which is how
   the hook shipped green locally and red on the first push (`uv tool install
   rust-just` + `$GITHUB_PATH` is the fix). Anything else moved into a `local` hook
   inherits the same requirement.
+
+The Python half is ruff, configured in `pyproject.toml` and run only through
+pre-commit (`ruff-check` with `--fix`, then `ruff-format`).
+
+- **ruff runs its own default rule set, and that set is not stable across
+  versions.** 0.9 enabled 59 rules; 0.16 enables 413 across 40 families. There is
+  deliberately no `select` — what holds the rules still is the exact `rev` in
+  `.pre-commit-config.yaml`, so `pre-commit autoupdate` is the only thing that can
+  change what is enforced. This is the mirror image of sqlfluff: ruff is *not* in
+  the `dev` group, so pre-commit's copy is the only one and can't drift.
+- **`extend-select` re-adds the 18 rules 0.16 dropped** from the defaults
+  (`E401`, `E402`, the `E7xx` comparison rules, `F403`/`F405`/`F406`, `F722`).
+  They were enforced before the widening and the tree still passes them; without
+  the list, a version bump silently stops checking star imports and `== None`.
+- **`combine-as-imports = true`, or the import blocks get shredded.** ruff's
+  default splits `from x import a, run as b` onto two statements. Four layers here
+  each export a `run()`, so `orchestration/assets.py` aliases every one of them —
+  the default turns its eight-line import block into twelve and separates
+  `run as write_lake` from its module.
+- **`B018` is ignored for `notebooks/*.py` on purpose.** marimo stores a notebook
+  as Python where each cell is a function, and the bare expression on a cell's
+  last line is how it renders — `df` at the end of a cell *is* the chart. The rule
+  is right about the syntax and wrong about the file; taking its fix blanks the
+  notebook.
+- **The hook id is `ruff-check`.** Plain `ruff` still works but is the legacy
+  alias as of 0.12.
+- **0.16 formats Python code blocks inside Markdown by default.** The hook is
+  scoped to `types_or: [python, pyi, jupyter]` so it never sees `.md` and CI is
+  unaffected — but a manual `ruff format .` will rewrite python blocks in `docs/`
+  and `README.md`. Evidence pages use `` ```sql `` blocks and are untouched.
+
+## Dependency and action versions
+
+`.github/dependabot.yml` watches three ecosystems — `github-actions` (`/`), `uv`
+(`/`) and `npm` (`/reports`) — monthly, each grouped to a single PR.
+
+- **It exists because green CI proves nothing about versions.** Every action sat
+  on a Node 20 major for months while `ci.yml` passed, until the runners started
+  warning that they were forcing those actions onto Node 24. Nothing in the repo
+  could have said so.
+- **The `uv` entry is `versioning-strategy: lockfile-only`, and must stay that
+  way.** The bounds in `pyproject.toml` are minimum-supported versions, not pins
+  (`duckdb>=1.1`, `polars>=1.17` sit far below what resolves). Dependabot's
+  default for uv raises the lower bound instead, and its first run did exactly
+  that — `dlt[duckdb]>=1.5` to `>=1.29.1`, dropping two dozen releases for no
+  change to what installs, since `uv.lock` already resolved there.
+- **`npm` is deliberately left on the default.** Those are `^` ranges, so the
+  major *is* the pin and an Evidence 40 → 41 bump is a real upgrade worth seeing
+  as a PR. `lockfile-only` there would quietly cap the site at 40.x forever.
+- **Dependabot scans the moment the config lands**, not on the next scheduled
+  date — expect PRs immediately after touching that file.
+- **`astral-sh/setup-uv` is pinned to an exact patch, not a major.** It stopped
+  publishing moving major/minor tags at v8 as a supply-chain measure, so `@v9`
+  does not resolve at all. All four workflows carry a comment saying so, because
+  the obvious tidy-up is to "simplify" it back to a major.
+- **`pages.yml` is the only workflow that needs Node** (24; the Evidence build).
+  The other three run on a bare uv checkout — see the Orchestration section for
+  why the site is excluded from `full_refresh`.
 
 ## Agent skills
 
