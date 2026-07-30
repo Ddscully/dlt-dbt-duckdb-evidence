@@ -305,55 +305,89 @@ order by t_per_person desc
     <Column id=t_per_person title="t CO₂ / person" fmt="0.00"/>
 </DataTable>
 
-## 5. The cuts are real, and the world total still rises
+## 5. Cleaner per dollar, not fewer tonnes
 
-Absolute change in emissions, 2015–2023, the period covering most of the reductions
-above.
+Finding 3 showed decoupling is real on a real-terms basis. It's worth separating
+two things that get conflated: whether a country's economy got *cleaner*
+(CO₂ per dollar of real GDP), and whether its *tonnage* went up or down. The
+first is close to universal; the second depends on how fast the economy grew
+relative to that cleanup. Carbon intensity indexed to 2005, for the six largest
+emitters:
 
-```sql absolute_change
-with base_year as (
-    select country_iso3, co2_mt
-    from warehouse.emissions_energy
-    where year = 2015
-),
-
-end_year as (
-    select country_iso3, country_name, co2_mt
-    from warehouse.emissions_energy
-    where year = 2023
+```sql intensity_trend
+with base as (
+    select country_iso3, co2_per_gdp_const_usd as base_intensity
+    from warehouse.co2_intensity
+    where year = 2005
+      and country_iso3 in ('CHN', 'IND', 'USA', 'DEU', 'GBR', 'JPN')
 )
 
 select
-    e.country_name,
-    e.co2_mt - b.co2_mt as change_mt,
-    case when e.co2_mt >= b.co2_mt then 'Added' else 'Removed' end as direction
-from end_year e
-inner join base_year b on e.country_iso3 = b.country_iso3
-where b.co2_mt is not null
-order by abs(e.co2_mt - b.co2_mt) desc
-limit 12
+    i.country_name,
+    i.year,
+    100 * i.co2_per_gdp_const_usd / b.base_intensity as intensity_index,
+    case when i.country_iso3 in ('CHN', 'IND') then 'Tonnage still rising' else 'Tonnage falling' end as tonnage_direction
+from warehouse.co2_intensity i
+inner join base b on i.country_iso3 = b.country_iso3
+where i.year >= 2005
+  and i.co2_per_gdp_const_usd is not null
+order by i.country_name, i.year
 ```
 
-<BarChart
-    data={absolute_change}
-    x=country_name
-    y=change_mt
-    series=direction
+<LineChart
+    data={intensity_trend}
+    x=year
+    y=intensity_index
+    series=country_name
     seriesColors={{
-        'Removed': ['#2a78d6', '#3987e5'],
-        'Added': ['#eb6834', '#d95926']
+        'China': ['#eb6834', '#d95926'],
+        'India': ['#eda100', '#c98500'],
+        'United States': ['#2a78d6', '#3987e5'],
+        'Germany': ['#1baf7a', '#199e70'],
+        'United Kingdom': ['#8a5fd6', '#7248c4'],
+        'Japan': ['#5f9ea0', '#4c8284']
     }}
-    swapXY=true
-    sort=false
-    yFmt="0"
-    xAxisTitle="Country"
-    yAxisTitle="Change in CO₂, 2015–2023 (Mt)"
-/>
+    yAxisTitle="Carbon intensity, 2005 = 100"
+>
+    <ReferenceLine y=100 label="2005 level" labelPosition=aboveEnd/>
+</LineChart>
 
-China added 2,314 Mt over the period. The United States, Japan, Germany and the UK
-between them removed about 1,005 Mt. The percentage reductions in finding 3 are
-genuine, and in absolute tonnes they still come to less than half of what one
-country added over eight years.
+Every line falls. China's carbon intensity is down 47% since 2005 and India's is
+down 13% — both while renewables' share of their energy mix roughly tripled and
+grew 39% respectively. Neither country's absolute emissions fell: China added
+6,290 Mt over the same period, India 1,867 Mt, because GDP grew faster than
+intensity dropped. The US, Germany, UK and Japan cut intensity by roughly as
+much or more and grew slower, so tonnage fell too.
+
+```sql intensity_table
+with base as (
+    select country_iso3, co2_mt as base_co2, co2_per_gdp_const_usd as base_intensity, renewables_share_pct as base_renew
+    from warehouse.co2_intensity
+    where year = 2005
+)
+
+select
+    i.country_name,
+    i.co2_mt - b.base_co2 as co2_change_mt,
+    100 * (i.co2_per_gdp_const_usd / b.base_intensity - 1) as intensity_change_pct,
+    100 * (i.renewables_share_pct / nullif(b.base_renew, 0) - 1) as renewables_change_pct
+from warehouse.co2_intensity i
+inner join base b on i.country_iso3 = b.country_iso3
+where i.year = 2023
+  and i.country_iso3 in ('CHN', 'IND', 'USA', 'DEU', 'GBR', 'JPN')
+order by co2_change_mt desc
+```
+
+<DataTable data={intensity_table} rows=6>
+    <Column id=country_name title="Country"/>
+    <Column id=co2_change_mt title="CO₂ change, 2005–23 (Mt)" fmt="#,##0" contentType=delta downIsGood=true/>
+    <Column id=intensity_change_pct title="Carbon intensity" fmt='0.0"%"' contentType=delta downIsGood=true/>
+    <Column id=renewables_change_pct title="Renewables share" fmt='0.0"%"' contentType=delta/>
+</DataTable>
+
+One caveat carries over from finding 3: these are territorial emissions, so a
+falling intensity number doesn't rule out the cleanup being partly offshored
+production rather than a genuinely lower-carbon economy.
 
 ---
 
