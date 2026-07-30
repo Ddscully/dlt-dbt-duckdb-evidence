@@ -26,8 +26,9 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just dbt-build` | `dbt deps` then `dbt build` (models, snapshot + 70 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
+| `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
 | `just lake` | year-partitioned Parquet archive of the warehouse → `data/lake/` |
-| `just run` | ingest → dbt-build → transform → lake (shell ordering) |
+| `just run` | ingest → dbt-build → transform → pipeline-status → lake (shell ordering) |
 | `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
 | `just materialize` | same pipeline, ordered by the asset graph |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
@@ -90,7 +91,8 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
   `fct_co2_estimate_versions` (revision history, off the snapshot)
 - `history` — the dbt snapshot `snap_co2_estimates`: SCD2 versions of OWID's CO2
   numbers. **The one table here that no rebuild can reproduce** — see below
-- `analytics` — Polars output, `co2_intensity`
+- `analytics` — Polars output: `co2_intensity`, plus `pipeline_sources` /
+  `pipeline_tables` / `pipeline_tests` (see *Pipeline observability* below)
 
 Grain of every fact/staging model is **`(country_iso3, year)`**; joins are on
 ISO3 country code + year. The country dimension (`stg_country`) supplies
@@ -177,6 +179,31 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   stamped at ingest, so a freshness failure means the pipeline stopped running.
   It is tautologically green in CI (which loads and then checks), which is why
   it is a `just` recipe rather than a workflow step.
+
+## Pipeline observability (`transform/pipeline_status.py`)
+
+`just pipeline-status` writes three flat tables into `analytics` —
+`pipeline_sources` (dlt load time, rows and year span per landing table),
+`pipeline_tables` (rows and year span per modelled table) and `pipeline_tests`
+(every dbt test, what it guards, and how many rows are currently failing it).
+`reports/pages/pipeline.md` renders them; the asset is
+`analytics/pipeline_status`, downstream of `co2_intensity`.
+
+- **None of it is new instrumentation.** dlt already stamps `_dlt_load_id`, dbt
+  already stores failing rows in `dbt_test__audit`, and `information_schema`
+  already knows every table's shape. The module exists because two of the three
+  need dynamic SQL over a table list that isn't known until runtime, which a
+  static Evidence source query can't express.
+- **Test names come from `dbt/target/manifest.json`, not the audit table name.**
+  dbt truncates and hashes a `store_failures` alias longer than 63 characters
+  (`dbt_utils_accepted_range_fct_c_1c6718ee…`), so the table name alone is not a
+  label. The manifest also supplies the model each test guards and the column it
+  tests. It's gitignored, so `build_tests` degrades to bare table names when it's
+  absent rather than failing.
+- **It excludes its own output from the inventory.** Otherwise the table count is
+  10 on a first build and 13 on every later one, for no change in the warehouse.
+- **It must run after `dbt build`** — it reads `dbt_test__audit` and the
+  manifest, neither of which exists before one.
 
 ## The lake (`lake/archive.py`)
 
@@ -293,6 +320,30 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
 - **World Bank region names are padded** — `'Sub-Saharan Africa '` and
   `'Latin America & Caribbean '` come back with a trailing space. `stg_country`
   trims them, so join and group on the trimmed values.
+- **"Latest year" is per column, not per table.** `max(year)` on the mart is
+  whichever source runs furthest ahead (Eurostat prices, a year beyond the rest),
+  and coverage thins out unevenly before that: `co2_mt` holds 214 countries into
+  the latest year, `primary_energy_twh` collapses from ~210 to **79**,
+  `consumption_co2` stops a year earlier still. Cutting an energy chart to the
+  latest CO2 year quietly drops two thirds of its sample. The Evidence layer
+  reads `sources/warehouse/latest_years.sql` — latest year per *metric family*,
+  each with its own coverage floor — instead of hardcoding a literal; add a
+  family there before charting a column whose coverage curve differs.
+- **`renewables_share_pct` covers 79 countries; the `*_elec` columns cover ~210.**
+  OWID's broad-coverage energy series is the *electricity* mix, not the
+  primary-energy mix. For anything where country coverage matters, prefer
+  `low_carbon_share_elec_pct` or `carbon_intensity_elec_g_kwh` (gCO2/kWh, which
+  also reads directly: coal grid ~800, gas ~400, nuclear/hydro under 50). They
+  answer a narrower question — electricity is roughly a third of energy use — so
+  the two are not interchangeable in levels, only in intent.
+- **Territorial vs. consumption-based emissions.** `co2_mt` is what a country
+  burns; `consumption_co2` adds the carbon embodied in imports and subtracts
+  exports (~120 countries, one year behind). It exists so "the cut was just
+  offshored" can be measured rather than caveated: the UK's territorial fall
+  since 2005 is 46% and its consumption fall 36%, so about a fifth of the
+  headline is trade moving and the rest isn't. `trade_co2_share` is deliberately
+  untested — the real range is about -98% to +1023% (Singapore imports ten times
+  what it emits), so a 0–100 bound would fail on reality, not on a bug.
 - **Two carbon-intensity columns, different bases.** `fct_emissions_energy.co2_per_gdp`
   is OWID's kg CO2 per 2011 international-$ (PPP) and stops in 2022 / 164
   countries. `analytics.co2_intensity.co2_per_gdp_const_usd` is derived in

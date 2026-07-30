@@ -37,16 +37,69 @@ for you, which is why this only ever bites in CI.
 - `sources/warehouse/*.sql`: source queries that read the dbt/Polars outputs
   (`marts.fct_emissions_energy`, `analytics.co2_intensity`). Referenced in pages
   as `warehouse.emissions_energy`, `warehouse.co2_intensity`.
-- `pages/index.md`: the home page — five written-up findings from the same two
+- `pages/index.md`: the home page — seven written-up findings from the same two
   tables.
-- `pages/dashboard.md`: the interactive dashboard, with renewables vs. life
-  expectancy (bubble), CO₂ intensity by income group over time (line), and a
-  most-efficient table, all driven by a year selector.
+- `pages/dashboard.md`: the interactive dashboard, with clean electricity vs. life
+  expectancy (bubble), CO₂ intensity by income group over time (line), a grid
+  carbon-intensity ranking and a most-efficient table, all driven by a year
+  selector.
+- `pages/coverage.md`: what each source actually covers, built by left-joining
+  `marts.fct_emissions_energy` onto the `dim_country_year` spine so a gap is a
+  row rather than an absence. Read this before writing a `where` clause against
+  the mart — the 79/210/217-country ceilings live here.
+- `pages/pipeline.md`: the state of the pipeline itself — dlt load times, rows
+  per layer, and every dbt test with its stored-failure count. Reads the three
+  `analytics.pipeline_*` tables written by `transform/pipeline_status.py`
+  (`just pipeline-status`, part of `just run`).
+- `pages/restatements.md`: what OWID has revised since this warehouse first
+  loaded it, off the dbt snapshot.
+
+Both new pages render an explanatory branch rather than an error when their data
+is empty, the way `restatements.md` does — the published copy is always built
+from scratch.
+
+## No hardcoded years
+
+`sources/warehouse/latest_years.sql` returns one row holding the latest year each
+metric family can populate, and every `where year = …` on both pages reads from
+it. Pages pick it up with a page-level query block, which is what makes it
+referenceable in both SQL and markdown:
+
+```sql
+select * from warehouse.latest_years
+```
+
+...then `(select co2_year from ${latest_years})` inside a query.
+
+**It is not `max(year)`, and the difference is the whole point.** The mart sits on
+a country-year spine, so its max year is whichever source runs furthest ahead —
+Eurostat prices, currently a year beyond everything else. Coverage also falls off
+at different rates per column: `primary_energy_twh` drops from ~210 countries to
+79 in the latest year, while `co2_mt` holds at 214. Cutting an energy chart to the
+latest CO₂ year silently discards two thirds of its sample. Each family therefore
+gets its own floor — see the comment block at the top of that file.
+
+Adding a chart on a new column? Check its coverage curve first
+(`select year, count(col) from marts.fct_emissions_energy group by year`), and add
+a family to `latest_years.sql` if the existing ones don't fit.
 
 ## Pages (`pages/`)
 
 Add a `.md` file per page; each runs SQL against the `warehouse` source and
 renders charts. See the [Evidence docs](https://docs.evidence.dev) for components.
+
+## Reserved column names in charts
+
+**Never name a charted column `tests` or `rows`.** They collide with Evidence's
+chart internals, and the failure is silent and convincing: the BarChart renders
+its axis, its categories and its value labels correctly, and simply draws no
+bars. No console error, no build failure, no empty-data warning — the chart just
+looks like every value is zero while the labels next to it say otherwise.
+
+`pipeline.md` hit this twice. Renaming to `n_tests` fixed it with no other
+change. `DataTable` is unaffected, so a column can be fine in a table on the same
+page and barless in a chart three lines below it. If a chart renders labels but
+no marks, rename the column before debugging anything else.
 
 ## Chart colors
 
@@ -85,13 +138,19 @@ always gets the same color regardless of how the query happens to sort it:
   excluded from that scatter entirely (their "change since peak" is 0% by
   construction, so they'd all stack on one point) and broken out in a bar
   chart instead.
-- **Binary progress/business-as-usual series** (`decoupled` in `index.md`)
-  reuses the same two hues throughout: blue for the "decoupled" side, orange
-  for the opposite. Deliberately not red/green — that pairing fails the
-  colorblind check outright (ΔE ~4, well under the ~6 floor) despite looking
+- **Binary progress/business-as-usual series** (`decoupled` and `direction` in
+  `index.md`) reuses the same two hues throughout: blue for the "improving"
+  side, orange for the opposite. Deliberately not red/green — that pairing fails
+  the colorblind check outright (ΔE ~4, well under the ~6 floor) despite looking
   fine to most readers.
-- **`measure`** (CO₂ share vs. population share) isn't a good/bad pair, so it
-  gets its own two hues (aqua/gold) rather than borrowing the progress pair.
+- **"Two ways of measuring the same quantity" always gets aqua/gold**
+  (`#1baf7a`/`#eda100` light, `#199e70`/`#c98500` dark). Three charts in
+  `index.md` use it — CO₂ share vs. population share, territorial vs.
+  consumption-based emissions, and share of the cumulative stock vs. share of
+  the current flow. They are not good/bad pairs, so borrowing the progress hues
+  would import a value judgment the chart isn't making; using one consistent
+  pair for the role means a reader who has decoded one of the three has decoded
+  all of them.
 
 Adding a new `series=` chart? Pick colors from the same validated set in
 `evidence.config.yaml` rather than eyeballing new hex values, and if two
