@@ -40,6 +40,53 @@ models:
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
+      - name: coal_co2
+        description: CO2 from coal, million tonnes. Sums with oil/gas/cement/flaring to `co2_mt`.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: oil_co2
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: gas_co2
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: consumption_co2
+        description: >
+          Consumption-based CO2: territorial emissions plus the carbon embodied
+          in imports, minus that embodied in exports. **Nullable on purpose** —
+          OWID publishes it for ~120 countries and one year behind `co2_mt`, so
+          most country-years legitimately have a number here and not there.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: consumption_co2_per_capita
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: trade_co2
+        description: >
+          `consumption_co2 - co2_mt`, million tonnes. **Signed on purpose**:
+          positive means the country is a net importer of embodied carbon
+          (the UK, France), negative a net exporter (China, Russia). No
+          `min_value` for that reason.
+      - name: trade_co2_share
+        description: >
+          `trade_co2` as a percent of territorial emissions. Range is roughly
+          -98% to +1023% in the full data — Singapore imports ten times what it
+          emits — so this is deliberately untested rather than bounded to
+          0-100. A bound here would fail on reality, not on a bug.
+      - name: cumulative_co2
+        description: Every tonne emitted since 1750, million tonnes. The stock behind the flow.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: share_global_cumulative_co2
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
 
   - name: stg_energy
     description: OWID energy, one row per (country_iso3, year).
@@ -59,15 +106,63 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1750, max_value: 2030}
       - name: primary_energy_twh
+        description: >
+          Primary energy consumption, TWh. Covers ~210 countries through 2023
+          and only ~79 from 2024 on — anything filtered to the mart's latest
+          year loses two thirds of its sample here. The `*_elec` columns below
+          do not have that cliff.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: renewables_share_pct
-        description: Renewables as a share of primary energy, percent.
+        description: >
+          Renewables as a share of primary energy, percent. **Only 79
+          countries** in any year — OWID's broad-coverage series is the
+          electricity mix, not the primary-energy mix. Prefer
+          `low_carbon_share_elec_pct` when country coverage matters.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: fossil_share_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: electricity_generation_twh
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: carbon_intensity_elec_g_kwh
+        description: >
+          Grams of CO2 per kWh of electricity generated. ~210 countries, so
+          roughly three times the coverage of `renewables_share_pct`, and in a
+          unit that reads directly. Ceiling is generous: the observed maximum is
+          ~1307 (coal-only grids), so 2000 catches a unit error without failing
+          on a real grid.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 2000}
+      - name: low_carbon_share_elec_pct
+        description: Renewables plus nuclear as a share of electricity generated, percent.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: solar_share_elec_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: wind_share_elec_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: nuclear_share_elec_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: coal_share_elec_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: gas_share_elec_pct
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}

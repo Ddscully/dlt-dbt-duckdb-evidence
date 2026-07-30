@@ -52,14 +52,36 @@ select
     s.region,
     s.income_group,
     s.year,
-    -- emissions
+    -- emissions, territorial (who burned it)
     c.co2_mt,
     c.co2_per_capita,
     c.co2_per_gdp,
+    c.share_global_co2,
+    c.coal_co2,
+    c.oil_co2,
+    c.gas_co2,
+    -- emissions, consumption-based (who bought it). ~120 countries, ends a year
+    -- before the territorial series — null is the normal case, not a defect.
+    c.consumption_co2,
+    c.consumption_co2_per_capita,
+    c.trade_co2,
+    c.trade_co2_share,
+    -- cumulative: the stock since 1750, which is a different ranking to the flow
+    c.cumulative_co2,
+    c.share_global_cumulative_co2,
     -- energy
     e.primary_energy_twh,
     e.renewables_share_pct,
     e.fossil_share_pct,
+    -- electricity (wider country coverage than the primary-energy columns)
+    e.electricity_generation_twh,
+    e.carbon_intensity_elec_g_kwh,
+    e.low_carbon_share_elec_pct,
+    e.solar_share_elec_pct,
+    e.wind_share_elec_pct,
+    e.nuclear_share_elec_pct,
+    e.coal_share_elec_pct,
+    e.gas_share_elec_pct,
     -- economic / social (World Bank WDI)
     w.gdp_per_capita_usd,
     w.gdp_usd,

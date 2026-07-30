@@ -147,11 +147,60 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: renewables_share_pct
-        description: Renewables as a share of primary energy, % (OWID).
+        description: >
+          Renewables as a share of primary energy, % (OWID). **79 countries** in
+          every year — the narrowest widely-used column in this table. For
+          country coverage use `low_carbon_share_elec_pct` (~210) instead; it is
+          a share of electricity rather than of all energy, so the two are not
+          interchangeable in levels.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: fossil_share_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: consumption_co2
+        description: >
+          Consumption-based CO2, million tonnes (OWID): territorial emissions
+          adjusted for carbon embodied in trade. ~120 countries and one year
+          behind `co2_mt`, so null here alongside a populated `co2_mt` is the
+          normal case. This is the column that answers the "emissions were just
+          offshored" objection to any territorial trend.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: trade_co2
+        description: >
+          `consumption_co2 - co2_mt`. Positive = net importer of embodied carbon.
+          Signed, so no `min_value`.
+      - name: trade_co2_share
+        description: >
+          `trade_co2` as a percent of territorial emissions. Deliberately
+          untested: the real range is about -98% to +1023%.
+      - name: cumulative_co2
+        description: CO2 emitted since 1750, million tonnes (OWID). Stock, not flow.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: share_global_cumulative_co2
+        description: >
+          Share of all CO2 ever emitted, %. Ranks countries very differently to
+          `share_global_co2`: the US is 23.8% cumulative against 12.9% of the
+          2023 flow, China 15.1% against 32.0%.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: carbon_intensity_elec_g_kwh
+        description: >
+          Grams of CO2 per kWh generated (OWID). ~210 countries — the
+          broad-coverage alternative to `renewables_share_pct`, and in a unit a
+          reader can hold.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 2000}
+      - name: low_carbon_share_elec_pct
+        description: Renewables plus nuclear as a share of electricity generated, %.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
