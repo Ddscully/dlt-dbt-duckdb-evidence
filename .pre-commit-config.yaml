@@ -1,8 +1,9 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.1
+    rev: v0.16.0
     hooks:
-      - id: ruff
+      # `ruff` is a legacy alias for this as of 0.12; both still work.
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format
 
@@ -29,7 +30,7 @@ repos:
         files: ^dbt/(models|snapshots)/.*\.sql$
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: end-of-file-fixer
       - id: trailing-whitespace

@@ -23,7 +23,7 @@ there is no shell script to keep in sync.
 # `context` parameter's annotation object, and a stringified one fails its check.
 
 from collections.abc import Mapping
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import dagster as dg
@@ -37,9 +37,9 @@ from ingest.pipeline import WB_WDI_INDICATORS, build_pipeline, load_groups, publ
 from lake.archive import ARCHIVED_TABLES, LAKE_DIR, run as write_lake, table_dir
 from orchestration.resources import dbt_project
 from scripts.build_report import (
+    BUILD_DIR,
     TABLE_TO_ASSET_KEY,
     TABLE_TO_DBT_MODEL,
-    BUILD_DIR,
     page_routes,
     run as build_report,
 )
@@ -369,7 +369,7 @@ def mart_covers_recent_years() -> dg.AssetCheckResult:
     finally:
         con.close()
 
-    current_year = date.today().year
+    current_year = datetime.now(UTC).year
     # a source with no rows at all has no max year — that's the worst case, not a pass
     lags = {
         source: (current_year - year if year is not None else None)
