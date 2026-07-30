@@ -23,13 +23,32 @@ npm run sources   # extract the warehouse tables -> .evidence/ parquet
 npm run build     # static site -> build/ (deploy to GitHub Pages)
 ```
 
-Or from the repo root: `just report` (which runs both).
+Or from the repo root: `just report` (which runs all three), `just report-clean`
+to drop the schema cache first.
 
 **`npm run build` does not run the sources.** It renders against whatever
 parquet `.evidence/` already holds, and `.evidence/` is gitignored — so a build
 from a fresh clone succeeds and produces a site where every chart reads
 *Table with name emissions_energy does not exist*. `npm run dev` extracts them
 for you, which is why this only ever bites in CI.
+
+## The site is a Dagster asset
+
+`reports/evidence_site` (in `orchestration/assets.py`) builds this folder, so the
+dashboard is the last node of the asset graph rather than something built beside
+it. `scripts/build_report.py` is the implementation — the same one `just report`
+calls, so the recipe and the graph can't drift into running different builds.
+
+- It declares **one dep per table the source queries read** (six assets, eight
+  tables), and `tests/test_report.py` fails if a new source query reads a table
+  none of them covers. Adding `sources/warehouse/foo.sql` on a new mart therefore
+  means adding a line to `TABLE_TO_DBT_MODEL` in `scripts/build_report.py` — see
+  `just test`'s failure message, which says exactly which table is unclaimed.
+- It is the only asset **excluded from the `full_refresh` job**, because it needs
+  Node and three workflows run that job on a Python-only checkout.
+  `just materialize-site` (`publish_site`) is the one that includes it.
+- A blocking asset check, `site_pages_all_rendered`, asserts every `pages/*.md`
+  produced HTML — `evidence build` exits 0 for a site that is missing a page.
 
 ## How it's wired
 
@@ -166,8 +185,12 @@ red/green pairing.
 
 ## Deploying to GitHub Pages
 
-The site is fully static. In CI, run `just run` (to produce the DuckDB file),
-then `npm --prefix reports ci`, `npm --prefix reports run sources:strict` and
-`npm --prefix reports run build`, and publish `reports/build/`. That's what
-`.github/workflows/pages.yml` does; `--strict` makes a missing or empty
-warehouse fail the build rather than deploy an empty dashboard.
+The site is fully static. `.github/workflows/pages.yml` materializes the
+`publish_site` job — the whole pipeline against the live sources plus this site —
+and publishes `reports/build/`. `sources:strict` (which the asset runs) makes a
+missing or empty warehouse fail the build rather than deploy an empty dashboard.
+
+The one thing the workflow still does by hand is append `deployment.basePath` to
+`evidence.config.yaml` before the build: project Pages serve from a subpath,
+Evidence has no env-var equivalent for it, and a committed value would break
+`npm run dev` on localhost.

@@ -30,8 +30,10 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just lake` | year-partitioned Parquet archive of the warehouse → `data/lake/` |
 | `just run` | ingest → dbt-build → transform → pipeline-status → lake (shell ordering) |
 | `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
-| `just materialize` | same pipeline, ordered by the asset graph |
+| `just materialize` | same pipeline, ordered by the asset graph (`full_refresh`, no Evidence) |
+| `just materialize-site` | `full_refresh` + the Evidence site (`publish_site`; needs Node) |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
+| `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
 | `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
 | `just test` | `pytest` — mocked-payload unit tests, no network |
 | `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
@@ -423,8 +425,32 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 - **Everything runs in one process** (`in_process_executor`, and all five dlt
   resources in a single op). DuckDB takes one writer at a time, so parallel steps
   would just fight over the file lock.
+- **The Evidence site is an asset, and it's the one asset excluded from
+  `full_refresh`.** `reports/evidence_site` shells out to npm via
+  `scripts/build_report.py`; `ci.yml`, `nightly.yml` and `release-data.yml` all run
+  `full_refresh` on a bare uv checkout with no Node, so a site in that job would
+  break three workflows to serve one. `publish_site` is `AssetSelection.all()` and
+  `pages.yml` runs it — one job instead of the three npm steps that used to sit
+  after it. `AssetSelection.all() - site` is the only selection in
+  `definitions.py` that names what it leaves out; a second npm-shaped asset would
+  have to be excluded by hand too.
+- **The site's deps are one per table it reads, not the single ordering edge.**
+  `scripts.build_report.TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY` map the eight
+  tables the source queries read to the six assets that write them, and
+  `tests/test_report.py` parses `reports/sources/**/*.sql` and fails if the two
+  disagree. Without it, adding a source query on a new mart would leave the site
+  building from a stale copy of it while the graph still showed complete lineage —
+  no error, just an old number. The maps live in `scripts/` rather than beside the
+  asset because `just test` runs before `dbt parse` in CI and so can't import
+  anything that needs the dbt manifest.
+- **`site_pages_all_rendered` is blocking, and it checks file *size*.**
+  `evidence build` exits 0 for a site missing a page, and nothing downstream reads
+  `reports/build/` — so a route that emitted only the SvelteKit shell would
+  materialise green and deploy. The five pages render at 17–74 kB; the floor is
+  8 kB.
 - The `daily_refresh` schedule ships `STOPPED` on purpose — opening the UI
-  shouldn't start hammering public APIs on a timer.
+  shouldn't start hammering public APIs on a timer. It targets `full_refresh`, so
+  it doesn't try to build the site either.
 - Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile).
   Only `dagster.yaml` is checked in.
 

@@ -90,10 +90,17 @@ dagster:
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster dev
 
-# Full pipeline, ordered by the asset graph and recorded in the Dagster instance
+# Full pipeline, ordered by the asset graph and recorded in the Dagster instance.
+# Excludes the Evidence site, which needs Node — see `just materialize-site`.
 materialize:
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster job execute -m orchestration.definitions -j full_refresh
+
+# The same graph plus the Evidence site on the end of it (requires Node).
+# This is what .github/workflows/pages.yml runs.
+materialize-site:
+    mkdir -p "$DAGSTER_HOME"
+    uv run --group orchestration dagster job execute -m orchestration.definitions -j publish_site
 
 # Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi*'` (* = all downstream, + = one layer)
 materialize-select selection:
@@ -114,12 +121,14 @@ notebook:
 lint: dbt-deps
     cd dbt && uv run sqlfluff lint models snapshots
 
-# Build the Evidence dashboard (requires Node; see reports/README.md)
+# Build the Evidence dashboard (requires Node; see reports/README.md).
+# Wraps the same module the `reports/evidence_site` asset calls, so the recipe and
+# the asset graph can't run different builds.
 report:
-    cd reports && npm install && npm run sources && npm run build
+    uv run python -m scripts.build_report
 
 # Evidence caches each source's schema keyed on the source SQL, so a `select *`
 # that gains columns looks unchanged and validation fails against the stale schema.
 # Nuke the cache + reprocess sources, then build. Use after mart columns change.
 report-clean:
-    cd reports && rm -rf .evidence build && npm install && npm run sources && npm run build
+    uv run python -m scripts.build_report --clean

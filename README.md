@@ -142,19 +142,30 @@ raw/wb_country    ─┼─▶ staging/stg_* ──┤                          
 raw/wb_wdi        ─┤       (dbt)       └─▶ history/snap_co2_estimates ─▶ marts/fct_co2_estimate_versions  (DuckDB → Parquet)
 raw/eu_elec_prices─┘                            (dbt snapshot)                       (dbt)
       (dlt)
+
+  ...and the four marts + analytics/co2_intensity + analytics/pipeline_status
+                    └─▶ reports/evidence_site   (Evidence → static HTML)
 ```
 
 Nothing declares that order by hand. The dlt resources are keyed
 `raw/<resource>` to match the source keys dagster-dbt derives from
 `_sources.yml`; the model-to-model edges come from dbt's own `ref()` graph via
-`manifest.json`; the Polars asset names its upstream mart. Change a `ref()` and
+`manifest.json`; the Polars asset names its upstream mart; the Evidence site
+declares one dep per table its source queries read, and a unit test fails if a
+source query starts reading a table that isn't in that list. Change a `ref()` and
 the graph moves with it.
 
 ```bash
 just dagster                              # UI on :3000 — graph, runs, freshness, checks
 just materialize                          # whole graph, headless
+just materialize-site                     # ...plus the Evidence site (needs Node)
 just materialize-select 'raw/wb_wdi*'     # one source + everything downstream
 ```
+
+The site is the one asset held out of the `full_refresh` job: it shells out to
+npm, and CI, the nightly run and the data release all want a graph that runs on a
+bare Python checkout. `publish_site` is `full_refresh` plus the site, and it's
+what the Pages workflow runs.
 
 What that buys over the shell chain:
 
@@ -275,7 +286,9 @@ for all of them.
 | **Pipeline** | dlt load times per source, rows and year spans per layer, and all 113 dbt tests with their stored failure counts — the observability tables from `transform/pipeline_status.py`. |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. Empty on the published copy by construction — the build starts from an empty DuckDB file, and a snapshot can only record a revision it was there for. |
 
-`.github/workflows/pages.yml` builds it. It runs the pipeline against the
+`.github/workflows/pages.yml` builds it, as a single `publish_site` job — the
+site is a node in the asset graph (`reports/evidence_site`), so the workflow
+materializes it rather than running npm itself. It runs the pipeline against the
 **live** sources rather than the fixtures (a published dashboard showing the
 17-country test slice would be worse than none), on every push to `main`,
 weekly, and on demand — so the site is never more than a week behind whatever
@@ -287,9 +300,11 @@ Three things to know if you're copying this setup:
   Actions**.
 - **`evidence build` does not run the sources.** It renders against whatever
   parquet `reports/.evidence/` already holds, which locally is a warm cache and
-  in CI is nothing at all — so the workflow runs `npm run sources:strict` first.
-  Skip it and you deploy a perfectly working site where every chart says
-  *Table with name emissions_energy does not exist*. `just report` runs both.
+  in CI is nothing at all — so `sources:strict` has to run first. Skip it and you
+  deploy a perfectly working site where every chart says *Table with name
+  emissions_energy does not exist*. That ordering lives in
+  `scripts/build_report.py`, which is the single implementation behind both
+  `just report` and the asset.
 - Project Pages serve from a subpath, so the workflow appends
   `deployment.basePath` to `reports/evidence.config.yaml` at build time. It's
   injected rather than committed because a base path set in the file also

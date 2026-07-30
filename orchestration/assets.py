@@ -1,7 +1,9 @@
 """The pipeline as a Dagster asset graph.
 
-    raw/*  (dlt)  ->  staging/stg_*  ->  marts/fct_*  (dbt)  ->  analytics/co2_intensity  (Polars)
-                                                     \->  lake/parquet_archive  (DuckDB -> Parquet)
+    raw/*  (dlt)  ->  staging/stg_*  ->  marts/fct_*  (dbt)  +->  analytics/co2_intensity  (Polars)
+                                                             |      +->  analytics/pipeline_status
+                                                             +->  lake/parquet_archive  (Parquet)
+                                                             +->  reports/evidence_site  (Evidence)
 
 The layers are wired by *asset key*, not by ordering:
 
@@ -9,7 +11,9 @@ The layers are wired by *asset key*, not by ordering:
   dagster-dbt derives from `dbt/models/staging/_sources.yml`;
 * dagster-dbt reads `manifest.json`, so the model-to-model edges come from dbt's
   own `ref()` graph;
-* the Polars asset declares `deps=[marts/fct_emissions_energy]`.
+* the Polars asset declares `deps=[marts/fct_emissions_energy]`;
+* the Evidence site declares one dep per table its source queries actually read,
+  from the maps in `scripts/build_report.py`.
 
 The upshot: changing a `ref()` or adding a source table moves the graph, and
 there is no shell script to keep in sync.
@@ -32,6 +36,13 @@ from dagster_dlt.translator import DltResourceTranslatorData
 from ingest.pipeline import WB_WDI_INDICATORS, build_pipeline, load_groups, public_indicators
 from lake.archive import ARCHIVED_TABLES, LAKE_DIR, run as write_lake, table_dir
 from orchestration.resources import dbt_project
+from scripts.build_report import (
+    TABLE_TO_ASSET_KEY,
+    TABLE_TO_DBT_MODEL,
+    BUILD_DIR,
+    page_routes,
+    run as build_report,
+)
 from transform.co2_intensity import DUCKDB_PATH, run as run_co2_intensity
 from transform.pipeline_status import run as run_pipeline_status
 
@@ -246,6 +257,63 @@ def parquet_archive(context: AssetExecutionContext) -> dg.MaterializeResult:
 
 
 # --------------------------------------------------------------------------- #
+# Layer 5 — the Evidence site
+# --------------------------------------------------------------------------- #
+
+EVIDENCE_SITE = dg.AssetKey(["reports", "evidence_site"])
+
+# One dep per table the source queries read, rather than the single edge that
+# would be enough to order this last. The lake gets away with `deps=[the mart]`
+# because it archives one table list; the site reads eight tables across two
+# layers, and a graph that showed it hanging off only the mart would be wrong
+# about what a stale dashboard means. `scripts.build_report` owns the mapping and
+# `tests/test_report.py` holds it to the SQL.
+SITE_DEPS = [
+    *(
+        get_asset_key_for_model([dbt_models], model)
+        for model in sorted(set(TABLE_TO_DBT_MODEL.values()))
+    ),
+    # dict.fromkeys: three of the four analytics tables share `pipeline_status`,
+    # and Dagster rejects a duplicated dep.
+    *(dg.AssetKey(list(key)) for key in dict.fromkeys(TABLE_TO_ASSET_KEY.values())),
+]
+
+
+@dg.asset(
+    key=EVIDENCE_SITE,
+    deps=SITE_DEPS,
+    group_name="reports",
+    kinds={"evidence", "duckdb"},
+    freshness_policy=MODELLED_FRESHNESS,
+    description=(
+        "The Evidence dashboard as a static site in `reports/build/`: extracts "
+        "the warehouse tables to parquet (`npm run sources:strict`), then renders "
+        "the five pages against them. Published by `.github/workflows/pages.yml`."
+    ),
+)
+def evidence_site(context: AssetExecutionContext) -> dg.MaterializeResult:
+    # Needs Node on PATH, which is why this asset is *excluded* from the
+    # `full_refresh` job — see orchestration/definitions.py.
+    summary = build_report()
+    context.log.info(
+        "built %s pages from %s source queries (%s files, %.1f MB)",
+        summary["pages"],
+        summary["source_queries"],
+        summary["files"],
+        summary["bytes"] / 1e6,
+    )
+    return dg.MaterializeResult(
+        metadata={
+            "pages": summary["pages"],
+            "files": summary["files"],
+            "bytes": summary["bytes"],
+            "warehouse_tables": summary["warehouse_tables"],
+            "build_dir": dg.MetadataValue.path(summary["build_dir"]),
+        }
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Asset checks — the ones dbt can't express
 # --------------------------------------------------------------------------- #
 
@@ -368,10 +436,42 @@ def lake_matches_warehouse() -> dg.AssetCheckResult:
     )
 
 
+@dg.asset_check(asset=EVIDENCE_SITE, blocking=True)
+def site_pages_all_rendered() -> dg.AssetCheckResult:
+    """Every page in `reports/pages/` has HTML in `reports/build/`.
+
+    `evidence build` exits 0 for a site that is missing a page, and nothing
+    downstream reads the output — so without this a half-rendered dashboard would
+    materialise green and deploy. Checks the file is non-trivial as well as
+    present: a route that rendered nothing but the shell is the failure that looks
+    most like success.
+    """
+    routes = page_routes()
+    # The five pages render at 17-74 kB, so 8 kB is well under anything real
+    # while still catching a route that emitted nothing but the SvelteKit shell.
+    empty = {
+        slug: path.stat().st_size
+        for slug, path in routes.items()
+        if path.exists() and path.stat().st_size < 8_000
+    }
+    missing = sorted(slug for slug, path in routes.items() if not path.exists())
+    return dg.AssetCheckResult(
+        passed=not missing and not empty,
+        metadata={
+            "pages_expected": len(routes),
+            "missing": missing,
+            "suspiciously_small": empty,
+            "build_dir": dg.MetadataValue.path(str(BUILD_DIR)),
+        },
+    )
+
+
 __all__ = [
+    "EVIDENCE_SITE",
     "FCT_EMISSIONS_ENERGY",
     "co2_intensity",
     "dbt_models",
+    "evidence_site",
     "parquet_archive",
     "pipeline_status",
     "raw_assets",
