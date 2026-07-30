@@ -64,6 +64,16 @@ jobs:
       - name: Lint SQL
         run: cd dbt && uv run sqlfluff lint models snapshots
 
+      # `sqlfluff-lint` is a `local` hook whose entry is the `just lint` recipe —
+      # deliberately, so there is exactly one pinned sqlfluff (see
+      # .pre-commit-config.yaml). The cost is that the runner needs `just` on
+      # PATH: without it every pre-commit run fails with "Executable `just` not
+      # found", and the SQL never gets linted by the hook at all.
+      - name: Install just
+        run: |
+          uv tool install rust-just
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       # ruff, formatting and whitespace. The same hooks contributors get from
       # `uv run pre-commit install`, run here because an outside PR arrives
       # from a clone where nobody ran that. Last, since it's the cheapest

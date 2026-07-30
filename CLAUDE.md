@@ -63,6 +63,12 @@ one whose entry is `just lint`).
   `../data/warehouse.duckdb` one directory too high and dies before linting.
 - CI lints via the same venv, so it agrees on rules. It does still lint a narrower
   path than the recipe (`models`, not `models snapshots`).
+- **The `just lint` hook means CI has to install `just`.** `ci.yml` runs
+  `pre-commit run --all-files`, and a `local` hook whose entry is a recipe fails
+  with "Executable `just` not found" on a runner that hasn't got it — which is how
+  the hook shipped green locally and red on the first push (`uv tool install
+  rust-just` + `$GITHUB_PATH` is the fix). Anything else moved into a `local` hook
+  inherits the same requirement.
 
 ## Agent skills
 
