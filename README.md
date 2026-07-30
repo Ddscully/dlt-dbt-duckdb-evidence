@@ -252,13 +252,13 @@ no ceiling because small petrostates legitimately reach 780 t/person.
 
 ### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-Two pages, both built from `marts.fct_emissions_energy` and
+Three pages, all built from `marts.fct_emissions_energy` and
 `analytics.co2_intensity`:
 
 | Page | What's on it |
 |------|--------------|
-| **Overview** | Pick a year: renewables share vs. life expectancy for every country (bubbles sized by population, coloured by income group), CO₂ intensity by income group over time, and the headline counts. |
-| **Five findings** | The things the data actually says once it's joined — including that rich countries cut emissions while growing, and how far the energy/longevity relationship flattens out at the top. |
+| **Home** | The things the data actually says once it's joined — including that rich countries cut emissions while growing, and how far the energy/longevity relationship flattens out at the top. |
+| **Explore** | Pick a year: renewables share vs. life expectancy for every country (bubbles sized by population, coloured by income group), CO₂ intensity by income group over time, and the headline counts. |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. Empty on the published copy by construction — the build starts from an empty DuckDB file, and a snapshot can only record a revision it was there for. |
 
 `.github/workflows/pages.yml` builds it. It runs the pipeline against the

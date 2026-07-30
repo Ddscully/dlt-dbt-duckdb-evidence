@@ -37,10 +37,11 @@ for you, which is why this only ever bites in CI.
 - `sources/warehouse/*.sql`: source queries that read the dbt/Polars outputs
   (`marts.fct_emissions_energy`, `analytics.co2_intensity`). Referenced in pages
   as `warehouse.emissions_energy`, `warehouse.co2_intensity`.
-- `pages/index.md`: the dashboard, with renewables vs. life expectancy (bubble),
-  CO₂ intensity by income group over time (line), and a most-efficient table,
-  all driven by a year selector.
-- `pages/findings.md`: five written-up findings from the same two tables.
+- `pages/index.md`: the home page — five written-up findings from the same two
+  tables.
+- `pages/dashboard.md`: the interactive dashboard, with renewables vs. life
+  expectancy (bubble), CO₂ intensity by income group over time (line), and a
+  most-efficient table, all driven by a year selector.
 
 ## Pages (`pages/`)
 
@@ -60,7 +61,7 @@ map instead of relying on the global palette's implicit ordering, so a series
 always gets the same color regardless of how the query happens to sort it:
 
 - **`income_group`** (`stg_country`'s income ladder — High → Low, 4 categories)
-  appears in `index.md`'s bubble/line/scatter charts. It's technically ordinal
+  appears in `dashboard.md`'s bubble/line/scatter charts. It's technically ordinal
   (High → Low is a ladder), which argues for a single-hue light→dark ramp —
   but with 4 overlapping categories on a scatter/bubble, adjacent ramp steps
   read as near-identical at a glance even though they clear the colorblind
@@ -74,12 +75,21 @@ always gets the same color regardless of how the query happens to sort it:
   magenta, a dark-mode colorblind-separation dip on green/gold) that the
   legend + hover tooltip mitigate rather than eliminate. Don't push income_group
   past 4 categories without re-running the validator.
-- **Binary progress/business-as-usual series** (`status`, `decoupled`,
-  `direction` in `findings.md`) reuse the same two hues throughout: blue for
-  the "decoupled" / past-peak / emissions-removed side, orange for the
-  opposite. Deliberately not red/green — that pairing fails the colorblind
-  check outright (ΔE ~4, well under the ~6 floor) despite looking fine to
-  most readers.
+- **`income_group` also drives the peak-emissions scatter in `index.md`**, but
+  only the three categories present among large emitters that have already
+  peaked (High/Upper-middle/Lower-middle — no Low-income country clears the
+  200 Mt threshold). That's a different `seriesColors` map from `dashboard.md`'s
+  four-category one: the first three palette slots (blue/orange/aqua), which
+  are the ones that clear the *all-pairs* check on their own — no need for
+  `dashboard.md`'s special-cased four-hue set. Still-rising countries are
+  excluded from that scatter entirely (their "change since peak" is 0% by
+  construction, so they'd all stack on one point) and broken out in a bar
+  chart instead.
+- **Binary progress/business-as-usual series** (`decoupled` in `index.md`)
+  reuses the same two hues throughout: blue for the "decoupled" side, orange
+  for the opposite. Deliberately not red/green — that pairing fails the
+  colorblind check outright (ΔE ~4, well under the ~6 floor) despite looking
+  fine to most readers.
 - **`measure`** (CO₂ share vs. population share) isn't a good/bad pair, so it
   gets its own two hues (aqua/gold) rather than borrowing the progress pair.
 
