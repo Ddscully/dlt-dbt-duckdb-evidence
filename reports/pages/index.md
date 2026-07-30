@@ -1,31 +1,64 @@
 ---
-title: Five Findings
-description: Five patterns in the warehouse data on emissions, growth and energy.
+title: Seven Findings
+description: Seven patterns in the warehouse data on emissions, energy, growth and trade.
 ---
 
-Five things that stood out when querying `marts.fct_emissions_energy` and
+Seven things that stood out when querying `marts.fct_emissions_energy` and
 `analytics.co2_intensity` directly. Every chart below is the query itself, re-run
 against the warehouse each time the site is built. For a year-by-year interactive
 view of the same tables, see [explore](/dashboard).
 
-A note on units first. Anything measured over time divides by `gdp_constant_usd`
-(constant 2015 US dollars) rather than `gdp_usd`. Current dollars move with
-inflation and exchange rates, which is enough to flip the sign of a country's
-apparent progress.
+Two notes on method first.
+
+**Real terms, not nominal.** Anything measured over time divides by
+`gdp_constant_usd` (constant 2015 US dollars) rather than `gdp_usd`. Current
+dollars move with inflation and exchange rates, which is enough to flip the sign
+of a country's apparent progress.
+
+```sql latest_years
+-- The latest year each metric family can populate, computed from coverage
+-- rather than assumed. See sources/warehouse/latest_years.sql for why they
+-- differ. Every `where year = ...` on this page reads from here.
+select * from warehouse.latest_years
+```
+
+**No year is hardcoded.** Each finding is cut to the latest year its own metrics
+can actually populate, read from the data at build time. Those years differ, and
+using one number for all of them would quietly gut the samples that run behind:
+
+```sql latest_years_long
+select 'CO₂ emissions' as series, co2_year_label as latest_year, 1 as ord from ${latest_years}
+union all select 'GDP (constant US$)', gdp_year_label, 2 from ${latest_years}
+union all select 'Electricity mix & intensity', elec_year_label, 3 from ${latest_years}
+union all select 'Primary energy', energy_year_label, 4 from ${latest_years}
+union all select 'Consumption-based CO₂', consumption_year_label, 5 from ${latest_years}
+union all select 'EU electricity prices', price_year_label, 6 from ${latest_years}
+order by ord
+```
+
+<DataTable data={latest_years_long} rows=6 rowNumbers=false>
+    <Column id=series title="Series"/>
+    <Column id=latest_year title="Latest usable year" align=left/>
+</DataTable>
+
+Where a baseline year appears (2005, throughout) it is a deliberate choice of
+starting line, not a moving target.
 
 ```sql headline
 select
-    count(distinct country_iso3)      as n_countries,
+    count(distinct country_iso3) as n_countries,
     cast(cast(max(year) as integer) as varchar) as latest_year,
-    sum(co2_mt) filter (where year = 2023) as world_co2_2023
+    sum(co2_mt) filter (
+        where year = (select co2_year from ${latest_years})
+    ) as world_co2_latest
 from warehouse.emissions_energy
 where region is not null and co2_mt is not null
 ```
 
 <Grid cols=3>
     <BigValue data={headline} value=n_countries title="Countries"/>
-    <BigValue data={headline} value=latest_year title="Latest year"/>
-    <BigValue data={headline} value=world_co2_2023 fmt="#,##0" title="World CO₂ 2023 (Mt)"/>
+    <BigValue data={headline} value=latest_year title="Latest CO₂ year"/>
+    <BigValue data={headline} value=world_co2_latest fmt="#,##0" title="World CO₂ (Mt)"/>
 </Grid>
 
 ## 1. Peak emissions arrive in sequence, and some countries haven't reached one
@@ -40,14 +73,18 @@ scatter below (their "change since peak" is 0% by construction, since their late
 year *is* their peak, so they'd all stack on one point) and broken out by country in
 the bar chart instead.
 
+"Large emitter" here means above 200 Mt in the latest year, which is roughly the
+top 30 and about 85% of world emissions.
+
 ```sql peaks
 with series as (
     select
+        country_iso3,
         country_name,
         income_group,
         year,
         co2_mt,
-        max(co2_mt) over (partition by country_name) as peak_mt
+        max(co2_mt) over (partition by country_iso3) as peak_mt
     from warehouse.emissions_energy
     where region is not null
       and co2_mt is not null
@@ -55,19 +92,20 @@ with series as (
 
 peaked as (
     select
-        country_name,
+        country_iso3,
+        any_value(country_name) as country_name,
         any_value(income_group) as income_group,
         min(year)    as peak_year,
         max(peak_mt) as peak_mt
     from series
     where co2_mt = peak_mt
-    group by country_name
+    group by country_iso3
 ),
 
 latest as (
-    select country_name, co2_mt as mt_latest
+    select country_iso3, co2_mt as mt_latest
     from warehouse.emissions_energy
-    where year = 2024
+    where year = (select co2_year from ${latest_years})
 )
 
 select
@@ -77,9 +115,13 @@ select
     p.peak_mt,
     l.mt_latest,
     100 * (l.mt_latest / p.peak_mt - 1) as pct_from_peak,
-    case when p.peak_year >= 2024 then 'Still rising' else 'Past peak' end as status
+    case
+        when p.peak_year >= (select co2_year from ${latest_years})
+            then 'Still rising'
+        else 'Past peak'
+    end as status
 from peaked p
-inner join latest l on p.country_name = l.country_name
+inner join latest l on p.country_iso3 = l.country_iso3
 where l.mt_latest > 200
 order by p.peak_year
 ```
@@ -108,8 +150,9 @@ where status = 'Past peak'
     tooltipTitle=country_name
 />
 
-Bubble size is 2024 emissions. The UK peaked in 1971 and is 53% below it. The eight
-countries still rising are broken out below, by country.
+Bubble size is latest-year emissions. The UK peaked in 1971 and is 53% below it;
+France peaked in 1973 and is 51% below. The countries still rising are broken out
+below, by country.
 
 ```sql still_rising
 select country_name, mt_latest
@@ -127,7 +170,7 @@ order by mt_latest desc
     color="#eb6834"
     labels=true
     labelFmt="#,##0"
-    xAxisTitle="2024 CO₂ (Mt)"
+    xAxisTitle="Latest-year CO₂ (Mt)"
     yAxisTitle="Country"
 />
 
@@ -135,79 +178,115 @@ order by mt_latest desc
     <Column id=country_name title="Country"/>
     <Column id=peak_year title="Peak" fmt="0"/>
     <Column id=peak_mt title="Peak (Mt)" fmt="#,##0"/>
-    <Column id=mt_latest title="2024 (Mt)" fmt="#,##0"/>
+    <Column id=mt_latest title="Latest (Mt)" fmt="#,##0"/>
     <Column id=pct_from_peak title="vs peak" fmt='0.0"%"' contentType=delta/>
 </DataTable>
 
-## 2. Energy buys longevity, up to a point
+## 2. Electricity is where the cleanup happened — and coal is the whole story
 
-Grouping countries by primary energy consumed per person against life expectancy
-produces a clear saturation curve.
+Carbon intensity of electricity is measured in grams of CO₂ per kWh generated, and
+it is the single most legible decarbonisation number there is: a coal grid runs
+around 800–900 g, a gas grid around 400, a nuclear or hydro grid under 50.
 
-```sql energy_life
+It is also the widest series in the warehouse. `carbon_intensity_elec_g_kwh`
+covers about 210 countries, against 79 for `renewables_share_pct` — OWID's
+broad-coverage energy series is the electricity mix, not the primary-energy mix.
+Of the 108 countries generating more than 10 TWh, **70% are cleaner per kWh than
+they were in 2005.**
+
+```sql elec_intensity
 with base as (
     select
-        country_name,
-        life_expectancy,
-        co2_per_capita,
-        1e9 * primary_energy_twh / population as kwh_per_person
+        country_iso3,
+        carbon_intensity_elec_g_kwh as g_2005,
+        coal_share_elec_pct         as coal_2005
     from warehouse.emissions_energy
-    where year = 2023
-      and primary_energy_twh > 0
-      and population > 1000000
-      and life_expectancy is not null
+    where year = 2005
+      and carbon_intensity_elec_g_kwh > 0
+),
+
+latest as (
+    select
+        country_iso3,
+        country_name,
+        carbon_intensity_elec_g_kwh as g_latest,
+        coal_share_elec_pct         as coal_latest,
+        low_carbon_share_elec_pct   as low_carbon_latest,
+        electricity_generation_twh
+    from warehouse.emissions_energy
+    where year = (select elec_year from ${latest_years})
+      and carbon_intensity_elec_g_kwh is not null
 )
 
 select
-    case
-        when kwh_per_person < 5000  then 'under 5k'
-        when kwh_per_person < 15000 then '5k – 15k'
-        when kwh_per_person < 30000 then '15k – 30k'
-        when kwh_per_person < 60000 then '30k – 60k'
-        else 'over 60k'
-    end as energy_band,
-    case
-        when kwh_per_person < 5000  then 1
-        when kwh_per_person < 15000 then 2
-        when kwh_per_person < 30000 then 3
-        when kwh_per_person < 60000 then 4
-        else 5
-    end as band_order,
-    count(*)                as n_countries,
-    avg(life_expectancy)    as avg_life_expectancy,
-    avg(co2_per_capita)     as avg_co2_per_capita
-from base
-group by energy_band, band_order
-order by band_order
+    l.country_name,
+    b.g_2005,
+    l.g_latest,
+    -- Charted in absolute g/kWh, not percent, on purpose. Norway went from 27
+    -- to 30 g and Brazil from 99 to 106 — on a percentage axis those two lead
+    -- the "got worse" ranking, ahead of Indonesia adding 29 g to a 651 g grid.
+    -- A percentage of an almost-zero denominator is not a comparable quantity.
+    l.g_latest - b.g_2005                as g_change,
+    100 * (l.g_latest / b.g_2005 - 1)    as pct_change,
+    b.coal_2005,
+    l.coal_latest,
+    l.low_carbon_latest,
+    l.electricity_generation_twh,
+    case when l.g_latest < b.g_2005 then 'Cleaner per kWh' else 'Dirtier per kWh' end as direction
+from latest l
+inner join base b on l.country_iso3 = b.country_iso3
+-- large grids only: below ~150 TWh a single new plant swings the number
+where l.electricity_generation_twh > 150
+order by g_change
 ```
 
 <BarChart
-    data={energy_life}
-    x=energy_band
-    y=avg_life_expectancy
+    data={elec_intensity}
+    x=country_name
+    y=g_change
+    series=direction
+    seriesColors={{
+        'Cleaner per kWh': ['#2a78d6', '#3987e5'],
+        'Dirtier per kWh': ['#eb6834', '#d95926']
+    }}
+    swapXY=true
     sort=false
-    xAxisTitle="Primary energy per person (kWh/year)"
-    yAxisTitle="Life expectancy (years)"
-    labels=true
-    labelFmt="0.0"
+    yFmt="#,##0"
+    xAxisTitle="Change in gCO₂ per kWh since 2005"
+    yAxisTitle="Country"
 />
 
-Moving from the lowest band to 30–60k kWh is worth about 15 years of life. Moving
-from there to the top band costs 2.8× the energy and 2.7× the CO₂ per person, and
-buys half a year. Past roughly 30k kWh per person, extra energy stops showing up in
-life expectancy.
+Spain took 329 g out of every kWh (−69%), Poland 324 g and the UK 318 g (−60%).
+The mechanism is in the next two columns and it is almost entirely one fuel: the
+UK went from 34% coal-fired to 1%, Spain from 27% to 1%, Poland from 91% to 54%.
+France barely registers on this chart and that is the measure working — its grid
+was already nuclear at 86 g in 2005, and it still found another 46 g.
+The countries that got *dirtier* did the same thing in reverse — Vietnam went from
+21% coal to 50%, Indonesia from 39% to 61% — while their absolute generation more
+than doubled.
 
-<DataTable data={energy_life} rows=5>
-    <Column id=energy_band title="Energy per person"/>
-    <Column id=n_countries title="Countries"/>
-    <Column id=avg_life_expectancy title="Life expectancy" fmt="0.0"/>
-    <Column id=avg_co2_per_capita title="CO₂ / person (t)" fmt="0.0"/>
+Two things this measure does *not* say. A cleaner grid is compatible with rising
+total emissions if the grid grows faster than it cleans, which is finding 7. And
+electricity is only about a third of energy use: the grid is the part of
+decarbonisation that has gone well, not the whole of it.
+
+<DataTable data={elec_intensity} rows=12>
+    <Column id=country_name title="Country"/>
+    <Column id=g_2005 title="2005 (g/kWh)" fmt="#,##0"/>
+    <Column id=g_latest title="Latest (g/kWh)" fmt="#,##0"/>
+    <Column id=g_change title="Change (g/kWh)" fmt="#,##0" contentType=delta downIsGood=true/>
+    <Column id=pct_change title="Change" fmt='0"%"' contentType=delta downIsGood=true/>
+    <Column id=coal_2005 title="Coal 2005 %" fmt="0"/>
+    <Column id=coal_latest title="Coal now %" fmt="0"/>
+    <Column id=low_carbon_latest title="Low-carbon now %" fmt="0"/>
 </DataTable>
 
 ## 3. Decoupling is real, on a real-terms basis
 
-Plotting change in emissions against change in inflation-adjusted GDP, 2005–2023.
+Plotting change in emissions against change in inflation-adjusted GDP since 2005.
 Anything in the lower-right quadrant grew its economy while cutting emissions.
+Restricted to countries emitting more than 100 Mt in 2005, so the sample is
+economies large enough for the comparison to mean something.
 
 ```sql decoupling
 with base_year as (
@@ -219,7 +298,7 @@ with base_year as (
 end_year as (
     select country_iso3, country_name, region, co2_mt, gdp_constant_usd
     from warehouse.emissions_energy
-    where year = 2023
+    where year = (select gdp_year from ${latest_years})
 )
 
 select
@@ -253,18 +332,100 @@ where b.gdp_constant_usd is not null
     }}
     xFmt="0"
     yFmt="0"
-    xAxisTitle="Real GDP change 2005–2023 (%)"
-    yAxisTitle="CO₂ change 2005–2023 (%)"
+    xAxisTitle="Real GDP change since 2005 (%)"
+    yAxisTitle="CO₂ change since 2005 (%)"
     tooltipTitle=country_name
 >
     <ReferenceLine y=0 label="No change in emissions" labelPosition=aboveEnd/>
 </ScatterPlot>
 
 The US grew 42% in real terms while cutting emissions 20%; the UK grew 26% and cut
-46%. One limit of the measure: these are territorial emissions, so production moved
-offshore counts against the producing country's ledger, not the consumer's.
+46%. The standing objection to any chart like this is that production moved
+offshore, so the cut is an accounting artifact of where the factory sits. That is
+a testable claim, and the next finding tests it.
 
-## 4. Emissions track income, not headcount
+## 4. …and it isn't only offshoring
+
+Territorial emissions count what a country burns. Consumption-based emissions
+count what it buys: territorial output plus the carbon embodied in imports, minus
+the carbon embodied in exports. OWID publishes both, so "you just exported your
+emissions" stops being a rhetorical move and becomes a subtraction.
+
+It covers about 120 countries and runs to
+<Value data={latest_years} column=consumption_year_label/>, one year behind the
+territorial series.
+
+```sql offshoring
+with base_year as (
+    select country_iso3, co2_mt, consumption_co2
+    from warehouse.emissions_energy
+    where year = 2005
+),
+
+end_year as (
+    select country_iso3, country_name, co2_mt, consumption_co2
+    from warehouse.emissions_energy
+    where year = (select consumption_year from ${latest_years})
+)
+
+select
+    e.country_name,
+    100 * (e.co2_mt / b.co2_mt - 1)                   as territorial_change,
+    100 * (e.consumption_co2 / b.consumption_co2 - 1) as consumption_change,
+    e.co2_mt
+from end_year e
+inner join base_year b on e.country_iso3 = b.country_iso3
+where b.consumption_co2 is not null
+  and e.consumption_co2 is not null
+  and e.co2_mt > 250
+order by territorial_change
+```
+
+```sql offshoring_long
+select country_name, 'Territorial (what it burns)' as basis, territorial_change as pct, co2_mt
+from ${offshoring}
+union all
+select country_name, 'Consumption (what it buys)', consumption_change, co2_mt
+from ${offshoring}
+```
+
+<BarChart
+    data={offshoring_long}
+    x=country_name
+    y=pct
+    series=basis
+    seriesColors={{
+        'Territorial (what it burns)': ['#1baf7a', '#199e70'],
+        'Consumption (what it buys)': ['#eda100', '#c98500']
+    }}
+    type=grouped
+    swapXY=true
+    sort=false
+    yFmt="0"
+    xAxisTitle="Country"
+    yAxisTitle="Change since 2005 (%)"
+/>
+
+The objection is real but partial. The UK's territorial emissions fell 46% and its
+consumption emissions fell 36%; Italy 38% against 29%, France 35% against 25%,
+Germany 32% against 26%. So roughly a fifth to a third of Europe's headline cut is
+trade moving around, and the rest is not. For Japan and the US the two measures
+are within a few points of each other, and Canada moves the other way — it cut 4%
+territorially and 16% on consumption.
+
+The same subtraction cuts against the "China is just the world's factory" reading
+too: China's consumption emissions have grown *faster* than its territorial ones
+since 2005 (+134% against +107%). Its own consumers, not only its export
+customers, are behind the increase.
+
+<DataTable data={offshoring} rows=10>
+    <Column id=country_name title="Country"/>
+    <Column id=territorial_change title="Territorial" fmt='0"%"' contentType=delta downIsGood=true/>
+    <Column id=consumption_change title="Consumption" fmt='0"%"' contentType=delta downIsGood=true/>
+    <Column id=co2_mt title="Latest (Mt)" fmt="#,##0"/>
+</DataTable>
+
+## 5. Emissions track income, not headcount
 
 ```sql income_split
 with totals as (
@@ -273,7 +434,7 @@ with totals as (
         sum(co2_mt)     as co2_mt,
         sum(population) as population
     from warehouse.emissions_energy
-    where year = 2023
+    where year = (select co2_year from ${latest_years})
       and income_group is not null
     group by income_group
 ),
@@ -315,9 +476,14 @@ order by rung, measure
     yAxisTitle="Share of world total (%)"
 />
 
-The two bars diverge at each end of the scale. High-income countries hold 17% of
-the world's people and 37% of its emissions. Low-income countries, with 727 million
-people, account for 0.6%.
+The gap opens at both ends, and the largest block is the middle: upper-middle-income
+countries are 38% of the world's people and **half** of its emissions, which is
+mostly China. High-income countries hold 17% of the people and 37% of the
+emissions. At the other end, low-income countries — around 750 million people, 9%
+of humanity — account for 0.6%.
+
+Read this against finding 6 before drawing a conclusion from it: a snapshot of the
+current flow is not the same question as who put the carbon there.
 
 ```sql income_table
 select
@@ -326,7 +492,7 @@ select
     sum(population) / 1000000              as population_m,
     sum(co2_mt) * 1000000 / sum(population) as t_per_person
 from warehouse.emissions_energy
-where year = 2023
+where year = (select co2_year from ${latest_years})
   and income_group is not null
 group by income_group
 order by t_per_person desc
@@ -339,14 +505,75 @@ order by t_per_person desc
     <Column id=t_per_person title="t CO₂ / person" fmt="0.00"/>
 </DataTable>
 
-## 5. Cleaner per dollar, not fewer tonnes
+## 6. Who caused it and who is causing it are different lists
 
-Finding 3 showed decoupling is real on a real-terms basis. It's worth separating
-two things that get conflated: whether a country's economy got *cleaner*
-(CO₂ per dollar of real GDP), and whether its *tonnage* went up or down. The
-first is close to universal; the second depends on how fast the economy grew
-relative to that cleanup. Carbon intensity indexed to 2005, for the six largest
-emitters:
+CO₂ accumulates. The stock in the atmosphere is the sum of every tonne emitted
+since 1750, so a country's share of the *stock* and its share of this year's
+*flow* answer different questions — and the two rankings disagree sharply.
+
+```sql stock_vs_flow
+select
+    country_name,
+    share_global_cumulative_co2 as cumulative_share,
+    share_global_co2            as current_share,
+    cumulative_co2
+from warehouse.emissions_energy
+where year = (select co2_year from ${latest_years})
+  and share_global_cumulative_co2 is not null
+order by cumulative_share desc
+limit 12
+```
+
+```sql stock_vs_flow_long
+select country_name, 'Share of all CO₂ ever emitted' as basis, cumulative_share as pct
+from ${stock_vs_flow}
+union all
+select country_name, 'Share of this year''s emissions', current_share
+from ${stock_vs_flow}
+```
+
+<BarChart
+    data={stock_vs_flow_long}
+    x=country_name
+    y=pct
+    series=basis
+    seriesColors={{
+        'Share of all CO₂ ever emitted': ['#1baf7a', '#199e70'],
+        "Share of this year's emissions": ['#eda100', '#c98500']
+    }}
+    type=grouped
+    swapXY=true
+    sort=false
+    yFmt="0"
+    xAxisTitle="Country"
+    yAxisTitle="Share of world total (%)"
+/>
+
+The United States has emitted roughly a quarter of all the CO₂ ever released and
+accounts for about an eighth of current emissions. China is the mirror image:
+around 15% of the stock and close to a third of the flow. The UK — the first
+industrial economy, and 0.8% of emissions today — still carries over 4% of the
+cumulative total, more than India, which has four times its current output and
+twenty times its population.
+
+Neither number is the whole picture on its own, which is the point. Finding 5 is
+the flow; this is the stock.
+
+<DataTable data={stock_vs_flow} rows=12>
+    <Column id=country_name title="Country"/>
+    <Column id=cumulative_co2 title="All CO₂ since 1750 (Mt)" fmt="#,##0"/>
+    <Column id=cumulative_share title="Share of stock" fmt='0.0"%"'/>
+    <Column id=current_share title="Share of flow" fmt='0.0"%"'/>
+</DataTable>
+
+## 7. Cleaner per dollar, not fewer tonnes
+
+Findings 3 and 4 showed decoupling is real on a real-terms basis and mostly
+survives the trade adjustment. It's worth separating two more things that get
+conflated: whether a country's economy got *cleaner* (CO₂ per dollar of real GDP),
+and whether its *tonnage* went up or down. The first is close to universal; the
+second depends on how fast the economy grew relative to that cleanup. Carbon
+intensity indexed to 2005, for the six largest emitters:
 
 ```sql intensity_trend
 with base as (
@@ -386,12 +613,11 @@ order by i.country_name, i.year
     <ReferenceLine y=100 label="2005 level" labelPosition=aboveEnd/>
 </LineChart>
 
-Every line falls. China's carbon intensity is down 47% since 2005 and India's is
-down 13% — both while renewables' share of their energy mix roughly tripled and
-grew 39% respectively. Neither country's absolute emissions fell: China added
-6,290 Mt over the same period, India 1,867 Mt, because GDP grew faster than
-intensity dropped. The US, Germany, UK and Japan cut intensity by roughly as
-much or more and grew slower, so tonnage fell too.
+Every line falls. China's carbon intensity is down roughly 47% since 2005 and
+India's around 13% — both while renewables' share of their energy mix roughly
+tripled and grew 39% respectively. Neither country's absolute emissions fell,
+because GDP grew faster than intensity dropped. The US, Germany, UK and Japan cut
+intensity by roughly as much or more and grew slower, so tonnage fell too.
 
 ```sql intensity_table
 with base as (
@@ -407,21 +633,17 @@ select
     100 * (i.renewables_share_pct / nullif(b.base_renew, 0) - 1) as renewables_change_pct
 from warehouse.co2_intensity i
 inner join base b on i.country_iso3 = b.country_iso3
-where i.year = 2023
+where i.year = (select gdp_year from ${latest_years})
   and i.country_iso3 in ('CHN', 'IND', 'USA', 'DEU', 'GBR', 'JPN')
 order by co2_change_mt desc
 ```
 
 <DataTable data={intensity_table} rows=6>
     <Column id=country_name title="Country"/>
-    <Column id=co2_change_mt title="CO₂ change, 2005–23 (Mt)" fmt="#,##0" contentType=delta downIsGood=true/>
+    <Column id=co2_change_mt title="CO₂ change since 2005 (Mt)" fmt="#,##0" contentType=delta downIsGood=true/>
     <Column id=intensity_change_pct title="Carbon intensity" fmt='0.0"%"' contentType=delta downIsGood=true/>
     <Column id=renewables_change_pct title="Renewables share" fmt='0.0"%"' contentType=delta/>
 </DataTable>
-
-One caveat carries over from finding 3: these are territorial emissions, so a
-falling intensity number doesn't rule out the cleanup being partly offshored
-production rather than a genuinely lower-carbon economy.
 
 ---
 
@@ -430,6 +652,7 @@ production rather than a genuinely lower-carbon economy.
 <a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.
 Coverage caveats: the mart sits on a country-year spine, so a row exists wherever
 any source reports and the columns the others don't cover are null — the charts
-above filter for what they need. <code>renewables_share_pct</code> covers 79
-countries (96.7% of world emissions); 11 small territories have World Bank data
-but no OWID emissions.</small>
+above filter for what they need. The narrowest column used here is
+<code>consumption_co2</code> (~120 countries); <code>renewables_share_pct</code>
+covers 79 and <code>carbon_intensity_elec_g_kwh</code> about 210. 11 small
+territories have World Bank data but no OWID emissions.</small>
