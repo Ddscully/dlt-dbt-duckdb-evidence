@@ -28,7 +28,13 @@ with coverage as (
         count(carbon_intensity_elec_g_kwh) as n_elec,
         count(gdp_constant_usd)            as n_gdp,
         count(consumption_co2)             as n_consumption,
-        count(electricity_price_eur_kwh)   as n_price
+        -- Complete years only. Eurostat publishes S1 around May and S2 the
+        -- following spring, and the annual column is an average over whichever
+        -- halves exist — so without this filter the newest year can be a
+        -- January-June figure charted against full-year ones.
+        count(electricity_price_eur_kwh) filter (
+            where not price_is_partial_year
+        ) as n_price
     from marts.fct_emissions_energy
     group by year
 ),

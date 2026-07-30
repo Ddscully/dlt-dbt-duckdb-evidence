@@ -39,6 +39,11 @@ LAKE_DIR = os.environ.get("LAKE_DIR") or str(REPO_ROOT / "data" / "lake")
 # where an upstream restatement first shows up. Tables without a `year` column
 # (`raw.wb_country`, `staging.stg_country`) have nothing to partition on and are
 # small enough not to want it.
+#
+# `marts.fct_eu_electricity_prices_semiannual` is deliberately absent: 1.4k rows
+# over 19 years would add 19 partitions of ~4 kB to an archive whose small-file
+# problem is already documented, and every byte of it is derivable from
+# `raw.eu_elec_prices`, which is archived.
 ARCHIVED_TABLES = (
     "raw.owid_co2",
     "raw.owid_energy",

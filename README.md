@@ -73,6 +73,13 @@ country-year spine (`dim_country_year`) rather than off whichever source happens
 to be widest — a country-year only Eurostat or only the World Bank reports still
 lands, with the other columns null.
 
+Eurostat is the one source whose own grain is finer than that, and it keeps it:
+`fct_eu_electricity_prices_semiannual` holds the published half-years alongside
+the annual average that joins to everything else. The average is what the annual
+grain costs — half-over-half price moves averaged 19% across countries in 2022
+against 3–4% through the 2010s — so both are in the warehouse rather than only
+the convenient one.
+
 Four of the five load with dlt's `replace` disposition — small enough that a full
 reload every run is the honest default, and it keeps dlt re-inferring the schema
 so an upstream type change fails loudly. WDI is the counter-example: it's the
@@ -90,8 +97,8 @@ The pipeline populates one DuckDB file (`data/warehouse.duckdb`) with these sche
 | Schema | Written by | Contents |
 |--------|-----------|----------|
 | `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`) |
-| `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain |
-| `marts` | dbt (tables) | `dim_country_year` — the country-year spine; `fct_emissions_energy` — the wide joined fact; `fct_co2_estimate_versions` — revision history |
+| `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain — except `stg_eu_electricity_prices_semiannual`, which keeps Eurostat's half-years |
+| `marts` | dbt (tables) | `dim_country_year` — the country-year spine; `fct_emissions_energy` — the wide joined fact; `fct_co2_estimate_versions` — revision history; `fct_eu_electricity_prices_semiannual` — EU prices at their published half-year grain |
 | `history` | dbt (snapshot) | `snap_co2_estimates` — SCD2 versions of OWID's CO₂ numbers, the one table a rebuild can't reproduce |
 | `analytics` | Polars | derived metrics (`co2_intensity`) |
 

@@ -217,7 +217,73 @@ models:
       - name: electricity_price_eur_kwh
         description: >
           Household electricity price, EUR/kWh incl. all taxes, medium band DC
-          (Eurostat nrg_pc_204). Null for non-EU/EEA countries.
+          (Eurostat nrg_pc_204). Null for non-EU/EEA countries. **Averaged over
+          the year's two half-years**, which is what the annual grain costs:
+          within-year moves of 300% have happened. Use
+          `fct_eu_electricity_prices_semiannual` for anything about prices over
+          time.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 1, inclusive: false}
+      - name: price_is_partial_year
+        description: >
+          True when `electricity_price_eur_kwh` averages a single half-year — the
+          state of the newest year between Eurostat's S1 and S2 releases, when an
+          "annual" price is really a January-June one. Null wherever the price is.
+          `sources/warehouse/latest_years.sql` excludes these years from
+          `price_year`, so the site's price cross-section is always a full year.
+
+  - name: fct_eu_electricity_prices_semiannual
+    description: >
+      EU/EEA household electricity prices at Eurostat's published grain: one row
+      per (country_iso3, year, half), 2007 onwards. The only non-annual fact in
+      the warehouse, and the reason it exists is that the annual average is lossy
+      — the mean absolute half-over-half change was 19% across
+      countries in 2022 and 13% in 2023, against 3-4% through the 2010s.
+
+      Built on `dim_country_year` for its dimension attributes, so like every
+      other fact here it can only carry countries the dimension knows.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year, half]
+    columns:
+      - name: country_iso3
+        data_tests: [not_null]
+      - name: year
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 2007, max_value: 2030}
+      - name: half
+        description: "'S1' (January-June) or 'S2' (July-December), from Eurostat's period code."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: ['S1', 'S2']}
+      - name: period
+        description: Eurostat's period label, e.g. '2022-S1'.
+        data_tests: [not_null]
+      - name: period_start_date
+        description: First day of the half-year — the column to put on a time axis.
+        data_tests: [not_null]
+      - name: electricity_price_eur_kwh
+        description: >
+          EUR/kWh incl. all taxes, medium consumption band DC. Unaveraged, so this
+          is the column that shows the 2021-23 energy crisis as it actually
+          arrived.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1, inclusive: false}
+      - name: change_vs_previous_half_eur_kwh
+        description: >
+          Change from the preceding half-year, EUR/kWh. Signed. Null at the start
+          of each country's series and across any gap in it — the previous row a
+          country has is not always the previous half, so this is only reported
+          when it is.
+      - name: change_vs_previous_half_pct
+        description: >
+          The same change as a percent. Deliberately untested: the Dutch 2022-S2
+          figure is +320% off a rebate-suppressed S1, which is reality rather than
+          a bug. Also null where the previous price was zero.

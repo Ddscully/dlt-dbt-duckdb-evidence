@@ -94,8 +94,12 @@ select
     w.forest_area_pct,
     w.renew_elec_pct,
     w.energy_imports_pct,
-    -- EU household electricity price, EUR/kWh (Eurostat; null outside the EU/EEA)
-    p.electricity_price_eur_kwh
+    -- EU household electricity price, EUR/kWh (Eurostat; null outside the EU/EEA).
+    -- Averaged over the year's half-years, so it carries the flag saying when that
+    -- average is over one of them — see fct_eu_electricity_prices_semiannual for
+    -- the unaveraged series.
+    p.electricity_price_eur_kwh,
+    p.n_half_years < 2 as price_is_partial_year
 from spine as s
 inner join observed as o on s.country_iso3 = o.country_iso3 and s.year = o.year
 left join co2 as c on s.country_iso3 = c.country_iso3 and s.year = c.year

@@ -87,8 +87,9 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
   `eu_elec_prices`
 - `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain
 - `marts` — dbt tables: `dim_country_year` (the country-year spine),
-  `fct_emissions_energy` (the wide join, built on the spine) and
-  `fct_co2_estimate_versions` (revision history, off the snapshot)
+  `fct_emissions_energy` (the wide join, built on the spine),
+  `fct_co2_estimate_versions` (revision history, off the snapshot) and
+  `fct_eu_electricity_prices_semiannual` (Eurostat's own half-year grain)
 - `history` — the dbt snapshot `snap_co2_estimates`: SCD2 versions of OWID's CO2
   numbers. **The one table here that no rebuild can reproduce** — see below
 - `analytics` — Polars output: `co2_intensity`, plus `pipeline_sources` /
@@ -96,7 +97,11 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 
 Grain of every fact/staging model is **`(country_iso3, year)`**; joins are on
 ISO3 country code + year. The country dimension (`stg_country`) supplies
-`region` and `income_group`.
+`region` and `income_group`. The two exceptions are both Eurostat prices at their
+published `(country_iso3, year, half)` grain —
+`stg_eu_electricity_prices_semiannual` and the mart off it — and they are the
+exception on purpose, not a model waiting to be flattened; see the Eurostat bullet
+under *Conventions & gotchas*.
 
 **The fact hangs off the spine, not off a source.** `dim_country_year` is
 `stg_country` × every year the data covers (bounds read from the sources, so both
@@ -363,9 +368,30 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
 - **Eurostat is JSON-stat** — a flat `value` dict keyed by a row-major index over
   all dimensions. `eu_elec_prices` filters every dimension but `geo`/`time`
   server-side, then walks that grid (see `pipeline.py`). Its `geo` codes are ISO2
-  *except* `EL`=Greece (GR) and `UK`=UK (GB); `stg_eu_electricity_prices.sql`
-  remaps those, joins `stg_country` for ISO3, and averages the two half-years to
-  annual. EU/EEA only, so the mart column is null for the rest of the world.
+  *except* `EL`=Greece (GR) and `UK`=UK (GB);
+  `stg_eu_electricity_prices_semiannual.sql` remaps those and joins `stg_country`
+  for ISO3. EU/EEA only, so the mart column is null for the rest of the world.
+  (The `length(geo) = 2` filter there drops `EU27_2020` and friends but *not*
+  `EA` — two letters. That falls out at the inner join, which no ISO2 matches.)
+- **Eurostat prices are semi-annual, and both grains are modelled.**
+  `stg_eu_electricity_prices_semiannual` is the cleaning model at
+  `(country_iso3, year, half)`; `stg_eu_electricity_prices` averages it to annual
+  so it can join the country-year spine. Averaging is what the annual grain costs,
+  and the cost is large enough to model around: the mean absolute half-over-half
+  change was 19% across countries in 2022 and 13% in 2023 against 3–4% through the
+  2010s, and the Netherlands went €0.034/kWh in 2022-S1 to €0.142 in S2 (+320%) as
+  that year's energy-tax cuts landed in the first half. The annual €0.088 is a
+  price nobody paid. Chart prices *over time* off
+  `marts.fct_eu_electricity_prices_semiannual`; use the annual column only to
+  join prices to emissions or GDP.
+- **An "annual" price can be one half-year.** Eurostat publishes S1 around May and
+  S2 the following spring, so `n_half_years` (staging) / `price_is_partial_year`
+  (mart) exist to say when the average is over one half. It is *not* only a
+  latest-year edge case — 29 country-years carry the flag, including 23 countries
+  at the 2007 series start and one-offs like the UK in 2020 and Iceland in 2025.
+  `sources/warehouse/latest_years.sql` counts only complete years for
+  `price_year`, and the dashboard reports the partial count for the selected year
+  rather than dropping those countries (in 2007 that would drop 23 of 27).
 
 ## Orchestration (`orchestration/`)
 
