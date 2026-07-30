@@ -33,6 +33,7 @@ from ingest.pipeline import WB_WDI_INDICATORS, build_pipeline, load_groups, publ
 from lake.archive import ARCHIVED_TABLES, LAKE_DIR, run as write_lake, table_dir
 from orchestration.resources import dbt_project
 from transform.co2_intensity import DUCKDB_PATH, run as run_co2_intensity
+from transform.pipeline_status import run as run_pipeline_status
 
 # --------------------------------------------------------------------------- #
 # Freshness policies
@@ -179,6 +180,30 @@ def co2_intensity(context: AssetExecutionContext) -> dg.MaterializeResult:
     rows = run_co2_intensity()
     context.log.info("wrote analytics.co2_intensity (%s rows)", rows)
     return dg.MaterializeResult(metadata={"dagster/row_count": rows})
+
+
+@dg.asset(
+    key=dg.AssetKey(["analytics", "pipeline_status"]),
+    # Inventories `analytics`, so it has to run after the last thing written
+    # there. `co2_intensity` is itself downstream of the mart, which is
+    # downstream of every raw table — one edge orders this behind the lot.
+    deps=[co2_intensity],
+    group_name="analytics",
+    kinds={"polars", "duckdb"},
+    freshness_policy=MODELLED_FRESHNESS,
+    description=(
+        "Pipeline observability: dlt load times per source, row counts and year "
+        "spans per layer, and the stored-failure count for every dbt test. "
+        "Rendered by the Evidence 'Pipeline' page."
+    ),
+)
+def pipeline_status(context: AssetExecutionContext) -> dg.MaterializeResult:
+    written = run_pipeline_status()
+    for name, rows in written.items():
+        context.log.info("wrote analytics.%s (%s rows)", name, rows)
+    return dg.MaterializeResult(
+        metadata={"dagster/row_count": sum(written.values()), "tables": written}
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -348,5 +373,6 @@ __all__ = [
     "co2_intensity",
     "dbt_models",
     "parquet_archive",
+    "pipeline_status",
     "raw_assets",
 ]

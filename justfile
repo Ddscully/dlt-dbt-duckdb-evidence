@@ -46,8 +46,13 @@ lake:
 transform:
     uv run python -m transform.co2_intensity
 
+# Pipeline observability tables (load times, layer inventory, dbt test failures)
+# Must run after dbt-build: it reads dbt_test__audit and dbt/target/manifest.json.
+pipeline-status:
+    uv run python -m transform.pipeline_status
+
 # Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
-run: ingest dbt-build transform lake
+run: ingest dbt-build transform pipeline-status lake
 
 # Unit tests — mocked API payloads, no network, no warehouse
 test:
@@ -67,6 +72,7 @@ test-pipeline:
     uv run python -m ingest.pipeline
     cd dbt && uv run dbt deps && uv run dbt build && cd ..
     uv run python -m transform.co2_intensity
+    uv run python -m transform.pipeline_status
     uv run python -m lake.archive
 
 # `.github/workflows/release-data.yml` runs this, then attaches the result to a

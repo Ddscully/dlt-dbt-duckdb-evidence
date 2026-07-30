@@ -36,6 +36,7 @@ defs = dg.Definitions(
         assets.raw_assets,
         assets.dbt_models,
         assets.co2_intensity,
+        assets.pipeline_status,
         assets.parquet_archive,
     ],
     asset_checks=[
