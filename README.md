@@ -56,7 +56,8 @@ layers fit together](#orchestration), [how it's tested](#tests), or just
 
 ## Data sources
 
-All country + year keyed, freely licensed, small enough to run locally.
+**Five feeds from three publishers.** All country + year keyed, freely licensed,
+small enough to run locally.
 
 | Dataset | Grain | Link |
 |---------|-------|------|
