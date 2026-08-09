@@ -26,10 +26,22 @@ def test_the_in_tree_root_is_this_repo():
 def test_an_explicit_root_wins(monkeypatch, tmp_path):
     """`PROJECT_ROOT` is the only answer available to a consumer that installs
     this package from outside the tree, so it outranks the in-tree guess even
-    when the in-tree guess would have worked."""
+    when the in-tree guess would have worked.
+
+    The two overrides have to be cleared first, and not clearing them is how this
+    test passed locally and failed on the first CI run after `paths.py` landed:
+    `ci.yml` exports `WAREHOUSE_PATH`, which correctly beats the root-derived
+    default (`test_the_overrides_do_not_need_a_root_at_all` pins that), so the
+    assertion below was reading the runner's path instead of `tmp_path`. What is
+    under test here is the *derived* location, so the thing that overrides it
+    has to be out of the way.
+    """
+    monkeypatch.delenv(paths.WAREHOUSE_ENV_VAR, raising=False)
+    monkeypatch.delenv(paths.LAKE_ENV_VAR, raising=False)
     monkeypatch.setenv(paths.ROOT_ENV_VAR, str(tmp_path))
     assert paths.project_root() == tmp_path.resolve()
     assert paths.warehouse_path() == str(tmp_path / "data" / "warehouse.duckdb")
+    assert paths.lake_dir() == str(tmp_path / "data" / "lake")
     assert paths.dbt_dir() == tmp_path / "dbt"
 
 
