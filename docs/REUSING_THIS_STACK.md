@@ -9,11 +9,11 @@ This is not a checklist for adding a source to *this* warehouse; that's
 It's the layer above: what carries over to a different dataset, what has to be
 rewritten, and the handful of decisions that are expensive to change later.
 
-The honest framing up front: **most of what makes this repo work is not
-transferable code.** The pipeline is ~4,000 lines, and the part with nothing
-domain-specific in it is maybe a third — the layout, the wiring conventions, the
-CI shape, and the lint config. The rest is a worked example, and the fastest way
-to reuse it is to copy the tree, keep the skeleton, and delete the emissions.
+**Most of what makes this repo work is not transferable code.** The pipeline is
+~4,000 lines and the part with nothing domain-specific in it is maybe a third —
+the layout, the wiring conventions, the CI shape, the lint config. The rest is a
+worked example. The fastest way to reuse it is to copy the tree, keep the
+skeleton and delete the emissions.
 
 ## 1. What you're actually reusing
 
@@ -37,7 +37,7 @@ Nothing in these mentions the dataset.
 - `transform/pipeline_status.py` — it reads `information_schema`, dlt's
   `_dlt_load_id` and dbt's `manifest.json`. There is no emissions logic in it at all.
 - `.github/workflows/ci.yml` and `nightly.yml` — the offline-fixtures /
-  live-sources split is the pattern worth keeping regardless of source.
+  live-sources split holds whatever you're ingesting.
 - `docs/STYLE_GUIDE.md`.
 
 ### Adapt — the structure holds, the constants don't
@@ -68,10 +68,9 @@ Nothing in these mentions the dataset.
 
 ## 2. The names that join the layers
 
-**The layers are wired by string, not by import.** This is the single most
-important thing to carry over, because every one of these mismatches fails
-*silently* — the pipeline runs, the graph renders, and something is quietly
-disconnected or stale.
+**The layers are wired by string, not by import.** Every mismatch below fails
+*silently*: the pipeline runs, the graph renders, and something is disconnected
+or stale.
 
 | Name | Set in | Must match |
 |------|--------|------------|
@@ -83,13 +82,11 @@ disconnected or stale.
 | Evidence connection `name:` | `reports/sources/*/connection.yaml` | the source directory name, and `${name.query}` in pages |
 | the DuckDB **file stem** | wherever the file is written | the catalog dbt bakes into view SQL (`warehouse.raw.x`) |
 
-Two of those deserve their own paragraph.
-
-**The asset-key match is the whole graph.** `raw/<resource>` from the dlt side and
-`raw/<source table>` from the dbt side are the only thing joining EL to T. Get it
-wrong and both halves still materialize — side by side, unconnected, no error
-anywhere. `dagster definitions validate` passes. Only looking at the graph tells
-you. Budget for checking it every time you add or rename a resource.
+**The asset key is the only join between EL and T.** `raw/<resource>` from the dlt
+side, `raw/<source table>` from the dbt side. Get it wrong and both halves still
+materialize, side by side, unconnected, with no error anywhere —
+`dagster definitions validate` passes too. Only the graph shows it, so look at
+the graph every time you add or rename a resource.
 
 **The DuckDB file stem becomes a catalog name.** dbt writes staging views with
 fully-qualified SQL, so `warehouse.duckdb` produces views that say
@@ -102,17 +99,16 @@ name once, and pin it with a test if you publish the file.
 
 ### The grain
 
-Here it's `(country_iso3, year)`, and effectively everything downstream is a
-consequence: the `unique_combination_of_columns` contract on every fact-shaped
-model, the spine, the lake's partition column, the join key in every mart.
+Here it's `(country_iso3, year)`, and most of the warehouse follows from it: the
+`unique_combination_of_columns` contract on every fact-shaped model, the spine,
+the lake's partition column, the join key in every mart.
 
 Write yours down as `(entity, period)` in the style guide before you build the
-first staging model. Then hold every staging model to it — and when a source
-genuinely publishes at a different grain, model it at *its* grain and derive the
-project grain from it, rather than flattening at the edge. This repo does that
-once (Eurostat's half-years), and the reason is worth copying: the averaging step
-that reaches the project grain destroys real signal, so both grains are modelled
-and the docs say which one to chart.
+first staging model. Then hold every staging model to it. When a source publishes
+at a different grain, model it at *its* grain and derive the project grain from
+that rather than flattening at the edge. This repo does it once, for Eurostat's
+half-years, because the averaging step that reaches the annual grain destroys
+real signal — so both grains are modelled and the docs say which one to chart.
 
 ### What decides an entity exists
 
@@ -128,8 +124,8 @@ rows with nulls. Build the dimension first, even if it's a seed file.
 ### Which resource is incremental
 
 Default to `write_disposition="replace"` and `refresh="drop_resources"`. Reach for
-`merge` only when a full pull is genuinely expensive, and know that it's a package
-deal — you owe all five of:
+`merge` only when a full pull is expensive, and take the whole package with it —
+all five of:
 
 1. a primary key that really is the grain,
 2. declared `columns={...}` types, because the schema is no longer re-inferred and
@@ -201,8 +197,7 @@ Six files, and the dbt profile name has to match in two of them:
 
 ## 6. Build order
 
-Each step leaves the repo runnable, which matters because the failures are much
-easier to attribute that way.
+Each step leaves the repo runnable, so a failure has one plausible cause.
 
 1. **Skeleton.** Copy the tree, delete the example files listed in §1, rename per
    §5. `just setup` should succeed with an empty pipeline.
@@ -215,13 +210,14 @@ easier to attribute that way.
 4. **Fixtures and CI.** As soon as the first source lands, before there are five.
    Recording fixtures for one endpoint is a morning; for five it's a project.
 5. **Tests as grain contracts.** `unique_combination_of_columns` on every
-   fact-shaped model the day it's created — that's the contract, not a nicety.
+   fact-shaped model, the day it's created. It's how the grain from §3 stops
+   being a convention.
 6. **Dagster.** Once two layers exist, so there's an edge to get wrong.
 7. **The optional layers** (§7), in whatever order earns its keep.
 
 ## 7. What to drop if you want less
 
-Five layers here are genuinely optional. Each is independent of the others:
+Five layers are optional, and independent of each other:
 
 - **The lake** (`lake/`) — drop it unless you want cross-run diffability or you
   intend to move to object storage. It's the cheapest to add later.
@@ -231,8 +227,8 @@ Five layers here are genuinely optional. Each is independent of the others:
   someone consumes the data without running the pipeline. Note that it turns
   "we use public data" into "we redistribute public data", which is an attribution
   obligation.
-- **Pipeline observability** (`transform/pipeline_status.py`) — worth it once
-  there are enough tables that "is anything stale?" isn't answerable by eye.
+- **Pipeline observability** (`transform/pipeline_status.py`) — earns its place
+  once there are enough tables that "is anything stale?" isn't answerable by eye.
 - **Fixtures and the nightly job** (`tests/fixtures/`, `nightly.yml`) — the one I'd
   drop last. Without it, a red CI build doesn't distinguish "we broke it" from
   "the API is down", and that ambiguity is what trains people to re-run failed builds.
@@ -241,8 +237,6 @@ The stack itself is less separable: Dagster is additive (`just run` still works
 without it), but dlt, DuckDB, dbt and Evidence each assume the previous one.
 
 ## 8. What doesn't transfer
-
-Be realistic about this, because it's most of the value:
 
 - **The gotchas that are about the sources**, and there are a lot of them here —
   padded region names, ISO2 exceptions, per-metric coverage curves, which GDP
