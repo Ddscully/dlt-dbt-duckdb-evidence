@@ -64,7 +64,7 @@ that an upstream publisher moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
 that OWID was down.
 
-**What blocks.** 113 dbt tests run inside `dbt build`, every one with
+**What blocks.** 148 dbt tests run inside `dbt build`, every one with
 `store_failures`, so a red test hands you `select * from
 dbt_test__audit.<test_name>` rather than a count. Five Dagster asset checks sit
 alongside them, and `site_pages_all_rendered` is blocking and checks page *size*
@@ -84,14 +84,15 @@ Measured on this machine against the live APIs, per stage:
 | Stage | Time | Notes |
 |-------|------|-------|
 | `just ingest` | **46.7 s** | five sources over the public internet |
-| `just dbt-build` | **12.9 s** | 125 nodes — 10 models, 1 snapshot, 1 seed, 113 tests |
+| `just dbt-build` | **12.7 s** | 164 nodes — 12 models, 2 snapshots, 2 seeds, 148 tests |
 | `just transform` | **0.9 s** | Polars derived metric |
 | `just pipeline-status` | **0.9 s** | observability tables |
 | `just lake` | **2.5 s** | 762 Parquet files, ~32 MB |
 | **total** | **≈ 64 s** | of which **73% is waiting on someone else's API** |
 
-Artifacts: a 52 MB DuckDB file, a 32 MB Parquet archive, a 94 MB Evidence site.
-Warehouse contents: 79k staging rows, 115k mart rows, 43,138 in the wide fact.
+Artifacts: a 57 MB DuckDB file, a 32 MB Parquet archive, a 94 MB Evidence site.
+Warehouse contents: 79,207 staging rows, 120,642 mart rows (43,138 of them the
+wide fact), 9,821 snapshot rows across the two `history` tables.
 
 CI, from the repo's own run history (median of successful runs):
 

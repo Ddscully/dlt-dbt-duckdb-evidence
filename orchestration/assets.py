@@ -346,7 +346,7 @@ EVIDENCE_SITE = dg.AssetKey(["reports", "evidence_site"])
 
 # One dep per table the source queries read, rather than the single edge that
 # would be enough to order this last. The lake gets away with `deps=[the mart]`
-# because it archives one table list; the site reads eight tables across two
+# because it archives one table list; the site reads ten tables across two
 # layers, and a graph that showed it hanging off only the mart would be wrong
 # about what a stale dashboard means. `scripts.build_report` owns the mapping and
 # `tests/test_report.py` holds it to the SQL.
@@ -370,7 +370,8 @@ SITE_DEPS = [
     description=(
         "The Evidence dashboard as a static site in `reports/build/`: extracts "
         "the warehouse tables to parquet (`npm run sources:strict`), then renders "
-        "the five pages against them. Published by `.github/workflows/pages.yml`."
+        "every page under `reports/pages/` against them. Published by "
+        "`.github/workflows/pages.yml`."
     ),
 )
 def evidence_site(context: AssetExecutionContext) -> dg.MaterializeResult:
@@ -529,8 +530,8 @@ def site_pages_all_rendered() -> dg.AssetCheckResult:
     most like success.
     """
     routes = page_routes()
-    # The five pages render at 17-74 kB, so 8 kB is well under anything real
-    # while still catching a route that emitted nothing but the SvelteKit shell.
+    # The pages render at 17-90 kB, so 8 kB is well under anything real while
+    # still catching a route that emitted nothing but the SvelteKit shell.
     empty = {
         slug: path.stat().st_size
         for slug, path in routes.items()

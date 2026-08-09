@@ -23,3 +23,42 @@ seeds:
         data_tests: [not_null, unique]
       - name: region
         data_tests: [not_null]
+
+  - name: example_scope2_sites
+    description: >
+      **Invented data, and the only invented data in this warehouse.** Twelve
+      sites of a hypothetical manufacturer — a name, a country and an annual
+      electricity consumption — so that `fct_example_scope2_emissions` can show
+      the arithmetic that turns `dim_grid_emission_factors` into a Scope 2
+      disclosure line. The factors the meter readings are multiplied by are
+      real; the meters are not.
+
+      It is a seed rather than a source because there is nothing to fetch: this
+      is the reader's own data in the real workflow, and every company's is
+      different.
+
+      **Every `country_iso3` here must be one of the 17 in `COUNTRIES` in
+      `scripts/record_fixtures.py`.** The mart's `not_null` tests are real gates
+      on the factor join, and `just test-pipeline` (which is what CI runs) builds
+      against the fixture slice — a site in a country the fixtures don't carry
+      fails CI while passing locally. That constraint is why this is a global
+      footprint rather than the European one it started as, and the spread is
+      better for it: Sweden at the clean end, South Africa at the other.
+    columns:
+      - name: site_id
+        data_tests: [not_null, unique]
+      - name: site_name
+        data_tests: [not_null]
+      - name: country_iso3
+        description: >
+          ISO3. Not tested against the country dimension here — the join in
+          `fct_example_scope2_emissions` is a left join precisely so that a
+          country with no published factor shows up as a null factor rather
+          than a missing site.
+        data_tests: [not_null]
+      - name: annual_electricity_mwh
+        description: Metered grid electricity for one year, MWh. Purchased, not generated on site.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}

@@ -81,14 +81,21 @@ WAREHOUSE_SCHEMAS = ("raw", "staging", "marts", "analytics", "history")
 # Polars outputs by asset key. Three tables share one key: `pipeline_status`
 # writes all three in a single op.
 #
+# `history.snap_*` is a legal schema for a source query to read but no page does:
+# the snapshots reach the site through the marts that summarise them
+# (`fct_co2_estimate_versions`, `dim_grid_emission_factors`), which is also the
+# only shape `get_asset_key_for_model` can resolve.
+#
 # They live here rather than beside the asset so `tests/test_report.py` can check
 # them against the SQL without importing Dagster — which `just test` cannot do,
 # because the dbt manifest it needs is gitignored and built later in CI.
 TABLE_TO_DBT_MODEL = {
     "marts.dim_country_year": "dim_country_year",
+    "marts.dim_grid_emission_factors": "dim_grid_emission_factors",
     "marts.fct_co2_estimate_versions": "fct_co2_estimate_versions",
     "marts.fct_emissions_energy": "fct_emissions_energy",
     "marts.fct_eu_electricity_prices_semiannual": "fct_eu_electricity_prices_semiannual",
+    "marts.fct_example_scope2_emissions": "fct_example_scope2_emissions",
 }
 
 TABLE_TO_ASSET_KEY = {
@@ -129,7 +136,7 @@ def page_routes(pages_dir: Path = PAGES_DIR, build_dir: Path = BUILD_DIR) -> dic
 
     The asset check reads this: `evidence build` exits 0 whether or not it emitted
     a page for every markdown file, so "the build succeeded" is not the same claim
-    as "the site has five pages on it".
+    as "the site has a page for every file under `pages/`".
     """
     routes = {}
     for page in sorted(pages_dir.rglob("*.md")):

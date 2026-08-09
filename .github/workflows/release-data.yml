@@ -74,10 +74,11 @@ jobs:
       - name: Install dbt packages and parse the project
         run: cd dbt && uv run dbt deps && uv run dbt parse
 
-      # `history.snap_co2_estimates` is the one table a rebuild cannot
-      # reproduce, and every release used to start from an empty file — so the
-      # published snapshot held one version per row forever and the Restatements
-      # page shipped permanently empty. Copying the previous release's `history`
+      # The `history` schema holds the tables a rebuild cannot reproduce
+      # (`snap_co2_estimates`, `snap_grid_emission_factors`), and every release
+      # used to start from an empty file — so the published snapshots held one
+      # version per row forever and the Restatements page shipped permanently
+      # empty. Copying the previous release's `history`
       # in *before* the build makes `dbt snapshot` compare this month's numbers
       # against last month's, so the releases accumulate a real revision log.
       #
@@ -101,8 +102,16 @@ jobs:
           uv run python - <<'PY' >> "$GITHUB_OUTPUT"
           import duckdb
 
+          # Every table in the schema, not a named one: a snapshot added later
+          # would otherwise be carried forward but never checked, which is the
+          # same silent-reset failure one step removed.
           con = duckdb.connect("data/warehouse.duckdb", read_only=True)
-          (rows,) = con.execute("select count(*) from history.snap_co2_estimates").fetchone()
+          rows = 0
+          for (table,) in con.execute(
+              "select table_name from duckdb_tables() where schema_name = 'history'"
+          ).fetchall():
+              (n,) = con.execute(f'select count(*) from history."{table}"').fetchone()
+              rows += n
           print(f"restored_rows={rows}")
           PY
           rm -rf prev-release
@@ -163,15 +172,21 @@ jobs:
               assert rows > 0, f"{relation} is empty"
               print(f"{relation}: {rows:,} rows")
 
-          # The snapshot can only grow. If it came back smaller than what was
+          # The snapshots can only grow. If they came back smaller than what was
           # carried forward, the restore didn't reach the build and this release
           # would publish a history that silently lost its earlier versions.
+          # Summed over the schema, matching how `restored_rows` was counted.
           restored = int(os.environ.get("RESTORED_ROWS") or 0)
-          (rows,) = con.execute(
-              "select count(*) from warehouse.history.snap_co2_estimates"
-          ).fetchone()
+          rows = 0
+          for (table,) in con.execute(
+              "select table_name from duckdb_tables() "
+              "where database_name = 'warehouse' and schema_name = 'history'"
+          ).fetchall():
+              (n,) = con.execute(f'select count(*) from warehouse.history."{table}"').fetchone()
+              print(f"warehouse.history.{table}: {n:,} rows")
+              rows += n
           assert rows >= restored, f"history shrank: {rows:,} rows, {restored:,} restored"
-          print(f"warehouse.history.snap_co2_estimates: {rows:,} rows ({restored:,} carried forward)")
+          print(f"warehouse.history: {rows:,} rows total ({restored:,} carried forward)")
           PY
 
       # The notes are the release body, so they move out of the way and

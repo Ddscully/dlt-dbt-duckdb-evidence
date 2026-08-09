@@ -166,6 +166,14 @@ models:
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
+      - name: source_loaded_at
+        description: >
+          When dlt landed the row, from `_dlt_load_id` — the same field
+          `dbt source freshness` reads, carried into the model so
+          `dim_grid_emission_factors` can publish the vintage of the extract
+          alongside the factor. One value per load, since this resource loads
+          with `replace`.
+        data_tests: [not_null]
 
   - name: stg_wdi
     description: >

@@ -1,0 +1,13 @@
+site_id,site_name,site_type,country_iso3,annual_electricity_mwh
+S01,Suzhou assembly,Manufacturing,CHN,108000
+S02,Katowice stamping,Manufacturing,POL,84000
+S03,Munich assembly,Manufacturing,DEU,76000
+S04,Pune components,Manufacturing,IND,62000
+S05,Ohio assembly,Manufacturing,USA,58000
+S06,Lyon components,Manufacturing,FRA,54000
+S07,Goteborg foundry,Manufacturing,SWE,47000
+S08,Derby machining,Manufacturing,GBR,31000
+S09,Thessaloniki plant,Manufacturing,GRC,26000
+S10,Durban depot,Distribution,ZAF,18000
+S11,Yokohama R&D,Office & R&D,JPN,11000
+S12,Nairobi service hub,Office & R&D,KEN,7500

@@ -103,6 +103,22 @@ where year = ${inputs.year.value}
   `(SELECT NULL WHERE 0 /* An Input has not been set */)` sentinel, so every
   query filtering on it sits at `Loading...` forever while input-free charts on
   the same page render normally. Write `defaultValue={2024}`.
+- **Same cause, second symptom: a year cast to a string on a page renders
+  `2025.0`.** The extractor writes every numeric column to parquet as `DOUBLE`,
+  and page SQL runs in the browser against that — so `cast(year as varchar)`
+  stringifies a double. It's a string by then, so no `fmt` fixes it. Where the
+  value stays numeric (DataTable column, `<BigValue>`) leave it alone and pass
+  `fmt="0"`; where it has to be text (a chart's category axis) write
+  `cast(cast(year as integer) as varchar)`. A *source* query is server-side and
+  needs neither, which is why `latest_years.sql`'s `*_label` columns look
+  simpler than they can be on a page.
+- **`<Value>` emits a trailing space, so never put punctuation straight after
+  one.** `<Value .../>.` renders as "Turkmenistan ." and `<Value .../>'s` as
+  "Norway 's". End the clause on words instead: `... at <Value .../> g/kWh.`
+- **Keep a sentence containing a `<Value>` on one source line.** A wrapped
+  paragraph that has a component in it stops processing markdown at the wrap, so
+  a `[link](/foo)` later in the same paragraph renders as literal brackets. Long
+  lines are the price; a following paragraph with no component is unaffected.
 - Don't hardcode the upper bound of a year selector (`where year between 1990
   and 2022`) — it silently pins the dashboard to whatever year the warehouse
   held the day it was written. `where year >= 1990` tracks the data.
@@ -153,6 +169,12 @@ chromium --headless=old --no-sandbox --disable-gpu --window-size=1400,2100 \
   `--dump-dom` and `--enable-logging=stderr` in either mode.
 - `python3 -m http.server` is not good enough for `build/`; it has no Range
   support, which DuckDB-WASM needs for the parquet.
+- **The 60 s budget is load-bearing on a long page, and cutting it fakes a bug.**
+  At 25 s, a page with three charts screenshots with one of them showing its axis,
+  its categories and its value labels and *no bars* — a different chart on each
+  run, which reads exactly like the reserved-column-name failure and sends you
+  editing SQL that was fine. Shoot twice before believing a chart is broken: a
+  real failure hits the same chart every time.
 - For console errors and failed requests, drive it over CDP instead: launch with
   `--remote-debugging-port=9222`, then connect from a Node script (Node 22 has a
   global `WebSocket`) and subscribe to `Runtime.consoleAPICalled`,

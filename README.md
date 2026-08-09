@@ -120,8 +120,8 @@ The pipeline populates one DuckDB file (`data/warehouse.duckdb`) with these sche
 |--------|-----------|----------|
 | `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`) |
 | `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain, except `stg_eu_electricity_prices_semiannual`, which keeps Eurostat's half-years |
-| `marts` | dbt (tables) | `dim_country_year`, the country-year spine; `fct_emissions_energy`, the wide joined fact; `fct_co2_estimate_versions`, revision history; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain |
-| `history` | dbt (snapshot) | `snap_co2_estimates`, SCD2 versions of OWID's CO₂ numbers and the one table a rebuild can't reproduce |
+| `marts` | dbt (tables) | `dim_country_year`, the country-year spine; `fct_emissions_energy`, the wide joined fact; `dim_grid_emission_factors`, grid factors packaged as a Scope 2 reference table; `fct_co2_estimate_versions`, revision history; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain; `fct_example_scope2_emissions`, the worked example over twelve invented sites |
+| `history` | dbt (snapshots) | `snap_co2_estimates` and `snap_grid_emission_factors`, SCD2 versions of OWID's CO₂ numbers and of the Scope 2 factors — the two tables a rebuild can't reproduce |
 | `analytics` | Polars | derived metrics (`co2_intensity`) |
 
 ### And a lake beside it: `data/lake/`
@@ -164,8 +164,10 @@ raw/wb_country    ─┼─▶ staging/stg_* ──┤                          
 raw/wb_wdi        ─┤       (dbt)       └─▶ history/snap_co2_estimates ─▶ marts/fct_co2_estimate_versions  (DuckDB → Parquet)
 raw/eu_elec_prices─┘                            (dbt snapshot)                       (dbt)
       (dlt)
+                    ...and history/snap_grid_emission_factors ─▶ marts/dim_grid_emission_factors
+                       (the same shape again) ─▶ marts/fct_example_scope2_emissions
 
-  ...and the four marts + analytics/co2_intensity + analytics/pipeline_status
+  ...and the six marts + analytics/co2_intensity + analytics/pipeline_status
                     └─▶ reports/evidence_site   (Evidence → static HTML)
 ```
 
@@ -214,7 +216,7 @@ from the UI if you want it running.
 ├── dbt/               # dbt-duckdb project
 │   ├── models/staging # 1:1 cleaned source views (stg_*)
 │   ├── models/marts   # the country-year spine (dim_*) + the facts (fct_*)
-│   ├── snapshots/     # SCD2 history of OWID's CO2 estimates (schema `history`)
+│   ├── snapshots/     # SCD2 history: CO2 estimates + grid factors (schema `history`)
 │   └── macros/        # generate_schema_name -> clean schema names
 ├── transform/         # Polars: derived metrics -> schema `analytics`
 ├── lake/              # DuckDB -> hive-partitioned Parquet in data/lake/
@@ -278,7 +280,7 @@ to fix the pipeline and `just record-fixtures`. Details in
 
 ### Data-quality gates
 
-`just dbt-build` runs 113 dbt tests alongside the models, and Dagster surfaces
+`just dbt-build` runs 148 dbt tests alongside the models, and Dagster surfaces
 each one as an asset check on the model it guards:
 
 | Gate | What it catches |
@@ -297,9 +299,10 @@ no ceiling because small petrostates legitimately reach 780 t/person.
 
 ### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-Five pages, built from the modelled layers: `marts.fct_emissions_energy` and
+Six pages, built from the modelled layers: `marts.fct_emissions_energy` and
 `analytics.co2_intensity` for the findings, plus `dim_country_year`,
-`fct_co2_estimate_versions`, `fct_eu_electricity_prices_semiannual` and the
+`dim_grid_emission_factors`, `fct_co2_estimate_versions`,
+`fct_eu_electricity_prices_semiannual`, `fct_example_scope2_emissions` and the
 `analytics.pipeline_*` tables for the rest. No year is hardcoded: every page reads
 the latest year each metric family can actually populate from
 `sources/warehouse/latest_years.sql`, because coverage doesn't end in the same year
@@ -310,8 +313,9 @@ for all of them.
 | **Home**: Explore | Pick a year: clean electricity vs. life expectancy, carbon intensity of the economy over time, grid carbon intensity, EU electricity prices against grid cleanliness, the most carbon-efficient economies, and what averaging Eurostat's half-year prices into an annual figure costs. |
 | **Findings** | Seven write-ups on the joined data: when each country's emissions peaked, that the cleanup happened in electricity and coal is most of it, real-terms decoupling, whether it's just offshoring (it isn't, mostly), emissions tracking income rather than headcount, cumulative vs. current responsibility, and carbon intensity falling while absolute tonnes rise. |
 | **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
-| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 113 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
+| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 148 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. Empty on the published copy by construction: the build starts from an empty DuckDB file, and a snapshot can only record a revision it was there for. |
+| **Scope 2 Factors** | The same grid carbon-intensity series read as what it also is: the location-based Scope 2 emission factor a company multiplies its metered kWh by for a CSRD, SECR or CDP disclosure. `marts.dim_grid_emission_factors` as a reference table with its vintage and lineage, a worked example over twelve *invented* sites, and the three caveats a practitioner checks first. |
 
 `.github/workflows/pages.yml` builds it, as a single `publish_site` job. The site
 is a node in the asset graph (`reports/evidence_site`), so the workflow
@@ -384,9 +388,9 @@ Three things to know if you're copying this setup:
   the workflow resolved, recorded in `manifest.json`. Older clients may refuse
   it. The Parquet files have no such constraint, which is why both ship.
 - **`history` is inherited, not rebuilt.** Everything else in the file is built
-  from scratch each time, but the SCD2 snapshot of OWID's CO₂ estimates is the
-  one table that can't be — a revision only leaves a trace if you were holding
-  the previous number. So each release downloads its predecessor and copies
+  from scratch each time, but the two SCD2 snapshots — OWID's CO₂ estimates and
+  the grid emission factors — can't be: a revision only leaves a trace if you
+  were holding the previous number. So each release downloads its predecessor and copies
   `history` in before it builds (`scripts/restore_history.py`), and the releases
   accumulate a genuine revision log. `manifest.json` reports how much of one.
 

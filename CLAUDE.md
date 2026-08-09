@@ -57,7 +57,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (models, snapshot + 113 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (12 models, 2 snapshots, 2 seeds + 148 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -202,10 +202,14 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 - `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain
 - `marts` — dbt tables: `dim_country_year` (the country-year spine),
   `fct_emissions_energy` (the wide join, built on the spine),
-  `fct_co2_estimate_versions` (revision history, off the snapshot) and
-  `fct_eu_electricity_prices_semiannual` (Eurostat's own half-year grain)
-- `history` — the dbt snapshot `snap_co2_estimates`: SCD2 versions of OWID's CO2
-  numbers. **The one table here that no rebuild can reproduce** — see below
+  `dim_grid_emission_factors` (the Scope 2 reference product),
+  `fct_co2_estimate_versions` (revision history, off the snapshot),
+  `fct_eu_electricity_prices_semiannual` (Eurostat's own half-year grain) and
+  `fct_example_scope2_emissions` (the worked example — **the only fabricated
+  data in the warehouse**)
+- `history` — the dbt snapshots `snap_co2_estimates` (SCD2 versions of OWID's CO2
+  numbers) and `snap_grid_emission_factors` (the same for the Scope 2 factors,
+  2015+). **The two tables here that no rebuild can reproduce** — see below
 - `analytics` — Polars output: `co2_intensity`, plus `pipeline_sources` /
   `pipeline_tables` / `pipeline_tests` (see *Pipeline observability* below)
 
@@ -260,6 +264,15 @@ this is the only place a revision leaves a trace.
   `is_revised` is uniformly false. The restatements page renders an explicit
   "nothing revised yet" branch for that case; it is the honest state, not a
   broken build.
+- **There are two snapshots now, and anything that names one must name both.**
+  `snap_grid_emission_factors` (the Scope 2 section below) was the second, and it
+  found the places that had hardcoded the first: `release-data.yml` counted
+  restored rows and asserted "history didn't shrink" against
+  `history.snap_co2_estimates` by name, so a snapshot added later would have been
+  carried forward by `restore_history` but never verified. Both spots now sum
+  over every table in the schema. `scripts/restore_history.py` needed no change —
+  it copies the schema, not a table list — which is the reason to keep it that
+  way.
 - **Verify a snapshot change by simulating a revision**, not by waiting for OWID:
   build, `update raw.owid_co2 set co2 = co2 * 1.05 where iso_code = 'DEU' and
   year = 2019` in a throwaway warehouse, build again, and check
@@ -270,6 +283,67 @@ this is the only place a revision leaves a trace.
   `sources/warehouse/co2_estimate_versions.sql` selects every country-year and
   the page filters on `is_revised` itself, rather than the source pre-filtering
   to the revised ones.
+
+## Scope 2 emission factors (`dim_grid_emission_factors`, `reports/pages/scope2.md`)
+
+`carbon_intensity_elec_g_kwh` is already in the wide fact. It is modelled a
+second time as `marts.dim_grid_emission_factors` because under the GHG Protocol
+that series **is** the location-based Scope 2 emission factor — the number a
+multi-site company multiplies its metered kWh by for the electricity line of a
+CSRD / SECR / CDP disclosure. No new ingestion, no new analysis: the work was
+packaging.
+
+- **It is a product table, so the columns beside the factor carry the weight.**
+  The factor in both units (`g_co2_per_kwh` as published, `t_co2_per_mwh` as
+  meter data arrives — shipping only the first is how a filing gains a factor of
+  1000), the vintage, and the lineage (`factor_basis`, `source_dataset`,
+  `source_loaded_at`). The three constant-per-row columns are deliberate: the
+  table ships as a standalone Parquet in the data release, and a factor detached
+  from its basis is the one thing a reporter must not be handed.
+- **`is_latest_available` is a filter, not a year, and that is the whole vintage
+  problem.** "The most recent published factor for country X" resolves to 2025
+  for 90 countries, 2024 for 105, 2023 for 10 and 2022 for 2, so a
+  `where year = 2025` cross-section drops more than half the world. Same lesson
+  as `latest_years.sql`, load-bearing here for a number with a legal
+  consequence. A `unique_combination_of_columns` test with
+  `config: {where: "is_latest_available"}` is what holds it to one row per
+  country. Grid size is no protection: Ukraine's newest factor is 2022, on a
+  111 TWh grid.
+- **Not built on the spine, unlike every other model here.** A country-year with
+  no factor is an absence, not a reference value; `dim_country_year` is where
+  absences are rows. The dimension is still authoritative for what a country is,
+  so five OWID territories (Guadeloupe, Martinique, Réunion, French Guiana,
+  Falklands) carry no factor — the page says so rather than leaving the count
+  unexplained.
+- **`source_loaded_at` is why `stg_energy` now selects `_dlt_load_id`.** Same
+  expression `dbt source freshness` uses. It answers "which extract did this
+  number come out of", which is the assurance question, and it is the only
+  reason that column exists in staging.
+- **`fct_example_scope2_emissions` is invented and must stay obviously invented.**
+  Twelve hypothetical sites (`seeds/example_scope2_sites.csv`) x real factors:
+  582.5 GWh, 232,456 tCO2e, and the two cleanest-grid plants drawing 17% of the
+  power for 1.7% of the tonnes. It is the only fabricated data in the warehouse
+  and it *ships in the public data release*, so the "example" in both names, the
+  seed description, the mart description, the `<Alert status=warning>` above the
+  table and the release notes bullet are all load-bearing. Don't quietly rename
+  it to something that reads as real.
+- **The seed's countries must come from the fixture slice**, i.e. `COUNTRIES` in
+  `scripts/record_fixtures.py`. The `not_null` tests on the factor join are real
+  gates, and CI builds against the 17-country fixtures — the first draft was a
+  twelve-site *European* group, which passed locally and failed `dbt build` with
+  8 null factors under `INGEST_FIXTURES=1`, because only six of the fixture
+  countries are European. This is the usual fixture-slice trap (CLAUDE.md's
+  "17 countries will happily pass a threshold the full 200+ would break") running
+  the other way: the slice is too *narrow* for a seed that joins to it. The
+  global footprint is the fix and the spread is better for it.
+- **The three caveats are stated on the page, not hidden.** Location-based only
+  (market-based needs RECs/GOs, which no public dataset carries), an annual
+  average rather than hourly matching, and production- rather than
+  consumption-based. Naming them is the difference between a credible reference
+  table and a liability; a practitioner checks all three first.
+- The page quotes a 57x spread across grids above 10 TWh where `findings.md`
+  quotes 24x above 150 TWh. Both are correct and the page says why — if one
+  moves, check the other.
 
 ## Data-quality gates (`dbt/models/**/_*.yml`)
 

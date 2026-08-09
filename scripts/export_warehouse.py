@@ -210,15 +210,24 @@ it for `{base}/download/{tag}/…`.
 `manifest.json` carries the row counts, year coverage and SHA-256 of every asset;
 `SHA256SUMS` is `sha256sum -c`-compatible.
 
-- **Grain:** one row per `(country_iso3, year)` in everything but
-  `staging.stg_country`, which is the country dimension (region, income group).
+- **Grain:** one row per `(country_iso3, year)`, with three exceptions —
+  `staging.stg_country` is the country dimension (region, income group), the two
+  `*_semiannual` tables keep Eurostat's published `(country_iso3, year, half)`,
+  and `marts.fct_example_scope2_emissions` is one row per site.
+- **One table in here is invented and says so:**
+  `marts.fct_example_scope2_emissions` prices twelve *hypothetical* sites against
+  real grid emission factors, as a worked example of
+  `marts.dim_grid_emission_factors`. Nothing else in this artifact is fabricated.
 - **Written by DuckDB {manifest["duckdb_version"]}.** Older clients may not read
   the storage format; the Parquet files have no such constraint.
 - **Data last landed:** {manifest.get("data_loaded_at") or "unknown"}.
-- **Revision history:** {history_note}. OWID restates published years;
-  `history.snap_co2_estimates` (in the DuckDB file, not the Parquet) keeps every
-  version it has served and `marts.fct_co2_estimate_versions` summarises them.
-  Each release carries the previous one's history forward, so this accumulates.
+- **Revision history (CO₂ estimates):** {history_note}. OWID restates published
+  years; `history.snap_co2_estimates` (in the DuckDB file, not the Parquet) keeps
+  every version it has served and `marts.fct_co2_estimate_versions` summarises
+  them. `history.snap_grid_emission_factors` does the same for the Scope 2
+  emission factors from 2015 on, summarised into the `first_published_*` and
+  `is_restated` columns of `marts.dim_grid_emission_factors`. Each release
+  carries the previous one's history forward, so both accumulate.
 - **`co2_per_gdp` vs. `co2_per_gdp_const_usd`** are different bases (OWID's 2011
   international-$ PPP vs. constant 2015 US$ derived here) and their levels are
   not comparable. Divide by `gdp_constant_usd`, never `gdp_usd`, for anything

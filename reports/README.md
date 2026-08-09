@@ -39,7 +39,7 @@ dashboard is the last node of the asset graph rather than something built beside
 it. `scripts/build_report.py` is the implementation, the same one `just report`
 calls, so the recipe and the graph can't drift into running different builds.
 
-- It declares **one dep per table the source queries read** (six assets, eight
+- It declares **one dep per table the source queries read** (eight assets, ten
   tables), and `tests/test_report.py` fails if a new source query reads a table
   none of them covers. Adding `sources/warehouse/foo.sql` on a new mart therefore
   means adding a line to `TABLE_TO_DBT_MODEL` in `scripts/build_report.py`; see
@@ -80,6 +80,13 @@ calls, so the recipe and the graph can't drift into running different builds.
   (`just pipeline-status`, part of `just run`).
 - `pages/restatements.md`: what OWID has revised since this warehouse first
   loaded it, off the dbt snapshot.
+- `pages/scope2.md`: the same grid carbon-intensity series the other pages chart,
+  read as the location-based Scope 2 emission factor it also is —
+  `marts.dim_grid_emission_factors` as a reference table with its vintage and
+  lineage, a worked example over twelve *invented* sites
+  (`marts.fct_example_scope2_emissions`), and the three caveats a practitioner
+  checks. It is the one page whose data is partly fabricated, which is stated in
+  an `<Alert>` directly above the table rather than in a footnote.
 
 The coverage and pipeline pages render an explanatory branch rather than an
 error when their data is empty, the way `restatements.md` does, because the
@@ -127,6 +134,35 @@ looks like every value is zero while the labels next to it say otherwise.
 change. `DataTable` is unaffected, so a column can be fine in a table on the same
 page and barless in a chart three lines below it. If a chart renders labels but
 no marks, rename the column before debugging anything else.
+
+**One false alarm worth knowing about:** a headless screenshot with too small a
+`--virtual-time-budget` produces the *identical* symptom — axis, categories and
+value labels, no bars — and does it to a different chart on each run, because the
+budget expires part-way through rendering a long page. `scope2.md` has three
+charts and 25 s left one of them blank each time, varying. 60 s renders all three,
+repeatably. Before believing a chart is broken, shoot it twice: a real failure is
+the same chart every time.
+
+## Years render as `2025.0` unless you cast twice
+
+**Evidence's DuckDB extractor writes every numeric column to parquet as
+`DOUBLE`**, whatever it was in the warehouse. Page queries run in the browser
+against *that*, so `cast(year as varchar)` in a page produces `'2025.0'` — a
+string, so no `fmt` can rescue it, and it lands in the BigValue, the DataTable
+cell and the chart's category axis looking like a bug in the data.
+
+Two fixes, and which one depends on where the value goes:
+
+- **A number rendered as a number** (DataTable column, BigValue): leave the year
+  numeric and pass `fmt="0"`.
+- **A number that has to be a string** (a chart's category axis, a label
+  concatenated into text): `cast(cast(year as integer) as varchar)`. The integer
+  cast is the load-bearing half.
+
+`latest_years.sql` sidesteps it by casting in the *source* query, which runs
+server-side before the extraction — hence its `*_label` columns. Anything
+computed on a page has to do it the long way; `scope2.md` has both forms with the
+reason inline.
 
 ## Chart colors
 

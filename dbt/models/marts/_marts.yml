@@ -35,6 +35,115 @@ models:
           World Bank income group. Null for the territories in
           `country_overrides`, which the World Bank does not classify.
 
+  - name: dim_grid_emission_factors
+    description: >
+      Grid emission factors as a reference product: one row per
+      (country_iso3, year) that has a published factor, with the vintage and the
+      lineage a reporter needs beside the number.
+
+      `emission_factor_g_co2_per_kwh` is the same series as
+      `fct_emissions_energy.carbon_intensity_elec_g_kwh`. It is modelled again
+      here because the use is different — under the GHG Protocol this *is* the
+      location-based Scope 2 emission factor, the figure a multi-site company
+      multiplies its metered kWh by for the electricity line of a CSRD, SECR or
+      CDP disclosure, and that reader wants a lookup table rather than a
+      60-column fact.
+
+      Three caveats travel with every row and are stated on the Scope 2 page
+      rather than hidden: it is **location-based** (a market-based factor needs
+      contractual instruments — RECs, GOs — that no public dataset carries), it
+      is an **annual average** rather than hourly-matched, and OWID's series is
+      **production-based**, so it ignores imported electricity.
+
+      Not built on the full spine, unlike every other model here: a country-year
+      with no factor is an absence, not a reference value. `dim_country_year` is
+      where absences are rows.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+      # The contract that makes `is_latest_available` usable as a lookup: filter
+      # on it and you get one row per country, not two and not zero.
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3]
+          config:
+            where: "is_latest_available"
+    columns:
+      - name: country_iso3
+        data_tests: [not_null]
+      - name: year
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1985, max_value: 2030}
+      - name: emission_factor_g_co2_per_kwh
+        description: >
+          Grams of CO2 per kWh generated. Never null — a row exists only where
+          a factor does.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 2000}
+      - name: emission_factor_t_co2_per_mwh
+        description: >
+          The same factor in the unit meter data arrives in: tonnes CO2e per
+          MWh, i.e. g/kWh / 1000. Shipped rather than left as a division because
+          a reporter doing it by hand is how a filing gains a factor of 1000.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 2}
+      - name: is_latest_available
+        description: >
+          The most recent year this country has a published factor for — the row
+          to use when the question is "the current factor for country X".
+          **That is not the same year for every country**: today it is 2025 for
+          90 of them, 2024 for 105, 2023 for 10 and 2022 for 2, so a
+          `where year = <latest>` cross-section would drop more than half the
+          world. Same lesson as `latest_years.sql`, load-bearing here for a
+          number with a legal consequence.
+        data_tests: [not_null]
+      - name: latest_available_year
+        description: This country's newest factor year, repeated on every one of its rows.
+        data_tests: [not_null]
+      - name: latest_factor_lag_years
+        description: >
+          How far `latest_available_year` sits behind the newest factor year in
+          the whole table — how stale the *best* number available for this
+          country is. 0 for the countries at the frontier.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: factor_version_count
+        description: >
+          Versions of this factor the warehouse has held, from
+          `snap_grid_emission_factors`. **Null before 2015**, which is where the
+          snapshot starts, and 1 for everything else on a warehouse built from
+          scratch — a snapshot can only record a revision it was present for.
+      - name: first_published_factor_g_co2_per_kwh
+        description: >
+          The factor as first snapshotted. The point of keeping it is that a
+          disclosure filed against a superseded number has to stay reconcilable;
+          it does not become wrong when OWID restates.
+      - name: is_restated
+        description: Whether the factor has changed since the snapshot first saw it. Null before 2015.
+      - name: factor_basis
+        description: >
+          Always `location-based`. Constant on every row on purpose: this table
+          ships as a standalone Parquet file in the data release, and a factor
+          detached from its basis is the one thing a reporter must not be handed.
+        data_tests: [not_null]
+      - name: source_dataset
+        description: Always `owid_energy.carbon_intensity_elec`.
+        data_tests: [not_null]
+      - name: source_loaded_at
+        description: >
+          When this pipeline pulled the extract the factor came out of (dlt's
+          `_dlt_load_id`) — not when the publisher computed it.
+        data_tests: [not_null]
+
   - name: fct_co2_estimate_versions
     description: >
       Version history of OWID's CO2 estimates, summarised off the
@@ -287,3 +396,70 @@ models:
           The same change as a percent. Deliberately untested: the Dutch 2022-S2
           figure is +320% off a rebate-suppressed S1, which is reality rather than
           a bug. Also null where the previous price was zero.
+
+  - name: fct_example_scope2_emissions
+    description: >
+      The worked example for `dim_grid_emission_factors`: metered MWh x factor
+      -> tonnes CO2e, per site, which is the whole of location-based Scope 2
+      accounting under the GHG Protocol.
+
+      **The twelve sites are invented** — `seeds/example_scope2_sites.csv`, the
+      only fabricated data in this warehouse. The factors they are multiplied by
+      are real, and each site takes the most recent one published for its
+      country, which is a different year for different countries. The seed's
+      countries are constrained to the fixture slice so the `not_null` gates
+      below stay real under CI; see the seed's own description.
+
+      It is modelled rather than left as a query on the Scope 2 page because the
+      arithmetic is the product. `scope2_at_best_grid_t_co2e` and
+      `scope2_at_worst_grid_t_co2e` reprice the identical consumption on the
+      cleanest and dirtiest grid the group already operates on, so the spread is
+      the cost of siting decisions already taken rather than a hypothetical.
+
+      Grain: one row per site.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [site_id]
+    columns:
+      - name: site_id
+        data_tests: [not_null]
+      - name: country_iso3
+        data_tests: [not_null]
+      - name: annual_electricity_mwh
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+      - name: factor_year
+        description: >
+          The vintage of the factor applied to this site. Deliberately on the
+          fact rather than looked up: two sites in the same group can be priced
+          off different years, and a disclosure has to be able to say so.
+        data_tests: [not_null]
+      - name: emission_factor_g_co2_per_kwh
+        description: >
+          Null would mean a site in a country with no published factor — a group
+          total that quietly under-reports. The join is a left join so that
+          arrives here as a failing row rather than a missing site.
+        data_tests: [not_null]
+      - name: scope2_t_co2e
+        description: Location-based Scope 2 emissions for one year, tonnes CO2e.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: share_of_group_pct
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: scope2_at_best_grid_t_co2e
+        description: The same consumption on the cleanest grid the group operates on.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: scope2_at_worst_grid_t_co2e
+        description: The same consumption on the dirtiest grid the group operates on.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
