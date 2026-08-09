@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
 
 import pytest
 
@@ -21,6 +22,7 @@ from ingest.pipeline import (
     WB_WDI_INDICATORS,
     wdi_url,
 )
+from modern_data_stack import fixtures as _fixtures
 
 ALL_URLS = [OWID_CO2, OWID_ENERGY, WB_COUNTRY_API, EU_ELEC_PRICES_API] + [
     wdi_url(code) for code in WB_WDI_INDICATORS
@@ -39,6 +41,18 @@ def test_unmapped_url_raises_rather_than_falling_back_to_the_network():
     Tuesdays'."""
     with pytest.raises(KeyError, match="no fixture mapped"):
         fixtures.path_for("https://example.test/something-new.json")
+
+
+def test_a_broken_route_is_not_reported_as_a_missing_fixture(tmp_path):
+    """`str.format` raises `KeyError` both for an unmapped URL and for a template
+    naming something the pattern doesn't capture — and `path_for` rewrites
+    `KeyError` as "no fixture mapped … see scripts/record_fixtures.py". For a URL
+    that matched a route and then failed to format, that sends you off to
+    re-record fixtures for a URL that was fine. Hence the different type.
+    """
+    routes = [(re.compile(r"ind/(?P<code>\S+)"), "wdi_{indicator}.json")]
+    with pytest.raises(ValueError, match="not a named group"):
+        _fixtures.resolve("https://example.test/ind/SP.POP.TOTL", routes, tmp_path)
 
 
 def test_enabled_reads_the_env_var(monkeypatch):

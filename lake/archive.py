@@ -15,12 +15,16 @@ Run:  uv run python -m lake.archive
 from __future__ import annotations
 
 from modern_data_stack.lake import archive, table_dir
-from modern_data_stack.paths import lake_dir, warehouse_path
+
+# Aliased: `run()` takes a `lake_dir` argument, and an unaliased import would be
+# shadowed by it — a later `lake_dir()` inside the body would be a runtime
+# `TypeError: 'str' object is not callable`, which no linter here would catch.
+from modern_data_stack.paths import lake_dir as default_lake_dir, warehouse_path
 
 DUCKDB_PATH = warehouse_path()
 
 # LAKE_DIR mirrors WAREHOUSE_PATH: the tests point it at a temp directory.
-LAKE_DIR = lake_dir()
+LAKE_DIR = default_lake_dir()
 
 # The year-keyed tables, raw and modelled. `raw` is here on purpose — the diff
 # between two runs of a *landing* table is the interesting one, since that's

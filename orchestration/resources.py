@@ -5,9 +5,8 @@ from __future__ import annotations
 from dagster_dbt import DbtCliResource, DbtProject
 from dagster_dlt import DagsterDltResource
 
-from modern_data_stack.paths import dbt_dir, project_root
+from modern_data_stack.paths import dbt_dir
 
-REPO_ROOT = project_root()
 DBT_DIR = dbt_dir()
 
 # `profiles.yml` lives next to `dbt_project.yml` in this repo, so both dirs match.

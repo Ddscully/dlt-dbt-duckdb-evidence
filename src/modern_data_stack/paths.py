@@ -20,11 +20,17 @@ Moving any one of those directories would have repointed the others, silently.
    installed editable — which is this repo).
 3. The nearest ancestor of the cwd holding a `pyproject.toml`, for a
    non-editable install where (2) lands in `site-packages`.
-4. The cwd, so nothing raises.
 
 Steps 2 and 3 are in that order on purpose: the Dagster daemon and the `dagster`
 CLI don't necessarily run from the project directory, so a cwd-first search would
 make the warehouse path depend on where the process happened to start.
+
+**All three exhausted raises.** Falling back to the cwd is the tempting fourth
+step and it fails in the worst available way: a non-editable install started
+outside any project tree resolves the warehouse to `./data/warehouse.duckdb`,
+DuckDB *creates* that file, and the run goes green against an empty database.
+There is no error to read, because nothing went wrong — the answer was just
+somewhere else. `PROJECT_ROOT` is the escape hatch, and the exception names it.
 """
 
 from __future__ import annotations
@@ -48,7 +54,12 @@ def project_root() -> Path:
     """The project directory — the one holding `pyproject.toml`, `dbt/`, `data/`."""
     env = os.environ.get(ROOT_ENV_VAR)
     if env:
-        return Path(env).resolve()
+        # Taken as given — a consumer's project need not carry this package's
+        # marker file — but a path that isn't there is a typo, not a layout.
+        root = Path(env).resolve()
+        if not root.is_dir():
+            raise NotADirectoryError(f"{ROOT_ENV_VAR}={env!r} is not a directory")
+        return root
 
     # src/modern_data_stack/paths.py -> src/modern_data_stack -> src -> the root.
     in_tree = Path(__file__).resolve().parents[2]
@@ -59,7 +70,12 @@ def project_root() -> Path:
     for candidate in (cwd, *cwd.parents):
         if _looks_like_root(candidate):
             return candidate
-    return cwd
+
+    raise RuntimeError(
+        f"cannot locate the project root: {Path(__file__).resolve().parents[2]} holds no "
+        f"{ROOT_MARKER} and neither does {cwd} or any directory above it. "
+        f"Set {ROOT_ENV_VAR} to the directory holding `dbt/` and `data/`."
+    )
 
 
 def warehouse_path() -> str:

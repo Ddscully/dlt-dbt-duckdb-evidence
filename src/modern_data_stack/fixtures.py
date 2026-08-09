@@ -47,9 +47,22 @@ def resolve(url: str, routes: list[Route], fixture_dir: Path) -> Path:
     Raises `KeyError` rather than returning None — an unmapped URL means the
     fixture set has drifted from the pipeline, and that should stop CI rather
     than quietly reach for the network.
+
+    A route whose template names something the pattern doesn't capture raises
+    `ValueError`, not `KeyError`, and the distinction is the point: callers wrap
+    the `KeyError` in "no fixture mapped for this URL — go re-record", which is
+    the wrong advice entirely for a URL that matched a route and then failed to
+    format. `str.format` reports both as `KeyError`.
     """
     for pattern, template in routes:
         match = pattern.search(url)
         if match:
-            return fixture_dir / template.format(**match.groupdict())
+            try:
+                filename = template.format(**match.groupdict())
+            except KeyError as exc:
+                raise ValueError(
+                    f"fixture route {pattern.pattern!r} -> {template!r} wants {exc.args[0]!r}, "
+                    f"which is not a named group in the pattern"
+                ) from exc
+            return fixture_dir / filename
     raise KeyError(f"no fixture mapped for {url!r}")

@@ -130,7 +130,12 @@ def export_table(
     out_dir: Path,
     period_column: str = "year",
 ) -> dict:
-    """Write one table as Parquet and describe it for the manifest."""
+    """Write one table as Parquet and describe it for the manifest.
+
+    The coverage bounds land under `years` whatever `period_column` is called —
+    the manifest's shape is what consumers parse, so it doesn't change with the
+    project's period.
+    """
     qualified = f'"{schema}"."{table}"'
     path = out_dir / f"{schema}__{table}.parquet"
     con.execute(f"copy (select * from {qualified}) to '{path}' (format parquet, compression zstd)")
@@ -164,12 +169,19 @@ def export(
     repo: str | None = None,
     grain: str | None = None,
     extra_manifest: Callable[[duckdb.DuckDBPyConnection], dict] | None = None,
+    period_column: str = "year",
 ) -> dict:
     """Build `out_dir` from `duckdb_path`. Returns the manifest.
 
     `extra_manifest` is read from the *copy*, and lets a project add fields the
     generic manifest can't know about. `release_notes` receives the finished
     manifest, the repo slug and the tag.
+
+    `period_column` is the column whose min/max becomes each table's coverage
+    bounds; a table without it is described without them. It's threaded through
+    rather than left to `export_table`'s default because a project whose period
+    is `month` or `fiscal_year` would otherwise get a manifest silently missing
+    coverage for every table.
     """
     src = Path(duckdb_path)
     if not src.exists():
@@ -204,7 +216,7 @@ def export(
                 "sha256": sha256(warehouse_copy),
             },
             "tables": [
-                export_table(con, schema, table, dest_dir)
+                export_table(con, schema, table, dest_dir, period_column)
                 for schema, table in published_tables(con, schemas)
             ],
         }

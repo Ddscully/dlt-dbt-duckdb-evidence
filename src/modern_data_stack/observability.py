@@ -98,16 +98,27 @@ def build_tables(
     Without it the inventory inventories itself, and the table count depends on
     whether it has run before — 10 on a first build, 13 on every later one, for
     no change in the warehouse.
+
+    An empty `exclude_prefix` means "exclude nothing", and has to drop the
+    predicate rather than pass it: `not like '' || '%'` is `not like '%'`, which
+    matches no row at all. That returns an empty inventory, which surfaces much
+    later and much less legibly as an empty frame out of `write_status`.
     """
+    predicate = ""
+    params: dict[str, object] = {"layers": list(layers)}
+    if exclude_prefix:
+        predicate = "and table_name not like $prefix || '%' escape '\\'"
+        params["prefix"] = exclude_prefix.replace("_", "\\_")
+
     listed = con.execute(
-        """
+        f"""
         select table_schema, table_name
         from information_schema.tables
         where table_schema in (select unnest($layers))
-          and table_name not like $prefix || '%' escape '\\'
+          {predicate}
         order by table_schema, table_name
         """,
-        {"layers": list(layers), "prefix": exclude_prefix.replace("_", "\\_")},
+        params,
     ).fetchall()
 
     rows = []

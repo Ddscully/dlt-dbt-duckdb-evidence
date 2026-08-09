@@ -14,6 +14,7 @@ import json
 import duckdb
 import pytest
 
+from modern_data_stack import observability
 from transform import pipeline_status
 
 
@@ -115,6 +116,28 @@ def test_tables_report_rows_and_year_span(warehouse):
     assert row["table_name"] == "marts.fct_emissions_energy"
     assert row["rows"] == 2
     assert (row["year_min"], row["year_max"]) == (2020, 2021)
+
+
+def test_an_empty_exclude_prefix_excludes_nothing(warehouse):
+    """`not like '' || '%'` is `not like '%'`, which matches no row at all — so an
+    empty prefix has to drop the predicate rather than pass it. Passing it gives
+    an empty inventory, which surfaces two calls later as polars' "must have at
+    least one column" out of `write_status`, naming neither the parameter nor the
+    cause. A reuser with no `pipeline_*` tables is the one who'd hit it.
+    """
+    con = duckdb.connect(str(warehouse))
+    con.sql("create table marts.pipeline_tables as select 1 as n")
+    try:
+        default = observability.build_tables(con, ("marts",))
+        everything = observability.build_tables(con, ("marts",), exclude_prefix="")
+    finally:
+        con.close()
+
+    assert default["table_name"].to_list() == ["marts.fct_emissions_energy"]
+    assert everything["table_name"].to_list() == [
+        "marts.fct_emissions_energy",
+        "marts.pipeline_tables",
+    ]
 
 
 def test_tests_split_pass_from_fail(warehouse, manifest):

@@ -11,7 +11,9 @@ from __future__ import annotations
 import duckdb
 import polars as pl
 
-from ingest.pipeline import DUCKDB_PATH
+from modern_data_stack.paths import warehouse_path
+
+DUCKDB_PATH = warehouse_path()
 
 
 def build_co2_intensity(df: pl.DataFrame) -> pl.DataFrame:

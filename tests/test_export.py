@@ -17,6 +17,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from modern_data_stack import export as _export
 from scripts.export_warehouse import default_tag, release_notes, run
 
 # `raw` and `main` must not ship as Parquet; `staging`/`marts`/`analytics` must.
@@ -95,6 +96,34 @@ def test_year_coverage_is_reported_only_where_there_is_a_year(export: dict):
     tables = {t["table"]: t for t in export["tables"]}
     assert tables["staging.stg_co2"]["years"] == [2020, 2020]
     assert "years" not in tables["staging.stg_country"]  # the country dimension
+
+
+def test_the_period_column_reaches_every_table(tmp_path: Path):
+    """`export()` threads its period column down to each table rather than
+    leaving `export_table`'s `"year"` default in charge. This project's period
+    *is* `year`, so the parameter only shows up for a reuser — whose manifest
+    would otherwise be missing coverage bounds for every table, with no error.
+
+    The manifest key stays `years` whatever the column is: `release_notes` reads
+    it, and renaming it per project would make the published manifest's shape
+    depend on the period, which consumers parse.
+    """
+    src = tmp_path / "src" / "warehouse.duckdb"
+    src.parent.mkdir()
+    con = duckdb.connect(str(src))
+    con.execute("create schema marts")
+    con.execute("create table marts.readings as select * from (values (1), (12)) t(month)")
+    con.close()
+
+    manifest = _export.export(
+        str(src),
+        str(tmp_path / "out"),
+        schemas=("marts",),
+        attribution="none",
+        release_notes=lambda *_: "",
+        period_column="month",
+    )
+    assert manifest["tables"][0]["years"] == [1, 12]
 
 
 def test_sha256sums_is_checkable(export: dict):

@@ -36,6 +36,10 @@ all unchanged.
   then the package's own grandparent when it looks like a project, then a
   marker search up from the cwd. The cwd comes last on purpose: the Dagster
   daemon and the CLI don't necessarily run from the project directory.
+  **Exhausting all three raises**, and a cwd fallback must not be added back: it
+  would resolve the warehouse to `./data/warehouse.duckdb`, which DuckDB then
+  *creates*, so a non-editable install started outside the tree runs green
+  against an empty database with nothing to read. `tests/test_paths.py` pins it.
 - **Config reaches a package module as a parameter, never as a constant.**
   Nothing under `src/` knows what a country is, and that is the whole of the
   split — a hardcoded table name there undoes it.
