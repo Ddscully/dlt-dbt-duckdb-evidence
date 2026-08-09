@@ -134,12 +134,19 @@ warehouse that bills by the second, that table is where the invoice comes from.
    where the warehouse stops being one file. That's the migration the shape is
    designed for: dbt, the tests, the asset graph and Evidence all move to
    Snowflake/BigQuery/MotherDuck on a profile change; dlt swaps a destination.
-3. **Full-refresh materialisation.** Every mart is `+materialized: table` and
-   rebuilt whole; there is **no incremental model in the project**. At 43M rows
-   that's the second thing to fix, and the correctness cost is the same tension
-   WDI's lookback window already documents — a restated year needs a full
-   refresh, so "incremental" and "picks up restatements" are in conflict and you
-   have to choose per model.
+3. **Full-refresh materialisation, for 18 of the 19 models.** Every mart is
+   `+materialized: table` and rebuilt whole. That is deliberate rather than
+   pending: each one re-derives a source that gets fully re-fetched, so
+   rebuilding is *how* an upstream restatement is picked up, and at 43k rows it
+   costs seconds. The exception is the one model where the argument reverses —
+   `fct_fx_rates_published` is `incremental`, because a published ECB fixing
+   never changes and the table grows ~30 rows a day forever. At 43M rows the
+   question is which of the other 18 join it, and the cost of each is the tension
+   WDI's lookback window already documents: a restated year needs a full refresh,
+   so "incremental" and "picks up restatements" are in conflict and you have to
+   choose per model. Today's numbers are honest and unimpressive — 0.16 s
+   incremental against 0.24 s full-refresh at 265k rows. The argument is the
+   shape of the curve, not the saving.
 4. **The Evidence site.** It ships Parquet to the browser and queries it with
    DuckDB-WASM. Lovely at 94 MB, wrong at 94 GB — that becomes a pre-aggregated
    serving layer.
@@ -182,9 +189,11 @@ The genuine ones, not the diplomatic ones.
   by a data column and reversing the flow would have cost schema inference and
   the raw freshness checks — but it's a compromise and the docs say so rather
   than implying the tidy version.
-- **The gaps I'd close next, in order:** a date dimension and currency handling
-  (there is neither, and every money question downstream is wrong without them),
-  one incremental model, then an entity grain below the country.
+- **The gaps I'd close next, in order:** an entity grain below the country, and
+  then a transactional one under that. The two that used to head this list — a
+  date dimension with currency handling, and one incremental model — are done,
+  and doing them in that order was right: the money questions had to be
+  answerable before there was any point holding a fact denominated in money.
 
 ---
 
