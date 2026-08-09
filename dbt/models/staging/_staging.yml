@@ -329,6 +329,51 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 2}
 
+  - name: stg_fx_rates
+    description: >
+      ECB daily euro reference rates, one row per (rate_date, quote_currency).
+      The only staging model that is not country-year keyed, and the only one
+      with a sub-annual grain — the grain contract below is the same kind of
+      assertion, just over different columns.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [rate_date, quote_currency]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "length(quote_currency) = 3"
+      # A rate quoted against anything but the euro would mean the request lost
+      # its `base` parameter, and every converted figure downstream would be
+      # wrong by whatever the new base happened to be.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "base_currency = 'EUR'"
+    columns:
+      - name: rate_date
+        description: The ECB publication date. Business days only — see the mart.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: "'1999-01-04'", max_value: "current_date"}
+      - name: quote_currency
+        data_tests: [not_null]
+      - name: units_per_eur
+        description: >
+          Units of the quote currency per 1 EUR, as the ECB quotes it. Untested
+          for an upper bound on purpose: the range spans 0.85 (GBP) to 1,725,000
+          (the pre-2005 Turkish lira), so any ceiling that would catch a real bug
+          would also fail on the pre-redenomination series.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+      - name: eur_per_unit
+        description: The reciprocal, shipped so nobody has to invert it themselves.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+
   - name: stg_country
     description: >
       Country dimension, one row per country_iso3: World Bank `/country` plus

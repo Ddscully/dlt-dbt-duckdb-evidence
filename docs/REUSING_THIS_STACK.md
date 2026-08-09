@@ -85,7 +85,7 @@ justfile recipes and the asset graph all still call the same names.
 ### Delete — this is the example, not the framework
 
 `ingest/pipeline.py` (keep `_get_json`, `load_groups`, `build_pipeline` and the
-`REFRESH` constant; everything else is five sources), all of `dbt/models`,
+`REFRESH` constant; everything else is six sources), all of `dbt/models`,
 `dbt/seeds` and `dbt/snapshots`, `transform/co2_intensity.py`, all of
 `reports/pages` and `reports/sources/warehouse/*.sql`, `tests/fixtures/`,
 `notebooks/explore.py`, and roughly half of `CLAUDE.md`.

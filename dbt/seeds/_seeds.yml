@@ -180,3 +180,60 @@ seeds:
           config:
             where: "default_total_t_co2e_per_t is null"
             severity: error
+
+  - name: currencies
+    description: >
+      The 47 currency codes the ECB reference-rate series has ever contained,
+      with the name to label them by and — for the twelve where it is a matter of
+      public record — the date and reason the quote ended.
+
+      Hand-maintained rather than generated, because Frankfurter's `/currencies`
+      endpoint lists only the 30 codes that are still published and the
+      interesting half of this table is the 17 that are not. It carries *no*
+      dates the series can supply for itself: `first_published_date` and
+      `last_published_date` are derived in `marts.dim_currency`, and the seed is
+      checked against them rather than trusted.
+    columns:
+      - name: currency_code
+        description: ISO 4217 alphabetic code.
+        data_tests: [not_null, unique]
+      - name: currency_name
+        data_tests: [not_null]
+      - name: retired_on
+        description: >
+          The first day the code was no longer a live quote — a euro adoption
+          date or a redenomination date. Null for the 30 current codes and for
+          the five whose quote simply ceased (ARS, DZD, MAD, TWD in October 2020
+          and RUB in March 2022): the seed deliberately does not guess at a
+          publisher's reason, and `dim_currency.retirement_is_explained` is how a
+          consumer tells "still current" from "stopped, cause not recorded here".
+      - name: retired_reason
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [euro_adoption, redenomination]
+      - name: replaced_by_currency
+        description: >
+          EUR for the ten euro adoptions; TRY and RON for the two 2005
+          redenominations, where the money continued under a new code at
+          1,000,000:1 and 10,000:1. A series charted by code rather than by money
+          has a cliff at those two dates.
+    data_tests:
+      # Every retirement date the seed asserts has to be consistent with what the
+      # ECB actually published — the last quote strictly before it. All twelve
+      # land on the business day before, which is why the dates can be trusted at
+      # all. Lives here rather than on the mart because it is the *seed* being
+      # checked; the mart is only where the evidence lives.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              retired_on is null
+              or retired_on > (
+                  select max(rate_date) from {{ ref('stg_fx_rates') }} as r
+                  where r.quote_currency = currency_code
+              )
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "replaced_by_currency is not null"
+          config:
+            where: "retired_reason is not null"

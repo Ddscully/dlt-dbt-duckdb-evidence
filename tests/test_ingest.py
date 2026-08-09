@@ -375,13 +375,34 @@ def test_load_groups_refreshes_only_the_replace_resources():
 def test_load_groups_covers_every_resource_in_the_source_exactly_once():
     """A resource missing from both tuples would silently stop being loaded.
 
-    The two tuples are also what the two `@dlt_assets` blocks are built from
-    (the partitioned one is `INCREMENTAL_RESOURCES`), so this is what keeps the
-    split from dropping a resource out of the asset graph as well.
+    The two tuples are also what the two `@dlt_assets` blocks are built from,
+    so this is what keeps the split from dropping a resource out of the asset
+    graph as well.
     """
     listed = [name for names, _ in pipeline.load_groups() for name in names]
     assert sorted(listed) == sorted(r.name for r in pipeline.public_indicators().resources.values())
     assert len(listed) == len(set(listed))
+
+
+def test_partitioned_resources_is_a_subset_of_the_incremental_ones():
+    """The orchestration split is by *partitioning*, not by disposition, and the
+    two questions are not the same one — `ecb_fx_rates` merges and is not
+    partitioned.
+
+    `orchestration/assets.py` derives its unpartitioned block as everything
+    minus this tuple, so a name in here that isn't a real resource would quietly
+    remove nothing and leave WDI's block empty.
+    """
+    assert set(pipeline.PARTITIONED_RESOURCES) <= set(pipeline.INCREMENTAL_RESOURCES)
+    unpartitioned = [
+        name
+        for names, _ in pipeline.load_groups()
+        for name in names
+        if name not in pipeline.PARTITIONED_RESOURCES
+    ]
+    assert sorted(unpartitioned + list(pipeline.PARTITIONED_RESOURCES)) == sorted(
+        r.name for r in pipeline.public_indicators().resources.values()
+    )
 
 
 def test_load_groups_drops_groups_the_selection_empties():
@@ -435,3 +456,110 @@ def test_eu_elec_prices_skips_absent_cells(monkeypatch):
     rows = list(pipeline.eu_elec_prices())
     assert len(rows) == 1
     assert rows[0]["geo"] == "EL" and rows[0]["period"] == "2023-S1"
+
+
+# --------------------------------------------------------------------------- #
+# ecb_fx_rates — the daily grain, and its watermark
+# --------------------------------------------------------------------------- #
+
+
+def _fx_payload(rates: dict[str, dict[str, float]]) -> dict:
+    return {"amount": 1.0, "base": "EUR", "rates": rates}
+
+
+def _serve_fx(monkeypatch, payload: dict) -> list[str]:
+    """Serve one Frankfurter response, recording the URL asked for."""
+    calls: list[str] = []
+
+    def fake_get_json(url, **kwargs):
+        calls.append(url)
+        return payload
+
+    monkeypatch.setattr(pipeline, "_get_json", fake_get_json)
+    return calls
+
+
+def test_fx_start_date_is_the_series_start_until_a_watermark_exists():
+    assert pipeline.fx_start_date(None) == pipeline.FX_FIRST_DATE
+
+
+def test_fx_start_date_looks_back_from_the_watermark():
+    """Ten days, not one: a corrected fixing inside the window has to be able to
+    reach the warehouse, and the merge key makes re-asking free."""
+    assert pipeline.fx_start_date("2026-08-07") == "2026-07-29"
+
+
+def test_fx_start_date_cannot_ask_for_dates_before_the_euro():
+    """A watermark near the start of the series would otherwise produce a range
+    the API answers with an empty `rates` object."""
+    assert pipeline.fx_start_date("1999-01-05") == pipeline.FX_FIRST_DATE
+
+
+def test_ecb_fx_rates_unpivots_the_wide_payload(monkeypatch):
+    """The API is `{date: {currency: rate}}` and the merge key is
+    (rate_date, quote_currency), so the resource has to land it long. A wide
+    landing table would need a new column every time the ECB lists a currency,
+    which is exactly what dlt's widen-only schema handles worst.
+    """
+    _state(monkeypatch, {})
+    _serve_fx(
+        monkeypatch,
+        _fx_payload({"2024-01-02": {"USD": 1.0956, "JPY": 155.68}}),
+    )
+
+    # dlt flattens a yielded list into individual items, so this is rows not batches.
+    rows = list(pipeline.ecb_fx_rates())
+    assert rows == [
+        {
+            "rate_date": "2024-01-02",
+            "base_currency": "EUR",
+            "quote_currency": "USD",
+            "rate": 1.0956,
+        },
+        {
+            "rate_date": "2024-01-02",
+            "base_currency": "EUR",
+            "quote_currency": "JPY",
+            "rate": 155.68,
+        },
+    ]
+
+
+def test_ecb_fx_rates_advances_the_watermark_to_the_newest_date(monkeypatch):
+    """One watermark for the table, not one per currency — every currency comes
+    back in the same request, so a newly listed one is already covered."""
+    state = _state(monkeypatch, {})
+    _serve_fx(
+        monkeypatch,
+        _fx_payload(
+            {
+                "2024-01-02": {"USD": 1.0956},
+                "2024-01-10": {"USD": 1.0946},
+                "2024-01-05": {"USD": 1.0921},
+            }
+        ),
+    )
+
+    list(pipeline.ecb_fx_rates())
+    assert state[pipeline.FX_WATERMARK_KEY] == "2024-01-10"
+
+
+def test_ecb_fx_rates_leaves_the_watermark_alone_on_an_empty_response(monkeypatch):
+    """A window falling entirely on a weekend legitimately returns no rates.
+    Advancing on that would advance to a date that was never loaded.
+    """
+    state = _state(monkeypatch, {pipeline.FX_WATERMARK_KEY: "2024-01-10"})
+    _serve_fx(monkeypatch, _fx_payload({}))
+
+    assert list(pipeline.ecb_fx_rates()) == []
+    assert state[pipeline.FX_WATERMARK_KEY] == "2024-01-10"
+
+
+def test_ecb_fx_rates_asks_for_the_lookback_window_when_it_has_a_watermark(monkeypatch):
+    _state(monkeypatch, {pipeline.FX_WATERMARK_KEY: "2026-08-07"})
+    calls = _serve_fx(monkeypatch, _fx_payload({"2026-08-07": {"USD": 1.1535}}))
+
+    list(pipeline.ecb_fx_rates())
+    assert len(calls) == 1
+    assert "/v1/2026-07-29.." in calls[0]
+    assert "base=EUR" in calls[0]

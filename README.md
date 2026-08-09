@@ -16,7 +16,8 @@ country's energy mix relate to its emissions and its people's wellbeing?** It
 pulls CO₂, energy and development figures for ~200 countries from
 [Our World in Data](https://github.com/owid/co2-data), the
 [World Bank](https://databank.worldbank.org/source/world-development-indicators)
-and [Eurostat](https://ec.europa.eu/eurostat), cleans and joins them, derives a
+[Eurostat](https://ec.europa.eu/eurostat) and the
+[ECB](https://frankfurter.dev), cleans and joins them, derives a
 few metrics, and publishes the charts. Every finding on the site names the
 decision it feeds, who makes that decision, and what it costs to get wrong.
 
@@ -83,6 +84,7 @@ small enough to run locally.
 | World Bank WDI: GDP, life expectancy, population, poverty | country-year (fact) | https://databank.worldbank.org/source/world-development-indicators |
 | World Bank countries: region & income group | country (dimension) | https://api.worldbank.org/v2/country?format=json |
 | Eurostat: household electricity prices (EU/EEA) | country-half-year (fact) | https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204 |
+| ECB euro reference rates, via Frankfurter | date-currency (fact) — the one sub-annual grain | https://frankfurter.dev |
 
 Joins are on **ISO country code + year**, yielding marts like
 *"CO₂ per \$ of GDP by income group over time"* and *"renewables adoption vs. life expectancy."*
@@ -91,12 +93,16 @@ country-year spine (`dim_country_year`) rather than off whichever source happens
 to be widest. A country-year only Eurostat or only the World Bank reports still
 lands, with the other columns null.
 
-Eurostat is the one source whose own grain is finer than that, and it keeps it:
-`fct_eu_electricity_prices_semiannual` holds the published half-years alongside
-the annual average that joins to everything else. Averaging is what the annual
+Two sources have a finer grain of their own, and both keep it. Eurostat's is
+half-yearly: `fct_eu_electricity_prices_semiannual` holds the published halves
+alongside the annual average that joins to everything else. Averaging is what the annual
 grain costs, and it costs a lot: half-over-half price moves averaged 19% across
 countries in 2022 against 3–4% through the 2010s. So both are in the warehouse
 rather than only the convenient one.
+
+The ECB's is daily, and it has no country in it at all — which is what forced the
+warehouse's first calendar (`dim_date`), its first gap-filling decision, and its
+first `materialized='incremental'` model. See the **Currency** page below.
 
 Four of the five load with dlt's `replace` disposition. They are small enough
 that a full reload every run is the honest default, and it keeps dlt re-inferring
@@ -119,7 +125,7 @@ The pipeline populates one DuckDB file (`data/warehouse.duckdb`) with these sche
 | Schema | Written by | Contents |
 |--------|-----------|----------|
 | `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`) |
-| `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain, except `stg_eu_electricity_prices_semiannual`, which keeps Eurostat's half-years |
+| `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain, except `stg_eu_electricity_prices_semiannual` (Eurostat's half-years) and `stg_fx_rates` (`(rate_date, quote_currency)`) |
 | `marts` | dbt (tables) | `dim_country_year`, the country-year spine; `fct_emissions_energy`, the wide joined fact; `dim_grid_emission_factors`, grid factors packaged as a Scope 2 reference table; `fct_co2_estimate_versions`, revision history; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain; `fct_example_scope2_emissions`, the worked example over twelve invented sites; `fct_cbam_exposure`, the CBAM border cost per tonne by sourcing country |
 | `history` | dbt (snapshots) | `snap_co2_estimates` and `snap_grid_emission_factors`, SCD2 versions of OWID's CO₂ numbers and of the Scope 2 factors — the two tables a rebuild can't reproduce |
 | `analytics` | Polars | derived metrics (`co2_intensity`) |
@@ -197,7 +203,7 @@ What that buys over the shell chain:
 | | |
 |---|---|
 | **Selective rebuilds** | `raw/wb_wdi*` reloads one API and rebuilds only what depends on it. dlt refreshes just that resource, so its four siblings keep their data. (`*` is all downstream; a bare `+` is only one layer.) |
-| **Re-runnable backfills** | `raw/wb_wdi` is partitioned by year (1960 → now), so a World Bank restatement older than the five-year lookback is a unit of work you can point at instead of a 190k-row full reload. A range is one request per indicator, and `merge` on `(indicator, country_code, year)` makes re-running a year a no-op. It's the only partitioned asset: the other four sources are whole-file downloads with no per-year fetch to express. |
+| **Re-runnable backfills** | `raw/wb_wdi` is partitioned by year (1960 → now), so a World Bank restatement older than the five-year lookback is a unit of work you can point at instead of a 190k-row full reload. A range is one request per indicator, and `merge` on `(indicator, country_code, year)` makes re-running a year a no-op. It's the only partitioned asset — and the split is on *partitioning*, not on load disposition: the ECB rates merge too, but their whole 27-year series is one three-second request, so a partition there would buy nothing. |
 | **Freshness policies** | Raw assets warn after 2 days and fail after 7; modelled assets are expected by 08:00 UTC daily. A schedule that quietly stops firing turns assets stale in the UI instead of leaving no trace. |
 | **Asset checks** | dbt's `not_null` tests show up as checks on the model they guard, next to Python checks dbt can't express (every WDI indicator present, mart reaching a recent year, dense ranks with no gaps). |
 | **Lineage that can't drift** | The graph is derived from the dbt manifest and the dlt source, not maintained alongside them. |
@@ -271,7 +277,7 @@ lint and whitespace hooks. CI runs the same hooks over every file, so a PR that 
 them fails there instead.
 
 CI on a pull request runs both, plus the Dagster asset graph and the asset
-checks, entirely offline: `INGEST_FIXTURES=1` serves all five sources from
+checks, entirely offline: `INGEST_FIXTURES=1` serves all six sources from
 `tests/fixtures/ingest/`. A red build therefore means *this repo* broke, not that
 OWID was rate-limiting. A separate nightly workflow runs the same graph against
 the live endpoints and opens an issue when a source has moved, which is the cue
@@ -299,11 +305,12 @@ no ceiling because small petrostates legitimately reach 780 t/person.
 
 ### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-Seven pages, built from the modelled layers: `marts.fct_emissions_energy` and
+Eight pages, built from the modelled layers: `marts.fct_emissions_energy` and
 `analytics.co2_intensity` for the findings, plus `dim_country_year`,
 `dim_grid_emission_factors`, `fct_co2_estimate_versions`,
 `fct_eu_electricity_prices_semiannual`, `fct_example_scope2_emissions`,
-`fct_cbam_exposure` and the `analytics.pipeline_*` tables for the rest. No year is hardcoded: every page reads
+`fct_cbam_exposure`, `dim_currency`, the three `fct_fx_rates_*` tables and the
+`analytics.pipeline_*` tables for the rest. No year is hardcoded: every page reads
 the latest year each metric family can actually populate from
 `sources/warehouse/latest_years.sql`, because coverage doesn't end in the same year
 for all of them.
@@ -313,9 +320,10 @@ for all of them.
 | **Home**: Explore | Pick a year: clean electricity vs. life expectancy, carbon intensity of the economy over time, grid carbon intensity, EU electricity prices against grid cleanliness, the most carbon-efficient economies, and what averaging Eurostat's half-year prices into an annual figure costs. |
 | **Findings** | Seven write-ups on the joined data: when each country's emissions peaked, that the cleanup happened in electricity and coal is most of it, real-terms decoupling, whether it's just offshoring (it isn't, mostly), emissions tracking income rather than headcount, cumulative vs. current responsibility, and carbon intensity falling while absolute tonnes rise. |
 | **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
-| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 176 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
+| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 268 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. Empty on the published copy by construction: the build starts from an empty DuckDB file, and a snapshot can only record a revision it was there for. |
 | **CBAM Exposure** | What a tonne of an imported CBAM good costs at the EU border, by where it was made: Annex I of Implementing Regulation (EU) 2025/2621 priced at a carbon price you choose. Semi-finished steel runs 63× from Azerbaijan to Indonesia — and the ranking sorts by *production route*, not by the national grid, which is the opposite of the Scope 2 story. A screening tool, not a filing. |
+| **Currency** | The ECB's daily euro reference rates, and the three problems an annual warehouse never has to answer. 30% of calendar days carry no rate, so the daily table carries the last fixing forward — capped, because the two interior gaps in the series are the Icelandic króna after 2008 and the Argentine peso in 2002, not long weekends. Spot against average, and what it changes about a number already on the site: EU household electricity rose 35% or 13.5% from 2021-S1 to 2022-S2 depending only on whether you counted in euros or dollars. |
 | **Scope 2 Factors** | The same grid carbon-intensity series read as what it also is: the location-based Scope 2 emission factor a company multiplies its metered kWh by for a CSRD, SECR or CDP disclosure. `marts.dim_grid_emission_factors` as a reference table with its vintage and lineage, a worked example over twelve *invented* sites, and the three caveats a practitioner checks first. |
 
 `.github/workflows/pages.yml` builds it, as a single `publish_site` job. The site
@@ -401,9 +409,11 @@ Code is [MIT](./LICENSE). The data is not this project's to license: OWID's
 [CO₂](https://github.com/owid/co2-data) and
 [energy](https://github.com/owid/energy-data) datasets are CC BY 4.0, World Bank
 WDI is CC BY 4.0, Eurostat data carries its own
-[reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright), and the
+[reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright), the
 CBAM default values are EU law, reusable under
-[Decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj).
+[Decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj), and the
+euro reference rates are the ECB's, under its
+[reuse policy](https://www.ecb.europa.eu/services/using-our-site/copyright/html/index.en.html).
 
 **One source was deliberately left out on licence grounds.** Annexes II and III
 of the CBAM regulation — country electricity emission factors — are IEA data
@@ -412,7 +422,7 @@ restriction on a data release that is otherwise entirely permissive, so the
 warehouse uses its own OWID-derived `dim_grid_emission_factors` instead and the
 CBAM page says plainly that the two are not the same measurement.
 
-All five permit redistribution with attribution, which is what the data releases
+All six permit redistribution with attribution, which is what the data releases
 above rely on. Every one ships an `ATTRIBUTION.md` naming the publisher and
 licence per source, and the release notes repeat it. Attribute them, not this
 repo, for the numbers; the joins and derived metrics are the only part that's

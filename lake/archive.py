@@ -36,12 +36,21 @@ LAKE_DIR = default_lake_dir()
 # over 19 years would add 19 partitions of ~4 kB to an archive whose small-file
 # problem is already documented, and every byte of it is derivable from
 # `raw.eu_elec_prices`, which is archived.
+#
+# The FX rates break the raw-first pattern, and it is a column that decides it:
+# `raw.ecb_fx_rates` is keyed on `rate_date` and has no `year` to partition on,
+# while `marts.fct_fx_rates_daily` carries one. So the modelled table is archived
+# and the landing table is not — the reverse of the choice made for the four
+# above. It is also the one table here that *improves* the small-file arithmetic:
+# 381k rows over 28 partitions averages 13.6k rows each, against the archive's
+# current ~47 kB.
 ARCHIVED_TABLES = (
     "raw.owid_co2",
     "raw.owid_energy",
     "raw.wb_wdi",
     "raw.eu_elec_prices",
     "marts.fct_emissions_energy",
+    "marts.fct_fx_rates_daily",
 )
 
 PARTITION_COLUMN = "year"

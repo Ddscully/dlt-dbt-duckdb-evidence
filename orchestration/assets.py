@@ -36,6 +36,7 @@ from dagster_dlt.translator import DltResourceTranslatorData
 from ingest.pipeline import (
     FULL_REFRESH_RESOURCES,
     INCREMENTAL_RESOURCES,
+    PARTITIONED_RESOURCES,
     WB_WDI_INDICATORS,
     WDI_FIRST_YEAR,
     build_pipeline,
@@ -90,7 +91,23 @@ RAW_DESCRIPTIONS = {
         "5-year lookback window, not a full reload."
     ),
     "eu_elec_prices": "Eurostat nrg_pc_204 household electricity prices, EU/EEA (JSON-stat).",
+    "ecb_fx_rates": (
+        "ECB daily euro FX reference rates via Frankfurter, at (rate_date, "
+        "quote_currency) — the one sub-annual source. Loaded incrementally: "
+        "`merge` over a 10-day lookback, and *not* partitioned, unlike WDI."
+    ),
 }
+
+# The blocks below split the six resources by whether they are partitioned, not
+# by how they load — `load_groups` still owns the refresh/merge split, and this
+# selection is passed through it. Two disjoint tuples covering the source, so an
+# added resource lands in exactly one `@dlt_assets` block: a resource in both
+# would be loaded twice per refresh, and one in neither would silently vanish
+# from the graph.
+UNPARTITIONED_RESOURCES = (
+    *FULL_REFRESH_RESOURCES,
+    *(name for name in INCREMENTAL_RESOURCES if name not in PARTITIONED_RESOURCES),
+)
 
 
 class RawSchemaDltTranslator(DagsterDltTranslator):
@@ -134,15 +151,17 @@ WDI_PARTITIONS = dg.TimeWindowPartitionsDefinition(
 
 
 @dlt_assets(
-    # The four `replace` resources. `wb_wdi` is loaded by the partitioned block
-    # below, and a resource in both would be loaded twice per refresh.
-    dlt_source=public_indicators().with_resources(*FULL_REFRESH_RESOURCES),
+    # Everything that isn't year-partitioned: the four `replace` resources plus
+    # `ecb_fx_rates`, which merges but has no per-year fetch to express. The
+    # mixed dispositions are fine here because the body asks `load_groups` for
+    # the kwargs rather than spelling them.
+    dlt_source=public_indicators().with_resources(*UNPARTITIONED_RESOURCES),
     dlt_pipeline=build_pipeline(),
     dagster_dlt_translator=RawSchemaDltTranslator(),
     name="ingest_public_indicators",
 )
 def raw_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
-    # One op for all four resources: DuckDB takes a single writer, so fanning
+    # One op for all five resources: DuckDB takes a single writer, so fanning
     # these out into parallel steps would just make them fight over the file.
     #
     # `load_groups` is still what supplies the `run()` kwargs, rather than
@@ -160,7 +179,7 @@ def raw_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
 
 
 @dlt_assets(
-    dlt_source=public_indicators().with_resources(*INCREMENTAL_RESOURCES),
+    dlt_source=public_indicators().with_resources(*PARTITIONED_RESOURCES),
     dlt_pipeline=build_pipeline(),
     dagster_dlt_translator=RawSchemaDltTranslator(),
     name="ingest_wdi",
@@ -172,11 +191,15 @@ def raw_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
 def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     """WDI, the one source with a per-year fetch to express.
 
-    Partitioning the other four would be a fiction: they are whole-file
+    Partitioning the other five would be a fiction. Four are whole-file
     `replace` loads (two CSVs, a JSON-stat payload and a dimension table) with
-    no way to ask for one year. WDI's API takes a date range, its disposition is
-    `merge`, and its primary key includes `year` — so a partition here is a real
-    unit of work that can be re-run without duplicating a row.
+    no way to ask for one year. The fifth, `ecb_fx_rates`, *is* incremental and
+    *does* take a date range — which is the interesting near-miss: merging is not
+    what earns a partition. Its whole 27-year series is one three-second request,
+    so partitioning it would trade a single call for thousands of Dagster
+    partitions and buy nothing. WDI's API takes a date range **and** its series
+    are large enough that a window is worth asking for, and its primary key
+    includes `year` — so a partition there is a real unit of work.
 
     Two paths into the same load, and the difference is only which window is
     asked for:
@@ -210,7 +233,7 @@ def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     # `load_groups` again rather than a bare `dlt.run(...)`: it is what asserts
     # this resource loads *without* `refresh`, which would drop the table and the
     # watermark with it.
-    for names, kwargs in load_groups(INCREMENTAL_RESOURCES):
+    for names, kwargs in load_groups(PARTITIONED_RESOURCES):
         yield from dlt.run(
             context=context,
             dlt_source=public_indicators(wdi_years=years).with_resources(*names),
@@ -401,6 +424,13 @@ def evidence_site(context: AssetExecutionContext) -> dg.MaterializeResult:
 # --------------------------------------------------------------------------- #
 
 
+# How far behind today the newest FX fixing may fall before the daily series is
+# reported as stale. One more than the carry-forward cap in `dbt_project.yml`:
+# inside the cap the dense table still answers with a carried rate, past it every
+# row for today is null and a conversion quietly stops returning numbers.
+FX_STALE_AFTER_DAYS = 8
+
+
 def _scalar(query: str):
     con = duckdb.connect(DUCKDB_PATH, read_only=True)
     try:
@@ -466,6 +496,36 @@ def mart_covers_recent_years() -> dg.AssetCheckResult:
                 source: year for source, year in zip(columns.values(), max_years, strict=True)
             },
             "years_behind": lags,
+        },
+    )
+
+
+FCT_FX_RATES_DAILY = get_asset_key_for_model([dbt_models], "fct_fx_rates_daily")
+
+
+@dg.asset_check(asset=FCT_FX_RATES_DAILY)
+def fx_rates_reach_the_present() -> dg.AssetCheckResult:
+    """The newest fixing is within the carry-forward window of today.
+
+    Every other source here publishes annually, so `mart_covers_recent_years`
+    measures staleness in *years* and would call a rate series that stopped in
+    March perfectly healthy. This is the same question at the cadence this source
+    actually has: once the newest fixing is older than the carry-forward cap,
+    every dense row for today is null rather than stale, and a conversion
+    silently stops producing numbers at all.
+
+    A warning rather than a blocker: the ECB closes for up to five consecutive
+    days at Christmas, and a run in the middle of one is not a broken pipeline.
+    """
+    newest = _scalar("select max(rate_source_date) from marts.fct_fx_rates_daily")
+    lag_days = (datetime.now(UTC).date() - newest).days if newest is not None else None
+    return dg.AssetCheckResult(
+        passed=lag_days is not None and lag_days <= FX_STALE_AFTER_DAYS,
+        severity=dg.AssetCheckSeverity.WARN,
+        metadata={
+            "newest_fixing": str(newest),
+            "days_behind": lag_days,
+            "threshold_days": FX_STALE_AFTER_DAYS,
         },
     )
 
@@ -552,6 +612,7 @@ def site_pages_all_rendered() -> dg.AssetCheckResult:
 __all__ = [
     "EVIDENCE_SITE",
     "FCT_EMISSIONS_ENERGY",
+    "FCT_FX_RATES_DAILY",
     "co2_intensity",
     "dbt_models",
     "evidence_site",

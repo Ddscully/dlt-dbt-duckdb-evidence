@@ -40,7 +40,20 @@ MANIFEST_PATH = dbt_manifest_path()
 LAYERS = ("staging", "marts", "analytics", "history")
 
 # dlt's landing tables, minus its internal `_dlt_*` bookkeeping.
-SOURCE_TABLES = ("owid_co2", "owid_energy", "wb_country", "wb_wdi", "eu_elec_prices")
+#
+# `ecb_fx_rates` reports a null year span, because it is keyed on `rate_date` and
+# has no `year` column to take one from. That is the same shape `stg_country` and
+# the currency dimension already have in `pipeline_tables`, and it is left as a
+# null rather than derived: the row's job here is the row count and the load
+# time, which is the freshness half of the page.
+SOURCE_TABLES = (
+    "owid_co2",
+    "owid_energy",
+    "wb_country",
+    "wb_wdi",
+    "eu_elec_prices",
+    "ecb_fx_rates",
+)
 
 
 def build_sources(con: duckdb.DuckDBPyConnection) -> pl.DataFrame:

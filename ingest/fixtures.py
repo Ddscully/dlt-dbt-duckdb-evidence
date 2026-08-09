@@ -1,6 +1,6 @@
 """Offline fixtures for the ingest layer — this project's routes.
 
-`ingest.pipeline` fetches from five live endpoints. That makes CI a test of
+`ingest.pipeline` fetches from six live endpoints. That makes CI a test of
 whether OWID, the World Bank and Eurostat happen to be up, which is not what a
 pull request is asking. Setting ``INGEST_FIXTURES=1`` swaps every fetch for a
 checked-in payload recorded from those same endpoints, so the *whole* pipeline —
@@ -9,7 +9,9 @@ offline.
 
 The fixtures are trimmed to a representative set of countries; see
 `scripts/record_fixtures.py`, which is what produced them and what re-records
-them when a source changes shape.
+them when a source changes shape. The FX series has no country in it and is kept
+whole — gzipped, because 3.6 MB of JSON compresses to 831 kB and every
+discontinuity in it is something a model is tested against.
 
 The mechanism (and the reasoning behind it) lives in
 `modern_data_stack.fixtures`. What's here is the URL-to-file map, which is the
@@ -41,6 +43,10 @@ _ROUTES: list[_fixtures.Route] = [
         "wb_wdi_{code}.json",
     ),
     (re.compile(r"eurostat/.*/data/nrg_pc_204"), "eu_elec_prices.json"),
+    # No capture for the date range: the recorded payload is the *whole* series,
+    # and an incremental run asking for a ten-day window gets all of it back.
+    # That is safe because the resource merges on (rate_date, quote_currency).
+    (re.compile(r"api\.frankfurter\.dev/v1/\d{4}-\d{2}-\d{2}\.\."), "ecb_fx_rates.json.gz"),
 ]
 
 

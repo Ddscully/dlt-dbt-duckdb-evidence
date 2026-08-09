@@ -81,6 +81,7 @@ its publishers and is redistributed here under their licences.
 | World Development Indicators, country dimension | [World Bank](https://data.worldbank.org/) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | Household electricity prices | [Eurostat](https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204/) | [Eurostat reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright) |
 | CBAM default values (Annex I) | [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621) | [Commission reuse decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj) |
+| Euro foreign-exchange reference rates | [European Central Bank](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html), via [Frankfurter](https://frankfurter.dev) | [ECB reuse policy](https://www.ecb.europa.eu/services/using-our-site/copyright/html/index.en.html) |
 
 Annexes II and III of that regulation — the country electricity emission factors
 — are **not** in this artifact. They are IEA data under CC BY-NC-SA 4.0, and
@@ -217,12 +218,23 @@ it for `{base}/download/{tag}/…`.
 `manifest.json` carries the row counts, year coverage and SHA-256 of every asset;
 `SHA256SUMS` is `sha256sum -c`-compatible.
 
-- **Grain:** one row per `(country_iso3, year)`, with four exceptions —
+- **Grain:** one row per `(country_iso3, year)`, with these exceptions —
   `staging.stg_country` is the country dimension (region, income group), the two
   `*_semiannual` tables keep Eurostat's published `(country_iso3, year, half)`,
-  `marts.fct_example_scope2_emissions` is one row per site, and
+  `marts.fct_example_scope2_emissions` is one row per site,
   `marts.fct_cbam_exposure` is one row per (sourcing country, good) with no year
-  at all — it is a regulatory schedule, not a time series.
+  at all — it is a regulatory schedule, not a time series — and the five FX
+  tables below have no country in them.
+- **The FX tables are the one daily grain here.** `marts.dim_date` is a calendar,
+  `marts.dim_currency` is the currency dimension, and
+  `marts.fct_fx_rates_published` / `_daily` / `_periods` are the ECB's euro
+  reference rates as published, gap-filled, and aggregated to month / quarter /
+  half / year. Two things to read before using them: the *daily* table carries a
+  rate forward across weekends and holidays and marks it (`is_carried_forward`,
+  `rate_source_date`), and the *periods* table ships both a period average and a
+  period-end rate because converting a flow and converting a balance are not the
+  same operation. Rates are quoted per euro, as the ECB quotes them; the
+  reciprocal ships beside every one of them.
 - **`marts.fct_cbam_exposure` is a screening tool, not a filing.** It prices Annex
   I of Implementing Regulation (EU) 2025/2621 — the CBAM default values an
   importer uses when they have no verified supplier data — at a carbon price that

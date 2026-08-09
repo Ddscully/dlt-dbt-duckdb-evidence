@@ -12,14 +12,14 @@ own CI history — none of it is estimated.
 | [`reports/pages/findings.md`](../reports/pages/findings.md) | the analysis, and the "So what" box under each finding |
 | [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including the partitioned WDI load |
 | [`dbt/models/marts/fct_emissions_energy.sql`](../dbt/models/marts/fct_emissions_energy.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest |
-| [`ingest/pipeline.py`](../ingest/pipeline.py) | five sources, two write dispositions, and why that has to be two `run()` calls |
+| [`ingest/pipeline.py`](../ingest/pipeline.py) | six sources, two write dispositions, and why that has to be two `run()` calls |
 | [`CLAUDE.md`](../CLAUDE.md) | every gotcha that cost more than an hour, written down at the point it was learned |
 
 ---
 
 ## 1. What decision does this serve?
 
-Three real ones, and they are the reason the "So what" boxes exist on the
+Four real ones, and they are the reason the "So what" boxes exist on the
 findings page:
 
 - **Scope 2 disclosure.** `carbon_intensity_elec_g_kwh` *is* the location-based
@@ -35,14 +35,21 @@ findings page:
   The large emitters that haven't peaked at all are about half of world
   emissions — "everywhere is decarbonising" is not a safe default about the
   country you actually buy from.
+- **Currency translation.** The one place the warehouse mixes units of money:
+  Eurostat publishes in euros and the World Bank in dollars. `dim_date`,
+  `dim_currency` and the three `fct_fx_rates_*` tables are what let the two meet,
+  and they make the choice explicit rather than incidental — a price over a
+  period converts at the period average, a balance at the closing rate, and both
+  columns ship. Converted at the average, EU household electricity rose 35%
+  between 2021-S1 and 2022-S2 in euros and 13.5% in dollars.
 
 **What it deliberately is not.** There is no entity below the country: no
 customer, supplier, site, product or order anywhere in the warehouse. So this
 demonstrates modelling at national grain and says nothing about entity
 resolution, cohort analysis or transactional dedup. That's the honest boundary,
 and closing it is the top of the roadmap — a company-entity grain (SEC XBRL) and
-a transactional one, plus the currency and date dimensions that any money-
-denominated fact needs.
+a transactional one. The currency and date dimensions any money-denominated fact
+needs are now in place, which is what makes those a join rather than a project.
 
 ## 2. What is the freshness SLA, and what happens when it is missed?
 
@@ -64,9 +71,9 @@ that an upstream publisher moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
 that OWID was down.
 
-**What blocks.** 148 dbt tests run inside `dbt build`, every one with
+**What blocks.** 268 dbt tests run inside `dbt build`, every one with
 `store_failures`, so a red test hands you `select * from
-dbt_test__audit.<test_name>` rather than a count. Five Dagster asset checks sit
+dbt_test__audit.<test_name>` rather than a count. Six Dagster asset checks sit
 alongside them, and `site_pages_all_rendered` is blocking and checks page *size*
 — `evidence build` exits 0 for a site missing a page, so a route that emitted
 only the SvelteKit shell would otherwise deploy green.
@@ -83,16 +90,17 @@ Measured on this machine against the live APIs, per stage:
 
 | Stage | Time | Notes |
 |-------|------|-------|
-| `just ingest` | **46.7 s** | five sources over the public internet |
-| `just dbt-build` | **12.7 s** | 164 nodes — 12 models, 2 snapshots, 2 seeds, 148 tests |
-| `just transform` | **0.9 s** | Polars derived metric |
-| `just pipeline-status` | **0.9 s** | observability tables |
-| `just lake` | **2.5 s** | 762 Parquet files, ~32 MB |
-| **total** | **≈ 64 s** | of which **73% is waiting on someone else's API** |
+| `just ingest` | **46.1 s** | six sources over the public internet |
+| `just dbt-build` | **17.5 s** | 294 nodes — 19 models, 2 snapshots, 5 seeds, 268 tests |
+| `just transform` | **1.0 s** | Polars derived metric |
+| `just pipeline-status` | **1.2 s** | observability tables |
+| `just lake` | **2.7 s** | 790 Parquet files, ~36 MB |
+| **total** | **≈ 69 s** | of which **67% is waiting on someone else's API** |
 
-Artifacts: a 57 MB DuckDB file, a 32 MB Parquet archive, a 94 MB Evidence site.
-Warehouse contents: 79,207 staging rows, 120,642 mart rows (43,138 of them the
-wide fact), 9,821 snapshot rows across the two `history` tables.
+Artifacts: a 108 MB DuckDB file, a 36 MB Parquet archive, a 93 MB Evidence site.
+Warehouse contents: 344,242 staging rows, 808,787 mart rows (43,138 of them the
+wide fact and 646k the three FX tables), 9,821 snapshot rows across the two
+`history` tables.
 
 CI, from the repo's own run history (median of successful runs):
 

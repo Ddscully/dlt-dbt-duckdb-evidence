@@ -91,12 +91,17 @@ WAREHOUSE_SCHEMAS = ("raw", "staging", "marts", "analytics", "history")
 # because the dbt manifest it needs is gitignored and built later in CI.
 TABLE_TO_DBT_MODEL = {
     "marts.dim_country_year": "dim_country_year",
+    "marts.dim_currency": "dim_currency",
+    "marts.dim_date": "dim_date",
     "marts.dim_grid_emission_factors": "dim_grid_emission_factors",
     "marts.fct_cbam_exposure": "fct_cbam_exposure",
     "marts.fct_co2_estimate_versions": "fct_co2_estimate_versions",
     "marts.fct_emissions_energy": "fct_emissions_energy",
     "marts.fct_eu_electricity_prices_semiannual": "fct_eu_electricity_prices_semiannual",
     "marts.fct_example_scope2_emissions": "fct_example_scope2_emissions",
+    "marts.fct_fx_rates_daily": "fct_fx_rates_daily",
+    "marts.fct_fx_rates_periods": "fct_fx_rates_periods",
+    "marts.fct_fx_rates_published": "fct_fx_rates_published",
 }
 
 TABLE_TO_ASSET_KEY = {

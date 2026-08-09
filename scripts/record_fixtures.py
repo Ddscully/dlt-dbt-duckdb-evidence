@@ -1,6 +1,6 @@
 """Record the ingest fixtures that CI runs against.
 
-Hits the five live endpoints once, trims each payload to a representative slice,
+Hits the six live endpoints once, trims each payload to a representative slice,
 and writes `tests/fixtures/ingest/`. Everything downstream of dlt then has real
 data to chew on without a pull request depending on OWID being up.
 
@@ -18,7 +18,8 @@ matches the source. `COUNTRIES` is the only knob.
 
 The World Bank country dimension and the Eurostat payload are kept whole — both
 are small, `wb_country` is the dimension the overrides seed is diffed against,
-and the Eurostat JSON-stat grid can't be subset without rebuilding its index.
+and the Eurostat JSON-stat grid can't be subset without rebuilding its index. The
+ECB rates are kept whole for a third reason — see `record_fx`.
 """
 
 from __future__ import annotations
@@ -32,11 +33,13 @@ import polars as pl
 from ingest.fixtures import FIXTURE_DIR, path_for
 from ingest.pipeline import (
     EU_ELEC_PRICES_API,
+    FX_FIRST_DATE,
     OWID_CO2,
     OWID_ENERGY,
     WB_COUNTRY_API,
     WB_WDI_INDICATORS,
     _get_json,
+    fx_url,
     wdi_url,
 )
 
@@ -138,6 +141,21 @@ def record_eurostat() -> None:
     _write(path_for(EU_ELEC_PRICES_API), json.dumps(_get_json(EU_ELEC_PRICES_API)))
 
 
+def record_fx() -> None:
+    """The whole ECB reference-rate series, gzipped.
+
+    Not trimmed at all, which is the exception `COUNTRIES` doesn't cover: there
+    is no country in this payload, and the interesting structure is *when each
+    currency starts and stops*. Cutting the date range would throw away the euro
+    changeovers, the 2022 rouble suspension and Iceland's nine-year gap — which
+    are the four shapes `fct_fx_rates_daily` exists to handle, and so the four
+    things CI should be exercising. 3.6 MB whole, 831 kB compressed.
+    """
+    url = fx_url(FX_FIRST_DATE)
+    payload = json.dumps(_get_json(url))
+    _write(path_for(url), gzip.compress(payload.encode()))
+
+
 def main() -> None:
     print(f"recording fixtures for {len(COUNTRIES)} countries into {FIXTURE_DIR}")
     record_owid(OWID_CO2)
@@ -145,6 +163,7 @@ def main() -> None:
     record_wb_country()
     record_wdi()
     record_eurostat()
+    record_fx()
     print("done — commit tests/fixtures/ingest/")
 
 

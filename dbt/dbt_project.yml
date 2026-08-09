@@ -22,6 +22,37 @@ vars:
   # whole sensitivity band from one build rather than needing one build per price.
   eu_ets_price_eur_per_t: 75
 
+  # The month a fiscal year starts in. 4 = April, which is the UK, Indian and
+  # Japanese convention; the US federal year starts in October and most of
+  # continental Europe runs on the calendar (1).
+  #
+  # It is a var and not a column because it is a *policy*, not a fact about a
+  # date: the same Tuesday belongs to FY2024 or FY2025 depending on whose books
+  # you are keeping. `dim_date` ships `fiscal_year` and `fiscal_quarter` next to
+  # the calendar ones so the difference is visible rather than assumed — set this
+  # to 1 and the two collapse onto each other, which is the honest default for a
+  # warehouse with no company in it. Anything joining on fiscal periods has to
+  # know which convention built the table, hence the `fiscal_year_start_month`
+  # column carried on every row.
+  fiscal_year_start_month: 4
+
+  # How many days a published FX rate may be carried forward before the dense
+  # daily series gives up and returns null.
+  #
+  # The bound is measured, not guessed: across 7,066 publication days the longest
+  # gap the ECB has ever left is 5 calendar days (36 times — the Christmas/New
+  # Year runs), so 7 covers every weekend and TARGET holiday closure with room to
+  # spare. What it deliberately does *not* cover is a currency the ECB stopped
+  # quoting: the Icelandic krona has a 3,341-day hole from the 2008 banking
+  # collapse to February 2018, and an uncapped carry-forward would fill nine
+  # years with a pre-collapse rate that no one could have traded at.
+  fx_max_carry_forward_days: 7
+
+  # How far back `fct_fx_rates_published` re-processes on an incremental run.
+  # Must be no smaller than `FX_LOOKBACK_DAYS` in `ingest/pipeline.py` (10), and
+  # is set larger on purpose — see the comment in that model.
+  fx_incremental_lookback_days: 30
+
 models:
   modern_data_stack:
     staging:
@@ -45,6 +76,12 @@ seeds:
         # to the values seed's varchar key. Same lesson as dlt's type inference on
         # `wb_wdi`, one layer down.
         cn_code: varchar
+    currencies:
+      +column_types:
+        # Mostly empty — only 12 of the 47 rows carry one — and an all-blank
+        # column would otherwise infer as text and fail the comparison against
+        # `max(rate_date)` that checks the seed against the series.
+        retired_on: date
 
 snapshots:
   modern_data_stack:

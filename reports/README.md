@@ -95,6 +95,18 @@ calls, so the recipe and the graph can't drift into running different builds.
   Evidence hands the value back as a raw SQL fragment, not a bound parameter.
   Its `goods_list` query also groups by the two selected columns, so
   `order by product_group` is a binder error; order by the label instead.
+- `pages/currency.md`: the ECB's daily euro reference rates — the gap in the
+  calendar, the carry-forward that fills it, spot against average, and the EU
+  electricity price restated in dollars. Two things it demonstrates that no other
+  page needed:
+  - **Put a real date on a time axis, not the period label.** Charting
+    `period_label` gave 27 category ticks rendered as `2...` and sorted as
+    strings; `x=period_start_date` with `xFmt='yyyy'` is what makes it readable.
+    Same for the half-yearly price chart (`xFmt='yyyy-mmm'`).
+  - It is the second page driven by a *string* input (`quote_currency`), so the
+    hand-written quotes in `'${inputs.ccy.value}'` are the cbam.md pattern again,
+    and the selection is named in prose as `{inputs.ccy.label}` — a `<Value>`
+    would show the first row of a query rather than what the reader picked.
 
 The coverage and pipeline pages render an explanatory branch rather than an
 error when their data is empty, the way `restatements.md` does, because the

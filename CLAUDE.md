@@ -57,7 +57,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (13 models, 2 snapshots, 4 seeds + 176 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (19 models, 2 snapshots, 5 seeds + 268 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -198,29 +198,41 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 ## Warehouse schemas (one DuckDB file: `data/warehouse.duckdb`)
 
 - `raw` — dlt landing tables: `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`,
-  `eu_elec_prices`
-- `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain
+  `eu_elec_prices`, `ecb_fx_rates`
+- `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain —
+  except `stg_fx_rates`, which is `(rate_date, quote_currency)`
 - `marts` — dbt tables: `dim_country_year` (the country-year spine),
   `fct_emissions_energy` (the wide join, built on the spine),
   `dim_grid_emission_factors` (the Scope 2 reference product),
   `fct_co2_estimate_versions` (revision history, off the snapshot),
   `fct_eu_electricity_prices_semiannual` (Eurostat's own half-year grain),
   `fct_example_scope2_emissions` (the worked example — **the only fabricated
-  data in the warehouse**) and `fct_cbam_exposure` (the CBAM border cost, at
-  `(sourcing country, good)` and **no year at all**)
+  data in the warehouse**), `fct_cbam_exposure` (the CBAM border cost, at
+  `(sourcing country, good)` and **no year at all**), and the five with no
+  country in them at all: `dim_date` (the calendar), `dim_currency`,
+  `fct_fx_rates_published` (the ECB's fixings as published, and **the project's
+  only incremental model**), `fct_fx_rates_daily` (gap-filled) and
+  `fct_fx_rates_periods` (month / quarter / half / year)
 - `history` — the dbt snapshots `snap_co2_estimates` (SCD2 versions of OWID's CO2
   numbers) and `snap_grid_emission_factors` (the same for the Scope 2 factors,
   2015+). **The two tables here that no rebuild can reproduce** — see below
 - `analytics` — Polars output: `co2_intensity`, plus `pipeline_sources` /
   `pipeline_tables` / `pipeline_tests` (see *Pipeline observability* below)
 
-Grain of every fact/staging model is **`(country_iso3, year)`**; joins are on
-ISO3 country code + year. The country dimension (`stg_country`) supplies
-`region` and `income_group`. The two exceptions are both Eurostat prices at their
+Grain of every *country* fact/staging model is **`(country_iso3, year)`**; joins
+are on ISO3 country code + year. The country dimension (`stg_country`) supplies
+`region` and `income_group`. Two of those models are Eurostat prices at their
 published `(country_iso3, year, half)` grain —
 `stg_eu_electricity_prices_semiannual` and the mart off it — and they are the
 exception on purpose, not a model waiting to be flattened; see the Eurostat bullet
 under *Conventions & gotchas*.
+
+**That sentence used to say "every model", and it stopped being true twice.**
+`fct_cbam_exposure` has no year (a regulatory schedule, not a time series) and
+the FX tables have no country. The country-year spine is the *dominant* grain
+here, not a house rule — reaching for `dim_country_year` when the thing being
+modelled isn't a country-year is how you get a fact with a fabricated dimension
+on it.
 
 **The fact hangs off the spine, not off a source.** `dim_country_year` is
 `stg_country` × every year the data covers (bounds read from the sources, so both
@@ -424,6 +436,119 @@ a regulatory schedule, not a time series.
   meaningful one; the mart coalesces to `stg_country.country_name` for anything
   that goes on a chart.
 
+## Currency and the calendar (`dim_date`, the `fx_*` models, `reports/pages/currency.md`)
+
+The ECB's daily euro reference rates, via [Frankfurter](https://frankfurter.dev)
+— no key, no quota, the whole 1999-2026 series in one 3.6 MB request. It is the
+**first sub-annual grain in the warehouse**, and everything interesting about it
+follows from that rather than from the numbers.
+
+- **The source is small on purpose.** The modelling is the point: a date
+  dimension, a gap-filled daily series, a spot-vs-average decision and the first
+  incremental model. A harder API would have bought nothing.
+- **30% of calendar days carry no rate**, and that is the model. 7,066 of 10,078
+  days have a fixing; the rest are 2,878 weekend days and 134 weekday TARGET
+  closures. `fct_fx_rates_daily` carries the last fixing forward, which is what a
+  finance system does and is the same operation as a slowly-changing lookup —
+  and `rate_source_date` says which fixing every row is quoting.
+- **The carry-forward is capped at 7 days (`fx_max_carry_forward_days`), and the
+  bound is measured.** The longest closure the ECB has ever taken is 5 days
+  (36 times, the Christmas/New Year runs). What the cap refuses is the two
+  *interior* gaps in the whole series, and both are currency crises rather than
+  calendars: the Icelandic krona has no rate for 3,341 days from the 2008 banking
+  collapse to February 2018, the Argentine peso none for 34 days from the January
+  2002 breaking of the dollar peg. Those 3,359 rows keep their place with a null
+  rate and `is_rate_stale` set. An uncapped fill would have put a pre-collapse
+  krona on nine years of charts.
+- **The currency panel is not fixed, which is why `dim_currency` exists.** 46
+  codes have been quoted and 29 still are. Ten stop on the last business day
+  before their country adopted the euro (GRD 2000 through BGN 2025), two at a
+  redenomination where the money continues under a new code (TRL→TRY at
+  1,000,000:1, ROL→RON at 10,000:1 — a chart following the *code* has a cliff in
+  2005), and five simply cease. **The `currencies` seed carries the twelve dates
+  that are matters of public record and deliberately guesses at none of the
+  other five**, and a test checks each one against the series: every asserted
+  retirement date is the day after the last published fixing. `is_quoted` is
+  false for exactly one row — EUR, which is the base of every quote and never a
+  quote itself.
+- **Both directions of every rate ship.** `units_per_eur` is the ECB's own quote,
+  `eur_per_unit` its reciprocal. Same argument as the Scope 2 factor in g/kWh
+  *and* t/MWh: a consumer forced to invert it themselves will eventually forget.
+- **Spot or average is a real decision and the model refuses to make it.** Stocks
+  (a balance at an instant) convert at the closing rate; flows (revenue, spend, a
+  price over a period) at the period average. `period_end_vs_avg_pct` measures
+  the cost of choosing wrong — +11.7% for EUR/USD in 2003, -8.6% in 2014, +98%
+  for the krona in 2008.
+  - **Average over published fixings, never over the dense table.** Averaging
+    `fct_fx_rates_daily` counts every Friday three times and four or five times
+    around a holiday, weighting the mean toward whichever weekday sits next to a
+    closure. `fct_fx_rates_periods` reads `fct_fx_rates_published` for that
+    reason alone.
+  - **`avg_eur_per_unit` is not `1 / avg_units_per_eur`** — the mean of
+    reciprocals is not the reciprocal of the mean. 0.07% apart in a calm year,
+    0.53% in 2008. Each column is the mean of its own series; the period-*end*
+    columns invert exactly, because a single point has no averaging in it.
+- **`dim_date` is a calendar and not a market calendar.** It knows weekends; it
+  does not know trading days in any jurisdiction, and the TARGET closures are
+  observed as absences rather than asserted from a list that would need
+  maintaining forever. Two traps it exists to stop:
+  - **ISO year is not calendar year.** 2021-01-01 is a Friday in ISO week 53 of
+    ISO year *2020*, and 2019-12-30 is already in week 1 of 2020. Grouping by
+    `(year, iso_week)` splits one week over two buckets. Pair `iso_year` with
+    `iso_week`, or group on `iso_week_start_date`.
+  - **`/` is float division in DuckDB, and `cast(... as integer)` rounds.** The
+    fiscal-quarter expression `((month - start + 12) % 12) / 3 + 1` gives 4.67
+    for March under an April year start, which cast to an integer is **quarter
+    5**. `floor()` is the fix, and the test that caught it is an
+    `accepted_range` of 1-4.
+  - The fiscal columns come from the `fiscal_year_start_month` var (4 = April)
+    and **the value used is carried on every row**, because the same Tuesday is
+    in a different fiscal year on someone else's books. `fiscal_year` is the year
+    the fiscal year *ends* in, which is what makes it collapse onto `year` when
+    the var is 1.
+- **`fct_fx_rates_published` is the only `materialized='incremental'` model in
+  the project, and it is the right one rather than the biggest one.** Every other
+  table here re-derives a source that gets fully re-fetched, so rebuilding it is
+  how a restatement is picked up, not waste. This one grows ~30 rows a day
+  forever and a published fixing never changes. Numbers, honestly: incremental
+  0.16 s against 0.24 s full-refresh at 265k rows — the saving is 0.08 s and the
+  argument is the shape of the curve, not today's seconds.
+  - **`delete+insert` on the grain, not `append`.** Ingestion re-asks for a
+    lookback window and an append would duplicate every row in it. Same
+    idempotence argument as `wb_wdi`'s merge key one layer up.
+  - **Two lookback windows, deliberately not equal.**
+    `fx_incremental_lookback_days` (30) must be **no smaller** than
+    `FX_LOOKBACK_DAYS` (10) in `ingest/pipeline.py`. Two constants that have to
+    match are a drift bug; one that only has to be no smaller costs a few rows a
+    run and cannot fail in the direction that loses data.
+  - A `dbt_utils.equal_rowcount` against `stg_fx_rates` is the guard. It only
+    works because this model is a faithful copy of the view — keep it that way,
+    or that one cheap test stops meaning anything.
+- **The FX watermark is one value for the table, where WDI's is one per
+  indicator.** Every currency comes back in the *same* request, so a newly listed
+  one is covered by the table-wide high-water mark. WDI needs the per-indicator
+  form precisely because adding an indicator adds a request that has never been
+  made before. Same mechanism, opposite answer, for a reason worth keeping
+  straight.
+- **The FX fixture is the whole series, gzipped** (3.6 MB → 843 kB), and it is
+  the one fixture that isn't trimmed. Every discontinuity above is something a
+  model is tested against, so cutting the date range would take the euro
+  changeovers, the rouble and Iceland out of CI. It is also the reason `_get_json`
+  has a `.gz` branch.
+- **The one thing it changes about a number already on the site.** Eurostat's
+  household electricity price is the warehouse's only euro-denominated
+  measurement, sitting beside the World Bank's dollar GDP. Converted at the
+  half-year average, the 39 countries present in both halves rose **35%** from
+  2021-S1 to 2022-S2 in euros and **13.5%** in dollars, because the euro fell
+  from 1.205 to 1.014 over the same eighteen months. Neither is wrong; a chart of
+  "European electricity prices" with no stated currency is reporting the exchange
+  rate as if it were an energy market. That is the `gdp_usd` vs
+  `gdp_constant_usd` gotcha below, finally measured instead of narrated.
+- **`marts.fct_fx_rates_daily` is archived to the lake and `raw.ecb_fx_rates` is
+  not** — the reverse of every other table there. The landing table is keyed on
+  `rate_date` and has no `year` to partition on. It is also the only table that
+  improves the archive's small-file arithmetic: 381k rows over 28 partitions.
+
 ## Data-quality gates (`dbt/models/**/_*.yml`)
 
 `dbt_utils` is the project's only dbt package; it exists for
@@ -488,7 +613,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 
 `just lake` writes the year-keyed tables back out of DuckDB as hive-partitioned
 Parquet under `data/lake/<table>/year=<year>/data_0.parquet` (zstd, gitignored,
-762 files / ~27 MB today). It's part of `just run`, an asset
+790 files / ~36 MB today). It's part of `just run`, an asset
 (`lake/parquet_archive`) downstream of the mart, and `lake_matches_warehouse`
 checks the read-back row counts and year spans against the warehouse.
 
@@ -503,13 +628,16 @@ checks the read-back row counts and year spans against the warehouse.
   of a stale file. `tests/test_lake.py` pins that.
 - **Rewriting from empty still leaves the output byte-identical run to run**, so
   the diff is meaningful: revising one country-year upstream changes exactly one
-  of the 762 files. That is the point of the layer — the DuckDB file differs
+  of the 790 files. That is the point of the layer — the DuckDB file differs
   everywhere on every run, so it can't tell you what moved.
-- **275 partitions of ~47 kB is too many small files for a real lake** (~100 MB
-  per partition is the usual rule of thumb, and on object storage this would be
-  275 round trips). Year is the partition column anyway because it's the one every
-  query filters on, and pruning still measures: `where year = 2020` runs in ~23 ms
-  against ~50 ms for the whole archive.
+- **Most partitions are far too small for a real lake.** The CO2 archive is 275
+  of them averaging ~47 kB, against a ~100 MB rule of thumb, and on object
+  storage that is 275 round trips. `marts.fct_fx_rates_daily` is the exception
+  and the illustration: 381k rows over 28 year-partitions is the only table here
+  whose partitions are a sensible size, precisely because its grain is finer than
+  its partition column. Year is the partition column anyway because it's the one
+  every query filters on, and pruning still measures: `where year = 2020` runs in
+  ~23 ms against ~50 ms for the whole archive.
 - **`LAKE_DIR` overrides the destination** the way `WAREHOUSE_PATH` does for the
   warehouse — `just test-pipeline` points it at a temp directory so a fixture run
   can't overwrite the real archive with the 17-country slice.
@@ -660,7 +788,10 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   2010–2024 and still scored 10% *worse* on carbon intensity, purely because the
   yen fell 28% against the dollar. `gdp_constant_usd` (`NY.GDP.MKTP.KD`, constant
   2015 US$) is the real-terms series. Current US$ is fine for single-year
-  cross-sections, wrong for trends.
+  cross-sections, wrong for trends. **The same failure is now measurable rather
+  than narrated** — see the Currency section: the EU household electricity price
+  rose 35% or 13.5% between 2021-S1 and 2022-S2 depending only on whether you
+  counted in euros or dollars.
 - **World Bank WDI** is fetched long (one row per indicator/country/year) and
   pivoted to wide columns in `stg_wdi.sql`. Add indicators in two places:
   `WB_WDI_INDICATORS` in `ingest/pipeline.py` and a `max(case …)` in `stg_wdi.sql`.
@@ -713,13 +844,24 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
   parallel steps would just fight over the file lock.
 - **`raw/wb_wdi` is partitioned by year and nothing else is** — which is why it
   sits in its own `@dlt_assets` block (`ingest_wdi`). Dagster gives every asset
-  in a multi-asset the same `partitions_def`, and the other four sources are
-  whole-file `replace` downloads with no per-year fetch to express, so
+  in a multi-asset the same `partitions_def`, and four of the other five sources
+  are whole-file `replace` downloads with no per-year fetch to express, so
   partitioning them would be a fiction. WDI earns it: the API takes `&date=lo:hi`,
   the disposition is `merge`, and `year` is in the primary key, so a partition is
-  a real re-runnable unit of work. The split is safe because both blocks are
-  built from `FULL_REFRESH_RESOURCES` / `INCREMENTAL_RESOURCES` and the covering
-  test in `tests/test_ingest.py` still holds those two to the source.
+  a real re-runnable unit of work.
+  - **Merging is not what earns a partition, and `ecb_fx_rates` is the near-miss
+    that proves it.** It is incremental *and* its API takes a date range, so by
+    the letter of the paragraph above it qualifies — but its entire 27-year
+    series is one three-second request, and partitioning it would trade that for
+    thousands of Dagster partitions and buy nothing. So the blocks split on
+    `PARTITIONED_RESOURCES`, not on the disposition, and
+    `UNPARTITIONED_RESOURCES` in `orchestration/assets.py` is derived as
+    everything else. **Before this there were two tuples and the WDI block was
+    built from `INCREMENTAL_RESOURCES` directly** — adding a second merge
+    resource to that constant would silently have given it yearly partitions.
+    `load_groups` still owns the refresh/merge split; the blocks only decide who
+    gets a `partitions_def`. Two tests in `tests/test_ingest.py` hold both
+    splits to the source.
   - **The asset has two paths and the unpartitioned one has to keep working.**
     `full_refresh` contains this asset and `ci.yml` / `nightly.yml` /
     `release-data.yml` execute that job with no partition key. A partitioned
@@ -771,7 +913,7 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 - **`site_pages_all_rendered` is blocking, and it checks file *size*.**
   `evidence build` exits 0 for a site missing a page, and nothing downstream reads
   `reports/build/` — so a route that emitted only the SvelteKit shell would
-  materialise green and deploy. The five pages render at 17–74 kB; the floor is
+  materialise green and deploy. The eight pages render at 19–82 kB; the floor is
   8 kB.
 - The `daily_refresh` schedule ships `STOPPED` on purpose — opening the UI
   shouldn't start hammering public APIs on a timer. It targets `full_refresh`, so
@@ -800,6 +942,14 @@ Gotchas:
   upstream field pass CI against a fixture that matches a `stg_` model no longer
   matching reality. The OWID fixtures are gzipped CSV, not Parquet, so they still
   go through `pl.read_csv(..., infer_schema_length=None)`.
+- **Three fixtures aren't trimmed at all**, each for a different reason:
+  `wb_country` because it *is* the dimension the overrides seed is diffed
+  against, `eu_elec_prices` because a JSON-stat grid can't be subset without
+  rebuilding its index, and `ecb_fx_rates` because the interesting structure is
+  *when each currency starts and stops* — cutting the date range would take the
+  euro changeovers, the rouble and Iceland's nine-year gap out of CI, which are
+  the four shapes the FX models exist to handle. It is gzipped (3.6 MB → 843 kB),
+  and it is why `_get_json` has a `.gz` branch.
 - **`fixtures.path_for()` raises on an unmapped URL** rather than falling back to
   the network — otherwise "offline CI" quietly becomes "CI that's online
   sometimes". `tests/test_fixtures.py` asserts every URL the pipeline can build

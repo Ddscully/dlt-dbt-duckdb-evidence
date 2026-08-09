@@ -6,12 +6,37 @@
 -- has to, to sit on the country-year spine — erases the sharpest price movement
 -- in the series. Reach for this model for anything about prices *over time*, and
 -- the annual column for anything joining prices to emissions or GDP.
+--
+-- **It is also the warehouse's one genuinely mixed-currency question**, which is
+-- why the USD columns hang off this model and not another. Everything else here
+-- is denominated in US dollars (the World Bank's GDP series) or in nothing at
+-- all (tonnes, kWh); this is the only euro-denominated measurement, so before
+-- `fct_fx_rates_periods` existed a euro price and a dollar GDP simply could not
+-- be put in the same sentence.
+--
+-- A price over a half-year is a **flow**, so it converts at the period average
+-- and not at the closing rate — see the header of `fct_fx_rates_periods`. The
+-- rate used ships beside the converted number, and so does the closing rate that
+-- was *not* used, because a converted figure whose rate you can't see is a
+-- figure nobody can check.
 with semiannual as (
     select * from {{ ref('stg_eu_electricity_prices_semiannual') }}
 ),
 
 spine as (
     select * from {{ ref('dim_country_year') }}
+),
+
+-- USD per EUR at Eurostat's own half-year grain — the join `dim_date`'s
+-- Eurostat-shaped `half` column exists to make possible.
+usd as (
+    select
+        period_start_date,
+        avg_units_per_eur,
+        period_end_units_per_eur,
+        period_is_complete
+    from {{ ref('fct_fx_rates_periods') }}
+    where period_type = 'half' and quote_currency = 'USD'
 ),
 
 -- Half-over-half change. `lag` returns the previous row this country *has*, which
@@ -54,6 +79,16 @@ select
     case
         when s.follows_previous_half and s.previous_price > 0
             then (s.electricity_price_eur_kwh - s.previous_price) / s.previous_price * 100
-    end as change_vs_previous_half_pct
+    end as change_vs_previous_half_pct,
+
+    -- The same price in dollars, at the average rate over the same half-year.
+    s.electricity_price_eur_kwh * f.avg_units_per_eur as electricity_price_usd_kwh,
+    f.avg_units_per_eur as usd_per_eur_period_avg,
+    -- Shipped, not used: the closing rate is the right one for a balance and the
+    -- wrong one for a price, and having both in the table is how that stays a
+    -- visible choice rather than a buried one.
+    f.period_end_units_per_eur as usd_per_eur_period_end,
+    not f.period_is_complete as usd_conversion_is_partial_period
 from with_change as s
 inner join spine as d on s.country_iso3 = d.country_iso3 and s.year = d.year
+left join usd as f on s.period_start_date = f.period_start_date

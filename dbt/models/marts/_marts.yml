@@ -396,6 +396,38 @@ models:
           The same change as a percent. Deliberately untested: the Dutch 2022-S2
           figure is +320% off a rebate-suppressed S1, which is reality rather than
           a bug. Also null where the previous price was zero.
+      - name: electricity_price_usd_kwh
+        description: >
+          The same price in US dollars, converted at the *average* USD/EUR rate
+          over the same half-year, because a price paid across a period is a flow
+          and not a balance. This is the warehouse's only currency conversion,
+          and it exists because this is its only euro-denominated measurement
+          sitting beside dollar-denominated GDP.
+
+          It changes the story rather than restating it: across the 39 countries
+          present in both halves, the average household price rose **35%**
+          between 2021-S1 and 2022-S2 in euros and **13.5%** in dollars, because
+          the euro fell from 1.205 to 1.014 over the same eighteen months.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 2, inclusive: false}
+      - name: usd_per_eur_period_avg
+        description: >
+          The rate actually used, on the row it was used on. A converted figure
+          whose rate is not visible is a figure nobody downstream can check.
+        data_tests: [not_null]
+      - name: usd_per_eur_period_end
+        description: >
+          The closing rate for the same half — shipped and deliberately *not*
+          used. It is the correct rate for a balance and the wrong one for a
+          price, and carrying both is what keeps that a visible choice.
+        data_tests: [not_null]
+      - name: usd_conversion_is_partial_period
+        description: >
+          True when the half-year's FX average is over a period that has not
+          finished. Same caveat as `price_is_partial_year` one model over, for
+          the same reason.
+        data_tests: [not_null]
 
   - name: fct_example_scope2_emissions
     description: >
@@ -571,4 +603,394 @@ models:
           indirect values come from IEA data under a non-commercial licence this
           project does not redistribute. Sitting beside, not reconciled against.
       - name: source_instrument
+        data_tests: [not_null]
+
+  - name: dim_date
+    description: >
+      The calendar: one row per day, 1999-01-01 to the end of the year the FX
+      series reaches, dense and gapless by construction. 10,227 rows today, and
+      both ends move with the data rather than being pinned.
+
+      The warehouse ran without one until the daily FX rates landed, because
+      nothing here had a grain finer than a year. It exists so that "which
+      quarter is this", "is this a weekday" and "which fiscal year does this fall
+      in" are answered by a join and answered identically everywhere.
+
+      Two things it deliberately does not claim. It is **not a market calendar**
+      — the ECB's TARGET closures are not derivable from any weekday rule, so
+      they are observed as absences in `fct_fx_rates_daily` rather than asserted
+      here. And its **fiscal columns are a policy**, taken from the
+      `fiscal_year_start_month` var and carried on every row, because the same
+      Tuesday belongs to different fiscal years depending on whose books you are
+      keeping.
+    data_tests:
+      # Dense and gapless: one row per day between the ends, no more and no less.
+      # A date dimension with a hole in it is worse than none, because every
+      # left join onto it silently loses rows instead of failing.
+      - dbt_utils.expression_is_true:
+          name: dim_date_has_no_missing_days
+          arguments:
+            expression: >
+              (select count(*) from {{ ref('dim_date') }})
+              = (
+                  select date_diff('day', min(date_day), max(date_day)) + 1
+                  from {{ ref('dim_date') }}
+              )
+    columns:
+      - name: date_day
+        data_tests: [not_null, unique]
+      - name: date_key
+        description: "Integer surrogate, yyyymmdd — sorts and reads like the date."
+        data_tests: [not_null, unique]
+      - name: year
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1999, max_value: 2100}
+      - name: quarter
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1, max_value: 4}
+      - name: month
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1, max_value: 12}
+      - name: half
+        description: "'S1'/'S2', spelled Eurostat's way so the price models join without a translation."
+        data_tests:
+          - accepted_values:
+              arguments: {values: ['S1', 'S2']}
+      - name: iso_year
+        description: >
+          The ISO-8601 week-numbering year, which is **not** `year`. 2021-01-01
+          is a Friday in ISO week 53 of ISO year 2020, and 2019-12-30 is already
+          in week 1 of 2020 — so grouping weekly by (year, iso_week) splits one
+          week across two buckets and files week 53 next to week 1. Pair this
+          with `iso_week`, or group on `iso_week_start_date`.
+        data_tests: [not_null]
+      - name: iso_week
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1, max_value: 53}
+      - name: iso_week_start_date
+        description: The Monday of this row's ISO week — the safe weekly grouping key.
+        data_tests: [not_null]
+      - name: day_of_week
+        description: ISO day number, 1 = Monday.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1, max_value: 7}
+      - name: is_weekday
+        description: >
+          Monday-Friday. A generic flag, not a business-day one: whether a given
+          weekday is a trading day depends on a market calendar this model does
+          not have.
+        data_tests: [not_null]
+      - name: fiscal_year_start_month
+        description: >
+          The policy that produced the fiscal columns, carried per row so anything
+          joining on them can tell which convention built the table.
+        data_tests: [not_null]
+      - name: fiscal_year
+        description: >
+          The calendar year the fiscal year *ends* in — the convention that makes
+          this collapse onto `year` when `fiscal_year_start_month` is 1.
+        data_tests: [not_null]
+      - name: fiscal_quarter
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1, max_value: 4}
+      - name: fiscal_month
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1, max_value: 12}
+
+  - name: dim_currency
+    description: >
+      One row per currency the ECB series has ever quoted, joining the
+      `currencies` seed to the series' own evidence of when each code was live.
+      47 rows: 46 quoted plus the euro, which is the base of every quote and so
+      never appears as one.
+
+      It exists because the panel is not fixed. 17 codes have stopped — ten at a
+      euro adoption, two at a redenomination, five without an explanation this
+      project is willing to invent — and two of the survivors have interior gaps
+      where the currency itself stopped working (Iceland 2008-2018, Argentina
+      2002). Anything that carries a rate forward has to know all of that, which
+      is why `first_published_date` / `last_published_date` bound the spine in
+      `fct_fx_rates_daily`.
+    data_tests:
+      # The seed's claim, checked against the series from the other side: a
+      # currency the seed says was retired must have stopped being quoted, and
+      # one it says nothing about must not have a retirement date invented for it.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "not is_currently_published"
+          config:
+            where: "retired_on is not null"
+    columns:
+      - name: currency_code
+        data_tests: [not_null, unique]
+      - name: currency_name
+        data_tests: [not_null]
+      - name: first_published_date
+        description: Null only for EUR, which is quoted against rather than quoted.
+      - name: last_published_date
+      - name: n_published_days
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: is_quoted
+        description: >
+          False for exactly one row, EUR. Filter on it before ranking or charting
+          rates, or the base currency joins in with nulls everywhere.
+        data_tests: [not_null]
+      - name: is_currently_published
+        description: >
+          Whether the code still has a live quote, tolerant of missing the single
+          newest day by the same margin the carry-forward uses — so this and
+          "carried forward to today" cannot disagree.
+      - name: longest_gap_days
+        description: >
+          The longest run of calendar days between two consecutive fixings. 3 for
+          a weekend, 5 for the Christmas closures, and only two values far beyond
+          that: ISK at 3,341 and ARS at 34.
+      - name: has_interior_gap
+        description: A quote that stopped and resumed, rather than one that stopped.
+        data_tests: [not_null]
+      - name: retired_on
+      - name: retired_reason
+      - name: replaced_by_currency
+      - name: retirement_is_explained
+        description: >
+          Whether the seed records a reason. Five retirements deliberately have
+          none — reading their null `retired_on` as "still current" is the mistake
+          this column exists to prevent.
+        data_tests: [not_null]
+
+  - name: fct_fx_rates_published
+    description: >
+      Every ECB euro reference rate as published, one row per (rate_date,
+      quote_currency). 265,035 rows over 7,066 publication days and 46
+      currencies. Sparse on purpose: no row on a weekend, a TARGET holiday, or
+      for a currency outside its quoted lifetime.
+
+      **The project's first and only incremental model.** Every other table here
+      is a re-derivation of a source that is fully re-fetched, so rebuilding it
+      is how a restatement gets picked up rather than waste. This one grows by
+      ~30 rows a day forever and a published fixing never changes, which is the
+      shape `materialized='incremental'` is actually for. `delete+insert` on the
+      grain rather than `append`, because ingestion re-asks for a lookback window
+      and an append would duplicate every row in it.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [rate_date, quote_currency]
+      # An incremental model can drift from its source in a way a table model
+      # cannot — a missed window, or a `unique_key` that stopped matching the
+      # grain — and nothing else would notice. This is the cheap guard, and it is
+      # the reason to keep this model a faithful copy of the view rather than
+      # letting it filter or reshape: as long as that holds, one row count
+      # answers "did the incremental logic lose anything".
+      - dbt_utils.equal_rowcount:
+          arguments:
+            compare_model: ref('stg_fx_rates')
+    columns:
+      - name: rate_date
+        data_tests: [not_null]
+      - name: quote_currency
+        data_tests: [not_null]
+      - name: base_currency
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: ['EUR']}
+      - name: units_per_eur
+        description: Units of the quote currency per 1 EUR, exactly as the ECB quotes it.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+      - name: eur_per_unit
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+      - name: date_key
+        description: >
+          Computed here rather than joined from `dim_date`, so this model has no
+          dependencies and can be backfilled or rebuilt on its own.
+        data_tests: [not_null]
+
+  - name: fct_fx_rates_daily
+    description: >
+      The reference rates on every calendar day within each currency's quoted
+      lifetime, gap-filled. Grain: one row per (date_day, currency_code).
+      381,414 rows — 265,035 published, 113,020 carried forward and 3,359 stale.
+
+      **The gap is the model.** 30% of calendar days carry no fixing (2,878
+      weekend days and 134 weekday TARGET closures), so a transaction dated on a
+      Sunday forces a decision. This carries the last published rate forward,
+      which is what a finance system does and is the same operation as a
+      slowly-changing lookup — and it caps the carry at
+      `fx_max_carry_forward_days`, because the alternative is filling Iceland's
+      nine-year suspension with a pre-collapse rate. `rate_source_date` says
+      which fixing every row is quoting.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [date_day, currency_code]
+      # No row may quote a fixing from the future. This is the whole correctness
+      # condition of a carry-forward, and it is one wrong window frame away from
+      # being false — a default frame reaches forward and backfills the past.
+      #
+      # Both of these are named explicitly: dbt derives a test's stored-failure
+      # table name from the model and the column *tokens* in the expression, so
+      # two tests over the same two columns collide on one name and the project
+      # fails to compile.
+      - dbt_utils.expression_is_true:
+          name: fx_daily_never_quotes_a_future_fixing
+          arguments:
+            expression: "rate_source_date <= date_day"
+      # Every published rate must survive into the dense table unchanged. Catches
+      # a fill that overwrote real observations with carried ones.
+      - dbt_utils.expression_is_true:
+          name: fx_daily_keeps_published_rates_on_their_own_day
+          arguments:
+            expression: "rate_source_date = date_day"
+          config:
+            where: "is_published_rate"
+    columns:
+      - name: date_day
+        data_tests: [not_null]
+      - name: currency_code
+        data_tests: [not_null]
+      - name: base_currency
+        data_tests: [not_null]
+      - name: units_per_eur
+        description: >
+          Null where the carry has run past the cap, so a stale number cannot be
+          multiplied by anything by accident. That is 3,359 rows: Iceland
+          2008-2018 and Argentina in early 2002.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+      - name: eur_per_unit
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+      - name: rate_source_date
+        description: The publication date of the fixing this row is quoting.
+        data_tests: [not_null]
+      - name: days_since_published_rate
+        description: 0 on a publication day, 1-2 over a weekend, more over a holiday.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: is_published_rate
+        data_tests: [not_null]
+      - name: is_carried_forward
+        data_tests: [not_null]
+      - name: is_rate_stale
+        description: >
+          The carry ran past the cap and the rate is null. Not an error — an
+          absence you can count, which is the point of keeping the row.
+        data_tests: [not_null]
+
+  - name: fct_fx_rates_periods
+    description: >
+      Rates aggregated to month, quarter, half and year. Grain: one row per
+      (period_type, period_start_date, currency_code).
+
+      **It exists for one decision: spot or average.** A stock — a balance, a
+      position at an instant — converts at the closing rate; a flow — revenue,
+      spend, a price paid over a period — converts at the period average. Both
+      ship, named for what they are, and this model picks for nobody.
+      `period_end_vs_avg_pct` measures the cost of choosing wrong: +11.7% for
+      EUR/USD in 2003, -8.6% in 2014, and +98% for the Icelandic krona in 2008.
+
+      Two subtleties baked in. The averages are taken over *published fixings*,
+      not over the dense daily table, which would weight every Friday three times
+      and more over a holiday weekend. And `avg_eur_per_unit` is not
+      1 / `avg_units_per_eur` — the mean of reciprocals is not the reciprocal of
+      the mean, and the two differ by 0.07% in a calm year and 0.53% in 2008.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [period_type, period_start_date, quote_currency]
+      # The annual average must be reconstructible from the fixings it covers.
+      # Guards the join to `dim_date` — a period key that drifted by a day would
+      # silently move fixings between buckets.
+      - dbt_utils.expression_is_true:
+          name: fx_periods_annual_buckets_cover_every_fixing
+          arguments:
+            expression: >
+              (
+                  select sum(n_published_days)
+                  from {{ ref('fct_fx_rates_periods') }}
+                  where period_type = 'year'
+              )
+              = (select count(*) from {{ ref('fct_fx_rates_published') }})
+    columns:
+      - name: period_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: ['month', 'quarter', 'half', 'year']}
+      - name: period_start_date
+        data_tests: [not_null]
+      - name: period_end_date
+        data_tests: [not_null]
+      - name: period_label
+        description: "'2022-05', '2022-q2', '2022-S1', '2022' — the half spelled Eurostat's way."
+        data_tests: [not_null]
+      - name: quote_currency
+        data_tests: [not_null]
+      - name: avg_units_per_eur
+        description: For flows. The mean of the fixings actually published in the period.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+      - name: avg_eur_per_unit
+        description: >
+          The mean of the reciprocals, which is not the reciprocal of the mean —
+          see the model description. Convert in the direction the rate is quoted
+          where you have the choice.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+      - name: period_end_units_per_eur
+        description: For stocks. The last fixing published inside the period.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+      - name: period_end_eur_per_unit
+        description: Its exact reciprocal — a single point inverts without the averaging problem.
+        data_tests: [not_null]
+      - name: period_start_units_per_eur
+        data_tests: [not_null]
+      - name: period_end_vs_avg_pct
+        description: >
+          How far the closing rate sits from the average, as a percent of the
+          average. Deliberately untested for range: a currency crisis legitimately
+          puts it near +100%.
+      - name: intra_period_range_pct
+        description: High-to-low spread within the period, as a percent of the low.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: n_published_days
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: period_is_complete
+        description: >
+          False where the period has not finished, so the current year's average
+          is over the months that have happened. The `price_is_partial_year`
+          lesson from the Eurostat models, arriving again.
         data_tests: [not_null]
