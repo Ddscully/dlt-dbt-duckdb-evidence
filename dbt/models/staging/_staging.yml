@@ -9,6 +9,8 @@ models:
   # Test args go under `arguments:` — the flat form is deprecated in dbt 1.10
   # and removed in Fusion.
   - name: stg_co2
+    config:
+      group: country_stats
     description: >
       OWID CO2, one row per (country_iso3, year). Aggregate rows ("World",
       "Europe", income groupings) are dropped by the 3-letter ISO filter.
@@ -88,7 +90,17 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
 
+  # `protected` rather than the staging default of `private`, and the exception is
+  # the Scope 2 product: `dim_grid_emission_factors` (group `compliance`) reads
+  # this model directly, because it re-models `carbon_intensity_elec_g_kwh` for a
+  # different reader and needs `source_loaded_at` — the `_dlt_load_id`-derived
+  # column that exists only here and only for that. Going through
+  # `fct_emissions_energy` instead would mean a compliance table depending on a
+  # 60-column fact to read one column and losing the load provenance on the way.
   - name: stg_energy
+    config:
+      group: country_stats
+      access: protected
     description: OWID energy, one row per (country_iso3, year).
     data_tests:
       - dbt_utils.unique_combination_of_columns:
@@ -176,6 +188,8 @@ models:
         data_tests: [not_null]
 
   - name: stg_wdi
+    config:
+      group: country_stats
     description: >
       World Bank WDI pivoted from long (one row per indicator/country/year) to
       one row per (country_iso3, year) with a column per indicator. Adding an
@@ -239,6 +253,8 @@ models:
               arguments: {min_value: 0, max_value: 100}
 
   - name: stg_eu_electricity_prices_semiannual
+    config:
+      group: country_stats
     description: >
       Eurostat household electricity prices at their published grain: one row per
       (country_iso3, year, half). EU/EEA only. This is the cleaning model — the
@@ -292,6 +308,8 @@ models:
               arguments: {min_value: 0, max_value: 1, inclusive: false}
 
   - name: stg_eu_electricity_prices
+    config:
+      group: country_stats
     description: >
       Eurostat household electricity prices averaged from semi-annual to annual,
       one row per (country_iso3, year). EU/EEA only. Derived from
@@ -330,6 +348,8 @@ models:
               arguments: {min_value: 1, max_value: 2}
 
   - name: stg_fx_rates
+    config:
+      group: reference
     description: >
       ECB daily euro reference rates, one row per (rate_date, quote_currency).
       The only staging model that is not country-year keyed, and the only one
@@ -374,7 +394,19 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
 
+  # The other `protected` staging model, and the more interesting of the two:
+  # three groups ref it (`country_stats`, `compliance` and the spine), because it
+  # is the answer to "what is a country" and there is no mart above it that says
+  # the same thing. `dim_country_year` is the *spine*, not the dimension — it is
+  # every country crossed with every year, so a model wanting one row per country
+  # would have to deduplicate it. The honest alternative is to promote this to a
+  # `dim_country` mart and make it public; that is a rename touching every model
+  # here, and until it is worth doing, `protected` says what is true: it is an
+  # interface in practice, and it is still shaped like a staging model.
   - name: stg_country
+    config:
+      group: reference
+      access: protected
     description: >
       Country dimension, one row per country_iso3: World Bank `/country` plus
       the `country_overrides` seed for the ISO3 codes it omits.
@@ -412,6 +444,8 @@ models:
               arguments: {min_value: -180, max_value: 180}
 
   - name: stg_retail_lines
+    config:
+      group: retail
     description: >
       UCI Online Retail II order lines, cleaned and classified, at
       (invoice, line_number) — the warehouse's finest grain and the only model

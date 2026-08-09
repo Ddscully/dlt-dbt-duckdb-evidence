@@ -2,6 +2,8 @@ version: 2
 
 seeds:
   - name: country_overrides
+    config:
+      group: reference
     description: >
       Manual country-dimension entries for ISO3 codes that OWID reports
       emissions for but the World Bank `/country` endpoint does not list, so
@@ -25,6 +27,8 @@ seeds:
         data_tests: [not_null]
 
   - name: example_scope2_sites
+    config:
+      group: compliance
     description: >
       **Invented data, and the only invented data in this warehouse.** Twelve
       sites of a hypothetical manufacturer — a name, a country and an annual
@@ -64,6 +68,8 @@ seeds:
               arguments: {min_value: 0, inclusive: false}
 
   - name: cbam_goods
+    config:
+      group: compliance
     description: >
       The 287 goods Annex I of Implementing Regulation (EU) 2025/2621 sets
       default values for, across five product groups: cement, fertilisers,
@@ -103,6 +109,8 @@ seeds:
         data_tests: [not_null]
 
   - name: cbam_default_values
+    config:
+      group: compliance
     description: >
       Annex I of Commission Implementing Regulation (EU) 2025/2621: the
       country-specific default values for the specific embedded emissions of
@@ -182,6 +190,8 @@ seeds:
             severity: error
 
   - name: currencies
+    config:
+      group: reference
     description: >
       The 47 currency codes the ECB reference-rate series has ever contained,
       with the name to label them by and — for the twelve where it is a matter of

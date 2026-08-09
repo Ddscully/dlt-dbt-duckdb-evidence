@@ -71,7 +71,7 @@ that an upstream publisher moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
 that OWID was down.
 
-**What blocks.** 337 dbt tests run inside `dbt build`, every one with
+**What blocks.** 354 dbt tests run inside `dbt build`, every one with
 `store_failures`, so a red test hands you `select * from
 dbt_test__audit.<test_name>` rather than a count. Six Dagster asset checks sit
 alongside them, and `site_pages_all_rendered` is blocking and checks page *size*
@@ -91,11 +91,11 @@ Measured on this machine against the live APIs, per stage:
 | Stage | Time | Notes |
 |-------|------|-------|
 | `just ingest` | **61.0 s** | seven sources; 55.2 s of it with the retail workbook already cached |
-| `just dbt-build` | **20.3 s** | 369 nodes — 25 models, 2 snapshots, 5 seeds, 337 tests |
+| `just dbt-build` | **26.4 s** | 396 nodes — 26 models, 2 snapshots, 5 seeds, 354 tests; contracts are enforced, which is a `describe` per mart |
 | `just transform` | **2.1 s** | two Polars models |
 | `just pipeline-status` | **1.4 s** | observability tables |
 | `just lake` | **3.2 s** | 793 Parquet files, ~60 MB |
-| **total** | **≈ 88 s** | ingest is 69% of it, and most of *that* is still network |
+| **total** | **≈ 94 s** | ingest is 65% of it, and most of *that* is still network |
 
 Artifacts: a 288 MB DuckDB file, a 60 MB Parquet archive, a 94 MB Evidence site.
 
@@ -140,7 +140,7 @@ warehouse that bills by the second, that table is where the invoice comes from.
    where the warehouse stops being one file. That's the migration the shape is
    designed for: dbt, the tests, the asset graph and Evidence all move to
    Snowflake/BigQuery/MotherDuck on a profile change; dlt swaps a destination.
-3. **Full-refresh materialisation, for 24 of the 25 models.** Every mart is
+3. **Full-refresh materialisation, for 25 of the 26 models.** Every mart is
    `+materialized: table` and rebuilt whole. That is deliberate rather than
    pending: each one re-derives a source that gets fully re-fetched, so
    rebuilding is *how* an upstream restatement is picked up, and the whole

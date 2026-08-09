@@ -66,9 +66,20 @@ models:
     staging:
       +materialized: view
       +schema: staging
+      # A staging model is its group's working copy of a source, not an
+      # interface: `private` means only models in the same group may `ref` it,
+      # and dbt fails the build rather than warning. Two models override this to
+      # `protected` in `_staging.yml`, and those two overrides are the whole
+      # point — they are the only places one domain reaches into another's
+      # cleaning layer, so they are visible instead of implied.
+      +access: private
     marts:
       +materialized: table
       +schema: marts
+      # The marts *are* the interface. `public` is not decoration here: the
+      # monthly data release ships every one of them as a standalone Parquet
+      # file, so a consumer outside this project is not hypothetical.
+      +access: public
 
 seeds:
   modern_data_stack:

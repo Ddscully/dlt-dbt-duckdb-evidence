@@ -340,6 +340,26 @@ def raw_retail_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
 class FolderGroupDbtTranslator(DagsterDbtTranslator):
     """Group dbt assets by their folder (`staging`, `marts`) and give them a freshness policy."""
 
+    def get_asset_key(self, dbt_resource_props: Mapping[str, Any]) -> dg.AssetKey:
+        # Versioning a model changes its asset key, and nothing tells you.
+        # `default_asset_key_fn` keys an ordinary model on
+        # `[configured_schema, name]` — `marts/fct_emissions_energy` — but a
+        # *versioned* one on `[alias]` alone, so adding `versions:` to that model
+        # renamed its asset to `fct_emissions_energy` and gave v1 the sibling key
+        # `fct_emissions_energy_v1`. Both still run; what breaks is everything
+        # that spells the key out. `just materialize-select 'marts/*'` stops
+        # matching it, and Dagster's materialization history is keyed on the
+        # asset key, so the model appears to have never been built.
+        #
+        # Putting the schema back is a two-line override and keeps the key the
+        # same on both sides of the migration, which is the only reason the
+        # version is invisible to the rest of the graph.
+        key = super().get_asset_key(dbt_resource_props)
+        if not dbt_resource_props.get("version"):
+            return key
+        schema = dbt_resource_props.get("config", {}).get("schema")
+        return key.with_prefix(schema) if schema else key
+
     def get_group_name(self, dbt_resource_props: Mapping[str, Any]) -> str | None:
         # Snapshots live directly in `snapshots/`, so there's no folder to take —
         # and the default would name the group after the snapshot itself.

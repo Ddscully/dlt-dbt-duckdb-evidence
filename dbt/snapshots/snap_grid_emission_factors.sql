@@ -30,6 +30,7 @@
 {{
     config(
         unique_key='country_year',
+        group='compliance',
         strategy='check',
         check_cols=['carbon_intensity_elec_g_kwh'],
         hard_deletes='invalidate',

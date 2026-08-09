@@ -13,6 +13,7 @@ warehouse. They cover the parts of the pipeline that have actually broken:
 | `test_transform.py` | the Polars intensity metric — Mt→kg conversion, the constant-USD denominator, dropped rows, dense per-cohort ranking |
 | `test_lake.py` | the Parquet archive: hive layout, read-back parity with the warehouse, and the stale-partition case DuckDB's `overwrite` doesn't cover |
 | `test_fixtures.py` | that every URL the pipeline can build resolves to a fixture that exists |
+| `test_exposures.py` | that the exposures in `dbt/models/_exposures.yml` still describe what the Evidence pages read, and that the release exposure names every mart — a stale exposure is invisible, since `dbt build` stays green and `dbt ls --select +exposure:*` keeps answering |
 
 ## `just test-pipeline` — integration against fixtures, ~30s
 

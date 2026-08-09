@@ -1,0 +1,53 @@
+version: 2
+
+# Who owns what, and who may depend on it.
+#
+# A group is an ownership boundary; `access` is what that boundary is worth.
+# Every model here belongs to exactly one group, and the split is by *domain*
+# rather than by layer — a layer split would put every staging model in one
+# group and make the boundary meaningless, since nothing ever refs across it.
+#
+# One person owns all four, and pretending otherwise would be fabricating a team
+# for a demo. What is not fabricated is the boundary itself: the access rules
+# below are enforced by `dbt build`, and they were derived from the ref graph
+# rather than asserted over it — the two `protected` staging models in
+# `_staging.yml` are the *only* two places one domain reaches into another's
+# working models, and both have a reason worth reading.
+groups:
+  - name: reference
+    description: >
+      Conformed dimensions with no domain of their own: the country dimension,
+      the calendar, the currency panel and the ECB rates. Everything else joins
+      to these, so this is the group whose models are hardest to change.
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  - name: country_stats
+    description: >
+      The country-year warehouse: OWID emissions and energy, World Bank
+      development indicators, Eurostat electricity prices, the spine they are
+      built on, and the CO2 restatement history.
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  - name: compliance
+    description: >
+      Regulatory products built on top of `country_stats` — the Scope 2 grid
+      emission factors, the worked example that uses them, and the CBAM border
+      cost. These are read by someone filing something, which is why the
+      lineage columns and the caveats travel with the rows.
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  - name: retail
+    description: >
+      The transactional grain: the UK gift wholesaler's invoice lines and
+      everything derived from them. The only group whose facts are below a
+      country, and the only one holding anything PII-shaped (a pseudonymous
+      customer id).
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com

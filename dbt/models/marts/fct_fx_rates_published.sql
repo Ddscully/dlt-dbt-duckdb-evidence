@@ -3,9 +3,18 @@
         materialized='incremental',
         unique_key=['rate_date', 'quote_currency'],
         incremental_strategy='delete+insert',
+        on_schema_change='fail',
     )
 }}
 
+-- `on_schema_change='fail'` is not a preference: dbt refuses the default
+-- (`ignore`) on a contracted incremental model, because the two say opposite
+-- things — the contract promises a fixed shape, and `ignore` would let a column
+-- quietly stop being written into the table that already exists. `fail` rather
+-- than `append_new_columns` because a new column here means the *model* changed,
+-- and this is the one table in the project that a rebuild has to rewrite 265k
+-- rows to fix: stop, and let a person decide to run `--full-refresh`.
+--
 -- Every euro reference rate the ECB has actually published, as published.
 -- Grain: one row per (rate_date, quote_currency). Sparse by design — no row on a
 -- weekend, a TARGET holiday, or for a currency outside its quoted lifetime.

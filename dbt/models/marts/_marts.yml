@@ -2,6 +2,10 @@ version: 2
 
 models:
   - name: dim_country_year
+    config:
+      contract:
+        enforced: true
+      group: country_stats
     description: >
       Country-year spine: `stg_country` crossed with every year the warehouse
       covers (the span is read from the sources, so both ends move with the
@@ -16,6 +20,7 @@ models:
             combination_of_columns: [country_iso3, year]
     columns:
       - name: country_iso3
+        data_type: VARCHAR
         description: >
           ISO3 code, from the country dimension. Codes the sources emit but the
           dimension doesn't carry (World Bank aggregates like `WLD`, and
@@ -23,19 +28,28 @@ models:
           keeps them out of the fact.
         data_tests: [not_null]
       - name: year
+        data_type: INTEGER
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1750, max_value: 2030}
+      - name: country_name
+        data_type: VARCHAR
       - name: region
+        data_type: VARCHAR
         description: World Bank region, trimmed. Never null — see `stg_country`.
         data_tests: [not_null]
       - name: income_group
+        data_type: VARCHAR
         description: >
           World Bank income group. Null for the territories in
           `country_overrides`, which the World Bank does not classify.
 
   - name: dim_grid_emission_factors
+    config:
+      contract:
+        enforced: true
+      group: compliance
     description: >
       Grid emission factors as a reference product: one row per
       (country_iso3, year) that has a published factor, with the vintage and the
@@ -71,13 +85,22 @@ models:
             where: "is_latest_available"
     columns:
       - name: country_iso3
+        data_type: VARCHAR
         data_tests: [not_null]
+      - name: country_name
+        data_type: VARCHAR
+      - name: region
+        data_type: VARCHAR
+      - name: income_group
+        data_type: VARCHAR
       - name: year
+        data_type: INTEGER
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1985, max_value: 2030}
       - name: emission_factor_g_co2_per_kwh
+        data_type: DOUBLE
         description: >
           Grams of CO2 per kWh generated. Never null — a row exists only where
           a factor does.
@@ -86,6 +109,7 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 2000}
       - name: emission_factor_t_co2_per_mwh
+        data_type: DOUBLE
         description: >
           The same factor in the unit meter data arrives in: tonnes CO2e per
           MWh, i.e. g/kWh / 1000. Shipped rather than left as a division because
@@ -94,7 +118,12 @@ models:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 2}
+      - name: electricity_generation_twh
+        data_type: DOUBLE
+      - name: low_carbon_share_elec_pct
+        data_type: DOUBLE
       - name: is_latest_available
+        data_type: BOOLEAN
         description: >
           The most recent year this country has a published factor for — the row
           to use when the question is "the current factor for country X".
@@ -105,9 +134,11 @@ models:
           number with a legal consequence.
         data_tests: [not_null]
       - name: latest_available_year
+        data_type: INTEGER
         description: This country's newest factor year, repeated on every one of its rows.
         data_tests: [not_null]
       - name: latest_factor_lag_years
+        data_type: INTEGER
         description: >
           How far `latest_available_year` sits behind the newest factor year in
           the whole table — how stale the *best* number available for this
@@ -117,34 +148,48 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: factor_version_count
+        data_type: BIGINT
         description: >
           Versions of this factor the warehouse has held, from
           `snap_grid_emission_factors`. **Null before 2015**, which is where the
           snapshot starts, and 1 for everything else on a warehouse built from
           scratch — a snapshot can only record a revision it was present for.
       - name: first_published_factor_g_co2_per_kwh
+        data_type: DOUBLE
         description: >
           The factor as first snapshotted. The point of keeping it is that a
           disclosure filed against a superseded number has to stay reconcilable;
           it does not become wrong when OWID restates.
       - name: is_restated
+        data_type: BOOLEAN
         description: Whether the factor has changed since the snapshot first saw it. Null before 2015.
+      - name: first_published_at
+        data_type: TIMESTAMP
+      - name: last_revised_at
+        data_type: TIMESTAMP
       - name: factor_basis
+        data_type: VARCHAR
         description: >
           Always `location-based`. Constant on every row on purpose: this table
           ships as a standalone Parquet file in the data release, and a factor
           detached from its basis is the one thing a reporter must not be handed.
         data_tests: [not_null]
       - name: source_dataset
+        data_type: VARCHAR
         description: Always `owid_energy.carbon_intensity_elec`.
         data_tests: [not_null]
       - name: source_loaded_at
+        data_type: TIMESTAMP WITH TIME ZONE
         description: >
           When this pipeline pulled the extract the factor came out of (dlt's
           `_dlt_load_id`) — not when the publisher computed it.
         data_tests: [not_null]
 
   - name: fct_co2_estimate_versions
+    config:
+      contract:
+        enforced: true
+      group: country_stats
     description: >
       Version history of OWID's CO2 estimates, summarised off the
       `snap_co2_estimates` SCD2 snapshot: how many versions of each country-year
@@ -161,36 +206,92 @@ models:
             combination_of_columns: [country_iso3, year]
     columns:
       - name: country_iso3
+        data_type: VARCHAR
         data_tests: [not_null]
+      - name: country_name
+        data_type: VARCHAR
+      - name: region
+        data_type: VARCHAR
       - name: year
+        data_type: INTEGER
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1990, max_value: 2030}
       - name: is_revised
+        data_type: BOOLEAN
         description: Whether the estimate has changed since it was first loaded.
         data_tests: [not_null]
       - name: version_count
+        data_type: BIGINT
         description: Versions the snapshot holds for this country-year.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1}
       - name: first_loaded_at
+        data_type: TIMESTAMP
         description: >
           `min(dbt_valid_from)` — when this country-year first entered the
           snapshot, not when OWID first published it.
       - name: last_revised_at
+        data_type: TIMESTAMP
         description: >
           When the most recent version appeared. Null while `version_count` is 1,
           since "revised at" would otherwise read as the first load.
+      - name: first_co2_mt
+        data_type: DOUBLE
+      - name: latest_co2_mt
+        data_type: DOUBLE
       - name: co2_mt_change
+        data_type: DOUBLE
         description: Latest estimate minus the first, million tonnes. Signed.
       - name: co2_mt_change_pct
+        data_type: DOUBLE
         description: >
           The same as a percentage of the first estimate. Null where the first
           estimate was zero.
+      - name: first_co2_per_capita
+        data_type: DOUBLE
+      - name: latest_co2_per_capita
+        data_type: DOUBLE
 
   - name: fct_emissions_energy
+    # The project's one versioned model, and the reason it is this one: nothing
+    # inside the project refs it, and the monthly release ships it as a Parquet
+    # file to consumers who cannot be paged. A rename here is free in-repo and
+    # breaking out of it, which is exactly the case `versions:` exists for.
+    #
+    # `ref('fct_emissions_energy')` resolves to the latest version, so every
+    # consumer that doesn't ask for a version gets v2. v2 is aliased back to the
+    # bare relation name for the same reason: the Evidence source query, the
+    # lake's `ARCHIVED_TABLES`, `TABLE_TO_DBT_MODEL` and the release notes all
+    # name `marts.fct_emissions_energy`, and a migration that renames the table
+    # out from under them is not a migration.
+    latest_version: 2
+    versions:
+      - v: 2
+        config:
+          alias: fct_emissions_energy
+      - v: 1
+        # The window. dbt warns on every parse once this date is inside 30 days
+        # and errors for anyone still `ref`-ing v1 after it passes; the release
+        # notes carry the same date, because the consumers who need it are the
+        # ones who never see a dbt log.
+        deprecation_date: 2026-11-01
+        columns:
+          - include: all
+            exclude: [co2_kg_per_gdp_ppp_2011]
+          - name: co2_per_gdp
+            data_type: DOUBLE
+            description: >
+              **Deprecated — use `co2_kg_per_gdp_ppp_2011` in v2.** Same numbers,
+              a name that says neither the unit nor the basis. Kept until the
+              deprecation date above so a release consumer has a version to
+              migrate *from* rather than a column that vanished.
+    config:
+      contract:
+        enforced: true
+      group: country_stats
     description: >
       Country-year fact combining OWID emissions & energy, World Bank WDI
       (GDP, life expectancy, population, poverty, internet, urbanisation, forest,
@@ -209,53 +310,97 @@ models:
             combination_of_columns: [country_iso3, year]
     columns:
       - name: country_iso3
+        data_type: VARCHAR
         data_tests: [not_null]
-      - name: year
-        data_tests:
-          - not_null
-          - dbt_utils.accepted_range:
-              arguments: {min_value: 1750, max_value: 2030}
+      - name: country_name
+        data_type: VARCHAR
       - name: region
+        data_type: VARCHAR
         description: >
           World Bank region, trimmed (the API pads 'Sub-Saharan Africa ' and
           'Latin America & Caribbean '). Comes from the spine, so never null —
           the ISO3 codes the World Bank omits are filled by the
           `country_overrides` seed and Antarctica isn't in the dimension at all.
       - name: income_group
+        data_type: VARCHAR
         description: >
           World Bank income group (dimension attribute for grouping marts).
           Null for the territories in `country_overrides`, which the World Bank
           does not classify.
-      - name: co2_per_gdp
-        description: >
-          OWID's kg CO2 per 2011 international-$ (PPP). Ends in 2022 and covers
-          164 countries — for a current, fuller series use
-          `co2_per_gdp_const_usd` in `analytics.co2_intensity`.
-      - name: gdp_per_capita_usd
-        description: GDP per capita, current US$ (WDI NY.GDP.PCAP.CD).
-      - name: gdp_usd
-        description: >
-          GDP, current US$ (WDI NY.GDP.MKTP.CD). Moves with inflation and the
-          exchange rate — use `gdp_constant_usd` for anything measured over time.
-      - name: gdp_constant_usd
-        description: >
-          GDP, constant 2015 US$ (WDI NY.GDP.MKTP.KD). The real-terms series;
-          denominator for carbon intensity in `analytics.co2_intensity`.
-      - name: life_expectancy
-        description: Life expectancy at birth, years (WDI SP.DYN.LE00.IN).
+      - name: year
+        data_type: INTEGER
         data_tests:
+          - not_null
           - dbt_utils.accepted_range:
-              arguments: {min_value: 0, max_value: 100}
+              arguments: {min_value: 1750, max_value: 2030}
       - name: co2_mt
+        data_type: DOUBLE
         description: Territorial CO2 emissions, million tonnes (OWID).
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
-      - name: population
+      - name: co2_per_capita
+        data_type: DOUBLE
+      # Renamed in v2 from `co2_per_gdp`, which said neither the unit nor the
+      # basis while a second, differently-based intensity column sat one schema
+      # away. v1 serves it under the old name until the deprecation date.
+      - name: co2_kg_per_gdp_ppp_2011
+        data_type: DOUBLE
+        description: >
+          OWID's kg CO2 per 2011 international-$ (PPP). Ends in 2022 and covers
+          164 countries — for a current, fuller series use
+          `co2_per_gdp_const_usd` in `analytics.co2_intensity`, which is kg CO2
+          per **constant 2015 US$** and so is not comparable in levels.
+      - name: share_global_co2
+        data_type: DOUBLE
+      - name: coal_co2
+        data_type: DOUBLE
+      - name: oil_co2
+        data_type: DOUBLE
+      - name: gas_co2
+        data_type: DOUBLE
+      - name: consumption_co2
+        data_type: DOUBLE
+        description: >
+          Consumption-based CO2, million tonnes (OWID): territorial emissions
+          adjusted for carbon embodied in trade. ~120 countries and one year
+          behind `co2_mt`, so null here alongside a populated `co2_mt` is the
+          normal case. This is the column that answers the "emissions were just
+          offshored" objection to any territorial trend.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
+      - name: consumption_co2_per_capita
+        data_type: DOUBLE
+      - name: trade_co2
+        data_type: DOUBLE
+        description: >
+          `consumption_co2 - co2_mt`. Positive = net importer of embodied carbon.
+          Signed, so no `min_value`.
+      - name: trade_co2_share
+        data_type: DOUBLE
+        description: >
+          `trade_co2` as a percent of territorial emissions. Deliberately
+          untested: the real range is about -98% to +1023%.
+      - name: cumulative_co2
+        data_type: DOUBLE
+        description: CO2 emitted since 1750, million tonnes (OWID). Stock, not flow.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: share_global_cumulative_co2
+        data_type: DOUBLE
+        description: >
+          Share of all CO2 ever emitted, %. Ranks countries very differently to
+          `share_global_co2`: the US is 23.8% cumulative against 12.9% of the
+          2023 flow, China 15.1% against 32.0%.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: primary_energy_twh
+        data_type: DOUBLE
       - name: renewables_share_pct
+        data_type: DOUBLE
         description: >
           Renewables as a share of primary energy, % (OWID). **79 countries** in
           every year — the narrowest widely-used column in this table. For
@@ -266,41 +411,14 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: fossil_share_pct
+        data_type: DOUBLE
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
-      - name: consumption_co2
-        description: >
-          Consumption-based CO2, million tonnes (OWID): territorial emissions
-          adjusted for carbon embodied in trade. ~120 countries and one year
-          behind `co2_mt`, so null here alongside a populated `co2_mt` is the
-          normal case. This is the column that answers the "emissions were just
-          offshored" objection to any territorial trend.
-        data_tests:
-          - dbt_utils.accepted_range:
-              arguments: {min_value: 0}
-      - name: trade_co2
-        description: >
-          `consumption_co2 - co2_mt`. Positive = net importer of embodied carbon.
-          Signed, so no `min_value`.
-      - name: trade_co2_share
-        description: >
-          `trade_co2` as a percent of territorial emissions. Deliberately
-          untested: the real range is about -98% to +1023%.
-      - name: cumulative_co2
-        description: CO2 emitted since 1750, million tonnes (OWID). Stock, not flow.
-        data_tests:
-          - dbt_utils.accepted_range:
-              arguments: {min_value: 0}
-      - name: share_global_cumulative_co2
-        description: >
-          Share of all CO2 ever emitted, %. Ranks countries very differently to
-          `share_global_co2`: the US is 23.8% cumulative against 12.9% of the
-          2023 flow, China 15.1% against 32.0%.
-        data_tests:
-          - dbt_utils.accepted_range:
-              arguments: {min_value: 0, max_value: 100}
+      - name: electricity_generation_twh
+        data_type: DOUBLE
       - name: carbon_intensity_elec_g_kwh
+        data_type: DOUBLE
         description: >
           Grams of CO2 per kWh generated (OWID). ~210 countries — the
           broad-coverage alternative to `renewables_share_pct`, and in a unit a
@@ -309,21 +427,67 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 2000}
       - name: low_carbon_share_elec_pct
+        data_type: DOUBLE
         description: Renewables plus nuclear as a share of electricity generated, %.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
+      - name: solar_share_elec_pct
+        data_type: DOUBLE
+      - name: wind_share_elec_pct
+        data_type: DOUBLE
+      - name: nuclear_share_elec_pct
+        data_type: DOUBLE
+      - name: coal_share_elec_pct
+        data_type: DOUBLE
+      - name: gas_share_elec_pct
+        data_type: DOUBLE
+      - name: gdp_per_capita_usd
+        data_type: DOUBLE
+        description: GDP per capita, current US$ (WDI NY.GDP.PCAP.CD).
+      - name: gdp_usd
+        data_type: DOUBLE
+        description: >
+          GDP, current US$ (WDI NY.GDP.MKTP.CD). Moves with inflation and the
+          exchange rate — use `gdp_constant_usd` for anything measured over time.
+      - name: gdp_constant_usd
+        data_type: DOUBLE
+        description: >
+          GDP, constant 2015 US$ (WDI NY.GDP.MKTP.KD). The real-terms series;
+          denominator for carbon intensity in `analytics.co2_intensity`.
+      - name: life_expectancy
+        data_type: DOUBLE
+        description: Life expectancy at birth, years (WDI SP.DYN.LE00.IN).
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: population
+        data_type: DOUBLE
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: poverty_rate
+        data_type: DOUBLE
       - name: internet_users_pct
+        data_type: DOUBLE
         description: Individuals using the internet, % of population (WDI IT.NET.USER.ZS).
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
+      - name: urban_pop_pct
+        data_type: DOUBLE
+      - name: forest_area_pct
+        data_type: DOUBLE
       - name: renew_elec_pct
+        data_type: DOUBLE
         description: Renewable electricity output, % of total (WDI EG.ELC.RNEW.ZS).
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
+      - name: energy_imports_pct
+        data_type: DOUBLE
       - name: electricity_price_eur_kwh
+        data_type: DOUBLE
         description: >
           Household electricity price, EUR/kWh incl. all taxes, medium band DC
           (Eurostat nrg_pc_204). Null for non-EU/EEA countries. **Averaged over
@@ -335,6 +499,7 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 1, inclusive: false}
       - name: price_is_partial_year
+        data_type: BOOLEAN
         description: >
           True when `electricity_price_eur_kwh` averages a single half-year — the
           state of the newest year between Eurostat's S1 and S2 releases, when an
@@ -343,6 +508,10 @@ models:
           `price_year`, so the site's price cross-section is always a full year.
 
   - name: fct_eu_electricity_prices_semiannual
+    config:
+      contract:
+        enforced: true
+      group: country_stats
     description: >
       EU/EEA household electricity prices at Eurostat's published grain: one row
       per (country_iso3, year, half), 2007 onwards. The only non-annual fact in
@@ -358,25 +527,37 @@ models:
             combination_of_columns: [country_iso3, year, half]
     columns:
       - name: country_iso3
+        data_type: VARCHAR
         data_tests: [not_null]
+      - name: country_name
+        data_type: VARCHAR
+      - name: region
+        data_type: VARCHAR
+      - name: income_group
+        data_type: VARCHAR
       - name: year
+        data_type: BIGINT
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 2007, max_value: 2030}
       - name: half
+        data_type: VARCHAR
         description: "'S1' (January-June) or 'S2' (July-December), from Eurostat's period code."
         data_tests:
           - not_null
           - accepted_values:
               arguments: {values: ['S1', 'S2']}
       - name: period
+        data_type: VARCHAR
         description: Eurostat's period label, e.g. '2022-S1'.
         data_tests: [not_null]
       - name: period_start_date
+        data_type: DATE
         description: First day of the half-year — the column to put on a time axis.
         data_tests: [not_null]
       - name: electricity_price_eur_kwh
+        data_type: DOUBLE
         description: >
           EUR/kWh incl. all taxes, medium consumption band DC. Unaveraged, so this
           is the column that shows the 2021-23 energy crisis as it actually
@@ -386,17 +567,20 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 1, inclusive: false}
       - name: change_vs_previous_half_eur_kwh
+        data_type: DOUBLE
         description: >
           Change from the preceding half-year, EUR/kWh. Signed. Null at the start
           of each country's series and across any gap in it — the previous row a
           country has is not always the previous half, so this is only reported
           when it is.
       - name: change_vs_previous_half_pct
+        data_type: DOUBLE
         description: >
           The same change as a percent. Deliberately untested: the Dutch 2022-S2
           figure is +320% off a rebate-suppressed S1, which is reality rather than
           a bug. Also null where the previous price was zero.
       - name: electricity_price_usd_kwh
+        data_type: DOUBLE
         description: >
           The same price in US dollars, converted at the *average* USD/EUR rate
           over the same half-year, because a price paid across a period is a flow
@@ -412,17 +596,20 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 2, inclusive: false}
       - name: usd_per_eur_period_avg
+        data_type: DOUBLE
         description: >
           The rate actually used, on the row it was used on. A converted figure
           whose rate is not visible is a figure nobody downstream can check.
         data_tests: [not_null]
       - name: usd_per_eur_period_end
+        data_type: DOUBLE
         description: >
           The closing rate for the same half — shipped and deliberately *not*
           used. It is the correct rate for a balance and the wrong one for a
           price, and carrying both is what keeps that a visible choice.
         data_tests: [not_null]
       - name: usd_conversion_is_partial_period
+        data_type: BOOLEAN
         description: >
           True when the half-year's FX average is over a period that has not
           finished. Same caveat as `price_is_partial_year` one model over, for
@@ -430,6 +617,10 @@ models:
         data_tests: [not_null]
 
   - name: fct_example_scope2_emissions
+    config:
+      contract:
+        enforced: true
+      group: compliance
     description: >
       The worked example for `dim_grid_emission_factors`: metered MWh x factor
       -> tonnes CO2e, per site, which is the whole of location-based Scope 2
@@ -455,48 +646,71 @@ models:
             combination_of_columns: [site_id]
     columns:
       - name: site_id
+        data_type: VARCHAR
         data_tests: [not_null]
+      - name: site_name
+        data_type: VARCHAR
+      - name: site_type
+        data_type: VARCHAR
       - name: country_iso3
+        data_type: VARCHAR
         data_tests: [not_null]
+      - name: country_name
+        data_type: VARCHAR
       - name: annual_electricity_mwh
+        data_type: INTEGER
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
       - name: factor_year
+        data_type: INTEGER
         description: >
           The vintage of the factor applied to this site. Deliberately on the
           fact rather than looked up: two sites in the same group can be priced
           off different years, and a disclosure has to be able to say so.
         data_tests: [not_null]
+      - name: latest_factor_lag_years
+        data_type: INTEGER
       - name: emission_factor_g_co2_per_kwh
+        data_type: DOUBLE
         description: >
           Null would mean a site in a country with no published factor — a group
           total that quietly under-reports. The join is a left join so that
           arrives here as a failing row rather than a missing site.
         data_tests: [not_null]
+      - name: low_carbon_share_elec_pct
+        data_type: DOUBLE
       - name: scope2_t_co2e
+        data_type: DOUBLE
         description: Location-based Scope 2 emissions for one year, tonnes CO2e.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: share_of_group_pct
+        data_type: DOUBLE
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: scope2_at_best_grid_t_co2e
+        data_type: DOUBLE
         description: The same consumption on the cleanest grid the group operates on.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: scope2_at_worst_grid_t_co2e
+        data_type: DOUBLE
         description: The same consumption on the dirtiest grid the group operates on.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
 
   - name: fct_cbam_exposure
+    config:
+      contract:
+        enforced: true
+      group: compliance
     description: >
       What a tonne of an imported CBAM good costs at the EU border, by where it
       was made: Annex I's default values resolved against the annex's own
@@ -526,36 +740,65 @@ models:
             combination_of_columns: [country_or_territory, good_key]
     columns:
       - name: country_or_territory
+        data_type: VARCHAR
         data_tests: [not_null]
       - name: country_iso3
+        data_type: VARCHAR
         description: >
           Null only for the fallback table's own row. Not tested against the
           country dimension: the annex lists Taiwan and Kosovo, and the join to
           `stg_country` is a left join so a territory the World Bank does not
           carry keeps its default values rather than vanishing.
+      - name: country_name
+        data_type: VARCHAR
+      - name: country_display_name
+        data_type: VARCHAR
+      - name: region
+        data_type: VARCHAR
+      - name: income_group
+        data_type: VARCHAR
+      - name: product_group
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: cn_code
+        data_type: VARCHAR
+      - name: goods_description
+        data_type: VARCHAR
       - name: good_key
+        data_type: VARCHAR
         data_tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('cbam_goods')
                 field: good_key
-      - name: product_group
-        data_tests: [not_null]
+      - name: production_route_code
+        data_type: VARCHAR
+      - name: is_fallback_table
+        data_type: BOOLEAN
       - name: is_country_specific
+        data_type: BOOLEAN
         description: >
           False where the annex prints "-" for this country and good and the
           value below came from the fallback table. 1,601 of 12,532 rows — one in
           eight — so a model that only handled *unlisted* countries would leave
           that many rows with a null cost.
         data_tests: [not_null]
+      - name: markup_is_inferred
+        data_type: BOOLEAN
+      - name: direct_t_co2e_per_t
+        data_type: DOUBLE
+      - name: indirect_t_co2e_per_t
+        data_type: DOUBLE
       - name: total_t_co2e_per_t
+        data_type: DOUBLE
         description: Embedded emissions per tonne of good, before the mark-up.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: certificates_2026_t_co2e_per_t
+        data_type: DOUBLE
         description: >
           Certificates surrendered per tonne, i.e. after the mark-up. Not null
           anywhere: every row either carries a country-specific value or resolves
@@ -565,7 +808,12 @@ models:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
+      - name: certificates_2027_t_co2e_per_t
+        data_type: DOUBLE
+      - name: certificates_2028_t_co2e_per_t
+        data_type: DOUBLE
       - name: markup_2026_pct
+        data_type: DOUBLE
         description: >
           Derived from the published values, not asserted. Fertilisers carry 1%
           in all three years where every other group carries 10 / 20 / 30% — 2,416
@@ -576,18 +824,27 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 31}
       - name: markup_schedule_is_irregular
+        data_type: BOOLEAN
         description: >
           Five cement rows (Angola grey clinker / grey Portland / grey hydraulic,
           Argentina grey clinker / grey Portland) compound the mark-up — x1.1,
           x1.21, x1.331 — where every other row adds it. Flagged, not corrected:
           the annex is the legal instrument and this model does not overrule it.
+      - name: ets_price_eur_per_t
+        data_type: INTEGER
       - name: cbam_cost_2026_eur_per_t
+        data_type: DOUBLE
         description: Certificates x `eu_ets_price_eur_per_t`, EUR per tonne of good.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
+      - name: cbam_cost_2027_eur_per_t
+        data_type: DOUBLE
+      - name: cbam_cost_2028_eur_per_t
+        data_type: DOUBLE
       - name: excess_over_cleanest_source_t_co2e_per_t
+        data_type: DOUBLE
         description: >
           This country's 2026 certificates per tonne minus the cheapest listed
           source of the same good. The procurement number: the same tonne of steel
@@ -596,16 +853,26 @@ models:
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
+      - name: grid_factor_year
+        data_type: INTEGER
       - name: grid_factor_t_co2_per_mwh
+        data_type: DOUBLE
         description: >
           The country's latest OWID grid emission factor, as context for the
           indirect column. **Not the factor the annex used** — the annex's
           indirect values come from IEA data under a non-commercial licence this
           project does not redistribute. Sitting beside, not reconciled against.
       - name: source_instrument
+        data_type: VARCHAR
         data_tests: [not_null]
+      - name: factor_basis
+        data_type: VARCHAR
 
   - name: dim_date
+    config:
+      contract:
+        enforced: true
+      group: reference
     description: >
       The calendar: one row per day, 1999-01-01 to the end of the year the FX
       series reaches, dense and gapless by construction. 10,227 rows today, and
@@ -638,29 +905,56 @@ models:
               )
     columns:
       - name: date_day
+        data_type: DATE
         data_tests: [not_null, unique]
       - name: date_key
+        data_type: INTEGER
         description: "Integer surrogate, yyyymmdd — sorts and reads like the date."
         data_tests: [not_null, unique]
       - name: year
+        data_type: INTEGER
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1999, max_value: 2100}
       - name: quarter
+        data_type: INTEGER
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 4}
       - name: month
+        data_type: INTEGER
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 12}
+      - name: day_of_month
+        data_type: INTEGER
+      - name: day_of_year
+        data_type: INTEGER
+      - name: month_name
+        data_type: VARCHAR
+      - name: year_start_date
+        data_type: TIMESTAMP
+      - name: year_end_date
+        data_type: TIMESTAMP
+      - name: quarter_start_date
+        data_type: TIMESTAMP
+      - name: quarter_end_date
+        data_type: TIMESTAMP
+      - name: month_start_date
+        data_type: TIMESTAMP
+      - name: month_end_date
+        data_type: DATE
       - name: half
+        data_type: VARCHAR
         description: "'S1'/'S2', spelled Eurostat's way so the price models join without a translation."
         data_tests:
           - accepted_values:
               arguments: {values: ['S1', 'S2']}
+      - name: half_start_date
+        data_type: DATE
       - name: iso_year
+        data_type: INTEGER
         description: >
           The ISO-8601 week-numbering year, which is **not** `year`. 2021-01-01
           is a Friday in ISO week 53 of ISO year 2020, and 2019-12-30 is already
@@ -669,43 +963,65 @@ models:
           with `iso_week`, or group on `iso_week_start_date`.
         data_tests: [not_null]
       - name: iso_week
+        data_type: INTEGER
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 53}
+      - name: iso_week_label
+        data_type: VARCHAR
       - name: iso_week_start_date
+        data_type: DATE
         description: The Monday of this row's ISO week — the safe weekly grouping key.
         data_tests: [not_null]
       - name: day_of_week
+        data_type: INTEGER
         description: ISO day number, 1 = Monday.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 7}
+      - name: day_name
+        data_type: VARCHAR
       - name: is_weekday
+        data_type: BOOLEAN
         description: >
           Monday-Friday. A generic flag, not a business-day one: whether a given
           weekday is a trading day depends on a market calendar this model does
           not have.
         data_tests: [not_null]
+      - name: is_weekend
+        data_type: BOOLEAN
       - name: fiscal_year_start_month
+        data_type: INTEGER
         description: >
           The policy that produced the fiscal columns, carried per row so anything
           joining on them can tell which convention built the table.
         data_tests: [not_null]
+      - name: fiscal_year_start_date
+        data_type: DATE
+      - name: fiscal_year_end_date
+        data_type: TIMESTAMP
       - name: fiscal_year
+        data_type: INTEGER
         description: >
           The calendar year the fiscal year *ends* in — the convention that makes
           this collapse onto `year` when `fiscal_year_start_month` is 1.
         data_tests: [not_null]
       - name: fiscal_quarter
+        data_type: INTEGER
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 4}
       - name: fiscal_month
+        data_type: INTEGER
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 12}
 
   - name: dim_currency
+    config:
+      contract:
+        enforced: true
+      group: reference
     description: >
       One row per currency the ECB series has ever quoted, joining the
       `currencies` seed to the series' own evidence of when each code was live.
@@ -730,38 +1046,51 @@ models:
             where: "retired_on is not null"
     columns:
       - name: currency_code
+        data_type: VARCHAR
         data_tests: [not_null, unique]
       - name: currency_name
+        data_type: VARCHAR
         data_tests: [not_null]
       - name: first_published_date
+        data_type: DATE
         description: Null only for EUR, which is quoted against rather than quoted.
       - name: last_published_date
+        data_type: DATE
       - name: n_published_days
+        data_type: BIGINT
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1}
       - name: is_quoted
+        data_type: BOOLEAN
         description: >
           False for exactly one row, EUR. Filter on it before ranking or charting
           rates, or the base currency joins in with nulls everywhere.
         data_tests: [not_null]
       - name: is_currently_published
+        data_type: BOOLEAN
         description: >
           Whether the code still has a live quote, tolerant of missing the single
           newest day by the same margin the carry-forward uses — so this and
           "carried forward to today" cannot disagree.
       - name: longest_gap_days
+        data_type: BIGINT
         description: >
           The longest run of calendar days between two consecutive fixings. 3 for
           a weekend, 5 for the Christmas closures, and only two values far beyond
           that: ISK at 3,341 and ARS at 34.
       - name: has_interior_gap
+        data_type: BOOLEAN
         description: A quote that stopped and resumed, rather than one that stopped.
         data_tests: [not_null]
       - name: retired_on
+        data_type: DATE
       - name: retired_reason
+        data_type: VARCHAR
       - name: replaced_by_currency
+        data_type: VARCHAR
       - name: retirement_is_explained
+        data_type: BOOLEAN
         description: >
           Whether the seed records a reason. Five retirements deliberately have
           none — reading their null `retired_on` as "still current" is the mistake
@@ -769,6 +1098,10 @@ models:
         data_tests: [not_null]
 
   - name: fct_fx_rates_published
+    config:
+      contract:
+        enforced: true
+      group: reference
     description: >
       Every ECB euro reference rate as published, one row per (rate_date,
       quote_currency). 265,035 rows over 7,066 publication days and 46
@@ -797,32 +1130,42 @@ models:
             compare_model: ref('stg_fx_rates')
     columns:
       - name: rate_date
+        data_type: DATE
         data_tests: [not_null]
       - name: quote_currency
+        data_type: VARCHAR
         data_tests: [not_null]
       - name: base_currency
+        data_type: VARCHAR
         data_tests:
           - not_null
           - accepted_values:
               arguments: {values: ['EUR']}
       - name: units_per_eur
+        data_type: DOUBLE
         description: Units of the quote currency per 1 EUR, exactly as the ECB quotes it.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
       - name: eur_per_unit
+        data_type: DOUBLE
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
       - name: date_key
+        data_type: INTEGER
         description: >
           Computed here rather than joined from `dim_date`, so this model has no
           dependencies and can be backfilled or rebuilt on its own.
         data_tests: [not_null]
 
   - name: fct_fx_rates_daily
+    config:
+      contract:
+        enforced: true
+      group: reference
     description: >
       The reference rates on every calendar day within each currency's quoted
       lifetime, gap-filled. Grain: one row per (date_day, currency_code).
@@ -862,12 +1205,18 @@ models:
             where: "is_published_rate"
     columns:
       - name: date_day
+        data_type: DATE
         data_tests: [not_null]
+      - name: date_key
+        data_type: INTEGER
       - name: currency_code
+        data_type: VARCHAR
         data_tests: [not_null]
       - name: base_currency
+        data_type: VARCHAR
         data_tests: [not_null]
       - name: units_per_eur
+        data_type: DOUBLE
         description: >
           Null where the carry has run past the cap, so a stale number cannot be
           multiplied by anything by accident. That is 3,359 rows: Iceland
@@ -876,29 +1225,49 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
       - name: eur_per_unit
+        data_type: DOUBLE
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
       - name: rate_source_date
+        data_type: DATE
         description: The publication date of the fixing this row is quoting.
         data_tests: [not_null]
       - name: days_since_published_rate
+        data_type: BIGINT
         description: 0 on a publication day, 1-2 over a weekend, more over a holiday.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: is_published_rate
+        data_type: BOOLEAN
         data_tests: [not_null]
       - name: is_carried_forward
+        data_type: BOOLEAN
         data_tests: [not_null]
       - name: is_rate_stale
+        data_type: BOOLEAN
         description: >
           The carry ran past the cap and the rate is null. Not an error — an
           absence you can count, which is the point of keeping the row.
         data_tests: [not_null]
+      - name: year
+        data_type: INTEGER
+      - name: quarter
+        data_type: INTEGER
+      - name: month
+        data_type: INTEGER
+      - name: half
+        data_type: VARCHAR
+      - name: is_weekday
+        data_type: BOOLEAN
 
   - name: fct_fx_rates_periods
+    config:
+      contract:
+        enforced: true
+      group: reference
     description: >
       Rates aggregated to month, quarter, half and year. Grain: one row per
       (period_type, period_start_date, currency_code).
@@ -934,26 +1303,37 @@ models:
               = (select count(*) from {{ ref('fct_fx_rates_published') }})
     columns:
       - name: period_type
+        data_type: VARCHAR
         data_tests:
           - not_null
           - accepted_values:
               arguments: {values: ['month', 'quarter', 'half', 'year']}
       - name: period_start_date
-        data_tests: [not_null]
-      - name: period_end_date
+        data_type: TIMESTAMP
         data_tests: [not_null]
       - name: period_label
+        data_type: VARCHAR
         description: "'2022-05', '2022-q2', '2022-S1', '2022' — the half spelled Eurostat's way."
         data_tests: [not_null]
-      - name: quote_currency
+      - name: period_end_date
+        data_type: TIMESTAMP
         data_tests: [not_null]
+      - name: year
+        data_type: INTEGER
+      - name: quote_currency
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: base_currency
+        data_type: VARCHAR
       - name: avg_units_per_eur
+        data_type: DOUBLE
         description: For flows. The mean of the fixings actually published in the period.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
       - name: avg_eur_per_unit
+        data_type: DOUBLE
         description: >
           The mean of the reciprocals, which is not the reciprocal of the mean —
           see the model description. Convert in the direction the rate is quoted
@@ -963,32 +1343,47 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
       - name: period_end_units_per_eur
+        data_type: DOUBLE
         description: For stocks. The last fixing published inside the period.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
       - name: period_end_eur_per_unit
+        data_type: DOUBLE
         description: Its exact reciprocal — a single point inverts without the averaging problem.
         data_tests: [not_null]
       - name: period_start_units_per_eur
+        data_type: DOUBLE
         data_tests: [not_null]
       - name: period_end_vs_avg_pct
+        data_type: DOUBLE
         description: >
           How far the closing rate sits from the average, as a percent of the
           average. Deliberately untested for range: a currency crisis legitimately
           puts it near +100%.
+      - name: min_units_per_eur
+        data_type: DOUBLE
+      - name: max_units_per_eur
+        data_type: DOUBLE
       - name: intra_period_range_pct
+        data_type: DOUBLE
         description: High-to-low spread within the period, as a percent of the low.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: n_published_days
+        data_type: BIGINT
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1}
+      - name: first_rate_date
+        data_type: DATE
+      - name: last_rate_date
+        data_type: DATE
       - name: period_is_complete
+        data_type: BOOLEAN
         description: >
           False where the period has not finished, so the current year's average
           is over the months that have happened. The `price_is_partial_year`
@@ -996,6 +1391,10 @@ models:
         data_tests: [not_null]
 
   - name: fct_retail_order_line
+    config:
+      contract:
+        enforced: true
+      group: retail
     description: >
       Order lines priced in GBP, EUR and USD and joined to `dim_date`, at
       (invoice, line_number). The warehouse's finest grain and the first fact in
@@ -1020,27 +1419,34 @@ models:
           arguments: {expression: "line_amount_eur is not null"}
     columns:
       - name: invoice
+        data_type: VARCHAR
         data_tests: [not_null]
       - name: line_number
+        data_type: BIGINT
         data_tests: [not_null]
-      - name: line_amount_gbp
-        data_tests: [not_null]
-      - name: line_amount_eur
-        description: Converted at the transaction date's ECB fixing, carried forward over closures.
-        data_tests: [not_null]
-      - name: line_amount_usd
-        description: GBP to EUR to USD, both legs at the same date's fixing.
-        data_tests: [not_null]
-      - name: fx_rate_source_date
-        description: >
-          The date of the fixing actually used. Differs from `invoice_date` on
-          13.1% of lines, almost all of them Sundays — this retailer trades on a
-          day the ECB does not quote, which is the carry-forward earning its
-          keep on real data rather than on a weekend in the abstract.
-        data_tests: [not_null]
+      - name: invoice_type
+        data_type: VARCHAR
+      - name: item_type
+        data_type: VARCHAR
+      - name: stock_code
+        data_type: VARCHAR
+      - name: description
+        data_type: VARCHAR
+      - name: customer_id
+        data_type: VARCHAR
+      - name: country
+        data_type: VARCHAR
+      - name: invoice_ts
+        data_type: TIMESTAMP
+      - name: invoice_date
+        data_type: DATE
+      - name: invoice_month
+        data_type: VARCHAR
       - name: date_key
+        data_type: INTEGER
         data_tests: [not_null]
       - name: year
+        data_type: INTEGER
         description: >
           Calendar year, and the Parquet lake's partition column. Carried
           explicitly rather than reusing the `iso_year` beside it: the two agree
@@ -1049,10 +1455,58 @@ models:
           year. Partitioning on `iso_year` would be correct today and wrong the
           first New Year they trade.
         data_tests: [not_null]
-      - name: is_revenue_line
+      - name: iso_year
+        data_type: INTEGER
+      - name: iso_week
+        data_type: INTEGER
+      - name: iso_week_start_date
+        data_type: DATE
+      - name: day_name
+        data_type: VARCHAR
+      - name: is_weekend
+        data_type: BOOLEAN
+      - name: fiscal_year
+        data_type: INTEGER
+      - name: fiscal_quarter
+        data_type: INTEGER
+      - name: quantity
+        data_type: BIGINT
+      - name: unit_price
+        data_type: DOUBLE
+      - name: line_amount_gbp
+        data_type: DOUBLE
         data_tests: [not_null]
+      - name: line_amount_eur
+        data_type: DOUBLE
+        description: Converted at the transaction date's ECB fixing, carried forward over closures.
+        data_tests: [not_null]
+      - name: line_amount_usd
+        data_type: DOUBLE
+        description: GBP to EUR to USD, both legs at the same date's fixing.
+        data_tests: [not_null]
+      - name: eur_per_gbp
+        data_type: DOUBLE
+      - name: fx_rate_source_date
+        data_type: DATE
+        description: >
+          The date of the fixing actually used. Differs from `invoice_date` on
+          13.1% of lines, almost all of them Sundays — this retailer trades on a
+          day the ECB does not quote, which is the carry-forward earning its
+          keep on real data rather than on a weekend in the abstract.
+        data_tests: [not_null]
+      - name: fx_rate_is_carried_forward
+        data_type: BOOLEAN
+      - name: is_revenue_line
+        data_type: BOOLEAN
+        data_tests: [not_null]
+      - name: is_stock_write_off
+        data_type: BOOLEAN
 
   - name: dim_retail_product
+    config:
+      contract:
+        enforced: true
+      group: retail
     description: >
       One row per stock code (5,131), with a survivorship-picked description.
       1,192 codes carry more than one label across their lines and one carries
@@ -1073,18 +1527,34 @@ models:
                  group by 1 having count(distinct item_type) > 1)) = 0
     columns:
       - name: stock_code
+        data_type: VARCHAR
         data_tests: [not_null, unique]
       - name: description
+        data_type: VARCHAR
         description: >
           Null for 4 codes that never carried one on any line. Not tested for
           nullity: an absent label is the source's answer, not a join failure.
       - name: item_type
+        data_type: VARCHAR
         data_tests: [not_null]
-      - name: n_descriptions
-        data_tests:
-          - dbt_utils.accepted_range:
-              arguments: {min_value: 0}
+      - name: n_lines
+        data_type: BIGINT
+      - name: n_invoices
+        data_type: BIGINT
+      - name: n_customers
+        data_type: BIGINT
+      - name: first_sold_date
+        data_type: DATE
+      - name: last_sold_date
+        data_type: DATE
+      - name: units_sold
+        data_type: HUGEINT
+      - name: units_returned
+        data_type: HUGEINT
+      - name: net_revenue_gbp
+        data_type: DOUBLE
       - name: median_unit_price_gbp
+        data_type: DOUBLE
         description: >
           Median, not mean. This retailer sells the same SKU at wholesale and
           retail prices, so the mean lands between two prices that both exist and
@@ -1092,8 +1562,25 @@ models:
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
+      - name: min_unit_price_gbp
+        data_type: DOUBLE
+      - name: max_unit_price_gbp
+        data_type: DOUBLE
+      - name: n_descriptions
+        data_type: BIGINT
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: has_multiple_descriptions
+        data_type: BOOLEAN
+      - name: is_non_product
+        data_type: BOOLEAN
 
   - name: dim_retail_customer
+    config:
+      contract:
+        enforced: true
+      group: retail
     description: >
       One row per identified customer (5,881 of the 5,942 ids that appear; the
       other 61 never made a purchase). Covers 86.2% of net revenue — the rest is
@@ -1109,34 +1596,71 @@ models:
           arguments: {expression: "last_order_date >= first_order_date"}
     columns:
       - name: customer_id
+        data_type: VARCHAR
         data_tests: [not_null, unique]
+      - name: country
+        data_type: VARCHAR
+      - name: n_countries
+        data_type: BIGINT
+      - name: has_moved_country
+        data_type: BOOLEAN
+      - name: first_order_date
+        data_type: DATE
+        data_tests: [not_null]
       - name: cohort_month
+        data_type: VARCHAR
         description: Month of first *purchase*, not of first appearance.
         data_tests: [not_null]
-      - name: first_order_date
-        data_tests: [not_null]
-      - name: n_orders
-        data_tests:
-          - not_null
-          - dbt_utils.accepted_range:
-              arguments: {min_value: 1}
+      - name: last_order_date
+        data_type: DATE
       - name: tenure_days
+        data_type: BIGINT
         description: Zero for the 1,626 customers who ordered once — a fact, not a gap.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
+      - name: n_orders
+        data_type: BIGINT
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: n_cancellations
+        data_type: BIGINT
+      - name: n_active_months
+        data_type: BIGINT
+      - name: n_distinct_products
+        data_type: BIGINT
+      - name: units_bought
+        data_type: HUGEINT
+      - name: gross_revenue_gbp
+        data_type: DOUBLE
+      - name: returned_gbp
+        data_type: DOUBLE
+      - name: net_revenue_gbp
+        data_type: DOUBLE
+      - name: avg_order_value_gbp
+        data_type: DOUBLE
       - name: return_rate_pct
+        data_type: DOUBLE
         description: >
           By value, not by order count. Deliberately carries no upper bound: a
           customer who returns more than they bought in the window is a real
           pattern at the extract's edges, not a bug.
+      - name: is_repeat_customer
+        data_type: BOOLEAN
       - name: is_left_censored_cohort
+        data_type: BOOLEAN
         description: >
           True for the 955 customers whose first order is in the extract's first
           month and who may have been customers for years already.
         data_tests: [not_null]
 
   - name: fct_retail_returns
+    config:
+      contract:
+        enforced: true
+      group: retail
     description: >
       Returns matched back to the sale they reverse, one row per return line
       (18,286). The source carries no link between the two — no order reference,
@@ -1157,16 +1681,61 @@ models:
             config: {where: "is_matched"}
     columns:
       - name: invoice
+        data_type: VARCHAR
         data_tests: [not_null]
       - name: line_number
+        data_type: BIGINT
         data_tests: [not_null]
+      - name: customer_id
+        data_type: VARCHAR
+      - name: stock_code
+        data_type: VARCHAR
+      - name: description
+        data_type: VARCHAR
+      - name: country
+        data_type: VARCHAR
+      - name: invoice_ts
+        data_type: TIMESTAMP
+      - name: invoice_date
+        data_type: DATE
+      - name: invoice_month
+        data_type: VARCHAR
       - name: quantity_returned
+        data_type: BIGINT
         description: Positive. The signed amount stays signed in `return_amount_gbp`.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1}
+      - name: unit_price
+        data_type: DOUBLE
+      - name: return_amount_gbp
+        data_type: DOUBLE
+      - name: original_invoice
+        data_type: VARCHAR
+      - name: original_line_number
+        data_type: BIGINT
+      - name: original_invoice_date
+        data_type: DATE
+      - name: original_quantity
+        data_type: BIGINT
+      - name: original_unit_price
+        data_type: DOUBLE
+      - name: original_amount_gbp
+        data_type: DOUBLE
+      - name: days_to_return
+        data_type: BIGINT
+        description: >
+          Median 10, mean 32, max 656. The shape is itself a check on the
+          matching rule — an arbitrary match would spread flat over the window.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: is_matched
+        data_type: BOOLEAN
+        data_tests: [not_null]
       - name: match_status
+        data_type: VARCHAR
         data_tests:
           - not_null
           - accepted_values:
@@ -1176,17 +1745,16 @@ models:
                   - 'matched, quantity exceeds purchase'
                   - no prior purchase in window
                   - no customer id
-      - name: days_to_return
-        description: >
-          Median 10, mean 32, max 656. The shape is itself a check on the
-          matching rule — an arbitrary match would spread flat over the window.
-        data_tests:
-          - dbt_utils.accepted_range:
-              arguments: {min_value: 0}
-      - name: is_matched
-        data_tests: [not_null]
+      - name: quantity_is_consistent
+        data_type: BOOLEAN
+      - name: price_differs_from_original
+        data_type: BOOLEAN
 
   - name: fct_retail_customer_cohorts
+    config:
+      contract:
+        enforced: true
+      group: retail
     description: >
       Monthly acquisition cohorts and their retention, at
       (cohort_month, months_since_first_order). Ragged on purpose: a cohort only
@@ -1222,23 +1790,38 @@ models:
                  from {{ ref('fct_retail_customer_cohorts') }} as r)
     columns:
       - name: cohort_month
+        data_type: VARCHAR
         data_tests: [not_null]
       - name: months_since_first_order
+        data_type: INTEGER
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
+      - name: activity_month
+        data_type: VARCHAR
       - name: cohort_size
+        data_type: BIGINT
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1}
+      - name: active_customers
+        data_type: BIGINT
+      - name: net_revenue_gbp
+        data_type: DOUBLE
       - name: retention_pct
+        data_type: DOUBLE
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
+      - name: revenue_per_active_customer_gbp
+        data_type: DOUBLE
+      - name: is_left_censored_cohort
+        data_type: BOOLEAN
       - name: is_complete_period
+        data_type: BOOLEAN
         description: >
           False for each cohort's final row: the extract stops on 2011-12-09, so
           every curve's last month is nine days long. A retention chart that ends

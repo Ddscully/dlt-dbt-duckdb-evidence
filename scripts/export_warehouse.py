@@ -269,10 +269,18 @@ it for `{base}/download/{tag}/…`.
   emission factors from 2015 on, summarised into the `first_published_*` and
   `is_restated` columns of `marts.dim_grid_emission_factors`. Each release
   carries the previous one's history forward, so both accumulate.
-- **`co2_per_gdp` vs. `co2_per_gdp_const_usd`** are different bases (OWID's 2011
-  international-$ PPP vs. constant 2015 US$ derived here) and their levels are
-  not comparable. Divide by `gdp_constant_usd`, never `gdp_usd`, for anything
-  measured over time.
+- **`co2_kg_per_gdp_ppp_2011` vs. `co2_per_gdp_const_usd`** are different bases
+  (OWID's 2011 international-$ PPP vs. constant 2015 US$ derived here) and their
+  levels are not comparable. Divide by `gdp_constant_usd`, never `gdp_usd`, for
+  anything measured over time.
+- **One column was renamed, and the old shape still ships.**
+  `marts.fct_emissions_energy.co2_per_gdp` is `co2_kg_per_gdp_ppp_2011` from this
+  release on — same numbers, a name that states the unit and the basis, because
+  the column beside it in `analytics.co2_intensity` is a *different* basis and the
+  old name said neither. `marts.fct_emissions_energy_v1` ships alongside with the
+  old column name, and is removed on **2026-11-01**. If you read the mart, move to
+  the new name before then; if you read nothing else in this artifact, nothing
+  else moved.
 
 ## Licence
 

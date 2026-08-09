@@ -57,7 +57,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (25 models, 2 snapshots, 5 seeds + 337 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 5 seeds + 354 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -203,7 +203,9 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
   except `stg_fx_rates`, which is `(rate_date, quote_currency)`, and
   `stg_retail_lines`, which is `(invoice, line_number)`
 - `marts` — dbt tables: `dim_country_year` (the country-year spine),
-  `fct_emissions_energy` (the wide join, built on the spine),
+  `fct_emissions_energy` (the wide join, built on the spine, and **the one
+  versioned model** — `fct_emissions_energy_v1` is a compatibility view live
+  until 2026-11-01),
   `dim_grid_emission_factors` (the Scope 2 reference product),
   `fct_co2_estimate_versions` (revision history, off the snapshot),
   `fct_eu_electricity_prices_semiannual` (Eurostat's own half-year grain),
@@ -689,6 +691,95 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   It is tautologically green in CI (which loads and then checks), which is why
   it is a `just` recipe rather than a workflow step.
 
+## Contracts, ownership and versions (`_groups.yml`, `_exposures.yml`)
+
+Who owns each model, who may depend on it, what shape it promises, and who is
+reading it. All four are declarative and all four are enforced by something —
+the point of the layer is that none of it is a comment.
+
+- **Groups are by domain, not by layer, or the boundary means nothing.** Four
+  groups (`reference`, `country_stats`, `compliance`, `retail`) in
+  `dbt/models/_groups.yml`; a staging/marts split would put every staging model
+  in one group and nothing would ever cross it. One person owns all four and the
+  file says so rather than inventing a team.
+- **Staging is `private`, marts are `public`, and the two exceptions are the
+  whole content.** The defaults are set per folder in `dbt_project.yml`;
+  `stg_country` and `stg_energy` override to `protected` because they are the
+  only two places one domain reads another's cleaning layer — the country
+  dimension has no mart above it, and `dim_grid_emission_factors` deliberately
+  re-models `stg_energy`'s intensity column for a different reader and needs
+  `source_loaded_at` with it. Both reasons are written next to the override.
+  Enforcement is real and was verified by breaking it: flipping `stg_country` to
+  `private` fails `dbt parse` naming `fct_cbam_exposure`, not `dbt build` an hour
+  later.
+- **Marts are `public` because the release makes them so.** Every mart ships as a
+  standalone Parquet file to people who cannot be paged; `access` is a statement
+  about that, not about the repo.
+- **Contracts are enforced on all 17 marts — 326 columns, each with a
+  `data_type`.** The ymls documented 179 of those columns before, so the list was
+  *generated* from the built warehouse's `information_schema` and inserted
+  line-wise into `_marts.yml`, reordering the existing entries into SQL order and
+  keeping every description untouched. A PyYAML round-trip would have reflowed
+  1,246 lines of prose to add scalars; don't do that to this file.
+  - **The grain contract and the schema contract catch different things.**
+    `unique_combination_of_columns` has been holding the grain since the start;
+    what it never saw was a column changing type under a consumer. Verified by
+    declaring `year` as `VARCHAR`: the build fails with a per-column mismatch
+    table before writing anything.
+  - **A contracted incremental model must set `on_schema_change`.** dbt refuses
+    `ignore` and it is right to — the contract promises a shape and `ignore`
+    would let a column stop being written into the existing table.
+    `fct_fx_rates_published` uses `fail` rather than `append_new_columns`,
+    because a new column there means the *model* changed and 265k rows need a
+    `--full-refresh` decision made by a person.
+  - **CI builds the same types.** The declared types come from the full
+    warehouse; CI builds the 17-country fixture slice, so a column whose type is
+    inferred from data could have differed. `just test-pipeline` was run to check
+    it rather than assumed — all 17 contracts hold on the slice.
+- **Exposures are per *page*, not per site, and they are checked.**
+  `dbt/models/_exposures.yml` declares eight Evidence pages and the monthly data
+  release, so `dbt ls --select +exposure:evidence_retail` answers "what breaks if
+  I change this" for one page. `scripts/build_report.py` gained `page_tables()`
+  (page → source query → warehouse table) and `tests/test_exposures.py` fails if
+  a declaration and the SQL disagree.
+  - **They do not replace `TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY`, and the
+    test says why.** An exposure can only name nodes dbt builds, so nothing in
+    `analytics` (written by Polars, downstream of dbt and invisible to it) can
+    appear in one. `reports/pages/pipeline.md` therefore has **no exposure at
+    all** — every table it reads is a Polars output and `depends_on` cannot be
+    empty. The test asserts that the remainder is *exactly* `TABLE_TO_ASSET_KEY`,
+    so the gap is measured instead of forgotten.
+  - **The release exposure names `stg_country`**, the one staging model in the
+    list, because the release notes point a reader at `staging.stg_country` by
+    name. The other seven staging views ship as Parquet too and nothing promises
+    them.
+- **`fct_emissions_energy` is versioned, and it is the right model rather than
+  the biggest.** Nothing in the project refs it and the release ships it, so a
+  rename is free in-repo and breaking outside it. v2 renames `co2_per_gdp` to
+  `co2_kg_per_gdp_ppp_2011` — the old name gave neither unit nor basis while a
+  differently-based intensity column sat one schema away.
+  - **v2 is aliased back to the bare relation name.** The Evidence source query,
+    `ARCHIVED_TABLES`, `TABLE_TO_DBT_MODEL` and the release notes all say
+    `marts.fct_emissions_energy`; a migration that renames the table out from
+    under them is not a migration.
+  - **v1 is a view over v2, not a second copy of the model.** `select * exclude
+    (…), … as co2_per_gdp` — one column put back, no duplicated logic and no
+    duplicated 43k rows. It puts the renamed column *last*, and the v1 contract
+    is declared the same way (`include: all`, `exclude:` the new name, then the
+    old one appended) so the two agree on the order dbt enforces.
+  - **`deprecation_date: 2026-11-01`** is carried in the release notes as well as
+    the yml, because the consumers who need it never see a dbt log.
+  - **Versioning a model changes its Dagster asset key, silently.**
+    `default_asset_key_fn` keys an ordinary model on `[configured_schema, name]`
+    (`marts/fct_emissions_energy`) but a versioned one on `[alias]` alone — so
+    adding `versions:` renamed the asset to `fct_emissions_energy` and gave v1
+    the sibling key `fct_emissions_energy_v1`. Both still run. What breaks is
+    everything that spells the key out: `just materialize-select 'marts/*'` stops
+    matching, and Dagster's materialisation history is keyed on the asset key, so
+    the model looks like it has never been built. `FolderGroupDbtTranslator.get_asset_key`
+    puts the schema back for versioned nodes, which is what keeps the version
+    invisible to the rest of the graph.
+
 ## Pipeline observability (`transform/pipeline_status.py`)
 
 `just pipeline-status` writes three flat tables into `analytics` —
@@ -714,7 +805,7 @@ leave the other free to land after the inventory meant to count it.
   absent rather than failing.
 - **It excludes its own output from the inventory.** Otherwise the table count
   jumps by three on every build after the first, for no change in the warehouse
-  (29 tables today, not 32).
+  (30 tables today, not 33).
 - **It must run after `dbt build`** — it reads `dbt_test__audit` and the
   manifest, neither of which exists before one.
 
@@ -905,12 +996,15 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   headline is trade moving and the rest isn't. `trade_co2_share` is deliberately
   untested — the real range is about -98% to +1023% (Singapore imports ten times
   what it emits), so a 0–100 bound would fail on reality, not on a bug.
-- **Two carbon-intensity columns, different bases.** `fct_emissions_energy.co2_per_gdp`
-  is OWID's kg CO2 per 2011 international-$ (PPP) and stops in 2022 / 164
-  countries. `analytics.co2_intensity.co2_per_gdp_const_usd` is derived in
+- **Two carbon-intensity columns, different bases.**
+  `fct_emissions_energy.co2_kg_per_gdp_ppp_2011` is OWID's kg CO2 per 2011
+  international-$ (PPP) and stops in 2022 / 164 countries.
+  `analytics.co2_intensity.co2_per_gdp_const_usd` is derived in
   `transform/co2_intensity.py` and tracks the mart — ~197 countries through 2024,
   but only back to 1960, where WDI starts. Levels aren't comparable between the
-  two; the rank uses only the derived one.
+  two; the rank uses only the derived one. The mart's column was called
+  `co2_per_gdp` until the v2 rename, which is the whole reason that model is
+  versioned — see *Contracts, ownership and versions* above.
 - **Divide by `gdp_constant_usd`, never `gdp_usd`, for anything measured over
   time.** `gdp_usd` (`NY.GDP.MKTP.CD`) is *current* US$, so it moves with
   inflation and the exchange rate: on that basis Japan cut emissions 21% from

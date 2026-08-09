@@ -293,7 +293,7 @@ to fix the pipeline and `just record-fixtures`. Details in
 
 ### Data-quality gates
 
-`just dbt-build` runs 148 dbt tests alongside the models, and Dagster surfaces
+`just dbt-build` runs 354 dbt tests alongside the models, and Dagster surfaces
 each one as an asset check on the model it guards:
 
 | Gate | What it catches |
@@ -301,6 +301,7 @@ each one as an asset check on the model it guards:
 | `dbt_utils.unique_combination_of_columns` on `(country_iso3, year)` | The grain contract, on every fact-shaped staging model, the spine and the mart. `fct_emissions_energy` is four left joins off `dim_country_year`, so one duplicated upstream row would fan the mart out silently. |
 | `dbt_utils.accepted_range` | Percentages inside 0–100, non-negative money and tonnage, years inside each source's real span (WDI starts in 1960, Eurostat in 2007), EU electricity under €1/kWh. Unit and index-arithmetic bugs land outside these long before anyone notices a wrong chart. |
 | `not_null` / `unique` / `accepted_values` | The country dimension: one row per ISO3, a region for every row, income groups from the World Bank's four. |
+| `contract: {enforced: true}` on every mart | The *schema* contract, which the grain contract never saw: 326 columns with a declared type, checked at build time. A column changing type or disappearing under the published Parquet files fails the build instead of arriving in someone's download. |
 | `dbt source freshness` (`just dbt-freshness`) | Whether the warehouse is stale. dlt stamps every row with `_dlt_load_id`, a unix epoch, so this measures when the *pipeline* last ran (warn at 7 days, error at 30) rather than when the publishers last updated. |
 
 The tests are deliberately calibrated to fail on a bug rather than on reality:
@@ -308,11 +309,22 @@ The tests are deliberately calibrated to fail on a bug rather than on reality:
 genuinely have no World Bank classification, and `co2_per_capita` has a floor but
 no ceiling because small petrostates legitimately reach 780 t/person.
 
+Around the tests sits the part that says who this is *for*. Every model belongs
+to one of four owned groups (`reference`, `country_stats`, `compliance`,
+`retail`); staging models are `private` to their group and the marts are
+`public`, which dbt enforces at parse time rather than by convention. Each
+dashboard page and the monthly data release are declared as `exposures`, so
+`dbt ls --select +exposure:evidence_retail` answers "what breaks if I change
+this" — and a test fails if a page starts reading a model its exposure doesn't
+name. `fct_emissions_energy` is versioned: v2 renamed one column to state its
+unit and basis, and v1 stays live as a compatibility view until **2026-11-01**,
+because the people reading the published Parquet files can't be paged.
+
 ## Published dashboard
 
 ### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-Eight pages, built from the modelled layers: `marts.fct_emissions_energy` and
+Nine pages, built from the modelled layers: `marts.fct_emissions_energy` and
 `analytics.co2_intensity` for the findings, plus `dim_country_year`,
 `dim_grid_emission_factors`, `fct_co2_estimate_versions`,
 `fct_eu_electricity_prices_semiannual`, `fct_example_scope2_emissions`,
@@ -327,7 +339,7 @@ for all of them.
 | **Home**: Explore | Pick a year: clean electricity vs. life expectancy, carbon intensity of the economy over time, grid carbon intensity, EU electricity prices against grid cleanliness, the most carbon-efficient economies, and what averaging Eurostat's half-year prices into an annual figure costs. |
 | **Findings** | Seven write-ups on the joined data: when each country's emissions peaked, that the cleanup happened in electricity and coal is most of it, real-terms decoupling, whether it's just offshoring (it isn't, mostly), emissions tracking income rather than headcount, cumulative vs. current responsibility, and carbon intensity falling while absolute tonnes rise. |
 | **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
-| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 337 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
+| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 354 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. Empty on the published copy by construction: the build starts from an empty DuckDB file, and a snapshot can only record a revision it was there for. |
 | **CBAM Exposure** | What a tonne of an imported CBAM good costs at the EU border, by where it was made: Annex I of Implementing Regulation (EU) 2025/2621 priced at a carbon price you choose. Semi-finished steel runs 63× from Azerbaijan to Indonesia — and the ranking sorts by *production route*, not by the national grid, which is the opposite of the Scope 2 story. A screening tool, not a filing. |
 | **Currency** | The ECB's daily euro reference rates, and the three problems an annual warehouse never has to answer. 30% of calendar days carry no rate, so the daily table carries the last fixing forward — capped, because the two interior gaps in the series are the Icelandic króna after 2008 and the Argentine peso in 2002, not long weekends. Spot against average, and what it changes about a number already on the site: EU household electricity rose 35% or 13.5% from 2021-S1 to 2022-S2 depending only on whether you counted in euros or dollars. |

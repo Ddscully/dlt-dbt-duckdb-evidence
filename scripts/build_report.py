@@ -120,6 +120,11 @@ _TABLE_REF = re.compile(
     re.IGNORECASE,
 )
 _SQL_COMMENT = re.compile(r"--[^\n]*")
+# A page reads `from warehouse.<query>` — Evidence's own spelling, where the
+# prefix is the directory under `sources/`. Matched loosely and filtered against
+# the source names that exist, so `from warehouse.typo` is an error rather than
+# something quietly skipped.
+_QUERY_REF = re.compile(r"\b(?:from|join)\s+([a-z_][a-z_0-9]*\.[a-z_][a-z_0-9]*)", re.IGNORECASE)
 
 
 def source_tables(sources_dir: Path = SOURCES_DIR) -> set[str]:
@@ -135,9 +140,54 @@ def source_tables(sources_dir: Path = SOURCES_DIR) -> set[str]:
     names columns, not tables) would be parsed as SQL.
     """
     tables = set()
+    for query_tables in source_query_tables(sources_dir).values():
+        tables |= query_tables
+    return tables
+
+
+def source_query_tables(sources_dir: Path = SOURCES_DIR) -> dict[str, set[str]]:
+    """`{"warehouse.emissions_energy": {"marts.fct_emissions_energy"}, …}`.
+
+    Per query rather than per project, which is the resolution `page_tables` needs:
+    Evidence pages name *queries*, and only the query knows which warehouse table
+    it reads. The key is `<source>.<query>` because that is how a page spells it —
+    the source name is the directory under `sources/`.
+    """
+    per_query = {}
     for sql in sorted(sources_dir.rglob("*.sql")):
         text = _SQL_COMMENT.sub("", sql.read_text())
-        tables.update(match.group(1).lower() for match in _TABLE_REF.finditer(text))
+        name = f"{sql.parent.name}.{sql.stem}"
+        per_query[name] = {match.group(1).lower() for match in _TABLE_REF.finditer(text)}
+    return per_query
+
+
+def page_tables(
+    pages_dir: Path = PAGES_DIR, sources_dir: Path = SOURCES_DIR
+) -> dict[str, set[str]]:
+    """`{"retail": {"marts.fct_retail_order_line", …}, …}` — warehouse tables per page.
+
+    Two hops: a page's SQL blocks read `warehouse.<query>`, and the query reads the
+    warehouse. This is what the exposures in `dbt/models/_exposures.yml` are checked
+    against, so that `dbt ls --select +exposure:retail_dashboard` answers "what
+    breaks if I change this model" for one page rather than for the whole site.
+
+    A page naming a query that doesn't exist raises: Evidence fails that build
+    anyway, and getting the error here means `just test` catches it without Node.
+    """
+    queries = source_query_tables(sources_dir)
+    sources = {name.split(".", 1)[0] for name in queries}
+    tables = {}
+    for page in sorted(page_routes(pages_dir, BUILD_DIR)):
+        text = _SQL_COMMENT.sub("", (pages_dir / f"{page}.md").read_text())
+        referenced = {
+            match.group(1).lower()
+            for match in _QUERY_REF.finditer(text)
+            if match.group(1).split(".", 1)[0].lower() in sources
+        }
+        unknown = referenced - set(queries)
+        if unknown:
+            raise ValueError(f"{page}.md reads undefined source queries: {sorted(unknown)}")
+        tables[page] = set().union(set(), *(queries[query] for query in referenced))
     return tables
 
 

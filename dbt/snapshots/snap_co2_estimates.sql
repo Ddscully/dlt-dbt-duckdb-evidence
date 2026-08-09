@@ -15,6 +15,7 @@
 {{
     config(
         unique_key='country_year',
+        group='country_stats',
         strategy='check',
         check_cols=['co2_mt', 'co2_per_capita'],
         hard_deletes='invalidate',

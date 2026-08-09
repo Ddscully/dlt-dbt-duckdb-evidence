@@ -1,0 +1,209 @@
+version: 2
+
+# Who reads this warehouse, declared to dbt.
+#
+# `dbt ls --select +exposure:evidence_retail` now answers "what breaks if I
+# change this model" for one page, and `dbt ls --select +exposure:*` for every
+# consumer at once. Before this file, that dependency existed only as
+# `TABLE_TO_DBT_MODEL` in `scripts/build_report.py` — a hand-maintained Python
+# dict that exists because the site→mart edge was invisible to dbt.
+#
+# The two are not duplicates and neither replaces the other, which is the useful
+# part:
+#
+#   - The dict is per *site*: it makes `reports/evidence_site` land in the right
+#     place in the Dagster graph, and it has to cover the Polars tables too.
+#   - These exposures are per *page*, and they can only name nodes dbt builds.
+#
+# `tests/test_report.py::test_exposures_match_what_the_pages_read` checks them
+# against each other by resolving page → source query → warehouse table, so
+# adding a chart on a new mart fails the build rather than quietly leaving one of
+# the two stale.
+#
+# **What dbt cannot say here.** Everything in `analytics` is written by Polars,
+# downstream of dbt and invisible to it, so no exposure can depend on
+# `co2_intensity`, `retail_rfm` or the three `pipeline_*` tables. That is why
+# `reports/pages/pipeline.md` has no exposure at all — every table it reads is a
+# Polars output — and why the Findings, Home and Retail exposures each name one
+# fewer dependency than their page actually has. The test asserts that remainder
+# is *exactly* `TABLE_TO_ASSET_KEY`, so the gap is measured rather than assumed.
+#
+# `maturity:` is deliberately not set. Every page here deploys from the same
+# workflow on the same schedule, so a column of `high` would be decoration; the
+# one real distinction (the Scope 2 page's worked example is invented data) is
+# stated on the page and in the mart's description, where a reader will meet it.
+exposures:
+  # Named for the page file (`pages/index.md`), not for what the page is called,
+  # because the test maps `evidence_<slug>` to a slug mechanically.
+  - name: evidence_index
+    label: Dashboard — Home
+    type: dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/
+    description: >
+      The site's front page: headline emissions, the decarbonisation ranking and
+      the European electricity price panel. Also reads `analytics.co2_intensity`,
+      which dbt does not build.
+    depends_on:
+      - ref('fct_emissions_energy')
+      - ref('fct_eu_electricity_prices_semiannual')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  - name: evidence_findings
+    label: Dashboard — Findings
+    type: dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/findings/
+    description: >
+      The seven findings, each ending in a decision. The most load-bearing page
+      on the site: every number in it is quoted in `README.md` and
+      `docs/FOR_REVIEWERS.md`, so a change to `fct_emissions_energy` that moves
+      one of them has to move the prose too. Also reads
+      `analytics.co2_intensity`.
+    depends_on:
+      - ref('fct_emissions_energy')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  - name: evidence_coverage
+    label: Dashboard — Coverage
+    type: dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/coverage/
+    description: >
+      What the warehouse does and does not cover, per source and per column.
+      Depends on the spine as well as the fact, because coverage gaps are only
+      visible as rows against the complete country-year cross join.
+    depends_on:
+      - ref('dim_country_year')
+      - ref('fct_emissions_energy')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  - name: evidence_restatements
+    label: Dashboard — Restatements
+    type: dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/restatements/
+    description: >
+      Revision history of OWID's CO2 estimates, off the snapshot. The one page
+      whose content cannot be rebuilt from the sources — see
+      `history.snap_co2_estimates`.
+    depends_on:
+      - ref('fct_co2_estimate_versions')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  - name: evidence_scope2
+    label: Dashboard — Scope 2 factors
+    type: dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/scope2/
+    description: >
+      Grid emission factors as a reference product, with the vintage problem and
+      the three GHG Protocol caveats stated on the page. The worked example it
+      renders is the only fabricated data in the warehouse and is labelled as
+      such in three places.
+    depends_on:
+      - ref('dim_grid_emission_factors')
+      - ref('fct_example_scope2_emissions')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  - name: evidence_cbam
+    label: Dashboard — CBAM exposure
+    type: dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/cbam/
+    description: >
+      The border cost per sourcing country and good, priced at the
+      `eu_ets_price_eur_per_t` var. The page derives its whole EUR 60-120
+      sensitivity band from the tonnage columns in one build, so a re-price does
+      not need a rebuild — but a change to the mart's *columns* does break it.
+    depends_on:
+      - ref('fct_cbam_exposure')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  - name: evidence_currency
+    label: Dashboard — Currency
+    type: dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/currency/
+    description: >
+      The FX layer: the calendar gap, the currency panel's retirements, spot
+      against average, and the euro-versus-dollar reading of the Eurostat
+      electricity price. Reads more marts than any other page, and is the reason
+      `fct_eu_electricity_prices_semiannual` now has two consumers rather than
+      one.
+    depends_on:
+      - ref('dim_currency')
+      - ref('dim_date')
+      - ref('fct_eu_electricity_prices_semiannual')
+      - ref('fct_fx_rates_daily')
+      - ref('fct_fx_rates_periods')
+      - ref('fct_fx_rates_published')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  - name: evidence_retail
+    label: Dashboard — Retail
+    type: dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/retail/
+    description: >
+      The transactional grain: line types, returns matched by inference, the
+      cohort triangle and the RFM segments. Also reads `analytics.retail_rfm`,
+      which is a Polars output and so cannot appear below.
+    depends_on:
+      - ref('fct_retail_order_line')
+      - ref('fct_retail_returns')
+      - ref('fct_retail_customer_cohorts')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
+  # Not a page — the monthly GitHub release, which is the consumer nobody can see
+  # from inside the repo and the only one that is genuinely *outside* this
+  # project. It is also why every mart is `access: public` rather than
+  # `protected`: those files land on somebody else's disk.
+  #
+  # `stg_country` is in the list because the release notes point a reader at
+  # `staging.stg_country` by name as the country dimension — there is no
+  # `dim_country` mart saying the same thing, which is the same gap that makes
+  # that model `protected` instead of `private`. The other seven staging views
+  # ship as Parquet too (`PUBLISHED_SCHEMAS`), but nothing in the notes promises
+  # them, so they are not declared here.
+  - name: published_data_release
+    label: Monthly data release (GitHub)
+    type: application
+    url: https://github.com/ddscully/dlt-dbt-duckdb-evidence/releases
+    description: >
+      `data-YYYY-MM-DD`: the DuckDB file, a zstd Parquet per modelled table,
+      `manifest.json`, `SHA256SUMS` and `ATTRIBUTION.md`, built monthly by
+      `release-data.yml` against live sources. Consumers are outside this repo
+      and cannot be paged, so a column removed here is a breaking change with no
+      migration path — which is what `contract: {enforced: true}` on the marts is
+      for, and why the versioned model exists.
+    depends_on:
+      - ref('dim_country_year')
+      - ref('dim_currency')
+      - ref('dim_date')
+      - ref('dim_grid_emission_factors')
+      - ref('dim_retail_customer')
+      - ref('dim_retail_product')
+      - ref('fct_cbam_exposure')
+      - ref('fct_co2_estimate_versions')
+      - ref('fct_emissions_energy')
+      - ref('fct_eu_electricity_prices_semiannual')
+      - ref('fct_example_scope2_emissions')
+      - ref('fct_fx_rates_daily')
+      - ref('fct_fx_rates_periods')
+      - ref('fct_fx_rates_published')
+      - ref('fct_retail_customer_cohorts')
+      - ref('fct_retail_order_line')
+      - ref('fct_retail_returns')
+      - ref('stg_country')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
