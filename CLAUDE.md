@@ -57,7 +57,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (19 models, 2 snapshots, 5 seeds + 268 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (25 models, 2 snapshots, 5 seeds + 337 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -198,9 +198,10 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 ## Warehouse schemas (one DuckDB file: `data/warehouse.duckdb`)
 
 - `raw` — dlt landing tables: `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`,
-  `eu_elec_prices`, `ecb_fx_rates`
+  `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`
 - `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain —
-  except `stg_fx_rates`, which is `(rate_date, quote_currency)`
+  except `stg_fx_rates`, which is `(rate_date, quote_currency)`, and
+  `stg_retail_lines`, which is `(invoice, line_number)`
 - `marts` — dbt tables: `dim_country_year` (the country-year spine),
   `fct_emissions_energy` (the wide join, built on the spine),
   `dim_grid_emission_factors` (the Scope 2 reference product),
@@ -212,12 +213,17 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
   country in them at all: `dim_date` (the calendar), `dim_currency`,
   `fct_fx_rates_published` (the ECB's fixings as published, and **the project's
   only incremental model**), `fct_fx_rates_daily` (gap-filled) and
-  `fct_fx_rates_periods` (month / quarter / half / year)
+  `fct_fx_rates_periods` (month / quarter / half / year). Plus the five retail
+  models, the only ones at a grain below a country: `fct_retail_order_line`
+  (`(invoice, line_number)` — the warehouse's finest grain), `dim_retail_product`,
+  `dim_retail_customer`, `fct_retail_returns` and `fct_retail_customer_cohorts`
+  (`(cohort_month, months_since_first_order)`)
 - `history` — the dbt snapshots `snap_co2_estimates` (SCD2 versions of OWID's CO2
   numbers) and `snap_grid_emission_factors` (the same for the Scope 2 factors,
   2015+). **The two tables here that no rebuild can reproduce** — see below
-- `analytics` — Polars output: `co2_intensity`, plus `pipeline_sources` /
-  `pipeline_tables` / `pipeline_tests` (see *Pipeline observability* below)
+- `analytics` — Polars output: `co2_intensity` and `retail_rfm`, plus
+  `pipeline_sources` / `pipeline_tables` / `pipeline_tests` (see *Pipeline
+  observability* below)
 
 Grain of every *country* fact/staging model is **`(country_iso3, year)`**; joins
 are on ISO3 country code + year. The country dimension (`stg_country`) supplies
@@ -549,6 +555,105 @@ follows from that rather than from the numbers.
   `rate_date` and has no `year` to partition on. It is also the only table that
   improves the archive's small-file arithmetic: 381k rows over 28 partitions.
 
+## Retail transactions (the `retail_*` models, `analytics.retail_rfm`, `reports/pages/retail.md`)
+
+[UCI Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
+— a UK gift wholesaler's complete transaction log, 1,067,371 lines over
+2009-12-01 to 2011-12-09. **The first grain below a country**, the first source
+that is a bulk file drop rather than an API, and the first fact recording what a
+person did rather than what an agency published. Six dbt models plus a Polars
+one; the page is `retail.md`.
+
+- **The mess is the deliverable.** Nothing about this source has been cleaned by
+  anyone, so the modelling *is* the value — and each decision has a wrong answer
+  that produces a plausible number. The three that matter, all measured:
+  - **A negative quantity is not a return.** 3,457 negative lines sit on *sale*
+    invoices, every one priced at exactly zero with no customer: inventory
+    write-offs (damage, stock counts, one row labelled `check`). Reading them as
+    returns inflates the return count by a fifth and the returned value by
+    nothing — an error that survives review because the money still balances.
+    `is_stock_write_off` and a test hold it.
+  - **There are three invoice prefixes, not two.** Beside the `C` cancellations
+    sit six `A` bad-debt adjustments worth −£147,614, and they are the only
+    negative *prices* in the file.
+  - **`item_type` is not decoration.** A bare revenue sum carries £463,931 of
+    postage and −£338,803 of bank fees as if they were sales.
+- **Returns have no foreign key**, so `fct_retail_returns` infers the link with
+  an `asof left join` to the same customer's most recent earlier purchase of the
+  same product. 87.6% match cleanly, 2.0% match a *smaller* purchase, 8.4% have
+  no prior purchase in the window, 1.9% have no customer id. **The 2.0% is the
+  interesting number**, not the 87.6% — it is the rule being wrong rather than
+  the data being absent. Reported per row instead of tuned into one headline; the
+  median return comes back in 10 days, which is the evidence the rule isn't
+  latching onto arbitrary sales.
+- **`dim_retail_customer` covers a subset of the business and says so.** 22.8%
+  of lines have no customer id — £2.67M, 13.8% of revenue. The two shares differ
+  because an order nobody signed in for is a smaller order, and quoting the line
+  share as the revenue share overstates the hole by nine points. Also: 5,881 of
+  the 5,942 ids reach the dimension (61 never purchased), and `cohort_month` is
+  the first *purchase*, not the first appearance.
+- **The cohort triangle is ragged and left-censored, and both are columns.** A
+  cohort born in November 2011 has no month-12 row — that is an absence, not a
+  zero, so rows are generated only up to the last observable month.
+  December 2009 is the extract's first month, so its "new" customers include
+  everyone already buying; `is_left_censored_cohort` excludes them everywhere.
+  Retention is against the cohort's own size, never against the previous month.
+  - **Read a triangle by direction: down a column is ageing, along a diagonal is
+    the calendar.** The heatmap's dark band is a diagonal — autumn. Pooled over
+    every cohort age, a customer is active in 23.6% of September–November months
+    against 15.3% for the rest of the year (Jan 11.2%, Nov 27.0%). The month-12
+    "recovery" in the average curve is the same fact edge-on, since a cohort's
+    twelfth month lands in the calendar month it was born in. A retention *curve*
+    averages the diagonal into the column and reports the blend as ageing.
+  - `retail_max_cohort_age_months` (36) is a var, not a literal, because it is
+    the one number that can silently **truncate** the answer.
+    `fct_retail_cohorts_are_not_truncated` asserts the first cohort reaches the
+    last month.
+- **`analytics.retail_rfm` is where the Polars layer stops being a division.**
+  The operation is "cut a column into quintiles", and SQL's primitive for it —
+  `ntile(5)` — is *wrong*: it fills buckets of equal size, so it cuts through a
+  run of equal values wherever the boundary lands. 1,626 customers have placed
+  exactly one order, and across the four tied values that straddle a boundary
+  **3,227 of 5,881 customers** could be scored differently from someone whose
+  behaviour is identical. `qcut` cuts on break points, so equal values always
+  score equally and the buckets come out uneven — which is a fact about the
+  customer base, not an artefact. `rfm_scores_do_not_split_ties` is a blocking
+  asset check, because a regression to `ntile` still yields five tidy buckets and
+  a plausible segment mix.
+  - **Casting a Polars Categorical straight to an integer gives the physical
+    dictionary index**, i.e. order of first appearance, not label order. Via
+    `String` is the only reading that means what it says.
+  - **`as_of_date` is a required parameter with no default.** Recency against
+    `date.today()` makes every customer in a 2011 extract equally and
+    enormously lapsed, and the segmentation quietly becomes a frequency ranking.
+    It is read from the data and shipped as a column.
+  - **The segment map is a 25-cell grid, not a rule list.** The widely-copied
+    version ("Champions: R>=4 and F>=4", "Loyal: R>=3 and F>=3", …) has
+    *overlapping* conditions, so the label depends on branch order — invisible in
+    review. Monetary is deliberately not in the grid: R and F say what the
+    relationship is doing, M says what it is worth.
+  - Champions are 14.9% of the identified base and 62.7% of its revenue.
+- **The FX carry-forward stops being theoretical here.** 139,658 lines (13.1%)
+  convert on a rate the ECB published earlier, and **every one is a Sunday**:
+  this business trades Sunday and not Saturday (139,256 lines against 402), and
+  it closes on exactly the days TARGET does, so no weekday closure ever
+  coincides with an order. A model assuming "weekend" means Saturday and Sunday
+  equally reads it backwards.
+- **`fct_retail_order_line` carries a plain `year` beside `iso_year`**, because
+  the lake partitions on it. The two agree on every row *only* because the
+  business shuts 23 December to 4 January, so nothing lands on the three days a
+  year where ISO week 1 crosses the new year. Partitioning on `iso_year` would be
+  correct today and wrong the first New Year they trade.
+- **It is the only table whose lake partitioning is sensible**: 1.07M rows over
+  three years is three files of 13 MB / 12 MB / 836 kB, against the CO2
+  archive's 275 files averaging 47 kB. The grain is a transaction and the
+  partition is a year, so the ratio is 350,000:1 rather than 150:1.
+- **The fixture is selected by shape, not sampled.** A 4% random draw keeps the
+  volume and loses all six `A` adjustments and the single positive `C` line.
+  `RETAIL_FIXTURE_SELECTION` in `scripts/record_fixtures.py` picks each shape
+  explicitly and `tests/test_fixtures.py` asserts they survive. At 1.88 MB it is
+  the largest file in the repo.
+
 ## Data-quality gates (`dbt/models/**/_*.yml`)
 
 `dbt_utils` is the project's only dbt package; it exists for
@@ -591,7 +696,10 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 `pipeline_tables` (rows and year span per modelled table) and `pipeline_tests`
 (every dbt test, what it guards, and how many rows are currently failing it).
 `reports/pages/pipeline.md` renders them; the asset is
-`analytics/pipeline_status`, downstream of `co2_intensity`.
+`analytics/pipeline_status`, downstream of **both** Polars assets
+(`co2_intensity` and `retail_rfm`). It has to name both: it inventories
+`analytics`, and depending only on the one that sits furthest downstream would
+leave the other free to land after the inventory meant to count it.
 
 - **None of it is new instrumentation.** dlt already stamps `_dlt_load_id`, dbt
   already stores failing rows in `dbt_test__audit`, and `information_schema`
@@ -604,8 +712,9 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   label. The manifest also supplies the model each test guards and the column it
   tests. It's gitignored, so `build_tests` degrades to bare table names when it's
   absent rather than failing.
-- **It excludes its own output from the inventory.** Otherwise the table count is
-  12 on a first build and 15 on every later one, for no change in the warehouse.
+- **It excludes its own output from the inventory.** Otherwise the table count
+  jumps by three on every build after the first, for no change in the warehouse
+  (29 tables today, not 32).
 - **It must run after `dbt build`** — it reads `dbt_test__audit` and the
   manifest, neither of which exists before one.
 
@@ -613,7 +722,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 
 `just lake` writes the year-keyed tables back out of DuckDB as hive-partitioned
 Parquet under `data/lake/<table>/year=<year>/data_0.parquet` (zstd, gitignored,
-790 files / ~36 MB today). It's part of `just run`, an asset
+793 files / ~60 MB today). It's part of `just run`, an asset
 (`lake/parquet_archive`) downstream of the mart, and `lake_matches_warehouse`
 checks the read-back row counts and year spans against the warehouse.
 
@@ -628,16 +737,19 @@ checks the read-back row counts and year spans against the warehouse.
   of a stale file. `tests/test_lake.py` pins that.
 - **Rewriting from empty still leaves the output byte-identical run to run**, so
   the diff is meaningful: revising one country-year upstream changes exactly one
-  of the 790 files. That is the point of the layer — the DuckDB file differs
+  of the 793 files. That is the point of the layer — the DuckDB file differs
   everywhere on every run, so it can't tell you what moved.
 - **Most partitions are far too small for a real lake.** The CO2 archive is 275
   of them averaging ~47 kB, against a ~100 MB rule of thumb, and on object
-  storage that is 275 round trips. `marts.fct_fx_rates_daily` is the exception
-  and the illustration: 381k rows over 28 year-partitions is the only table here
-  whose partitions are a sensible size, precisely because its grain is finer than
-  its partition column. Year is the partition column anyway because it's the one
-  every query filters on, and pruning still measures: `where year = 2020` runs in
-  ~23 ms against ~50 ms for the whole archive.
+  storage that is 275 round trips. The two exceptions are both tables whose
+  grain is finer than their partition column, which is the whole rule:
+  `marts.fct_fx_rates_daily` is 381k rows over 28 year-partitions, and
+  `marts.fct_retail_order_line` is the best in the archive at 1.07M rows over
+  **three** — 13 MB, 12 MB and 836 kB, i.e. 26 MB of a 60 MB archive in three
+  objects. A transaction grain against a year partition is a 350,000:1 ratio
+  where a country-year is 150:1. Year is the partition column anyway because
+  it's the one every query filters on, and pruning still measures:
+  `where year = 2020` runs in ~23 ms against ~50 ms for the whole archive.
 - **`LAKE_DIR` overrides the destination** the way `WAREHOUSE_PATH` does for the
   warehouse — `just test-pipeline` points it at a temp directory so a fixture run
   can't overwrite the real archive with the 17-country slice.
@@ -737,6 +849,23 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   `value` mixes counts with ratios — a lookback window that happened to hold only
   integers would infer bigint and shunt the next ratio into a
   `value__v_double` variant column.
+- **A resource that yields Arrow gets no `_dlt_load_id` unless you ask.**
+  `retail_invoice_lines` yields Arrow batches straight out of DuckDB, and dlt's
+  Parquet normalizer leaves the load-id column off by default — so the biggest
+  table in the warehouse landed with no load provenance, `dbt source freshness`
+  had nothing to read, and `pipeline_sources` silently reported six sources for
+  seven. `build_pipeline()` sets
+  `NORMALIZE__PARQUET_NORMALIZER__ADD_DLT_LOAD_ID=true`. Adding the column to an
+  existing table needs a `drop table` plus `refresh="drop_resources"`; dlt will
+  not widen into it.
+- **`.arrow()` is a streaming reader with a 1,000,000-row default batch.** Using
+  it to hand a relation to dlt stored exactly 1,000,000 of 1,067,371 rows, with
+  no error — the round number was the only clue. `to_arrow_reader(BATCH)` and
+  `yield from` is the fix, and `test_retail_yields_every_row_the_workbook_holds`
+  counts.
+- **Declare `timezone: False` on a timestamp column, or dlt makes it
+  `TIMESTAMP WITH TIME ZONE`.** A 07:45 till time then reads `08:45:00+01:00` on
+  a CET machine and differs between a laptop and CI.
 - **Polars CSV type inference** defaults to the first 100 rows. OWID's early rows
   are empty for most metrics, so `pl.read_csv(..., infer_schema_length=None)` is
   required or numeric columns land as VARCHAR.
@@ -902,8 +1031,8 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
   `definitions.py` that names what it leaves out; a second npm-shaped asset would
   have to be excluded by hand too.
 - **The site's deps are one per table it reads, not the single ordering edge.**
-  `scripts.build_report.TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY` map the eight
-  tables the source queries read to the six assets that write them, and
+  `scripts.build_report.TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY` map the 20
+  tables the source queries read to the assets that write them, and
   `tests/test_report.py` parses `reports/sources/**/*.sql` and fails if the two
   disagree. Without it, adding a source query on a new mart would leave the site
   building from a stale copy of it while the graph still showed complete lineage —
@@ -913,7 +1042,7 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 - **`site_pages_all_rendered` is blocking, and it checks file *size*.**
   `evidence build` exits 0 for a site missing a page, and nothing downstream reads
   `reports/build/` — so a route that emitted only the SvelteKit shell would
-  materialise green and deploy. The eight pages render at 19–82 kB; the floor is
+  materialise green and deploy. The nine pages render at 19–83 kB; the floor is
   8 kB.
 - The `daily_refresh` schedule ships `STOPPED` on purpose — opening the UI
   shouldn't start hammering public APIs on a timer. It targets `full_refresh`, so

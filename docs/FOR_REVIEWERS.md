@@ -12,7 +12,7 @@ own CI history — none of it is estimated.
 | [`reports/pages/findings.md`](../reports/pages/findings.md) | the analysis, and the "So what" box under each finding |
 | [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including the partitioned WDI load |
 | [`dbt/models/marts/fct_emissions_energy.sql`](../dbt/models/marts/fct_emissions_energy.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest |
-| [`ingest/pipeline.py`](../ingest/pipeline.py) | six sources, two write dispositions, and why that has to be two `run()` calls |
+| [`ingest/pipeline.py`](../ingest/pipeline.py) | seven sources, two write dispositions, and why that has to be two `run()` calls |
 | [`CLAUDE.md`](../CLAUDE.md) | every gotcha that cost more than an hour, written down at the point it was learned |
 
 ---
@@ -71,7 +71,7 @@ that an upstream publisher moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
 that OWID was down.
 
-**What blocks.** 268 dbt tests run inside `dbt build`, every one with
+**What blocks.** 337 dbt tests run inside `dbt build`, every one with
 `store_failures`, so a red test hands you `select * from
 dbt_test__audit.<test_name>` rather than a count. Six Dagster asset checks sit
 alongside them, and `site_pages_all_rendered` is blocking and checks page *size*
@@ -90,14 +90,20 @@ Measured on this machine against the live APIs, per stage:
 
 | Stage | Time | Notes |
 |-------|------|-------|
-| `just ingest` | **46.1 s** | six sources over the public internet |
-| `just dbt-build` | **17.5 s** | 294 nodes — 19 models, 2 snapshots, 5 seeds, 268 tests |
-| `just transform` | **1.0 s** | Polars derived metric |
-| `just pipeline-status` | **1.2 s** | observability tables |
-| `just lake` | **2.7 s** | 790 Parquet files, ~36 MB |
-| **total** | **≈ 69 s** | of which **67% is waiting on someone else's API** |
+| `just ingest` | **61.0 s** | seven sources; 55.2 s of it with the retail workbook already cached |
+| `just dbt-build` | **20.3 s** | 369 nodes — 25 models, 2 snapshots, 5 seeds, 337 tests |
+| `just transform` | **2.1 s** | two Polars models |
+| `just pipeline-status` | **1.4 s** | observability tables |
+| `just lake` | **3.2 s** | 793 Parquet files, ~60 MB |
+| **total** | **≈ 88 s** | ingest is 69% of it, and most of *that* is still network |
 
-Artifacts: a 108 MB DuckDB file, a 36 MB Parquet archive, a 93 MB Evidence site.
+Artifacts: a 288 MB DuckDB file, a 60 MB Parquet archive, a 94 MB Evidence site.
+
+Ingest stopped being purely network-bound when the retail source landed, and the
+split is worth having measured: of the 61 s, the 45 MB workbook costs ~5.8 s to
+download and ~5.8 s to parse into 1.07M rows. It is the first source here whose
+cost is CPU rather than latency, which is also why its download is cached — 25
+Dagster partitions over one static file must not mean 25 fetches.
 Warehouse contents: 344,242 staging rows, 808,787 mart rows (43,138 of them the
 wide fact and 646k the three FX tables), 9,821 snapshot rows across the two
 `history` tables.
@@ -134,14 +140,15 @@ warehouse that bills by the second, that table is where the invoice comes from.
    where the warehouse stops being one file. That's the migration the shape is
    designed for: dbt, the tests, the asset graph and Evidence all move to
    Snowflake/BigQuery/MotherDuck on a profile change; dlt swaps a destination.
-3. **Full-refresh materialisation, for 18 of the 19 models.** Every mart is
+3. **Full-refresh materialisation, for 24 of the 25 models.** Every mart is
    `+materialized: table` and rebuilt whole. That is deliberate rather than
    pending: each one re-derives a source that gets fully re-fetched, so
-   rebuilding is *how* an upstream restatement is picked up, and at 43k rows it
-   costs seconds. The exception is the one model where the argument reverses —
+   rebuilding is *how* an upstream restatement is picked up, and the whole
+   graph — 1.07M-row retail fact included — rebuilds in 20 s. The exception is
+   the one model where the argument reverses —
    `fct_fx_rates_published` is `incremental`, because a published ECB fixing
    never changes and the table grows ~30 rows a day forever. At 43M rows the
-   question is which of the other 18 join it, and the cost of each is the tension
+   question is which of the other 24 join it, and the cost of each is the tension
    WDI's lookback window already documents: a restated year needs a full refresh,
    so "incremental" and "picks up restatements" are in conflict and you have to
    choose per model. Today's numbers are honest and unimpressive — 0.16 s
@@ -189,11 +196,14 @@ The genuine ones, not the diplomatic ones.
   by a data column and reversing the flow would have cost schema inference and
   the raw freshness checks — but it's a compromise and the docs say so rather
   than implying the tidy version.
-- **The gaps I'd close next, in order:** an entity grain below the country, and
-  then a transactional one under that. The two that used to head this list — a
-  date dimension with currency handling, and one incremental model — are done,
-  and doing them in that order was right: the money questions had to be
-  answerable before there was any point holding a fact denominated in money.
+- **The gaps I'd close next, in order:** a second entity to join the retail
+  customer to — a sector or industry dimension — and then something that forces
+  a late-arriving-fact decision, which nothing here has yet. The three that used
+  to head this list are done: a date dimension with currency handling, one
+  incremental model, and a grain below the country. Doing them in that order was
+  right, and the retail fact is the evidence — it needed the calendar and the
+  daily FX table on the day it landed, and 13% of its rows depend on a
+  carry-forward rule written months earlier for a series with no weekends in it.
 
 ---
 

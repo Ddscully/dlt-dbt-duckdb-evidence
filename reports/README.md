@@ -39,8 +39,8 @@ dashboard is the last node of the asset graph rather than something built beside
 it. `scripts/build_report.py` is the implementation, the same one `just report`
 calls, so the recipe and the graph can't drift into running different builds.
 
-- It declares **one dep per table the source queries read** (eight assets, ten
-  tables), and `tests/test_report.py` fails if a new source query reads a table
+- It declares **one dep per table the source queries read** (20 tables today),
+  and `tests/test_report.py` fails if a new source query reads a table
   none of them covers. Adding `sources/warehouse/foo.sql` on a new mart therefore
   means adding a line to `TABLE_TO_DBT_MODEL` in `scripts/build_report.py`; see
   `just test`'s failure message, which says exactly which table is unclaimed.
@@ -107,6 +107,11 @@ calls, so the recipe and the graph can't drift into running different builds.
     hand-written quotes in `'${inputs.ccy.value}'` are the cbam.md pattern again,
     and the selection is named in prose as `{inputs.ccy.label}` — a `<Value>`
     would show the first row of a query rather than what the reader picked.
+- `pages/retail.md`: one retailer's invoice lines, the only page below country
+  grain. What counts as revenue once stock write-offs and bad-debt adjustments
+  are separated out, a cohort retention heatmap, RFM segments from
+  `analytics.retail_rfm`, and returns matched to their sale by inference. Its
+  heatmap is where the `*_pct` auto-format trap below was found.
 
 The coverage and pipeline pages render an explanatory branch rather than an
 error when their data is empty, the way `restatements.md` does, because the
@@ -183,6 +188,49 @@ Two fixes, and which one depends on where the value goes:
 server-side before the extraction — hence its `*_label` columns. Anything
 computed on a page has to do it the long way; `scope2.md` has both forms with the
 reason inline.
+
+## A paragraph that *starts* with a component loses its spacing
+
+A paragraph beginning with `<Value .../>` is treated as an HTML block, so the
+markdown processor never wraps it in `<p class="markdown">` and it renders hard
+against the paragraph below with no margin between them. Nothing errors, and it
+only shows up in a browser.
+
+Put a word in front of the component and the paragraph is wrapped normally:
+`In total <Value .../> lines, …` rather than `<Value .../> lines, …`.
+
+This only applies to the first line of a *paragraph*. A component that starts a
+wrapped line **inside** a paragraph is fine and is sometimes deliberate, as in
+`findings.md`, where a sentence continues onto a line beginning with a `<Value>`.
+Check for a blank line above before "fixing" one.
+
+## A column named `*_pct` is silently multiplied by 100
+
+**Evidence infers a format from the column *name*.** `lookupColumnFormat` takes
+everything after the last underscore and looks it up as a format tag, so a
+column called `retention_pct` matches the built-in `pct` format — which assumes
+the value is a fraction and multiplies it by 100. This warehouse stores
+percentages **0–100**, so the two conventions collide and a 37.57% retention
+figure renders as `3,757%`.
+
+It costs nothing on most charts here purely by accident: every one of them
+already passes an explicit `fmt` / `yFmt` / `valueFmt`, and an explicit format
+wins over the name lookup. The bug only appears on a component where you didn't
+think a format was needed — a `<Heatmap>`'s color legend, an axis you left
+alone. `retail.md`'s cohort heatmap shipped that way and read `263%` to
+`3,757%` for a column whose real range is 2.63 to 37.57.
+
+So: **pass an explicit format to anything that renders a `*_pct` column**, and
+if a percentage ever looks like it has two extra digits, check the column name
+before you check the SQL.
+
+The suffix is matched against every tag in `builtInFormats.js`, so `_pct` is not
+the only one — `id`, `fract`, `mult`, `sci`, `num0`…`num4`, `yyyy`, `mmm` and
+the date tags are all live. Currency suffixes are *not* on that list, which is
+why `revenue_gbp` and `gdp_usd` pass through untouched and `_pct` is the one
+that bites here. A column named `customer_id` does pick up the `id` format,
+which is harmless (it suppresses thousands separators, which is what you want
+for an identifier) and is worth knowing before it looks like a bug.
 
 ## Chart colors
 

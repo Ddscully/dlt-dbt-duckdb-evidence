@@ -82,6 +82,7 @@ its publishers and is redistributed here under their licences.
 | Household electricity prices | [Eurostat](https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204/) | [Eurostat reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright) |
 | CBAM default values (Annex I) | [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621) | [Commission reuse decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj) |
 | Euro foreign-exchange reference rates | [European Central Bank](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html), via [Frankfurter](https://frankfurter.dev) | [ECB reuse policy](https://www.ecb.europa.eu/services/using-our-site/copyright/html/index.en.html) |
+| Online Retail II transactions | [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/502/online+retail+ii) (Chen, D., 2019) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 
 Annexes II and III of that regulation — the country electricity emission factors
 — are **not** in this artifact. They are IEA data under CC BY-NC-SA 4.0, and
@@ -223,8 +224,19 @@ it for `{base}/download/{tag}/…`.
   `*_semiannual` tables keep Eurostat's published `(country_iso3, year, half)`,
   `marts.fct_example_scope2_emissions` is one row per site,
   `marts.fct_cbam_exposure` is one row per (sourcing country, good) with no year
-  at all — it is a regulatory schedule, not a time series — and the five FX
-  tables below have no country in them.
+  at all — it is a regulatory schedule, not a time series — the five FX
+  tables below have no country in them, and the retail tables are per invoice
+  line, product, customer or cohort month.
+- **The retail tables are the one sub-country grain here.** `marts` carries
+  `fct_retail_order_line` (one row per invoice line, priced in GBP, EUR and USD
+  at the transaction date's ECB fixing), `dim_retail_product`,
+  `dim_retail_customer`, `fct_retail_returns` and `fct_retail_customer_cohorts`;
+  `analytics.retail_rfm` scores each customer. Three things to read first: a
+  negative quantity on a *sale* invoice is a stock write-off and not a return
+  (`is_stock_write_off`), 22.8% of lines carry no customer id so every
+  per-customer table covers a subset of the business, and returns are matched to
+  the sale they reverse by inference — `match_status` says how confidently, per
+  row, because the source has no key linking the two.
 - **The FX tables are the one daily grain here.** `marts.dim_date` is a calendar,
   `marts.dim_currency` is the currency dimension, and
   `marts.fct_fx_rates_published` / `_daily` / `_periods` are the ECB's euro

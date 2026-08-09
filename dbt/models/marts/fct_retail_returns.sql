@@ -27,12 +27,12 @@
 --     points at is a sign the rule found the wrong sale. `quantity_is_consistent`
 --     separates the two instead of a bare boolean pretending it can't happen.
 --
--- Measured, over 18,286 return lines: **87.7% match cleanly**, 2.0% match but to
+-- Measured, over 18,286 return lines: **87.6% match cleanly**, 2.0% match but to
 -- a purchase smaller than the return, 8.4% have no prior purchase in the window
 -- and 1.9% have no customer id. Among the lines that *can* be matched at all the
 -- rate is 91.4%. The honest way to read the remainder is as the cost of a source
 -- without a foreign key, not as a bug to be tuned away — and the 2.0% is the
--- more interesting number than the 87.7%, because it is the rule being wrong
+-- more interesting number than the 87.6%, because it is the rule being wrong
 -- rather than the data being absent.
 --
 -- The distribution is a sanity check in itself and it passes: the median return

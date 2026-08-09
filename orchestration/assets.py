@@ -1,6 +1,7 @@
 """The pipeline as a Dagster asset graph.
 
     raw/*  (dlt)  ->  staging/stg_*  ->  marts/fct_*  (dbt)  +->  analytics/co2_intensity  (Polars)
+                                                             +->  analytics/retail_rfm     (Polars)
                                                              |      +->  analytics/pipeline_status
                                                              +->  lake/parquet_archive  (Parquet)
                                                              +->  reports/evidence_site  (Evidence)
@@ -56,6 +57,7 @@ from scripts.build_report import (
 )
 from transform.co2_intensity import DUCKDB_PATH, run as run_co2_intensity
 from transform.pipeline_status import run as run_pipeline_status
+from transform.retail_rfm import run as run_retail_rfm
 
 # --------------------------------------------------------------------------- #
 # Freshness policies
@@ -363,6 +365,7 @@ def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource):
 
 
 FCT_EMISSIONS_ENERGY = get_asset_key_for_model([dbt_models], "fct_emissions_energy")
+DIM_RETAIL_CUSTOMER = get_asset_key_for_model([dbt_models], "dim_retail_customer")
 
 
 # --------------------------------------------------------------------------- #
@@ -388,11 +391,31 @@ def co2_intensity(context: AssetExecutionContext) -> dg.MaterializeResult:
 
 
 @dg.asset(
+    key=dg.AssetKey(["analytics", "retail_rfm"]),
+    deps=[DIM_RETAIL_CUSTOMER],
+    group_name="analytics",
+    kinds={"polars", "duckdb"},
+    freshness_policy=MODELLED_FRESHNESS,
+    description=(
+        "RFM scores and segments per customer. Quintiles are cut on value "
+        "rather than on rank position — SQL's `ntile` would split the 1,626 "
+        "one-order customers across two buckets."
+    ),
+)
+def retail_rfm(context: AssetExecutionContext) -> dg.MaterializeResult:
+    rows = run_retail_rfm()
+    context.log.info("wrote analytics.retail_rfm (%s rows)", rows)
+    return dg.MaterializeResult(metadata={"dagster/row_count": rows})
+
+
+@dg.asset(
     key=dg.AssetKey(["analytics", "pipeline_status"]),
     # Inventories `analytics`, so it has to run after the last thing written
-    # there. `co2_intensity` is itself downstream of the mart, which is
-    # downstream of every raw table — one edge orders this behind the lot.
-    deps=[co2_intensity],
+    # there. Both Polars tables are named, not just the one that happens to be
+    # downstream of the most: `co2_intensity` alone would order this behind the
+    # country mart and leave `retail_rfm` free to land after the inventory that
+    # is supposed to count it.
+    deps=[co2_intensity, retail_rfm],
     group_name="analytics",
     kinds={"polars", "duckdb"},
     freshness_policy=MODELLED_FRESHNESS,
@@ -636,6 +659,39 @@ def co2_intensity_rank_is_dense() -> dg.AssetCheckResult:
     return dg.AssetCheckResult(passed=bad == 0, metadata={"bad_cohorts": bad})
 
 
+@dg.asset_check(asset=retail_rfm, blocking=True)
+def rfm_scores_do_not_split_ties() -> dg.AssetCheckResult:
+    """Two customers with the same value score the same, on all three axes.
+
+    This checks the exact property the module exists to hold. The one-line SQL
+    version of RFM is `ntile(5) over (order by …)`, which fills equal-sized
+    buckets and therefore cuts straight through a run of equal values — 3,227 of
+    the 5,881 customers here share a frequency with someone `ntile` would put in
+    a different quintile. A regression to that form still produces five tidy
+    buckets and a plausible-looking segment mix, so nothing else in the pipeline
+    would notice. Counting values that carry more than one score does.
+    """
+    bad = _scalar(
+        """
+        select coalesce(sum(n), 0) from (
+            select count(*) as n from analytics.retail_rfm
+            group by frequency having count(distinct frequency_score) > 1
+            union all
+            select count(*) from analytics.retail_rfm
+            group by recency_days having count(distinct recency_score) > 1
+            union all
+            select count(*) from analytics.retail_rfm
+            group by monetary_gbp having count(distinct monetary_score) > 1
+        )
+        """
+    )
+    unsegmented = _scalar("select count(*) from analytics.retail_rfm where segment is null")
+    return dg.AssetCheckResult(
+        passed=bad == 0 and unsegmented == 0,
+        metadata={"customers_scored_against_a_peer": bad, "unsegmented": unsegmented},
+    )
+
+
 @dg.asset_check(asset=parquet_archive, blocking=True)
 def lake_matches_warehouse() -> dg.AssetCheckResult:
     """Every archived table reads back from Parquet with the row count and year
@@ -708,5 +764,7 @@ __all__ = [
     "parquet_archive",
     "pipeline_status",
     "raw_assets",
+    "raw_retail_asset",
     "raw_wdi_asset",
+    "retail_rfm",
 ]

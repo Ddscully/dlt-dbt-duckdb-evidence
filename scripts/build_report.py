@@ -102,6 +102,9 @@ TABLE_TO_DBT_MODEL = {
     "marts.fct_fx_rates_daily": "fct_fx_rates_daily",
     "marts.fct_fx_rates_periods": "fct_fx_rates_periods",
     "marts.fct_fx_rates_published": "fct_fx_rates_published",
+    "marts.fct_retail_customer_cohorts": "fct_retail_customer_cohorts",
+    "marts.fct_retail_order_line": "fct_retail_order_line",
+    "marts.fct_retail_returns": "fct_retail_returns",
 }
 
 TABLE_TO_ASSET_KEY = {
@@ -109,6 +112,7 @@ TABLE_TO_ASSET_KEY = {
     "analytics.pipeline_sources": ("analytics", "pipeline_status"),
     "analytics.pipeline_tables": ("analytics", "pipeline_status"),
     "analytics.pipeline_tests": ("analytics", "pipeline_status"),
+    "analytics.retail_rfm": ("analytics", "retail_rfm"),
 }
 
 _TABLE_REF = re.compile(

@@ -1040,6 +1040,15 @@ models:
         data_tests: [not_null]
       - name: date_key
         data_tests: [not_null]
+      - name: year
+        description: >
+          Calendar year, and the Parquet lake's partition column. Carried
+          explicitly rather than reusing the `iso_year` beside it: the two agree
+          on every row here only because the business shuts from 23 December to
+          4 January, so no order lands on a day where ISO week 1 crosses the new
+          year. Partitioning on `iso_year` would be correct today and wrong the
+          first New Year they trade.
+        data_tests: [not_null]
       - name: is_revenue_line
         data_tests: [not_null]
 
@@ -1133,7 +1142,7 @@ models:
       (18,286). The source carries no link between the two — no order reference,
       no RMA — so the join is inferred by an `asof` on the same customer's most
       recent prior purchase of the same product, and the model reports how often
-      that failed: 87.7% match cleanly, 2.0% match to a smaller purchase, 8.4%
+      that failed: 87.6% match cleanly, 2.0% match to a smaller purchase, 8.4%
       have no prior purchase in the window and 1.9% have no customer id.
     data_tests:
       - dbt_utils.unique_combination_of_columns:

@@ -74,8 +74,8 @@ expensive to revisit later.
 
 ## Data sources
 
-**Five feeds from three publishers.** All country + year keyed, freely licensed,
-small enough to run locally.
+**Six feeds from four publishers.** Freely licensed and small enough to run
+locally. Five are country-keyed; the sixth is not a country dataset at all.
 
 | Dataset | Grain | Link |
 |---------|-------|------|
@@ -84,7 +84,8 @@ small enough to run locally.
 | World Bank WDI: GDP, life expectancy, population, poverty | country-year (fact) | https://databank.worldbank.org/source/world-development-indicators |
 | World Bank countries: region & income group | country (dimension) | https://api.worldbank.org/v2/country?format=json |
 | Eurostat: household electricity prices (EU/EEA) | country-half-year (fact) | https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204 |
-| ECB euro reference rates, via Frankfurter | date-currency (fact) — the one sub-annual grain | https://frankfurter.dev |
+| ECB euro reference rates, via Frankfurter | date-currency (fact) — the first sub-annual grain | https://frankfurter.dev |
+| UCI Online Retail II: one retailer's invoice lines | invoice-line (fact) — the finest grain here, and the only one below a country | https://archive.ics.uci.edu/dataset/502/online+retail+ii |
 
 Joins are on **ISO country code + year**, yielding marts like
 *"CO₂ per \$ of GDP by income group over time"* and *"renewables adoption vs. life expectancy."*
@@ -93,7 +94,7 @@ country-year spine (`dim_country_year`) rather than off whichever source happens
 to be widest. A country-year only Eurostat or only the World Bank reports still
 lands, with the other columns null.
 
-Two sources have a finer grain of their own, and both keep it. Eurostat's is
+Three sources have a finer grain of their own, and all three keep it. Eurostat's is
 half-yearly: `fct_eu_electricity_prices_semiannual` holds the published halves
 alongside the annual average that joins to everything else. Averaging is what the annual
 grain costs, and it costs a lot: half-over-half price moves averaged 19% across
@@ -104,7 +105,13 @@ The ECB's is daily, and it has no country in it at all — which is what forced 
 warehouse's first calendar (`dim_date`), its first gap-filling decision, and its
 first `materialized='incremental'` model. See the **Currency** page below.
 
-Four of the five load with dlt's `replace` disposition. They are small enough
+The retailer's is a single invoice line at a timestamp, which is a grain *below*
+a country rather than beside one, and it is the only source here that isn't a
+statistical publication. Nothing about it has been cleaned by anyone, so the
+modelling is the value: what counts as a return, which rows are revenue, and who
+the customer is when 22.8% of lines have no id. See the **Retail** page below.
+
+Four of the seven load with dlt's `replace` disposition. They are small enough
 that a full reload every run is the honest default, and it keeps dlt re-inferring
 the schema so an upstream type change fails loudly. WDI is the counter-example:
 it's the
@@ -124,11 +131,11 @@ The pipeline populates one DuckDB file (`data/warehouse.duckdb`) with these sche
 
 | Schema | Written by | Contents |
 |--------|-----------|----------|
-| `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`) |
-| `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain, except `stg_eu_electricity_prices_semiannual` (Eurostat's half-years) and `stg_fx_rates` (`(rate_date, quote_currency)`) |
-| `marts` | dbt (tables) | `dim_country_year`, the country-year spine; `fct_emissions_energy`, the wide joined fact; `dim_grid_emission_factors`, grid factors packaged as a Scope 2 reference table; `fct_co2_estimate_versions`, revision history; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain; `fct_example_scope2_emissions`, the worked example over twelve invented sites; `fct_cbam_exposure`, the CBAM border cost per tonne by sourcing country |
+| `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`) |
+| `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain, except `stg_eu_electricity_prices_semiannual` (Eurostat's half-years), `stg_fx_rates` (`(rate_date, quote_currency)`) and `stg_retail_lines` (`(invoice, line_number)`) |
+| `marts` | dbt (tables) | `dim_country_year`, the country-year spine; `fct_emissions_energy`, the wide joined fact; `dim_grid_emission_factors`, grid factors packaged as a Scope 2 reference table; `fct_co2_estimate_versions`, revision history; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain; `fct_example_scope2_emissions`, the worked example over twelve invented sites; `fct_cbam_exposure`, the CBAM border cost per tonne by sourcing country; the FX and calendar tables (`dim_date`, `dim_currency`, `fct_fx_rates_*`); and the five retail models (`fct_retail_order_line`, `dim_retail_product`, `dim_retail_customer`, `fct_retail_returns`, `fct_retail_customer_cohorts`) |
 | `history` | dbt (snapshots) | `snap_co2_estimates` and `snap_grid_emission_factors`, SCD2 versions of OWID's CO₂ numbers and of the Scope 2 factors — the two tables a rebuild can't reproduce |
-| `analytics` | Polars | derived metrics (`co2_intensity`) |
+| `analytics` | Polars | derived metrics (`co2_intensity`, `retail_rfm`) |
 
 ### And a lake beside it: `data/lake/`
 
@@ -277,7 +284,7 @@ lint and whitespace hooks. CI runs the same hooks over every file, so a PR that 
 them fails there instead.
 
 CI on a pull request runs both, plus the Dagster asset graph and the asset
-checks, entirely offline: `INGEST_FIXTURES=1` serves all six sources from
+checks, entirely offline: `INGEST_FIXTURES=1` serves all seven sources from
 `tests/fixtures/ingest/`. A red build therefore means *this repo* broke, not that
 OWID was rate-limiting. A separate nightly workflow runs the same graph against
 the live endpoints and opens an issue when a source has moved, which is the cue
@@ -320,11 +327,12 @@ for all of them.
 | **Home**: Explore | Pick a year: clean electricity vs. life expectancy, carbon intensity of the economy over time, grid carbon intensity, EU electricity prices against grid cleanliness, the most carbon-efficient economies, and what averaging Eurostat's half-year prices into an annual figure costs. |
 | **Findings** | Seven write-ups on the joined data: when each country's emissions peaked, that the cleanup happened in electricity and coal is most of it, real-terms decoupling, whether it's just offshoring (it isn't, mostly), emissions tracking income rather than headcount, cumulative vs. current responsibility, and carbon intensity falling while absolute tonnes rise. |
 | **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
-| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 268 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
+| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 337 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. Empty on the published copy by construction: the build starts from an empty DuckDB file, and a snapshot can only record a revision it was there for. |
 | **CBAM Exposure** | What a tonne of an imported CBAM good costs at the EU border, by where it was made: Annex I of Implementing Regulation (EU) 2025/2621 priced at a carbon price you choose. Semi-finished steel runs 63× from Azerbaijan to Indonesia — and the ranking sorts by *production route*, not by the national grid, which is the opposite of the Scope 2 story. A screening tool, not a filing. |
 | **Currency** | The ECB's daily euro reference rates, and the three problems an annual warehouse never has to answer. 30% of calendar days carry no rate, so the daily table carries the last fixing forward — capped, because the two interior gaps in the series are the Icelandic króna after 2008 and the Argentine peso in 2002, not long weekends. Spot against average, and what it changes about a number already on the site: EU household electricity rose 35% or 13.5% from 2021-S1 to 2022-S2 depending only on whether you counted in euros or dollars. |
 | **Scope 2 Factors** | The same grid carbon-intensity series read as what it also is: the location-based Scope 2 emission factor a company multiplies its metered kWh by for a CSRD, SECR or CDP disclosure. `marts.dim_grid_emission_factors` as a reference table with its vintage and lineage, a worked example over twelve *invented* sites, and the three caveats a practitioner checks first. |
+| **Retail Transactions** | One retailer's 1.07M invoice lines — the only page here below country grain. What counts as revenue when a negative quantity on a sale invoice is a stock write-off and not a return, cohort retention read as a triangle (down a column is ageing, along a diagonal is the calendar — and the diagonal here is autumn), RFM segmentation where SQL's `ntile` would split 3,227 customers away from their identical peers, and returns matched to their sale by inference because the source has no key linking them. |
 
 `.github/workflows/pages.yml` builds it, as a single `publish_site` job. The site
 is a node in the asset graph (`reports/evidence_site`), so the workflow
@@ -413,7 +421,9 @@ WDI is CC BY 4.0, Eurostat data carries its own
 CBAM default values are EU law, reusable under
 [Decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj), and the
 euro reference rates are the ECB's, under its
-[reuse policy](https://www.ecb.europa.eu/services/using-our-site/copyright/html/index.en.html).
+[reuse policy](https://www.ecb.europa.eu/services/using-our-site/copyright/html/index.en.html),
+and [UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
+(Chen, D., 2019) is CC BY 4.0.
 
 **One source was deliberately left out on licence grounds.** Annexes II and III
 of the CBAM regulation — country electricity emission factors — are IEA data

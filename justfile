@@ -45,6 +45,7 @@ lake:
 # Polars derived metrics
 transform:
     uv run python -m transform.co2_intensity
+    uv run python -m transform.retail_rfm
 
 # Pipeline observability tables (load times, layer inventory, dbt test failures)
 # Must run after dbt-build: it reads dbt_test__audit and dbt/target/manifest.json.
@@ -72,6 +73,7 @@ test-pipeline:
     uv run python -m ingest.pipeline
     cd dbt && uv run dbt deps && uv run dbt build && cd ..
     uv run python -m transform.co2_intensity
+    uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
     uv run python -m lake.archive
 

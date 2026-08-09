@@ -18,10 +18,18 @@
 --     answered by summing the converted lines rather than converting the sum.
 --     Both are shipped so the difference can be measured, which is the point.
 --   * **The rate is carried forward, and the row says when it was published.**
---     A third of these orders fall on a day the ECB did not quote — Saturdays
---     especially, this being a retailer — so `fx_rate_source_date` and
---     `fx_rate_is_carried_forward` travel with the amount. A converted figure
---     whose provenance is one join away is a figure nobody can audit.
+--     139,658 of these lines — 13.1% — fall on a day the ECB did not quote, so
+--     `fx_rate_source_date` and `fx_rate_is_carried_forward` travel with the
+--     amount. A converted figure whose provenance is one join away is a figure
+--     nobody can audit. The carry-forward cap that looked theoretical against a
+--     27-year FX series is load-bearing the moment a fact has a weekend in it.
+--
+--     Every single carried rate here is a **Sunday**, and the reason is a fact
+--     about this business rather than about the calendar: it trades Sunday and
+--     not Saturday (139,256 lines against 402), and it closes on exactly the
+--     days TARGET does, so no weekday closure ever coincides with an order.
+--     A model that assumed "weekend" meant "Saturday and Sunday equally" would
+--     read this business exactly backwards.
 with lines as (
     select * from {{ ref('stg_retail_lines') }}
 ),
@@ -67,6 +75,14 @@ select
     -- with `date_part` here, which is the whole reason a date dimension exists:
     -- one definition of "which week is this" for every fact that ever asks.
     d.date_key,
+    -- Calendar year, carried explicitly even though `iso_year` sits right below
+    -- it, because this is the column the Parquet lake partitions on. The two
+    -- agree on every row of this extract — and only by accident: the business
+    -- closes 23 December to 4 January, so no order ever lands on one of the
+    -- three days a year where ISO week 1 crosses the new year. Partitioning on
+    -- `iso_year` would work perfectly today and put the 1st of January in last
+    -- year's file the first time they trade over New Year.
+    d.year,
     d.iso_year,
     d.iso_week,
     d.iso_week_start_date,

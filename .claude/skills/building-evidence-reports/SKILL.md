@@ -112,6 +112,11 @@ where year = ${inputs.year.value}
   `cast(cast(year as integer) as varchar)`. A *source* query is server-side and
   needs neither, which is why `latest_years.sql`'s `*_label` columns look
   simpler than they can be on a page.
+- **A paragraph that *starts* with a component isn't wrapped in `<p>`**, so it
+  renders with no margin against the paragraph below it. Lead with a word
+  (`In total <Value .../> lines, …`). Only paragraph-initial components matter:
+  a component beginning a wrapped line *inside* a paragraph is fine, and
+  `findings.md` relies on that.
 - **`<Value>` emits a trailing space, so never put punctuation straight after
   one.** `<Value .../>.` renders as "Turkmenistan ." and `<Value .../>'s` as
   "Norway 's". End the clause on words instead: `... at <Value .../> g/kWh.`
@@ -125,6 +130,16 @@ where year = ${inputs.year.value}
 - Charts and `<BigValue>` need explicit `fmt=` for anything that isn't a plain
   number; percentages in this warehouse are stored 0–100, so `fmt='0.0"%"'`, not
   a percent format that multiplies by 100.
+- **A `*_pct` column with no explicit format is multiplied by 100.** Evidence
+  infers a format from the column *name*: `lookupColumnFormat` takes everything
+  after the last underscore and matches it against the built-in format tags, and
+  `pct` assumes a fraction. Every chart here happens to be safe because every
+  chart passes an explicit format — the bug surfaces on the parts you didn't
+  think needed one, like a `<Heatmap>`'s color legend (`retail.md` shipped one
+  reading `263%`–`3,757%` for a 2.63–37.57 column). Pass `valueFmt` /
+  `fmt` / `yFmt` on anything rendering a `*_pct` column. `id`, `fract`, `mult`,
+  `sci`, `num0`–`num4` and the date tags are live suffixes too; currency ones
+  are not.
 - Filter nulls in the SQL. `electricity_price_eur_kwh` is null outside the
   EU/EEA and `life_expectancy` is sparse in early years — unfiltered they render
   as gaps or drag averages.

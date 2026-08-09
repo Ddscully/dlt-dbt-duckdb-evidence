@@ -44,6 +44,21 @@ LAKE_DIR = default_lake_dir()
 # above. It is also the one table here that *improves* the small-file arithmetic:
 # 381k rows over 28 partitions averages 13.6k rows each, against the archive's
 # current ~47 kB.
+#
+# `marts.fct_retail_order_line` is the first table here whose partitioning is
+# actually sensible, and it is the FX rates' reason again only more so: 1.07M
+# rows over three calendar years is **three** files of 13 MB, 12 MB and 836 kB,
+# against the CO2 archive's 275 files averaging 47 kB. It is 26 MB of a 62 MB
+# archive in three objects. Still short of the ~100 MB rule of thumb, but it is
+# the only table here where a year-partition and a query pattern want the same
+# thing — because the grain is a transaction and the partition is a year, so the
+# ratio is 350,000:1 rather than 150:1.
+#
+# It breaks the raw-first pattern again, for the same reason the FX rates do:
+# `raw.retail_invoice_lines` has no `year` column and the fact is the layer that
+# joins the calendar on. Partition on `year`, not on the `iso_year` sitting next
+# to it in the same table — see the note in the model for why that one is a trap
+# this dataset would not spring today.
 ARCHIVED_TABLES = (
     "raw.owid_co2",
     "raw.owid_energy",
@@ -51,6 +66,7 @@ ARCHIVED_TABLES = (
     "raw.eu_elec_prices",
     "marts.fct_emissions_energy",
     "marts.fct_fx_rates_daily",
+    "marts.fct_retail_order_line",
 )
 
 PARTITION_COLUMN = "year"
