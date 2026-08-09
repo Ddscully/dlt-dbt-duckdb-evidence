@@ -1,17 +1,17 @@
 ---
 title: Scope 2 Factors
 description: Grid emission factors packaged as a reference table, with the vintage, the lineage and a worked example of the disclosure line they feed.
+sidebar_position: 2
 ---
 
-Every other page here reads `carbon_intensity_elec_g_kwh` as a climate statistic.
-This one reads it as what it also is: the **location-based Scope 2 emission
-factor** under the GHG Protocol, the number a company multiplies its metered kWh
-by to produce the purchased-electricity line of a CSRD, SECR or CDP disclosure.
+The **location-based Scope 2 emission factor** under the GHG Protocol: the number
+a company multiplies its metered kWh by to produce the purchased-electricity line
+of a CSRD, SECR or CDP disclosure.
 
-Nothing new is computed. `marts.dim_grid_emission_factors` is the same series,
-packaged for that use: the factor in the unit meter data arrives in, the year it
-belongs to, how stale that year is, which extract it came out of, and whether it
-has been restated since this warehouse first recorded it.
+This page is that factor for every country, with the four things a reporter needs
+beside it — the unit meter data actually arrives in, the year it belongs to, how
+stale that year is, and whether it has been restated since it was first
+published.
 
 ```sql headline
 -- The double cast is not redundant. Evidence's DuckDB extractor writes every

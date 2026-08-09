@@ -24,25 +24,40 @@ version: 2
 # downstream of dbt and invisible to it, so no exposure can depend on
 # `co2_intensity`, `retail_rfm` or the three `pipeline_*` tables. That is why
 # `reports/pages/pipeline.md` has no exposure at all — every table it reads is a
-# Polars output — and why the Findings, Home and Retail exposures each name one
+# Polars output — and why the Findings, Countries and Retail exposures each name one
 # fewer dependency than their page actually has. The test asserts that remainder
 # is *exactly* `TABLE_TO_ASSET_KEY`, so the gap is measured rather than assumed.
+#
+# **Two pages have no exposure, for opposite reasons.** `pipeline.md` reads tables
+# dbt cannot name; `index.md` reads nothing at all. It is a routing page — prose
+# and links, no SQL — so there is no dependency to declare and no number on it
+# that can go stale. `tests/test_exposures.py` asserts both cases by name, so
+# either page growing a chart fails the test rather than silently losing its
+# lineage.
 #
 # `maturity:` is deliberately not set. Every page here deploys from the same
 # workflow on the same schedule, so a column of `high` would be decoration; the
 # one real distinction (the Scope 2 page's worked example is invented data) is
 # stated on the page and in the mart's description, where a reader will meet it.
 exposures:
-  # Named for the page file (`pages/index.md`), not for what the page is called,
-  # because the test maps `evidence_<slug>` to a slug mechanically.
-  - name: evidence_index
-    label: Dashboard — Home
+  # Named for the page file (`pages/countries.md`), not for what the page is
+  # called, because the test maps `evidence_<slug>` to a slug mechanically.
+  #
+  # The file is `countries.md` and not `explore.md` because **`explore` is a
+  # reserved Evidence route**: the template ships its own `pages/explore/` (the
+  # SQL console and schema browser) with no `+page.md`, so a page of that name is
+  # never copied in and the build dies on `/api/explore/evidencemeta.json` 500
+  # rather than on anything naming the page. `settings` and `api` are reserved
+  # the same way.
+  - name: evidence_countries
+    label: Dashboard — Country Explorer
     type: dashboard
-    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/countries/
     description: >
-      The site's front page: headline emissions, the decarbonisation ranking and
-      the European electricity price panel. Also reads `analytics.co2_intensity`,
-      which dbt does not build.
+      The self-serve country explorer: pick a year and every chart re-queries.
+      Headline emissions, the decarbonisation ranking and the European
+      electricity price panel. Also reads `analytics.co2_intensity`, which dbt
+      does not build.
     depends_on:
       - ref('fct_emissions_energy')
       - ref('fct_eu_electricity_prices_semiannual')
@@ -55,7 +70,7 @@ exposures:
     type: dashboard
     url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/findings/
     description: >
-      The seven findings, each ending in a decision. The most load-bearing page
+      The eight findings, each ending in a decision. The most load-bearing page
       on the site: every number in it is quoted in `README.md` and
       `docs/FOR_REVIEWERS.md`, so a change to `fct_emissions_energy` that moves
       one of them has to move the prose too. Also reads

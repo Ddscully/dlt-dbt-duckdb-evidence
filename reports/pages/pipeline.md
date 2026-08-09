@@ -1,11 +1,13 @@
 ---
 title: Pipeline
 description: The state of the pipeline that built this site, from load times to layer sizes and every dbt test.
+sidebar_position: 9
+sidebar_badge: Ops
 ---
 
-Every other page reports on the data. This one reports on the machinery: when
-each source last loaded, how many rows survived each layer, and the current state
-of all the tests.
+Operational state of the pipeline behind this site: when each source last loaded,
+how many rows survived each layer, and the current result of every data-quality
+test.
 
 ```sql test_summary
 select

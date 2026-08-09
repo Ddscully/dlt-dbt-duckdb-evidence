@@ -1,13 +1,16 @@
 ---
 title: Currency
 description: The ECB's daily euro reference rates, what the 30% of days with no rate cost you, and why the same electricity price rose 35% or 13.5% depending on which currency you counted in.
+sidebar_position: 4
 ---
 
-Every other source in this warehouse publishes once a year. The European Central
-Bank publishes euro reference rates every business day, so this is the first
-table here with a grain finer than a year. Three problems come with it that an
-annual warehouse never has to answer: the calendar has holes in it, a rate has a
-direction, and converting a flow works differently from converting a balance.
+A rate has a direction, the calendar has holes in it, and converting a flow works
+differently from converting a balance. Each of those three turns one underlying
+figure into a different reported number, and all three show up in the European
+Central Bank's daily euro reference rates.
+
+This is also the only source here that publishes every business day rather than
+once a year.
 
 ```sql coverage
 select

@@ -749,6 +749,14 @@ the point of the layer is that none of it is a comment.
     all** — every table it reads is a Polars output and `depends_on` cannot be
     empty. The test asserts that the remainder is *exactly* `TABLE_TO_ASSET_KEY`,
     so the gap is measured instead of forgotten.
+  - **Two pages have no exposure and the test names both, because the reasons are
+    opposite.** `pipeline.md` reads tables dbt cannot describe; `index.md` reads
+    nothing at all — it is a routing page, prose and links, with no SQL on it, so
+    there is no dependency to declare and no figure that can go stale by hand.
+    Through `page_models()` the two are indistinguishable (both an empty set), so
+    `test_the_pages_with_no_exposure_are_the_two_that_cannot_have_one` asserts the
+    *table* counts as well: `index` must read zero source queries and `pipeline`
+    must still read some. Put a chart on the front page and it fails.
   - **The release exposure names `stg_country`**, the one staging model in the
     list, because the release notes point a reader at `staging.stg_country` by
     name. The other seven staging views ship as Parquet too and nothing promises
@@ -1136,8 +1144,18 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 - **`site_pages_all_rendered` is blocking, and it checks file *size*.**
   `evidence build` exits 0 for a site missing a page, and nothing downstream reads
   `reports/build/` — so a route that emitted only the SvelteKit shell would
-  materialise green and deploy. The nine pages render at 19–83 kB; the floor is
-  8 kB.
+  materialise green and deploy. The ten pages render at 19–92 kB; the floor is
+  8 kB. The two smallest are the ones carrying the least SQL — the routing front
+  page (19 kB) and Restatements (20 kB) — so it is prose-only pages, not chart
+  pages, that would ever bring the floor into play.
+- **`explore`, `settings` and `api` are reserved route names.** Evidence's own
+  template ships `pages/explore/` (the SQL console and schema browser) and
+  `pages/settings/`, so a `reports/pages/explore.md` is silently *not* copied into
+  `.evidence/template/src/pages/` and the build dies on
+  `Internal Error /api/[...route]/evidencemeta.json … /api/explore/… status 500`
+  — a message that names neither the page nor the collision. `just report-clean`
+  does not help, because nothing is stale. The country explorer is
+  `pages/countries.md` for exactly this reason.
 - The `daily_refresh` schedule ships `STOPPED` on purpose — opening the UI
   shouldn't start hammering public APIs on a timer. It targets `full_refresh`, so
   it doesn't try to build the site either.

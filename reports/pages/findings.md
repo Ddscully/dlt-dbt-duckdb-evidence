@@ -1,18 +1,18 @@
 ---
-title: Seven Findings
-description: Seven patterns in the warehouse data on emissions, energy, growth and trade.
+title: Eight Findings
+description: Eight patterns in the warehouse data on emissions, energy, growth and trade.
+sidebar_position: 5
 ---
 
-Seven things that stood out when querying `marts.fct_emissions_energy` and
-`analytics.co2_intensity` directly. Every chart below is the query itself, re-run
-against the warehouse each time the site is built. For a year-by-year interactive
-view of the same tables, see [explore](/). Notes on method are at the
-[bottom of the page](#notes-on-method).
+Eight patterns in six decades of national emissions, energy and economic data.
+Each one closes with the decision it feeds, who makes that decision, and what it
+costs to get wrong — an observation nobody acts on isn't a finding, and three of
+these are inputs to numbers a company is legally required to publish.
 
-Each finding closes with a **So what** box: the decision it feeds, who makes that
-decision, and what it costs to get it wrong. An observation nobody acts on isn't
-a finding, and three of these are inputs to numbers a company is legally required
-to publish.
+Every chart is a live query rather than a pasted figure, so the numbers in the
+prose move when the data does. For a year-by-year interactive view of the same
+data see the [country explorer](/countries); notes on method are at the
+[bottom of the page](#notes-on-method).
 
 ```sql latest_years
 -- The latest year each metric family can populate, computed from coverage
@@ -724,7 +724,121 @@ hitting the KPI and missing the outcome, in public, for a decade.
 
 </Alert>
 
+## 8. The average grid is getting cleaner. The gap between grids is not.
+
+Every finding above is about direction — who fell, who rose, who decoupled. This
+one is about *spread*, and it points the other way.
+
+```sql grid_distribution
+-- A balanced panel: the same countries in every year from 2000 on, so the
+-- spread cannot move merely because the sample did. Without this the country
+-- count grows from 82 to 108 over the period and the widening below is partly
+-- new reporters arriving, which is not the same claim.
+--
+-- Grids above 10 TWh only. A 2 TWh grid's intensity swings on one plant opening.
+with eligible as (
+    select country_iso3
+    from warehouse.emissions_energy
+    where year between 2000 and (select elec_year from ${latest_years})
+      and carbon_intensity_elec_g_kwh is not null
+      and electricity_generation_twh > 10
+    group by 1
+    having count(*) = (select elec_year from ${latest_years}) - 1999
+)
+
+select
+    cast(cast(year as integer) as varchar)                as year_label,
+    quantile_cont(carbon_intensity_elec_g_kwh, 0.05)      as p5,
+    quantile_cont(carbon_intensity_elec_g_kwh, 0.25)      as p25,
+    quantile_cont(carbon_intensity_elec_g_kwh, 0.50)      as p50,
+    quantile_cont(carbon_intensity_elec_g_kwh, 0.75)      as p75,
+    quantile_cont(carbon_intensity_elec_g_kwh, 0.95)      as p95
+from warehouse.emissions_energy
+where country_iso3 in (select country_iso3 from eligible)
+  and year between 2000 and (select elec_year from ${latest_years})
+  and year % 4 = 0
+group by 1
+order by 1
+```
+
+<BoxPlot
+    data={grid_distribution}
+    name=year_label
+    min=p5
+    intervalBottom=p25
+    midpoint=p50
+    intervalTop=p75
+    max=p95
+    yAxisTitle="gCO₂ per kWh generated"
+    xAxisTitle="Year"
+/>
+
+Each box is the distribution of national grid carbon intensity across the same 80
+countries. The middle of it has moved a long way: the first quartile fell from
+347 to 199 gCO₂/kWh, a 43% improvement in twenty-four years. The two ends have
+barely moved at all. The cleanest 5% of grids were already near zero in 2000 and
+still are, and the dirtiest 5% have gone from about 807 to 722 — roughly a tenth.
+
+```sql grid_dispersion
+with eligible as (
+    select country_iso3
+    from warehouse.emissions_energy
+    where year between 2000 and (select elec_year from ${latest_years})
+      and carbon_intensity_elec_g_kwh is not null
+      and electricity_generation_twh > 10
+    group by 1
+    having count(*) = (select elec_year from ${latest_years}) - 1999
+)
+
+select
+    cast(cast(year as integer) as varchar) as year_label,
+    avg(carbon_intensity_elec_g_kwh)       as mean_ci,
+    quantile_cont(carbon_intensity_elec_g_kwh, 0.9)
+        - quantile_cont(carbon_intensity_elec_g_kwh, 0.1) as gap_p90_p10,
+    stddev_samp(carbon_intensity_elec_g_kwh)
+        / avg(carbon_intensity_elec_g_kwh) as spread_relative_to_mean
+from warehouse.emissions_energy
+where country_iso3 in (select country_iso3 from eligible)
+  and year in (2000, (select elec_year from ${latest_years}))
+group by 1
+order by 1
+```
+
+<DataTable data={grid_dispersion} rows=2 rowNumbers=false>
+    <Column id=year_label title="Year" align=left/>
+    <Column id=mean_ci title="Mean gCO₂/kWh" fmt="#,##0"/>
+    <Column id=gap_p90_p10 title="Cleanest-to-dirtiest gap" fmt="#,##0"/>
+    <Column id=spread_relative_to_mean title="Spread relative to mean" fmt="0.00"/>
+</DataTable>
+
+The average grid got **18% cleaner**. The gap between the cleanest and dirtiest
+grids closed by **8%**. Because the mean fell and the spread did not, the spread
+*relative* to the mean rose by 23% — the world's grids are further apart, in
+proportional terms, than when the period started. Neither reading is a
+start-and-end-point artefact: fitted across all twenty-five years, the fall in
+the mean and the rise in relative spread both carry p-values below 0.001.
+
+<Alert status=info>
+
+**So what.** A transition that improves every grid at roughly the same
+proportional rate leaves the ranking, and the penalty for being at the wrong end
+of it, intact. Anything priced off *where* electricity is consumed — the Scope 2
+line of a disclosure, the embedded carbon in an imported tonne, the siting of a
+plant — does not get cheaper to get wrong as the world decarbonises. On this
+trajectory a location premium is a permanent feature of the next two decades, not
+a transitional one.
+
+**Who acts:** whoever signs off site selection, long-term supply agreements or a
+decarbonisation roadmap that assumes convergence. **Cost of getting it wrong:**
+building a twenty-year plan on the expectation that the gap closes on its own.
+
+</Alert>
+
 ## Notes on method
+
+**Where the numbers come from.** Every chart on this page queries
+`marts.fct_emissions_energy` or `analytics.co2_intensity` directly, re-run
+against the warehouse each time the site is built.
 
 **Real terms, not nominal.** Anything measured over time divides by
 `gdp_constant_usd` (constant 2015 US dollars) rather than `gdp_usd`. Current

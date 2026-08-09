@@ -1,6 +1,7 @@
 ---
 title: CBAM Exposure
 description: What a tonne of an imported CBAM good costs at the EU border, by where it was made. Annex I's default values, priced at a carbon price you choose.
+sidebar_position: 1
 ---
 
 From 1 January 2026 an importer bringing cement, fertiliser, aluminium, hydrogen
@@ -139,6 +140,79 @@ the clean end are not the ones with clean grids. This is the opposite of the
 [Scope 2](/scope2) story, where the grid was the whole answer, and it is why a
 procurement team screening suppliers on country-level carbon data alone will pick
 the wrong lanes.
+
+</Alert>
+
+## Why the national grid barely enters the number
+
+The section above says the grid is not the story. This one says why, and the
+reason is not statistical — it is that the regulation mostly does not count
+electricity at all.
+
+```sql electricity_share
+select
+    product_group,
+    avg(direct_t_co2e_per_t)                                    as avg_direct,
+    avg(indirect_t_co2e_per_t)                                  as avg_indirect,
+    100.0 * sum(coalesce(indirect_t_co2e_per_t, 0))
+        / sum(total_t_co2e_per_t)                               as pct_electricity,
+    case
+        when count(indirect_t_co2e_per_t) = 0        then 'Not published'
+        when count(indirect_t_co2e_per_t) = count(*) then 'Every row'
+        else count(indirect_t_co2e_per_t)::varchar
+             || ' of ' || count(*)::varchar || ' rows'
+    end                                                         as indirect_coverage
+from warehouse.cbam_exposure
+where not is_fallback_table
+  and total_t_co2e_per_t > 0
+group by 1
+order by pct_electricity desc
+```
+
+```sql electricity_overall
+select
+    100.0 * sum(coalesce(indirect_t_co2e_per_t, 0))
+        / sum(total_t_co2e_per_t)  as pct_electricity_overall,
+    count(*)                       as n_rows
+from warehouse.cbam_exposure
+where not is_fallback_table
+  and total_t_co2e_per_t > 0
+```
+
+<Grid cols=2>
+    <BigValue data={electricity_overall} value=pct_electricity_overall fmt='0.0"%"' title="Electricity's share of all priced carbon"/>
+    <BigValue data={electricity_overall} value=n_rows fmt="#,##0" title="Country × good values priced"/>
+</Grid>
+
+<DataTable data={electricity_share} rows=5 rowNumbers=false>
+    <Column id=product_group title="Product group"/>
+    <Column id=avg_direct title="Direct tCO₂e/t" fmt='0.00'/>
+    <Column id=avg_indirect title="Indirect (electricity) tCO₂e/t" fmt='0.00'/>
+    <Column id=pct_electricity title="Electricity's share" fmt='0.0"%"'/>
+    <Column id=indirect_coverage title="Indirect value published for" align=left/>
+</DataTable>
+
+Indirect emissions — the carbon in the electricity the plant drew — are published
+only for **cement and fertilisers**. For aluminium and hydrogen the annex carries
+no indirect column at all, and for iron and steel it is present on 32 of 6,466
+rows. Even where it does count, it is small: 7.5% of a cement tonne and 5.5% of a
+fertiliser one. Across the whole annex, electricity is under **1%** of the carbon
+being priced.
+
+<Alert status=info>
+
+**So what.** A country's grid can be among the dirtiest in the world and barely
+move its CBAM bill, because the bill is overwhelmingly the carbon burned *in the
+process* — the coke in a blast furnace, the calcination of limestone — not the
+carbon behind the meter. That makes the weak correlation between a country's grid
+factor and its border cost a fact about the regulation rather than a quirk of
+this dataset, and it means the two carbon numbers this site publishes answer
+different questions and are not substitutes. A grid factor is the right input to
+a Scope 2 disclosure and the wrong input to a sourcing decision on steel.
+
+**Who acts:** whoever is building a supplier-screening or carbon-cost model.
+**Cost of getting it wrong:** ranking suppliers on grid data that the border cost
+is almost entirely insensitive to.
 
 </Alert>
 

@@ -1,6 +1,8 @@
 ---
 title: Restatements
 description: CO₂ estimates OWID has revised since this warehouse first loaded them.
+sidebar_position: 8
+sidebar_badge: Method
 ---
 
 Emissions data is not a fixed record. Countries resubmit inventories, OWID

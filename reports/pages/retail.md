@@ -1,19 +1,17 @@
 ---
 title: Retail Transactions
 description: One online retailer's order lines, at the finest grain in the warehouse and the only source here recording individual purchases rather than published statistics.
+sidebar_position: 3
 ---
 
-Every other page here is built on a country-year. National statistics arrive
-pre-aggregated: someone else has already decided what to count, and the work is
-joining their totals to other totals.
-[UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
-is the opposite. It is a UK gift wholesaler's raw transaction log, every line of
-every invoice over two years, with no cleaning applied by anyone.
+A UK gift wholesaler's complete transaction log: every line of every invoice over
+two years, with no cleaning applied by anyone
+([UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)).
 
-So the questions this page has to settle are the ones aggregation would normally
-have settled already: what counts as a return, which rows are revenue, and what
-to do about orders with nobody attached to them. Each has an answer that looks
-reasonable and produces the wrong number.
+Three questions have to be settled before a single figure can be reported — what
+counts as a return, which rows are revenue, and what to do about orders with
+nobody attached to them. Each has an answer that looks reasonable and produces
+the wrong number, and each one is worth six figures here.
 
 ```sql headline
 select * from warehouse.retail_headline
@@ -275,12 +273,110 @@ also left-censored, since December 2009 is the extract's opening month and its
 
 </Alert>
 
+## How concentrated the revenue is
+
+Before asking who the customers are, it is worth knowing how few of them carry
+the business.
+
+```sql concentration_curve
+-- Customers ranked by spend, then cumulative share of revenue at each percentile
+-- of the base. `ceil` rather than `round` so bucket X means "the top X%" exactly;
+-- rounding puts the first 29 customers in a bucket labelled 0.
+with ranked as (
+    select
+        monetary_gbp,
+        row_number() over (order by monetary_gbp desc)  as rn,
+        count(*) over ()                                as n_customers,
+        sum(monetary_gbp) over (
+            order by monetary_gbp desc rows unbounded preceding
+        )                                               as cumulative_gbp,
+        sum(monetary_gbp) over ()                       as total_gbp
+    from warehouse.retail_rfm
+    where monetary_gbp > 0
+),
+
+curve as (
+    select
+        ceil(100.0 * rn / n_customers)                  as pct_of_customers,
+        max(100.0 * cumulative_gbp / total_gbp)         as pct_of_revenue
+    from ranked
+    group by 1
+)
+
+select 0 as pct_of_customers, 0.0 as pct_of_revenue
+union all
+select * from curve
+order by 1
+```
+
+<LineChart
+    data={concentration_curve}
+    x=pct_of_customers
+    y=pct_of_revenue
+    yMin=0
+    yMax=100
+    echartsOptions={{xAxis: {min: 0, max: 100}}}
+    color="#2a78d6"
+    xAxisTitle="Share of customers, richest first (%)"
+    yAxisTitle="Share of revenue (%)"
+>
+    <ReferenceLine x=0 y=0 x2=100 y2=100 label="If every customer spent the same" lineType=dashed/>
+</LineChart>
+
+```sql concentration_stats
+with ranked as (
+    select
+        row_number() over (order by monetary_gbp desc)  as rn,
+        count(*) over ()                                as n,
+        sum(monetary_gbp) over (
+            order by monetary_gbp desc rows unbounded preceding
+        )                                               as cum,
+        sum(monetary_gbp) over ()                       as tot
+    from warehouse.retail_rfm
+    where monetary_gbp > 0
+)
+
+select
+    max(n)                                                  as n_customers,
+    100.0 * max(case when rn <= n * 0.01 then cum end) / max(tot) as top_1,
+    100.0 * max(case when rn <= n * 0.05 then cum end) / max(tot) as top_5,
+    100.0 * max(case when rn <= n * 0.20 then cum end) / max(tot) as top_20
+from ranked
+```
+
+<Grid cols=3>
+    <BigValue data={concentration_stats} value=top_1 fmt='0.0"%"' title="Revenue from the top 1% of customers"/>
+    <BigValue data={concentration_stats} value=top_5 fmt='0.0"%"' title="…from the top 5%"/>
+    <BigValue data={concentration_stats} value=top_20 fmt='0.0"%"' title="…from the top 20%"/>
+</Grid>
+
+The distance between the curve and the dashed line is the whole point. The classic
+Pareto shorthand is 80/20; this business is steeper than that, at roughly 77/20 —
+and far steeper still at the very top.
+
+Fifty-eight customers out of <Value data={concentration_stats} column=n_customers fmt="#,##0"/> account for just under a third of everything sold, and the bottom half of the base accounts for the last 6.6%.
+
+<Alert status=info>
+
+**So what.** Concentration this steep changes what a retention number is worth.
+A campaign that lifts overall repeat rate by two points but misses the top
+percentile has moved almost nothing; losing nine of those 58 customers costs more
+than losing the bottom 2,900. It also sets the reporting grain: an average order
+value or a blended churn rate over 5,835 customers is dominated by people who
+contribute a rounding error, which is the argument for the segmentation below
+rather than a single headline metric.
+
+**Who acts:** whoever owns account management and the retention budget.
+**Cost of getting it wrong:** spreading spend evenly across a base where the top
+1% is worth more than the bottom half combined.
+
+</Alert>
+
 ## Which customers are worth what
 
 [RFM](https://en.wikipedia.org/wiki/RFM_(market_research)) scores every customer
-1–5 on how recently they bought, how often, and how much. It is also the one
-place in this project where the Polars layer does something SQL's obvious
-equivalent gets wrong.
+1–5 on how recently they bought, how often, and how much — turning the
+concentration above into groups you can act on differently.
 
 ```sql segments
 select

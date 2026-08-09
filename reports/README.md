@@ -147,6 +147,39 @@ a family to `latest_years.sql` if the existing ones don't fit.
 Add a `.md` file per page; each runs SQL against the `warehouse` source and
 renders charts. See the [Evidence docs](https://docs.evidence.dev) for components.
 
+Sidebar order comes from a numeric `sidebar_position` in the frontmatter; pages
+carrying one sort ahead of every page without one, and ties fall back to the
+*filename*, not the title. `sidebar_badge: <text>` puts a badge beside the label
+(used here to mark the method and ops pages as skippable). There is no
+`sidebar_label` in this version — the nav label is the `title`, and the anchors
+carry `capitalize`, so a title with a lowercase preposition renders title-cased.
+
+## Reserved page names
+
+**`explore`, `settings` and `api` are taken.** Evidence's template ships its own
+`pages/explore/` (the SQL console and schema browser) and `pages/settings/`, so a
+page you name `explore.md` is never copied into `.evidence/template/src/pages/`.
+The build then fails on:
+
+```
+[ERROR]: Internal Error | /api/[...route]/evidencemeta.json
+  url: 'http://sveltekit-prerender/api/explore/evidencemeta.json', status: 500
+```
+
+which names neither your page nor the collision, and `just report-clean` does not
+help because nothing is stale. Rename the page. The country explorer here is
+`pages/countries.md` for this reason.
+
+## `<BoxPlot color=…>` does the opposite of what it looks like
+
+Passing `color` to a `BoxPlot` **rainbow-colours every box** instead of setting
+one colour. `Box.svelte` reads `colorBy: $colorStore ? 'data' : 'series'`, so
+supplying a colour switches ECharts to per-*item* colouring and each category
+takes the next palette entry — which on a time axis implies the years encode
+something. **Omit `color` entirely** to get a single themed box, which is almost
+always what you want. This is the reverse of `LineChart` and `BarChart`, where
+`color` sets one series colour as expected.
+
 ## Reserved column names in charts
 
 **Never name a charted column `tests` or `rows`.** They collide with Evidence's

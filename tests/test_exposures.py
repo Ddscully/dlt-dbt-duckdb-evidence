@@ -72,17 +72,28 @@ def test_each_page_exposure_names_exactly_what_its_charts_read():
     assert declared == expected
 
 
-def test_the_page_with_no_exposure_is_the_one_dbt_cannot_describe():
-    """`pipeline.md` has no exposure, and that is a fact about dbt, not an omission.
+def test_the_pages_with_no_exposure_are_the_two_that_cannot_have_one():
+    """Two pages carry no exposure, for opposite reasons, and both are asserted.
 
-    Every table it reads (`analytics.pipeline_sources`, `_tables`, `_tests`) is
-    written by Polars, downstream of dbt and unknown to it, so there is nothing an
-    exposure could depend on — `depends_on` is required and cannot be empty. If a
-    future version of that page reads a mart, this test fails and the exposure has
-    to be written.
+    `pipeline.md` reads three tables (`analytics.pipeline_sources`, `_tables`,
+    `_tests`), every one written by Polars, downstream of dbt and unknown to it —
+    so there is nothing an exposure could depend on and `depends_on` cannot be
+    empty. `index.md` reads *no* tables: it is a routing page, prose and links
+    only, which is also why no figure on it can go stale by hand.
+
+    Telling the two apart is the point. Both look identical through
+    `page_models()` — an empty set — but only one of them would still be correct
+    after growing a chart on a mart. The table counts below are what separate
+    "dbt cannot describe this" from "there is nothing here to describe".
     """
+    tables = build_report.page_tables()
     pages_without_models = {page for page, models in page_models().items() if not models}
-    assert pages_without_models == {"pipeline"}
+    assert pages_without_models == {"index", "pipeline"}
+
+    assert tables["index"] == set(), "the routing page grew a query; give it an exposure"
+    assert tables["pipeline"], "pipeline.md should still read the Polars tables"
+
+    assert "evidence_index" not in exposures()
     assert "evidence_pipeline" not in exposures()
 
 
