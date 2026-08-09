@@ -4,19 +4,31 @@
 
 ### 📊 [**See the live dashboard →**](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-A data pipeline that answers one question: **how does a country's energy mix
-relate to its emissions and its people's wellbeing?**
+A data pipeline that turns five public feeds into figures organisations are
+required to act on: **the grid carbon intensity that sits behind every company's
+Scope 2 disclosure** (30 g/kWh in Norway against 717 in South Africa — a 24×
+spread on the same kilowatt-hour), **what electricity actually costs in each EU
+market**, and **which sourcing countries are getting cleaner rather than
+dirtier**.
 
-It pulls CO₂, energy and development figures for ~200 countries from
+Underneath that it answers the question the data was assembled for: **how does a
+country's energy mix relate to its emissions and its people's wellbeing?** It
+pulls CO₂, energy and development figures for ~200 countries from
 [Our World in Data](https://github.com/owid/co2-data), the
 [World Bank](https://databank.worldbank.org/source/world-development-indicators)
 and [Eurostat](https://ec.europa.eu/eurostat), cleans and joins them, derives a
-few metrics, and publishes the charts. No numbers are exported by hand: the
-whole thing rebuilds itself from the live sources on every push, so the site is
-never more than a week behind what those organisations publish.
+few metrics, and publishes the charts. Every finding on the site names the
+decision it feeds, who makes that decision, and what it costs to get wrong.
+
+No numbers are exported by hand: the whole thing rebuilds itself from the live
+sources on every push, so the site is never more than a week behind what those
+organisations publish.
 
 <sub>Nothing to install to look at the numbers, just follow the link. The rest
-of this README is for people who want to run or read the pipeline.</sub>
+of this README is for people who want to run or read the pipeline — and if
+you're evaluating it as work, [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md)
+is the short version: the SLA, what a run costs, what breaks at 1000×, and what
+I'd do differently.</sub>
 
 ---
 

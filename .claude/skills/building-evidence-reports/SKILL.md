@@ -80,6 +80,22 @@ where year = ${inputs.year.value}
   raw fragment. `<Value data={q} column=year/>` is *not* a substitute — it shows
   the first row of that query, not the selection, so it silently disagrees with
   the charts as soon as the user picks another year.
+- **`<Alert>` needs blank lines around its content.** It's the callout component
+  (`findings.md` uses it for the "So what" boxes) and takes
+  `status="base|info|positive|warning|negative"` — the older `default`/`danger`/
+  `success` spellings still render but log a deprecation warning. Written tight
+  against the tags, the markdown inside comes out literal (`**text**`):
+
+  ````markdown
+  <Alert status=info>
+
+  **So what.** Body text, which may span paragraphs.
+
+  </Alert>
+  ````
+
+  It isn't in the components list most Evidence docs pages show; the exhaustive
+  answer is `ls reports/node_modules/@evidence-dev/core-components/dist/{atoms,molecules,organisms,unsorted/ui}`.
 - **`<Dropdown defaultValue>` must be braced if the values are numbers.**
   `defaultValue=2024` is the *string* `"2024"`; DuckDB hands the options back as
   doubles (`2024.0`), the strict-equality match fails, and no option is selected.
@@ -107,7 +123,9 @@ just report-clean
 grep -oiE '(could not|error|does not exist|no such|binder error|catalog error)[^<]{0,60}' reports/build/index.html
 ```
 
-Empty output means clean. Then confirm the numbers look sane — a formatting bug
+Empty output means clean — but **`error: null` is a false positive on every
+page**, including ones you didn't touch: it's a field in SvelteKit's embedded
+data payload. Diff against a page you didn't change before believing any hit. Then confirm the numbers look sane — a formatting bug
 shows up as absurd percentages:
 
 ```bash

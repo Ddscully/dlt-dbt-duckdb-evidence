@@ -9,6 +9,11 @@ against the warehouse each time the site is built. For a year-by-year interactiv
 view of the same tables, see [explore](/). Notes on method are at the
 [bottom of the page](#notes-on-method).
 
+Each finding closes with a **So what** box: the decision it feeds, who makes that
+decision, and what it costs to get it wrong. An observation nobody acts on isn't
+a finding, and three of these are inputs to numbers a company is legally required
+to publish.
+
 ```sql latest_years
 -- The latest year each metric family can populate, computed from coverage
 -- rather than assumed. See sources/warehouse/latest_years.sql for why they
@@ -153,6 +158,20 @@ order by mt_latest desc
     <Column id=pct_from_peak title="vs peak" fmt='0.0"%"' contentType=delta/>
 </DataTable>
 
+<Alert status=info>
+
+**So what.** A sourcing country's peak year and its distance from that peak is
+its direction of travel, and any supply agreement longer than a few years is a
+bet on that direction. The large emitters that haven't peaked at all account for
+about **half of world emissions** — so "everywhere is decarbonising" is not a
+safe default about the specific country you buy from.
+
+**Who acts:** procurement and site selection. **Cost of getting it wrong:** an
+energy- or carbon-linked cost line that rises across the life of a contract
+priced on the assumption it would fall.
+
+</Alert>
+
 ## 2. Electricity is where the cleanup happened, and coal is most of it
 
 Carbon intensity of electricity is the most legible decarbonisation number there
@@ -252,6 +271,22 @@ decarbonisation that has gone well, not the whole of it.
     <Column id=low_carbon_latest title="Low-carbon now %" fmt="0"/>
 </DataTable>
 
+<Alert status=info>
+
+**So what.** `carbon_intensity_elec_g_kwh` is not only a climate statistic — it
+is the **location-based Scope 2 emission factor**, the number a multi-site
+company multiplies its metered kWh by to produce the electricity line in a CSRD,
+SECR or CDP disclosure. Across the largest grids in the table above it runs from
+Norway at 30 g/kWh to South Africa at 717 g/kWh, a **24× spread**: an identical
+100 GWh/year site reports roughly 3 kt CO₂e in one and 72 kt in the other, having
+changed nothing but its address.
+
+**Who acts:** sustainability reporting, and site selection long before them.
+**Cost of getting it wrong:** a site chosen on power price alone that adds tens
+of kilotonnes to a group total nobody re-forecast — under CSRD, an audited one.
+
+</Alert>
+
 ## 3. Decoupling is real, on a real-terms basis
 
 Change in emissions against change in inflation-adjusted GDP since 2005.
@@ -315,6 +350,22 @@ emissions 20%; the UK grew 26% and cut 46%.
 The standing objection to any chart like this is that production moved offshore,
 so the cut is an accounting artifact of where the factory sits. That is a
 testable claim, and the next finding tests it.
+
+<Alert status=info>
+
+**So what.** This is the national-scale evidence that "grow and cut" is
+achievable, and it is the same choice a company makes when it sets a target: the
+US grew 42% in real terms while cutting 20%, the UK grew 26% and cut 46%. An
+absolute reduction target is credible alongside a growth plan — but only where
+the intensity improvement outruns the growth, and finding 7 shows that isn't
+automatic.
+
+**Who acts:** whoever signs the target, which in practice is the CFO rather than
+the sustainability team. **Cost of getting it wrong:** committing publicly to an
+absolute cut the growth plan makes arithmetically impossible, and restating it
+two years later.
+
+</Alert>
 
 ## 4. …and it isn't only offshoring
 
@@ -397,6 +448,20 @@ customers, are behind the increase.
     <Column id=co2_mt title="Latest (Mt)" fmt="#,##0"/>
 </DataTable>
 
+<Alert status=info>
+
+**So what.** Anyone reporting a supply-chain (Scope 3) reduction should expect
+the question *did it fall, or did it move?* — and this is the size of that doubt
+at national scale: roughly **a fifth to a third** of Europe's headline cut is
+trade moving rather than emissions ending. The useful part is that it's a
+subtraction, so the question can be answered rather than caveated.
+
+**Who acts:** sustainability reporting and external assurance. **Cost of getting
+it wrong:** a claimed reduction that an auditor — or a journalist — reclassifies
+as an outsourcing decision.
+
+</Alert>
+
 ## 5. Emissions track income, not headcount
 
 ```sql income_split
@@ -477,6 +542,21 @@ order by t_per_person desc
     <Column id=t_per_person title="t CO₂ / person" fmt="0.00"/>
 </DataTable>
 
+<Alert status=info>
+
+**So what.** Demand for anything that abates carbon — equipment, retrofits,
+compliance software — sits where the carbon is, and that is not where the people
+are. Upper-middle-income countries are 38% of the world's population and **half**
+of its emissions; low-income countries are 9% of people and 0.6%. The two
+distributions are different enough that they give different answers to "where
+should we sell this".
+
+**Who acts:** strategy and market entry. **Cost of getting it wrong:** a
+go-to-market plan sized on population, aimed at a segment with almost nothing to
+abate.
+
+</Alert>
+
 ## 6. Who caused it and who is causing it are different lists
 
 CO₂ accumulates, so a country's share of the *stock* in the atmosphere and its
@@ -537,6 +617,20 @@ the flow; this is the stock.
     <Column id=cumulative_share title="Share of stock" fmt='0.0"%"'/>
     <Column id=current_share title="Share of flow" fmt='0.0"%"'/>
 </DataTable>
+
+<Alert status=info>
+
+**So what.** Two defensible metrics, one table, opposite rankings — the US leads
+on the stock, China on the flow, and each is correct for the question it answers.
+Every ranked KPI has this property. The decision isn't which number is right, it's
+which definition goes into the target and gets reused: defined once in the
+warehouse, not re-derived in each dashboard query by whoever wrote it.
+
+**Who acts:** whoever owns metric definitions. **Cost of getting it wrong:** two
+teams presenting different leaders from the same warehouse in the same meeting,
+with neither of them wrong.
+
+</Alert>
 
 ## 7. Cleaner per dollar, not fewer tonnes
 
@@ -614,6 +708,21 @@ order by co2_change_mt desc
     <Column id=intensity_change_pct title="Carbon intensity" fmt='0.0"%"' contentType=delta downIsGood=true/>
     <Column id=renewables_change_pct title="Renewables share" fmt='0.0"%"' contentType=delta/>
 </DataTable>
+
+<Alert status=info>
+
+**So what.** This is the intensity-target versus absolute-target choice, and the
+chart is six countries hitting one while missing the other. China cut carbon
+intensity 47% since 2005 and still raised tonnage, because GDP grew faster than
+intensity fell. An intensity target is fully compatible with rising emissions —
+which is why most corporate target-setting frameworks require an absolute one,
+and why an organisation can report a KPI improving every year while its actual
+footprint grows.
+
+**Who acts:** whoever sets and reports the target. **Cost of getting it wrong:**
+hitting the KPI and missing the outcome, in public, for a decade.
+
+</Alert>
 
 ## Notes on method
 
