@@ -669,4 +669,8 @@ uv run python -c "import duckdb; \
 ## Session history
 
 Exported Claude Code session logs live in `docs/sessions/` — see the README
-there. They're checked into git as a running project history.
+there. The directory is **gitignored**: transcripts are a local working record,
+not project history, and leaving them untracked inside a tracked directory meant
+a `git add -A` could commit scratch notes. Anything learned in a session that
+should outlive it goes in this file, not in a transcript. (Three files predate
+the rule and are still tracked; `git add -f` for anything new.)

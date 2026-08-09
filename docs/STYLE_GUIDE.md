@@ -92,8 +92,7 @@ then `-- emissions`, `-- energy`, `-- economic / social (World Bank WDI)`.
   column whose coverage is partial. `electricity_price_eur_kwh` being null
   outside the EU/EEA is the kind of thing that has to be written down.
 - **[convention]** Test the grain contract, not everything: `not_null` on the
-  join keys, and a uniqueness test on `(country_iso3, year)`. See
-  [`IDEAS.md`](./IDEAS.md) idea 2 for the tests still missing.
+  join keys, and a uniqueness test on `(country_iso3, year)`.
 - **[convention]** Prefer a smaller number of high-value tests over exhaustive
   coverage. A failing test nobody acts on is worse than no test.
 
