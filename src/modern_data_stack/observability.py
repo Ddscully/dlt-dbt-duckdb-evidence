@@ -214,6 +214,21 @@ def build_tests(
         ).fetchall()
     ]
     catalogue = manifest_tests(manifest_path)
+    if catalogue:
+        # A table the manifest does not name is stale: dbt writes the audit
+        # schema on every build, but it never *removes* a table whose test has
+        # gone. Renaming a model orphans every audit table attached to it,
+        # because the alias hash is over the test's arguments — renaming
+        # `fct_emissions_energy` to `_v2` for the versioned model left 17
+        # `dbt_utils_accepted_range_fct_e_<hash>` tables behind, which are empty
+        # and so scored as passing, inflating the test count by 17 and showing
+        # with no model attached.
+        #
+        # Keyed on the manifest being *present*, not on the match itself: with no
+        # manifest nothing matches, and dropping everything would empty the table
+        # instead of degrading to bare names. `pipeline_status` runs after
+        # `dbt build`, so a loaded manifest is current by construction.
+        audit_tables = [table for table in audit_tables if table in catalogue]
 
     rows = []
     for table in audit_tables:

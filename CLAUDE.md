@@ -811,6 +811,24 @@ leave the other free to land after the inventory meant to count it.
   label. The manifest also supplies the model each test guards and the column it
   tests. It's gitignored, so `build_tests` degrades to bare table names when it's
   absent rather than failing.
+- **A test's verdict is its `fail_calc`, not `count(*)` over the audit table.**
+  `count(*)` is only dbt's *default*. `dbt_utils.equal_rowcount` overrides it with
+  `sum(coalesce(diff_count, 0))` and returns a one-row summary whether it passed
+  or failed, so counting rows scored both `equal_rowcount` guards (on
+  `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
+  against a build that finished ERROR=0 — the health page contradicting the
+  build. `build_tests` reads `fail_calc` from the manifest and applies it, which
+  is what dbt does; 351 of the 354 tests use the default. `severity` comes across
+  the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
+- **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
+  that schema every build but never *removes* a table whose test is gone, and the
+  alias hash is over the test's arguments — so renaming a model orphans every
+  audit table on it. Versioning `fct_emissions_energy` to `_v2` left 17
+  `dbt_utils_accepted_range_fct_e_<hash>` tables behind; being empty they scored
+  as passing and inflated the count to 371 against dbt's 354. The filter is keyed
+  on the manifest being *present*, not on the match: with no manifest nothing
+  matches and dropping everything would empty the table rather than degrade to
+  bare names.
 - **It excludes its own output from the inventory.** Otherwise the table count
   jumps by three on every build after the first, for no change in the warehouse
   (30 tables today, not 33).

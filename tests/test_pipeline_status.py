@@ -65,27 +65,32 @@ def _one_source_table(monkeypatch):
     monkeypatch.setattr(pipeline_status, "LAYERS", ("marts",))
 
 
+def _range_node():
+    return {
+        "resource_type": "test",
+        "name": "dbt_utils_accepted_range_fct_emissions_energy_co2_mt__0",
+        "alias": "dbt_utils_accepted_range_fct_e_abc123",
+        "attached_node": "model.demo.fct_emissions_energy",
+        "test_metadata": {"name": "accepted_range", "kwargs": {"column_name": "co2_mt"}},
+    }
+
+
+def _not_null_node():
+    return {
+        "resource_type": "test",
+        "name": "not_null_fct_emissions_energy_co2_mt",
+        "alias": "not_null_fct_emissions_energy_co2_mt",
+        "attached_node": "model.demo.fct_emissions_energy",
+        "test_metadata": {"name": "not_null", "kwargs": {"column_name": "co2_mt"}},
+    }
+
+
 @pytest.fixture
 def manifest(tmp_path):
-    """A manifest naming one of the two audit tables, to exercise both paths."""
+    """A manifest naming both audit tables — i.e. neither of them is stale."""
     path = tmp_path / "manifest.json"
     path.write_text(
-        json.dumps(
-            {
-                "nodes": {
-                    "test.demo.range": {
-                        "resource_type": "test",
-                        "name": "dbt_utils_accepted_range_fct_emissions_energy_co2_mt__0",
-                        "alias": "dbt_utils_accepted_range_fct_e_abc123",
-                        "attached_node": "model.demo.fct_emissions_energy",
-                        "test_metadata": {
-                            "name": "accepted_range",
-                            "kwargs": {"column_name": "co2_mt"},
-                        },
-                    }
-                }
-            }
-        )
+        json.dumps({"nodes": {"test.demo.range": _range_node(), "test.demo.nn": _not_null_node()}})
     )
     return path
 
@@ -158,6 +163,29 @@ def test_tests_split_pass_from_fail(warehouse, manifest):
     assert failing["tested_model"] == "fct_emissions_energy"
     assert failing["tested_column"] == "co2_mt"
     assert failing["audit_table"].startswith("dbt_test__audit.")
+
+
+def test_an_audit_table_the_manifest_does_not_name_is_dropped_as_stale(warehouse, tmp_path):
+    """dbt writes the audit schema every build but never removes a dead table.
+
+    Renaming a model orphans every audit table attached to it, because the alias
+    hash is over the test's arguments — versioning `fct_emissions_energy` to
+    `_v2` left 17 `dbt_utils_accepted_range_fct_e_<hash>` tables behind. They are
+    empty, so they scored as passing and silently inflated the test count while
+    showing no model.
+    """
+    path = tmp_path / "partial.json"
+    path.write_text(json.dumps({"nodes": {"test.demo.range": _range_node()}}))
+
+    con = duckdb.connect(str(warehouse), read_only=True)
+    try:
+        frame = observability.build_tests(con, str(path))
+    finally:
+        con.close()
+
+    # The `not_null` audit table exists in the warehouse but not in the manifest.
+    assert frame.height == 1
+    assert frame.to_dicts()[0]["tested_model"] == "fct_emissions_energy"
 
 
 def _equal_rowcount_case(tmp_path, diff_count):
