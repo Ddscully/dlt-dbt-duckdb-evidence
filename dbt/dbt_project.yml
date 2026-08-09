@@ -9,6 +9,19 @@ seed-paths: ["seeds"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
+vars:
+  # The EU ETS spot price an importer will pay per CBAM certificate. It is a
+  # *parameter*, not a measurement: there is no clean free API for EUA spot (ICAP's
+  # allowance price explorer is the usual public reference), and a hardcoded number
+  # would go stale silently inside a euro figure. EUAs traded around EUR 72/t in
+  # April 2026 on a EUR 60-95 range across 2025-26, and the Commission's own
+  # industrial decarbonisation fund was costed at EUR 75/t, so that is the default.
+  #
+  # Override per run — `dbt build --vars '{eu_ets_price_eur_per_t: 100}'` — and note
+  # that `fct_cbam_exposure` also ships the tonnage, so the Evidence page derives its
+  # whole sensitivity band from one build rather than needing one build per price.
+  eu_ets_price_eur_per_t: 75
+
 models:
   modern_data_stack:
     staging:
@@ -17,6 +30,21 @@ models:
     marts:
       +materialized: table
       +schema: marts
+
+seeds:
+  modern_data_stack:
+    cbam_default_values:
+      +column_types:
+        # Without this the fallback table's blank ISO3 column infers as a type
+        # DuckDB then refuses to join to `country_iso3` elsewhere.
+        country_iso3: varchar
+    cbam_goods:
+      +column_types:
+        # "7601" is a CN code, not a number. Left to inference it lands as BIGINT,
+        # loses the leading structure of the 4/6/8-digit forms, and stops joining
+        # to the values seed's varchar key. Same lesson as dlt's type inference on
+        # `wb_wdi`, one layer down.
+        cn_code: varchar
 
 snapshots:
   modern_data_stack:

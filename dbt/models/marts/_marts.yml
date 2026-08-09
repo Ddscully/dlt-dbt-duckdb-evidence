@@ -463,3 +463,112 @@ models:
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
+
+  - name: fct_cbam_exposure
+    description: >
+      What a tonne of an imported CBAM good costs at the EU border, by where it
+      was made: Annex I's default values resolved against the annex's own
+      fallback rule, marked up on the statutory schedule, and multiplied by an
+      EU ETS price.
+
+      Grain: one row per (country or territory listed in the annex, good) —
+      12,532 rows over 119 countries and 287 goods. Countries the annex does not
+      list are deliberately absent: the regulation sends every one of them to the
+      same "other countries and territories" table, so ranking them against each
+      other would be ranking a hundred copies of one number. That table is here
+      as its own row, flagged `is_fallback_table`.
+
+      **The carbon price is a parameter, not a measurement.** There is no clean
+      free API for EUA spot, so `eu_ets_price_eur_per_t` is a dbt var (EUR 75)
+      and the tonnage columns ship beside the euro columns so a consumer can
+      re-price without a rebuild. `reports/pages/cbam.md` draws the EUR 60-120
+      sensitivity straight off them.
+
+      **A screening tool, not a filing.** These are administrative values with a
+      mark-up designed to be worse than reality, so that going and getting
+      verified supplier data pays. What this ranks is which sourcing lanes are
+      worth that effort — not what any particular importer will owe.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_or_territory, good_key]
+    columns:
+      - name: country_or_territory
+        data_tests: [not_null]
+      - name: country_iso3
+        description: >
+          Null only for the fallback table's own row. Not tested against the
+          country dimension: the annex lists Taiwan and Kosovo, and the join to
+          `stg_country` is a left join so a territory the World Bank does not
+          carry keeps its default values rather than vanishing.
+      - name: good_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('cbam_goods')
+                field: good_key
+      - name: product_group
+        data_tests: [not_null]
+      - name: is_country_specific
+        description: >
+          False where the annex prints "-" for this country and good and the
+          value below came from the fallback table. 1,601 of 12,532 rows — one in
+          eight — so a model that only handled *unlisted* countries would leave
+          that many rows with a null cost.
+        data_tests: [not_null]
+      - name: total_t_co2e_per_t
+        description: Embedded emissions per tonne of good, before the mark-up.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: certificates_2026_t_co2e_per_t
+        description: >
+          Certificates surrendered per tonne, i.e. after the mark-up. Not null
+          anywhere: every row either carries a country-specific value or resolves
+          to the fallback, and this test is what proves the fallback join covers
+          the annex.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: markup_2026_pct
+        description: >
+          Derived from the published values, not asserted. Fertilisers carry 1%
+          in all three years where every other group carries 10 / 20 / 30% — 2,416
+          rows, consistent across every country, so it reads as intended. A model
+          that hardcoded 10/20/30 would overstate every fertiliser line by nine
+          points in 2026 and twenty-seven in 2028.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 31}
+      - name: markup_schedule_is_irregular
+        description: >
+          Five cement rows (Angola grey clinker / grey Portland / grey hydraulic,
+          Argentina grey clinker / grey Portland) compound the mark-up — x1.1,
+          x1.21, x1.331 — where every other row adds it. Flagged, not corrected:
+          the annex is the legal instrument and this model does not overrule it.
+      - name: cbam_cost_2026_eur_per_t
+        description: Certificates x `eu_ets_price_eur_per_t`, EUR per tonne of good.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: excess_over_cleanest_source_t_co2e_per_t
+        description: >
+          This country's 2026 certificates per tonne minus the cheapest listed
+          source of the same good. The procurement number: the same tonne of steel
+          carries a different border cost depending only on which country smelted
+          it.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: grid_factor_t_co2_per_mwh
+        description: >
+          The country's latest OWID grid emission factor, as context for the
+          indirect column. **Not the factor the annex used** — the annex's
+          indirect values come from IEA data under a non-commercial licence this
+          project does not redistribute. Sitting beside, not reconciled against.
+      - name: source_instrument
+        data_tests: [not_null]

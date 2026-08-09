@@ -57,7 +57,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (12 models, 2 snapshots, 2 seeds + 148 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (13 models, 2 snapshots, 4 seeds + 176 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -204,9 +204,10 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
   `fct_emissions_energy` (the wide join, built on the spine),
   `dim_grid_emission_factors` (the Scope 2 reference product),
   `fct_co2_estimate_versions` (revision history, off the snapshot),
-  `fct_eu_electricity_prices_semiannual` (Eurostat's own half-year grain) and
+  `fct_eu_electricity_prices_semiannual` (Eurostat's own half-year grain),
   `fct_example_scope2_emissions` (the worked example — **the only fabricated
-  data in the warehouse**)
+  data in the warehouse**) and `fct_cbam_exposure` (the CBAM border cost, at
+  `(sourcing country, good)` and **no year at all**)
 - `history` — the dbt snapshots `snap_co2_estimates` (SCD2 versions of OWID's CO2
   numbers) and `snap_grid_emission_factors` (the same for the Scope 2 factors,
   2015+). **The two tables here that no rebuild can reproduce** — see below
@@ -344,6 +345,84 @@ packaging.
 - The page quotes a 57x spread across grids above 10 TWh where `findings.md`
   quotes 24x above 150 TWh. Both are correct and the page says why — if one
   moves, check the other.
+
+## CBAM exposure (`fct_cbam_exposure`, the `cbam_*` seeds, `reports/pages/cbam.md`)
+
+Annex I of Implementing Regulation (EU) 2025/2621 — the country x good default
+values an importer uses from 2026 when they have no verified supplier data —
+transcribed into two seeds and multiplied by a carbon price. 11,657 rows over 119
+countries and 264 goods. The only model here with **no year in its grain**: it is
+a regulatory schedule, not a time series.
+
+- **A seed, not a dlt resource, and that is the interesting decision.**
+  Regulatory reference data is versioned by *amendment*, not by scrape; there is
+  no API, and the values change when a new implementing regulation says so.
+  `scripts/build_cbam_seeds.py` regenerates both seeds from the Commission's
+  published workbook, so the next amendment is a re-run and a reviewable diff
+  rather than a re-transcription. `country_overrides.csv` is the precedent.
+- **Two seeds because normalising the goods out is worth 1.6 MB.** 12,532 value
+  rows share 287 (product group, CN code, description) triples and one
+  description runs to 250 characters. `cbam_goods` is 38 kB; inlined it would be
+  1.6 MB of CSV and the same again in the warehouse.
+- **A CN code is not a key.** 2523 10 00 is both white clinker and grey clinker
+  and their values differ by more than 2x, so the grain is (CN code, description)
+  and `good_key` is a slug of the pair — readable in a diff, and stable across an
+  amendment in a way a renumbered surrogate would not be.
+- **The transcription is faithful, defects included, and the mart is where they
+  are handled.** The annex is a legal instrument; cleaning it in the seed would
+  put this project's judgement between the regulation and a euro figure. Four
+  quirks, all verified as present in the OJ text and not introduced here:
+  - Albania's white Portland cement is published with `-` for direct, indirect
+    and total and its three values sitting in the *mark-up* columns instead. The
+    extractor reads the mark-up columns only when a total is present, which lands
+    the row on the annex's own "field shows `-` → use the fallback" rule.
+  - Five cement rows (Angola, Argentina) **compound** the mark-up — x1.1, x1.21,
+    x1.331 — where the other 10,926 add it. Flagged (`markup_schedule_is_irregular`),
+    never corrected.
+  - Chile's line pipe has a total and a blank 2026 cell. This is what proves the
+    fallback is a **row-level rule, not a column-level one**: a per-column
+    `coalesce` paired Chile's tonnage with the *fallback's* mark-up and produced a
+    100% implied rate — a row that exists nowhere in the regulation.
+  - 23 of the 287 goods carry no value in any country, including the fallback.
+    They are 4-digit CN *headings* whose subheadings hold the numbers, and they
+    are excluded from the mart — 875 rows that could only be priced at null.
+- **Fertilisers carry a 1% mark-up in all three years**, not 10/20/30% and not
+  1/2/3%. 2,416 rows, consistent across every country, so it reads as intended.
+  The mart derives each group's rate with `mode()` rather than asserting the
+  schedule — hardcoding 10/20/30 overstates every fertiliser line by nine points
+  in 2026 and twenty-seven in 2028, and an amendment that moves a rate needs no
+  edit. The same mistake in reverse broke `markup_schedule_is_irregular` first
+  time round: extrapolating the 2028 rate from the 2026 one flagged all 2,457
+  fertiliser rows as irregular when none are.
+- **Round half up, not `round()`.** The OJ prints three decimals and the
+  Commission's XLSX mark-up cells are live formulas, so they arrive as binary
+  floats. Python's banker's rounding turns 7,7165 into 7.716 where the regulation
+  says 7,717. Eleven rows across the seven spot-checked countries differed in the
+  third decimal before `Decimal` + `ROUND_HALF_UP`. Small, but the column is
+  multiplied by a carbon price and shown as money.
+- **The ETS price is a dbt var (`eu_ets_price_eur_per_t`, EUR 75), not a
+  measurement.** There is no clean free API for EUA spot. The mart ships the
+  tonnage columns beside the euro columns and states the price per row, so the
+  page draws its EUR 60-120 sensitivity from one build and a release consumer can
+  re-price without rebuilding.
+- **Annexes II and III are deliberately not ingested.** They are the country
+  electricity emission factors, and they are IEA data under **CC BY-NC-SA 4.0** —
+  redistributing them would put a non-commercial and share-alike restriction on a
+  data release that is otherwise entirely CC BY 4.0. `dim_grid_emission_factors`
+  (OWID) sits beside the annex's numbers as context and **is not the same
+  measurement**; the page says so. This is also why the mart carries only the grid
+  factor and no derived reconciliation against the annex's indirect column.
+- **The story is production route, not grid** — the opposite of the Scope 2 page.
+  Semi-finished steel runs 63x from Azerbaijan to Indonesia, and sorting by cost
+  sorts almost perfectly by the annex's route indicator (`E` scrap/EAF against
+  `C`/`F` ore/BF-BOF), not by the country's grid — the correlation between a
+  country's steel default and its grid factor is 0.26.
+- **Excel mangles the country names, so `country_display_name` exists.** Sheet
+  names cap at 31 characters and forbid punctuation, which is why the annex's
+  Congo arrives as `Democratic Republic of the Cong` and Myanmar as
+  `Myanmar_Burma`. The seed keeps the annex's label because it is the legally
+  meaningful one; the mart coalesces to `stg_country.country_name` for anything
+  that goes on a chart.
 
 ## Data-quality gates (`dbt/models/**/_*.yml`)
 

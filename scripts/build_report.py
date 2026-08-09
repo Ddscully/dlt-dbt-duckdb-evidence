@@ -92,6 +92,7 @@ WAREHOUSE_SCHEMAS = ("raw", "staging", "marts", "analytics", "history")
 TABLE_TO_DBT_MODEL = {
     "marts.dim_country_year": "dim_country_year",
     "marts.dim_grid_emission_factors": "dim_grid_emission_factors",
+    "marts.fct_cbam_exposure": "fct_cbam_exposure",
     "marts.fct_co2_estimate_versions": "fct_co2_estimate_versions",
     "marts.fct_emissions_energy": "fct_emissions_energy",
     "marts.fct_eu_electricity_prices_semiannual": "fct_eu_electricity_prices_semiannual",

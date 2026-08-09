@@ -120,7 +120,7 @@ The pipeline populates one DuckDB file (`data/warehouse.duckdb`) with these sche
 |--------|-----------|----------|
 | `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`) |
 | `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain, except `stg_eu_electricity_prices_semiannual`, which keeps Eurostat's half-years |
-| `marts` | dbt (tables) | `dim_country_year`, the country-year spine; `fct_emissions_energy`, the wide joined fact; `dim_grid_emission_factors`, grid factors packaged as a Scope 2 reference table; `fct_co2_estimate_versions`, revision history; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain; `fct_example_scope2_emissions`, the worked example over twelve invented sites |
+| `marts` | dbt (tables) | `dim_country_year`, the country-year spine; `fct_emissions_energy`, the wide joined fact; `dim_grid_emission_factors`, grid factors packaged as a Scope 2 reference table; `fct_co2_estimate_versions`, revision history; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain; `fct_example_scope2_emissions`, the worked example over twelve invented sites; `fct_cbam_exposure`, the CBAM border cost per tonne by sourcing country |
 | `history` | dbt (snapshots) | `snap_co2_estimates` and `snap_grid_emission_factors`, SCD2 versions of OWID's CO₂ numbers and of the Scope 2 factors — the two tables a rebuild can't reproduce |
 | `analytics` | Polars | derived metrics (`co2_intensity`) |
 
@@ -299,11 +299,11 @@ no ceiling because small petrostates legitimately reach 780 t/person.
 
 ### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-Six pages, built from the modelled layers: `marts.fct_emissions_energy` and
+Seven pages, built from the modelled layers: `marts.fct_emissions_energy` and
 `analytics.co2_intensity` for the findings, plus `dim_country_year`,
 `dim_grid_emission_factors`, `fct_co2_estimate_versions`,
-`fct_eu_electricity_prices_semiannual`, `fct_example_scope2_emissions` and the
-`analytics.pipeline_*` tables for the rest. No year is hardcoded: every page reads
+`fct_eu_electricity_prices_semiannual`, `fct_example_scope2_emissions`,
+`fct_cbam_exposure` and the `analytics.pipeline_*` tables for the rest. No year is hardcoded: every page reads
 the latest year each metric family can actually populate from
 `sources/warehouse/latest_years.sql`, because coverage doesn't end in the same year
 for all of them.
@@ -313,8 +313,9 @@ for all of them.
 | **Home**: Explore | Pick a year: clean electricity vs. life expectancy, carbon intensity of the economy over time, grid carbon intensity, EU electricity prices against grid cleanliness, the most carbon-efficient economies, and what averaging Eurostat's half-year prices into an annual figure costs. |
 | **Findings** | Seven write-ups on the joined data: when each country's emissions peaked, that the cleanup happened in electricity and coal is most of it, real-terms decoupling, whether it's just offshoring (it isn't, mostly), emissions tracking income rather than headcount, cumulative vs. current responsibility, and carbon intensity falling while absolute tonnes rise. |
 | **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
-| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 148 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
+| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 176 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. Empty on the published copy by construction: the build starts from an empty DuckDB file, and a snapshot can only record a revision it was there for. |
+| **CBAM Exposure** | What a tonne of an imported CBAM good costs at the EU border, by where it was made: Annex I of Implementing Regulation (EU) 2025/2621 priced at a carbon price you choose. Semi-finished steel runs 63× from Azerbaijan to Indonesia — and the ranking sorts by *production route*, not by the national grid, which is the opposite of the Scope 2 story. A screening tool, not a filing. |
 | **Scope 2 Factors** | The same grid carbon-intensity series read as what it also is: the location-based Scope 2 emission factor a company multiplies its metered kWh by for a CSRD, SECR or CDP disclosure. `marts.dim_grid_emission_factors` as a reference table with its vintage and lineage, a worked example over twelve *invented* sites, and the three caveats a practitioner checks first. |
 
 `.github/workflows/pages.yml` builds it, as a single `publish_site` job. The site
@@ -399,10 +400,19 @@ Three things to know if you're copying this setup:
 Code is [MIT](./LICENSE). The data is not this project's to license: OWID's
 [CO₂](https://github.com/owid/co2-data) and
 [energy](https://github.com/owid/energy-data) datasets are CC BY 4.0, World Bank
-WDI is CC BY 4.0, and Eurostat data carries its own
-[reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright).
+WDI is CC BY 4.0, Eurostat data carries its own
+[reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright), and the
+CBAM default values are EU law, reusable under
+[Decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj).
 
-All four permit redistribution with attribution, which is what the data releases
+**One source was deliberately left out on licence grounds.** Annexes II and III
+of the CBAM regulation — country electricity emission factors — are IEA data
+under CC BY-NC-SA 4.0. Ingesting them would put a non-commercial and share-alike
+restriction on a data release that is otherwise entirely permissive, so the
+warehouse uses its own OWID-derived `dim_grid_emission_factors` instead and the
+CBAM page says plainly that the two are not the same measurement.
+
+All five permit redistribution with attribution, which is what the data releases
 above rely on. Every one ships an `ATTRIBUTION.md` naming the publisher and
 licence per source, and the release notes repeat it. Attribute them, not this
 repo, for the numbers; the joins and derived metrics are the only part that's

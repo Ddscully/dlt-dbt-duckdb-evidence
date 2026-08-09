@@ -14,6 +14,9 @@ wheels/
 data/*.duckdb
 data/*.duckdb.wal
 data/raw/
+# The CBAM annex workbook, if `scripts/build_cbam_seeds.py` was run without
+# `--xlsx`. The seeds it produces are checked in; the 860 kB source is not.
+data/*.xlsx
 # Publishable artifact built by `just export-data`; it lives in GitHub releases
 data/export/
 # Parquet archive built by `just lake`; regenerated from the warehouse

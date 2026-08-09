@@ -87,6 +87,14 @@ calls, so the recipe and the graph can't drift into running different builds.
   (`marts.fct_example_scope2_emissions`), and the three caveats a practitioner
   checks. It is the one page whose data is partly fabricated, which is stated in
   an `<Alert>` directly above the table rather than in a footnote.
+- `pages/cbam.md`: what a tonne of an imported CBAM good costs at the EU border,
+  by where it was made — `marts.fct_cbam_exposure`, i.e. Annex I of Implementing
+  Regulation (EU) 2025/2621 times a carbon price. The one page driven by a
+  *string* input: the `<Dropdown>` picks a `good_key`, so its SQL interpolates as
+  `where good_key = '${inputs.good.value}'` with the quotes written by hand —
+  Evidence hands the value back as a raw SQL fragment, not a bound parameter.
+  Its `goods_list` query also groups by the two selected columns, so
+  `order by product_group` is a binder error; order by the label instead.
 
 The coverage and pipeline pages render an explanatory branch rather than an
 error when their data is empty, the way `restatements.md` does, because the

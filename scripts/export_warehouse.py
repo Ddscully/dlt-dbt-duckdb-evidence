@@ -80,6 +80,13 @@ its publishers and is redistributed here under their licences.
 | Energy production and consumption | [Our World in Data](https://github.com/owid/energy-data) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | World Development Indicators, country dimension | [World Bank](https://data.worldbank.org/) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | Household electricity prices | [Eurostat](https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204/) | [Eurostat reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright) |
+| CBAM default values (Annex I) | [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621) | [Commission reuse decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj) |
+
+Annexes II and III of that regulation — the country electricity emission factors
+— are **not** in this artifact. They are IEA data under CC BY-NC-SA 4.0, and
+carrying them would put a non-commercial and share-alike restriction on
+everything here. `marts.dim_grid_emission_factors` is the OWID-derived analogue
+and is not the same measurement; see `reports/pages/cbam.md`.
 
 Attribute the publishers, not this repository, when you use the numbers. Neither
 the publishers nor this project warrant the data; the transformations are the
@@ -210,10 +217,20 @@ it for `{base}/download/{tag}/…`.
 `manifest.json` carries the row counts, year coverage and SHA-256 of every asset;
 `SHA256SUMS` is `sha256sum -c`-compatible.
 
-- **Grain:** one row per `(country_iso3, year)`, with three exceptions —
+- **Grain:** one row per `(country_iso3, year)`, with four exceptions —
   `staging.stg_country` is the country dimension (region, income group), the two
   `*_semiannual` tables keep Eurostat's published `(country_iso3, year, half)`,
-  and `marts.fct_example_scope2_emissions` is one row per site.
+  `marts.fct_example_scope2_emissions` is one row per site, and
+  `marts.fct_cbam_exposure` is one row per (sourcing country, good) with no year
+  at all — it is a regulatory schedule, not a time series.
+- **`marts.fct_cbam_exposure` is a screening tool, not a filing.** It prices Annex
+  I of Implementing Regulation (EU) 2025/2621 — the CBAM default values an
+  importer uses when they have no verified supplier data — at a carbon price that
+  is a *parameter*, not a market quote. The price this build used is stated on
+  every row in `ets_price_eur_per_t`, and the tonnage columns ship beside the euro
+  columns so you can re-price without rebuilding.
+  The two seeds it is built from (`cbam_default_values`, `cbam_goods`) are in the
+  DuckDB file's `main` schema, not the Parquet set.
 - **One table in here is invented and says so:**
   `marts.fct_example_scope2_emissions` prices twelve *hypothetical* sites against
   real grid emission factors, as a worked example of

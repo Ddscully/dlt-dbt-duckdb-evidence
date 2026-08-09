@@ -62,3 +62,121 @@ seeds:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
+
+  - name: cbam_goods
+    description: >
+      The 287 goods Annex I of Implementing Regulation (EU) 2025/2621 sets
+      default values for, across five product groups: cement, fertilisers,
+      aluminium, hydrogen, and iron and steel.
+
+      Normalised out of `cbam_default_values` because the descriptions are long
+      — one runs to 250 characters — and 12,532 value rows share these 287
+      triples. Repeated per row they are 1.6 MB of CSV and the same again in the
+      warehouse; as a dimension they are 38 kB.
+
+      **A CN code is not the key.** 2523 10 00 is both white clinker and grey
+      clinker, and their default values differ by more than a factor of two, so
+      the grain is (CN code, description) and `good_key` is a slug of the pair.
+      An importer who knows only the customs code of what they are importing
+      cannot resolve a single row here, which is a property of the annex rather
+      than of this model.
+
+      Regenerated wholesale by `scripts/build_cbam_seeds.py` from the
+      Commission's published workbook; not hand-edited.
+    columns:
+      - name: good_key
+        data_tests: [not_null, unique]
+      - name: product_group
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Cement", "Fertilisers", "Aluminium", "Hydrogen", "Iron and steel"]
+      - name: cn_code
+        description: >
+          Combined Nomenclature code, as the annex prints it: 8 digits in
+          4/2/2 groups, or the 6- and 4-digit forms where the annex gives a value
+          for a whole subheading. Forced to varchar in `dbt_project.yml` — "7601"
+          left to inference lands as a BIGINT and stops joining.
+        data_tests: [not_null]
+      - name: goods_description
+        data_tests: [not_null]
+
+  - name: cbam_default_values
+    description: >
+      Annex I of Commission Implementing Regulation (EU) 2025/2621: the
+      country-specific default values for the specific embedded emissions of
+      CBAM goods, in tonnes CO2e per tonne of good, which an importer uses from
+      2026 when they cannot get verified data from the installation that made the
+      goods. One row per (country or territory, good) — 119 countries plus the
+      "other countries and territories" fallback table, x 287 goods, minus the
+      combinations the annex omits entirely.
+
+      **A seed rather than a dlt resource, on purpose.** Regulatory reference
+      data is versioned by amendment, not by scrape; there is no API, and the
+      values change when a new implementing regulation says so. The file name of
+      the instrument is in the model description and the extractor, so the next
+      amendment is a re-run of `scripts/build_cbam_seeds.py` and a reviewable
+      diff. `country_overrides.csv` is the existing precedent for the shape.
+
+      **Transcribed faithfully, defects included.** The annex is the legal
+      instrument, so cleaning it here would put this project's judgement between
+      the regulation and a euro figure. Three quirks are pinned by the tests
+      below and handled in `fct_cbam_exposure` instead; see the extractor's
+      docstring for the full account.
+
+      Verified against the OJ text rather than only against the Commission's
+      "for information purposes only" workbook: for the seven countries whose
+      table could be windowed cleanly out of the 2,400-page PDF, every row the
+      OJ prints is reproduced here to the third decimal.
+    columns:
+      - name: country_or_territory
+        description: The annex's own name for the country, or the fallback table's label.
+        data_tests: [not_null]
+      - name: country_iso3
+        description: >
+          Resolved once, at transcription time, by `SHEET_TO_ISO3` in the
+          extractor — 100 of the 119 matched `stg_country` by name and 19 needed
+          a human. Null for the "other countries and territories" row, which is a
+          rule rather than a place.
+      - name: good_key
+        description: Foreign key to `cbam_goods`.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('cbam_goods')
+                field: good_key
+      - name: default_total_t_co2e_per_t
+        description: >
+          Direct + indirect embedded emissions, tCO2e per tonne of good. Null
+          where the annex prints "-", which routes the row to the fallback table.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: default_2026_t_co2e_per_t
+        description: >
+          The total with 2026's mark-up applied, as published. Read from the annex
+          only where a total is present: Albania's white Portland cement (2523 21
+          00) has "-" for direct, indirect and total and 1,230 / 0,140 / 1,370
+          sitting in the three mark-up columns instead — the values shifted three
+          columns right. It reads that way in the OJ *and* in the Commission's
+          workbook, so it is the regulation that says it, not a transcription
+          error, and the annex's own "field shows '-' → use the fallback" rule is
+          what that row falls to.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_or_territory, good_key]
+      # The known defect, pinned by row count rather than described in prose. If a
+      # corrected amendment lands, this goes red and the docs above get revisited
+      # — the alternative is that a published euro figure changes silently.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "default_2026_t_co2e_per_t is null"
+          config:
+            where: "default_total_t_co2e_per_t is null"
+            severity: error
