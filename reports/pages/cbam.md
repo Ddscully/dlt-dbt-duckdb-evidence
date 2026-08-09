@@ -1,6 +1,6 @@
 ---
 title: CBAM Exposure
-description: What a tonne of an imported CBAM good costs at the EU border, by where it was made — Annex I's default values priced at a carbon price you choose.
+description: What a tonne of an imported CBAM good costs at the EU border, by where it was made. Annex I's default values, priced at a carbon price you choose.
 ---
 
 From 1 January 2026 an importer bringing cement, fertiliser, aluminium, hydrogen
@@ -12,7 +12,7 @@ Where the importer cannot get verified emissions data from the installation that
 actually made the goods, they fall back to a **country-specific default value**
 published in Annex I of [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621),
 plus a mark-up. That annex is a country × good carbon-intensity table. Multiplied
-by a carbon price it becomes a euro figure with a statutory deadline — and that
+by a carbon price it becomes a euro figure with a statutory deadline, and that
 multiplication is the whole of this page.
 
 ```sql headline
@@ -55,7 +55,7 @@ from fb inner join listed on fb.good_key = listed.good_key
     <BigValue data={fallback_penalty} value=median_ratio fmt='0.00"×"' title="Fallback vs. median country"/>
 </Grid>
 
-For <Value data={fallback_penalty} column=n_worse/> of the <Value data={fallback_penalty} column=n_goods/> goods, the fallback value is worse than the median listed country — a median of <Value data={fallback_penalty} column=median_ratio fmt='0.00'/> times worse. That is the mechanism working as designed: the defaults exist to make going and getting real supplier data pay for itself.
+For <Value data={fallback_penalty} column=n_worse/> of the <Value data={fallback_penalty} column=n_goods/> goods, the fallback value is worse than the median listed country, by a median factor of <Value data={fallback_penalty} column=median_ratio fmt='0.00'/>. That is the mechanism working as designed, since the defaults exist to make collecting real supplier data pay for itself.
 
 ## The same tonne, a different border cost
 
@@ -109,7 +109,7 @@ where good_key = '${inputs.good.value}'
   and not is_fallback_table
 ```
 
-Across <Value data={ranked_span} column=n/> sourcing countries the 2026 cost runs from <Value data={ranked_span} column=cheapest_country/> at <Value data={ranked_span} column=cheapest fmt='€#,##0.00'/> per tonne up to <Value data={ranked_span} column=dearest_country/> at <Value data={ranked_span} column=dearest fmt='€#,##0.00'/> — a spread of <Value data={ranked_span} column=spread fmt='0.0"×"'/> on an identical tonne of product.
+Across <Value data={ranked_span} column=n/> sourcing countries the 2026 cost runs from <Value data={ranked_span} column=cheapest_country/> at <Value data={ranked_span} column=cheapest fmt='€#,##0.00'/> per tonne up to <Value data={ranked_span} column=dearest_country/> at <Value data={ranked_span} column=dearest fmt='€#,##0.00'/>, a spread of <Value data={ranked_span} column=spread fmt='0.0"×"'/> on an identical tonne of product.
 
 <BarChart
     data={ranked}
@@ -131,12 +131,12 @@ Across <Value data={ranked_span} column=n/> sourcing countries the 2026 cost run
 
 <Alert status=info>
 
-**So what.** For steel the spread is not mainly about the national grid — it is
+**So what.** For steel the spread is not mainly about the national grid. It is
 about the **production route**. The `Route` column is the annex's own indicator:
 `E` is scrap into an electric arc furnace, `C` and `F` are ore through a blast
 furnace. Sorting by cost sorts by route almost perfectly, and the countries at
 the clean end are not the ones with clean grids. This is the opposite of the
-[Scope 2](/scope2) story, where the grid was the whole answer — and it is why a
+[Scope 2](/scope2) story, where the grid was the whole answer, and it is why a
 procurement team screening suppliers on country-level carbon data alone will pick
 the wrong lanes.
 
@@ -184,7 +184,7 @@ order by prices.eur_per_t_co2
 ## The mark-up escalates, and not uniformly
 
 The defaults are applied with a mark-up that rises over the phase-in: **10% in
-2026, 20% in 2027, 30% from 2028**. Fertilisers are the exception — 1%, in all
+2026, 20% in 2027, 30% from 2028**. Fertilisers are the exception at 1%, in all
 three years.
 
 ```sql markups
@@ -208,15 +208,16 @@ order by median_2026 desc
 </DataTable>
 
 The mark-up is read off the published values rather than asserted from the
-articles. That is not pedantry: hardcoding 10/20/30% would overstate every one of
-the 2,457 fertiliser rows by nine points in 2026 and twenty-seven by 2028.
+articles, and the difference matters: hardcoding 10/20/30% would overstate every
+one of the 2,457 fertiliser rows by nine points in 2026 and twenty-seven by
+2028.
 
 ## What this is not
 
 <Alert status=warning>
 
 **A screening tool, not a filing.** Every number here is an *administrative
-default* — an estimate of a country's average, deliberately marked up so that
+default*: an estimate of a country's average, deliberately marked up so that
 obtaining verified installation data is the cheaper path. A real importer with
 supplier data will use that instead and will usually pay less. What this ranks is
 which sourcing lanes are worth the effort of going to get that data.
@@ -235,12 +236,12 @@ first:
   the mark-up columns; five cement rows for Angola and Argentina compound the
   mark-up instead of adding it; Chile's line pipe is missing its 2026 cell
   entirely. The seed transcribes the regulation as it stands and the mart flags
-  each case — a legal instrument is not this project's to tidy up.
+  each case, since a legal instrument is not this project's to tidy up.
 - **The grid factor shown elsewhere in this warehouse is not the annex's.** The
   regulation's own electricity emission factors come from IEA data under a
   non-commercial licence, which this project deliberately does not redistribute.
-  Where the annex publishes a direct/indirect split at all — cement and
-  fertilisers, and almost none of iron and steel — the indirect part is
+  Where the annex publishes a direct/indirect split at all, which covers cement
+  and fertilisers and almost none of iron and steel, the indirect part is
   electricity, but it cannot be reconciled against the OWID-derived factors on
   the [Scope 2](/scope2) page. They sit beside each other; they are not the same
   measurement.

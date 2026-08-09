@@ -5,7 +5,7 @@ description: Grid emission factors packaged as a reference table, with the vinta
 
 Every other page here reads `carbon_intensity_elec_g_kwh` as a climate statistic.
 This one reads it as what it also is: the **location-based Scope 2 emission
-factor** under the GHG Protocol — the number a company multiplies its metered kWh
+factor** under the GHG Protocol, the number a company multiplies its metered kWh
 by to produce the purchased-electricity line of a CSRD, SECR or CDP disclosure.
 
 Nothing new is computed. `marts.dim_grid_emission_factors` is the same series,
@@ -53,8 +53,8 @@ where is_latest_available
 Across the <Value data={spread} column=n_countries/> countries with a grid above 10 TWh, the current factor runs from <Value data={spread} column=cleanest_country/> at <Value data={spread} column=cleanest fmt="0.0"/> up to <Value data={spread} column=dirtiest_country/> at <Value data={spread} column=dirtiest fmt="#,##0"/> grams of CO₂ per kWh.
 
 That is a wider spread than the 24× quoted on the [findings](/findings) page,
-which uses a 150 TWh floor rather than 10. Same series, different cut — and which
-floor to apply is itself a reporting decision, not a detail.
+which uses a 150 TWh floor rather than 10. Same series, different cut, and which
+floor to apply is itself a reporting decision rather than a detail.
 
 <Alert status=info>
 
@@ -72,7 +72,7 @@ inside a number an assurance provider signs.
 ## The reference table
 
 The current factor for every country that has one. `is_latest_available` is the
-filter that produces this cross-section — see the vintage section below for why
+filter that produces this cross-section. See the vintage section below for why
 it is a filter and not a year.
 
 ```sql latest_factors
@@ -166,7 +166,7 @@ order by electricity_generation_twh desc
 
 <Alert status=warning>
 
-**The twelve sites below are invented** — a hypothetical manufacturer on four
+**The twelve sites below are invented.** They describe a hypothetical manufacturer on four
 continents, seeded in `dbt/seeds/example_scope2_sites.csv`. They are the only
 fabricated data in this warehouse. The factors they are multiplied by are real.
 
@@ -254,7 +254,7 @@ from ${sites}
 
 Lyon and Göteborg together draw 17% of the group's electricity and account for
 1.7% of its reported emissions. Lyon alone draws three times the power of the
-Durban depot — 54 GWh against 18 — and reports less than a fifth of its tonnes,
+Durban depot, 54 GWh against 18, and reports less than a fifth of its tonnes,
 because France's grid runs at 41 gCO₂/kWh and South Africa's at 699. At the other
 end of the table, Pune is 11% of the electricity and 18% of the footprint.
 
@@ -282,16 +282,16 @@ order by ord
     yAxisTitle="Scenario"
 />
 
-The same <Value data={group_totals} column=mwh fmt="#,##0"/> MWh, moved nowhere except on paper — every site on the cleanest grid in the set, <Value data={group_extremes} column=cleanest_country/> at <Value data={group_extremes} column=cleanest_factor fmt="0.0"/> g/kWh, then every site on the dirtiest, <Value data={group_extremes} column=dirtiest_country/> at <Value data={group_extremes} column=dirtiest_factor fmt="#,##0"/> g/kWh.
+The same <Value data={group_totals} column=mwh fmt="#,##0"/> MWh, moved nowhere except on paper: every site placed on the cleanest grid in the set, <Value data={group_extremes} column=cleanest_country/> at <Value data={group_extremes} column=cleanest_factor fmt="0.0"/> g/kWh, then every site on the dirtiest, <Value data={group_extremes} column=dirtiest_country/> at <Value data={group_extremes} column=dirtiest_factor fmt="#,##0"/> g/kWh.
 
 Both ends are countries this company already operates in, so the ratio between
-them is not a hypothetical — it is the accumulated cost of siting decisions
+them is not hypothetical. It is the accumulated cost of siting decisions
 already taken, sitting in a number that has to be published.
 
 ## Has the factor been restated?
 
 A disclosure is filed against the factor published *at the time*. When the
-publisher revises that year afterwards, the filing does not become wrong — it
+publisher revises that year afterwards, the filing does not become wrong. It
 becomes a filing against a superseded factor, which is something you have to be
 able to demonstrate. `history.snap_grid_emission_factors` is the SCD2 snapshot
 that keeps the versions, from 2015 on.
@@ -337,7 +337,7 @@ present for. The first run stores version 1 of every factor, and a row becomes
 restated the first time a later run finds a different number.
 
 That makes the snapshot the one part of this table a rebuild cannot reproduce,
-which is why it is carried in rather than recomputed — the
+which is why it is carried in rather than recomputed: the
 [Pages build](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/pages.yml)
 copies `history` out of the most recent
 [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases)
@@ -349,14 +349,15 @@ estimates.
 
 ## What this factor is not
 
-The three caveats a practitioner checks first. Naming them is not a hedge — a
+The three caveats a practitioner checks first. Naming them is not a hedge. A
 factor handed over without them is the thing that fails assurance.
 
 <Alert status=warning>
 
 **Location-based only.** This is the grid average where a site sits. A
-market-based factor reflects the contracts a company actually holds — RECs,
-Guarantees of Origin, PPAs, supplier-specific residual mixes — and no public
+market-based factor reflects the contracts a company actually holds, such as
+RECs, Guarantees of Origin, PPAs and supplier-specific residual mixes, and no
+public
 dataset carries those. A company reporting both bases will find the two lines
 differ substantially, and only this one can be built from open data.
 
@@ -375,8 +376,8 @@ consumed mix, and an exporter of coal power looks dirtier.
 One more, from the warehouse rather than the standard: five territories in OWID's
 energy data (Guadeloupe, Martinique, Réunion, French Guiana and the Falklands) do
 not exist in the country dimension, so they carry no factor here. The dimension is
-authoritative for what a country is throughout this warehouse — it is also what
-keeps World Bank aggregates like `WLD` out of every fact — and the
+authoritative for what a country is throughout this warehouse, which is also what
+keeps World Bank aggregates like `WLD` out of every fact, and the
 [coverage page](/coverage) is where absences are rows.
 
 ---

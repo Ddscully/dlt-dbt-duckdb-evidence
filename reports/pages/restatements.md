@@ -99,13 +99,13 @@ valid for, and `marts.fct_co2_estimate_versions` reads the first and the current
 version back off it.
 
 That makes the snapshot the one table here that isn't reproducible from the
-sources. Rebuild the warehouse from scratch and the history is gone — which is
+sources. Rebuild the warehouse from scratch and the history is gone, which is
 why it is carried in rather than recomputed: the
 [Pages build](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/pages.yml)
 copies `history` out of the most recent
 [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases)
 before it builds, and the release does the same from the release before it. So an
-empty table here means nothing has been restated since that chain began — not
+empty table here means nothing has been restated since that chain began, not
 that nothing is being watched. Before the first data release was cut there was
 nothing to carry, and the page was empty for that reason instead.
 

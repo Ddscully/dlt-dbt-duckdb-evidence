@@ -163,7 +163,7 @@ order by mt_latest desc
 **So what.** A sourcing country's peak year and its distance from that peak is
 its direction of travel, and any supply agreement longer than a few years is a
 bet on that direction. The large emitters that haven't peaked at all account for
-about **half of world emissions** — so "everywhere is decarbonising" is not a
+about **half of world emissions**, so "everywhere is decarbonising" is not a
 safe default about the specific country you buy from.
 
 **Who acts:** procurement and site selection. **Cost of getting it wrong:** an
@@ -273,7 +273,7 @@ decarbonisation that has gone well, not the whole of it.
 
 <Alert status=info>
 
-**So what.** `carbon_intensity_elec_g_kwh` is not only a climate statistic — it
+**So what.** `carbon_intensity_elec_g_kwh` is not only a climate statistic. It
 is the **location-based Scope 2 emission factor**, the number a multi-site
 company multiplies its metered kWh by to produce the electricity line in a CSRD,
 SECR or CDP disclosure. Across the largest grids in the table above it runs from
@@ -283,7 +283,7 @@ changed nothing but its address.
 
 **Who acts:** sustainability reporting, and site selection long before them.
 **Cost of getting it wrong:** a site chosen on power price alone that adds tens
-of kilotonnes to a group total nobody re-forecast — under CSRD, an audited one.
+of kilotonnes to a group total nobody re-forecast, and under CSRD an audited one.
 
 </Alert>
 
@@ -356,7 +356,7 @@ testable claim, and the next finding tests it.
 **So what.** This is the national-scale evidence that "grow and cut" is
 achievable, and it is the same choice a company makes when it sets a target: the
 US grew 42% in real terms while cutting 20%, the UK grew 26% and cut 46%. An
-absolute reduction target is credible alongside a growth plan — but only where
+absolute reduction target is credible alongside a growth plan, but only where
 the intensity improvement outruns the growth, and finding 7 shows that isn't
 automatic.
 
@@ -451,13 +451,13 @@ customers, are behind the increase.
 <Alert status=info>
 
 **So what.** Anyone reporting a supply-chain (Scope 3) reduction should expect
-the question *did it fall, or did it move?* — and this is the size of that doubt
+the question *did it fall, or did it move?*, and this is the size of that doubt
 at national scale: roughly **a fifth to a third** of Europe's headline cut is
 trade moving rather than emissions ending. The useful part is that it's a
 subtraction, so the question can be answered rather than caveated.
 
 **Who acts:** sustainability reporting and external assurance. **Cost of getting
-it wrong:** a claimed reduction that an auditor — or a journalist — reclassifies
+it wrong:** a claimed reduction that an auditor, or a journalist, reclassifies
 as an outsourcing decision.
 
 </Alert>
@@ -544,12 +544,12 @@ order by t_per_person desc
 
 <Alert status=info>
 
-**So what.** Demand for anything that abates carbon — equipment, retrofits,
-compliance software — sits where the carbon is, and that is not where the people
-are. Upper-middle-income countries are 38% of the world's population and **half**
-of its emissions; low-income countries are 9% of people and 0.6%. The two
-distributions are different enough that they give different answers to "where
-should we sell this".
+**So what.** Demand for anything that abates carbon, whether equipment,
+retrofits or compliance software, sits where the carbon is, and that is not
+where the people are. Upper-middle-income countries are 38% of the world's
+population and **half** of its emissions; low-income countries are 9% of people
+and 0.6%. The two distributions are different enough that they give different
+answers to "where should we sell this".
 
 **Who acts:** strategy and market entry. **Cost of getting it wrong:** a
 go-to-market plan sized on population, aimed at a segment with almost nothing to
@@ -608,8 +608,8 @@ industrial economy and 0.8% of emissions today, still carries over 4% of the
 cumulative total. That is more than India, which has four times its current
 output and twenty times its population.
 
-Neither number is the whole picture on its own, which is the point. Finding 5 is
-the flow; this is the stock.
+Neither number tells the whole story on its own. Finding 5 measures the flow;
+this measures the stock.
 
 <DataTable data={stock_vs_flow} rows=12>
     <Column id=country_name title="Country"/>
@@ -620,7 +620,7 @@ the flow; this is the stock.
 
 <Alert status=info>
 
-**So what.** Two defensible metrics, one table, opposite rankings — the US leads
+**So what.** Two defensible metrics, one table, opposite rankings: the US leads
 on the stock, China on the flow, and each is correct for the question it answers.
 Every ranked KPI has this property. The decision isn't which number is right, it's
 which definition goes into the target and gets reused: defined once in the
@@ -714,7 +714,7 @@ order by co2_change_mt desc
 **So what.** This is the intensity-target versus absolute-target choice, and the
 chart is six countries hitting one while missing the other. China cut carbon
 intensity 47% since 2005 and still raised tonnage, because GDP grew faster than
-intensity fell. An intensity target is fully compatible with rising emissions —
+intensity fell. An intensity target is fully compatible with rising emissions,
 which is why most corporate target-setting frameworks require an absolute one,
 and why an organisation can report a KPI improving every year while its actual
 footprint grows.
