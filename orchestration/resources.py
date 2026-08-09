@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from dagster_dbt import DbtCliResource, DbtProject
 from dagster_dlt import DagsterDltResource
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DBT_DIR = REPO_ROOT / "dbt"
+from modern_data_stack.paths import dbt_dir, project_root
+
+REPO_ROOT = project_root()
+DBT_DIR = dbt_dir()
 
 # `profiles.yml` lives next to `dbt_project.yml` in this repo, so both dirs match.
 dbt_project = DbtProject(project_dir=DBT_DIR, profiles_dir=DBT_DIR)

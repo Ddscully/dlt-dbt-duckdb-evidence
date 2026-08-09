@@ -37,39 +37,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import duckdb
+from modern_data_stack.history import SCD2_COLUMNS, restore
+from modern_data_stack.paths import warehouse_path
 
-from ingest.pipeline import DUCKDB_PATH
+DUCKDB_PATH = warehouse_path()
 
 HISTORY_SCHEMA = "history"
 
-# dbt's SCD2 bookkeeping. `dbt_valid_from` is what `fct_co2_estimate_versions`
-# orders versions by; without these the relation is not a snapshot dbt can merge
-# into, whatever else it holds.
-SCD2_COLUMNS = ("dbt_scd_id", "dbt_updated_at", "dbt_valid_from", "dbt_valid_to")
-
-
-def _tables(con: duckdb.DuckDBPyConnection, database: str) -> list[str]:
-    """Table names in `<database>.history`, or [] if the schema isn't there."""
-    rows = con.execute(
-        """
-        select table_name
-        from duckdb_tables()
-        where database_name = $database and schema_name = $schema
-        order by table_name
-        """,
-        {"database": database, "schema": HISTORY_SCHEMA},
-    ).fetchall()
-    return [name for (name,) in rows]
-
-
-def _columns(con: duckdb.DuckDBPyConnection, qualified: str) -> set[str]:
-    return {row[0] for row in con.execute(f"describe {qualified}").fetchall()}
-
-
-def _rows(con: duckdb.DuckDBPyConnection, qualified: str) -> int:
-    (count,) = con.execute(f"select count(*) from {qualified}").fetchone()
-    return count
+__all__ = ["DUCKDB_PATH", "HISTORY_SCHEMA", "SCD2_COLUMNS", "main", "run"]
 
 
 def run(
@@ -83,72 +58,7 @@ def run(
     predecessor, and a source with no `history` schema (or an empty one) is the
     same case. Only a *destination* that already has history is an error.
     """
-    src = Path(source)
-    if not src.exists():
-        raise FileNotFoundError(f"no warehouse to restore from at {src}")
-
-    dest = Path(duckdb_path)
-    if dest.resolve() == src.resolve():
-        raise ValueError(f"source and destination are the same file: {dest}")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    con = duckdb.connect(str(dest))
-    try:
-        # ATTACH takes a literal, not a bind parameter (`attach $path` is a
-        # parser error), so the path is interpolated.
-        con.execute(f"attach '{src}' as prev_wh (read_only)")
-        try:
-            restored = _restore_tables(con, force=force)
-        finally:
-            con.execute("detach prev_wh")
-    finally:
-        con.close()
-
-    return {
-        "source": str(src),
-        "destination": str(dest),
-        "tables": restored,
-        "rows": sum(t["rows"] for t in restored),
-    }
-
-
-def _restore_tables(con: duckdb.DuckDBPyConnection, force: bool) -> list[dict]:
-    names = _tables(con, "prev_wh")
-    if not names:
-        return []
-
-    existing = set(_tables(con, con.execute("select current_database()").fetchone()[0]))
-    con.execute(f"create schema if not exists {HISTORY_SCHEMA}")
-
-    restored = []
-    for name in names:
-        source_relation = f'prev_wh.{HISTORY_SCHEMA}."{name}"'
-        dest_relation = f'{HISTORY_SCHEMA}."{name}"'
-
-        missing = [c for c in SCD2_COLUMNS if c not in _columns(con, source_relation)]
-        if missing:
-            raise ValueError(
-                f"{source_relation} is not a dbt snapshot — no {', '.join(missing)}. "
-                "Restoring it would fail inside `dbt build` instead of here."
-            )
-
-        rows = _rows(con, source_relation)
-        if not rows:
-            continue
-
-        if name in existing and not force:
-            held = _rows(con, dest_relation)
-            if held:
-                raise ValueError(
-                    f"{dest_relation} already holds {held:,} rows — refusing to "
-                    "overwrite history that a rebuild cannot reproduce. Pass "
-                    "--force if replacing it is really what you want."
-                )
-
-        con.execute(f"create or replace table {dest_relation} as select * from {source_relation}")
-        restored.append({"table": f"{HISTORY_SCHEMA}.{name}", "rows": rows})
-
-    return restored
+    return restore(source, duckdb_path, force=force, history_schema=HISTORY_SCHEMA)
 
 
 def main() -> None:

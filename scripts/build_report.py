@@ -59,9 +59,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ingest.pipeline import REPO_ROOT
+from modern_data_stack.paths import project_root
 
-REPORTS_DIR = REPO_ROOT / "reports"
+REPORTS_DIR = project_root() / "reports"
 
 # Evidence's own layout, not ours: `pages/x.md` renders to `build/x/index.html`
 # (and `pages/index.md` to `build/index.html`), sources live in `sources/<source>/`,

@@ -1,4 +1,4 @@
-"""Offline fixtures for the ingest layer.
+"""Offline fixtures for the ingest layer — this project's routes.
 
 `ingest.pipeline` fetches from five live endpoints. That makes CI a test of
 whether OWID, the World Bank and Eurostat happen to be up, which is not what a
@@ -11,31 +11,28 @@ The fixtures are trimmed to a representative set of countries; see
 `scripts/record_fixtures.py`, which is what produced them and what re-records
 them when a source changes shape.
 
-Two deliberate choices:
-
-* **Fixtures sit behind the same code path, not beside it.** The OWID fixtures
-  are gzipped CSV (not Parquet) so they still go through `pl.read_csv` with
-  `infer_schema_length=None` — the type-inference gotcha that bites in
-  production is exercised in CI too. The JSON fixtures are the API's own
-  response body, so `_get_json`'s callers parse exactly what they parse live.
-* **Resolution is explicit, not a URL hash.** A missing mapping raises rather
-  than silently falling through to the network, and `tests/test_fixtures.py`
-  asserts every URL the pipeline can build resolves to a file that exists.
+The mechanism (and the reasoning behind it) lives in
+`modern_data_stack.fixtures`. What's here is the URL-to-file map, which is the
+only part that's about these five sources. The OWID fixtures are gzipped CSV
+rather than Parquet so they still go through `pl.read_csv` with
+`infer_schema_length=None`, and the JSON fixtures are the API's own response
+body — the parsing gotchas that bite in production are exercised in CI too.
 """
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
-FIXTURE_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "ingest"
+from modern_data_stack import fixtures as _fixtures
+from modern_data_stack.fixtures import DEFAULT_ENV_VAR as ENV_VAR
+from modern_data_stack.paths import project_root
 
-ENV_VAR = "INGEST_FIXTURES"
+FIXTURE_DIR = project_root() / "tests" / "fixtures" / "ingest"
 
 # (pattern, fixture filename). The WDI entry captures the indicator code, which
 # is the only part of the URL space that varies per request.
-_ROUTES: list[tuple[re.Pattern[str], str]] = [
+_ROUTES: list[_fixtures.Route] = [
     (re.compile(r"owid/co2-data/.*\.csv$"), "owid_co2.csv.gz"),
     (re.compile(r"owid/energy-data/.*\.csv$"), "owid_energy.csv.gz"),
     (re.compile(r"api\.worldbank\.org/v2/country\?"), "wb_country.json"),
@@ -49,7 +46,7 @@ _ROUTES: list[tuple[re.Pattern[str], str]] = [
 
 def enabled() -> bool:
     """True when the pipeline should read fixtures instead of the network."""
-    return os.environ.get(ENV_VAR, "").lower() in {"1", "true", "yes"}
+    return _fixtures.enabled(ENV_VAR)
 
 
 def path_for(url: str) -> Path:
@@ -59,8 +56,7 @@ def path_for(url: str) -> Path:
     drifted from the pipeline, and falling back to the network would turn that
     into a silently-online CI run.
     """
-    for pattern, template in _ROUTES:
-        match = pattern.search(url)
-        if match:
-            return FIXTURE_DIR / template.format(**match.groupdict())
-    raise KeyError(f"no fixture mapped for {url!r} — see scripts/record_fixtures.py")
+    try:
+        return _fixtures.resolve(url, _ROUTES, FIXTURE_DIR)
+    except KeyError as exc:
+        raise KeyError(f"no fixture mapped for {url!r} — see scripts/record_fixtures.py") from exc

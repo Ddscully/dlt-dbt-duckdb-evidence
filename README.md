@@ -195,6 +195,8 @@ from the UI if you want it running.
 
 ```
 .
+├── src/modern_data_stack/ # the domain-neutral half: paths, fixtures, lake,
+│                      #   observability, export, snapshot carry-forward
 ├── ingest/            # dlt pipeline: sources -> DuckDB (schema `raw`)
 ├── orchestration/     # Dagster: the pipeline as an asset graph + schedule
 ├── dbt/               # dbt-duckdb project

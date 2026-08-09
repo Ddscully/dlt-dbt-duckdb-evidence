@@ -18,6 +18,31 @@ Starting a *different* project on this shape is
 what has to be rewritten, and the decisions that are expensive to change later.
 The rest of this file is about *this* warehouse.
 
+## The package (`src/modern_data_stack/`)
+
+The domain-neutral mechanisms live here — `paths`, `fixtures`, `lake`,
+`observability`, `export`, `history` — and take their configuration as
+arguments. The project modules that call them (`ingest/fixtures.py`,
+`lake/archive.py`, `transform/pipeline_status.py`, `scripts/export_warehouse.py`,
+`scripts/restore_history.py`) hold this project's constants and stay the entry
+points, so `python -m lake.archive`, the justfile recipes and the asset keys are
+all unchanged.
+
+- **`modern_data_stack.paths` is the single answer to "where is the project".**
+  It used to be `REPO_ROOT` in `ingest/pipeline.py`, defined as the parent of
+  `ingest/` and imported from there by the lake, the observability tables, the
+  exporter and the report builder — so every layer's sense of where it was
+  depended on where the *ingestion* layer sat. Resolution is now `PROJECT_ROOT`,
+  then the package's own grandparent when it looks like a project, then a
+  marker search up from the cwd. The cwd comes last on purpose: the Dagster
+  daemon and the CLI don't necessarily run from the project directory.
+- **Config reaches a package module as a parameter, never as a constant.**
+  Nothing under `src/` knows what a country is, and that is the whole of the
+  split — a hardcoded table name there undoes it.
+- **`RawSchemaDltTranslator` stays in `orchestration/assets.py`** — twenty lines
+  around two of that module's constants, and moving it would put Dagster (an
+  optional dependency group) behind a package import.
+
 ## Commands
 
 Use the `justfile` recipes (they map to plain `uv run …` commands):

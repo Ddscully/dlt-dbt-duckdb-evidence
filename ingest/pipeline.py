@@ -21,22 +21,21 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from pathlib import Path
 
 import dlt
 import polars as pl
 import requests
 
 from ingest import fixtures
-
-# Anchored to the repo root, not the cwd — the Dagster daemon and the CLI don't
-# necessarily run from the project directory.
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from modern_data_stack.paths import warehouse_path
 
 # WAREHOUSE_PATH lets a fixture run target a throwaway file instead of the real
 # warehouse. It must be absolute: dbt resolves its own copy of this from `dbt/`,
 # and `just test-pipeline` passes an absolute path for exactly that reason.
-DUCKDB_PATH = os.environ.get("WAREHOUSE_PATH") or str(REPO_ROOT / "data" / "warehouse.duckdb")
+# Resolution — and the project root it falls back to — lives in
+# `modern_data_stack.paths`, so every layer agrees on the answer without
+# importing it from whichever layer happened to compute it first.
+DUCKDB_PATH = warehouse_path()
 
 OWID_CO2 = "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv"
 OWID_ENERGY = "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv"

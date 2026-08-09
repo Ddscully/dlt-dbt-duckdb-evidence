@@ -15,11 +15,39 @@ the layout, the wiring conventions, the CI shape, the lint config. The rest is a
 worked example. The fastest way to reuse it is to copy the tree, keep the
 skeleton and delete the emissions.
 
+That third is already separated out, so you don't have to go looking for it:
+it's `src/modern_data_stack/`, it takes its configuration as arguments, and the
+project modules that call it hold the constants.
+
 ## 1. What you're actually reusing
 
-### Copy verbatim
+### The package — `src/modern_data_stack/`
 
-Nothing in these mentions the dataset.
+Six modules, no mention of emissions in any of them. Copy the directory, or
+depend on it and write only the layers below.
+
+| Module | What it does | Configured by |
+|--------|--------------|---------------|
+| `paths` | project root, warehouse file, lake dir, dbt manifest | `PROJECT_ROOT`, `WAREHOUSE_PATH`, `LAKE_DIR` |
+| `fixtures` | serve recorded payloads instead of live endpoints | a list of `(url pattern, filename)` routes |
+| `lake` | hive-partitioned Parquet archive of warehouse tables | a table tuple and a partition column |
+| `observability` | dlt/dbt/DuckDB metadata as queryable tables | landing-table and layer names |
+| `export` | package a warehouse as a publishable artifact | schemas, attribution, a notes renderer |
+| `history` | carry a dbt snapshot forward between builds | the snapshot schema name |
+
+Each project module keeps the entry point, so `python -m lake.archive`, the
+justfile recipes and the asset graph all still call the same names.
+
+### Config-only — copy the file, change the constants at the top
+
+- `ingest/fixtures.py` — the `_ROUTES` table.
+- `lake/archive.py` — `ARCHIVED_TABLES` and `PARTITION_COLUMN`.
+- `transform/pipeline_status.py` — `SOURCE_TABLES` and `LAYERS`.
+- `scripts/export_warehouse.py` — `PUBLISHED_SCHEMAS`, `ATTRIBUTION`, the release
+  notes and whatever your manifest wants that the generic one can't know.
+- `scripts/restore_history.py` — the schema name and the CLI.
+
+### Copy verbatim — the tooling
 
 - `.sqlfluff` — retarget `dialect` if you're not on DuckDB; everything else holds.
 - `.pre-commit-config.yaml` — including the reasons the sqlfluff hook is `local`.
@@ -33,23 +61,19 @@ Nothing in these mentions the dataset.
 - `orchestration/resources.py` and `orchestration/definitions.py` — the dbt/dlt
   resource handles and the two-job split (`full_refresh` without the site,
   `publish_site` with it). Both are about Node, not about your data.
-- `ingest/fixtures.py` — only the `_ROUTES` table changes.
-- `transform/pipeline_status.py` — it reads `information_schema`, dlt's
-  `_dlt_load_id` and dbt's `manifest.json`. There is no emissions logic in it at all.
 - `.github/workflows/ci.yml` and `nightly.yml` — the offline-fixtures /
   live-sources split holds whatever you're ingesting.
 - `docs/STYLE_GUIDE.md`.
 
-### Adapt — the structure holds, the constants don't
+### Adapt — the structure holds, the specifics don't
 
-- `lake/archive.py` — change `ARCHIVED_TABLES` and `PARTITION_COLUMN`. The
-  delete-then-write behaviour and the read-back summary are the parts you want.
-- `scripts/export_warehouse.py` — `PUBLISHED_SCHEMAS` and `ATTRIBUTION`.
 - `scripts/build_report.py` — `TABLE_TO_DBT_MODEL` and `TABLE_TO_ASSET_KEY`, the
   two maps that give the Evidence site one dependency per table it reads.
-- `scripts/record_fixtures.py`, `scripts/restore_history.py`.
-- `orchestration/assets.py` — `RawSchemaDltTranslator` and the asset shapes carry
-  over almost unchanged; every asset *check* in it is yours to rewrite.
+- `scripts/record_fixtures.py`.
+- `orchestration/assets.py` — the asset shapes carry over almost unchanged, and
+  `RawSchemaDltTranslator` is the piece worth copying by hand (§2 says why it
+  matters; it stays here rather than in the package because it's twenty lines
+  wrapped around two of that module's constants). Every asset *check* is yours.
 - `.github/workflows/pages.yml` and `release-data.yml` — paths and the basePath
   step are generic; the snapshot carry-forward only matters if you have a snapshot.
 - `reports/sources/warehouse/connection.yaml` — the relative path to the DuckDB
@@ -156,11 +180,11 @@ one era, because it's the table `rm data/warehouse.duckdb` destroys for good.
 anything built this way:
 
 - **`WAREHOUSE_PATH` must be absolute.** dbt resolves it from `dbt/`, the Python
-  layers from the repo root. A relative override gives you two different
-  warehouses and no error.
-- **`REPO_ROOT` is defined as the parent of `ingest/`** and imported from there by
-  `lake/`, `transform/` and `scripts/`. Move any of those directories without
-  moving the rest and paths silently point somewhere else.
+  layers from the project root. A relative override gives you two different
+  warehouses and no error. Every layer here gets the answer from
+  `modern_data_stack.paths` so they can't disagree — it used to come from a
+  `REPO_ROOT` in `ingest/pipeline.py` that meant "the parent of `ingest/`", which
+  made the lake and the exporter depend on where the *ingestion* layer sat.
 - **`dbt deps` before `dbt build`, `dbt parse` *or* `sqlfluff`.** `dbt_packages/`
   and `target/` are gitignored, and `prepare_if_dev()` only fires under
   `dagster dev`. Every workflow has to run it explicitly.
@@ -253,7 +277,8 @@ without it), but dlt, DuckDB, dbt and Evidence each assume the previous one.
   Keep the sections about tooling (the sqlfluff pin, the ruff defaults, dependabot,
   the `dbt deps` prerequisite); those are the same on any project using them.
 
-If you find yourself wanting to *share* rather than copy the domain-neutral files,
-they're the ones in §1's first list, and `src/` already exists as the seam to put
-them behind. That's a real refactor, not a copy — worth doing on the second
-project, not the first.
+To *share* `src/modern_data_stack/` between projects rather than copying it, add
+this repo as a git dependency and delete the copy. Nothing in the package imports
+the layers above it, so that works today — but copying is the better default
+until you have two projects that actually disagree about something. A shared
+package with one consumer is just a longer import path.
