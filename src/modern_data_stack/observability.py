@@ -25,6 +25,10 @@ import polars as pl
 
 DEFAULT_AUDIT_SCHEMA = "dbt_test__audit"
 
+# dbt's own default: a test fails on the number of rows it returned. Tests are
+# free to override it, and `build_tests` reads each one's from the manifest.
+DEFAULT_FAIL_CALC = "count(*)"
+
 
 def _has_column(con: duckdb.DuckDBPyConnection, schema: str, table: str, column: str) -> bool:
     return bool(
@@ -138,7 +142,7 @@ def build_tables(
 
 
 def manifest_tests(manifest_path: str) -> dict[str, dict]:
-    """Map audit-table name -> {test type, model it guards, column}.
+    """Map audit-table name -> {test type, model it guards, column, fail_calc, severity}.
 
     The audit table is named after the test's `alias`, and dbt **truncates and
     hashes** an alias longer than 63 characters
@@ -146,6 +150,9 @@ def manifest_tests(manifest_path: str) -> dict[str, dict]:
     own is not a readable label. The manifest is where the real name, the
     attached model and the tested column live — and it's gitignored, so an absent
     manifest degrades to bare table names rather than failing.
+
+    `fail_calc` and `severity` come from the same node and are what make a
+    *passing* test read as passing — see `build_tests`.
     """
     path = Path(manifest_path)
     if not path.exists():
@@ -158,12 +165,16 @@ def manifest_tests(manifest_path: str) -> dict[str, dict]:
             continue
         metadata = node.get("test_metadata") or {}
         attached = node.get("attached_node") or ""
+        config = node.get("config") or {}
         out[node["alias"]] = {
             "test_name": node["name"],
             "test_type": metadata.get("name") or "singular",
             # `model.<project>.fct_emissions_energy` -> the last segment
             "tested_model": attached.rsplit(".", 1)[-1] or None,
             "tested_column": (metadata.get("kwargs") or {}).get("column_name"),
+            "fail_calc": config.get("fail_calc") or DEFAULT_FAIL_CALC,
+            # dbt writes this as "ERROR"/"WARN", but a yml can spell it lowercase.
+            "severity": (config.get("severity") or "error").lower(),
         }
     return out
 
@@ -176,9 +187,20 @@ def build_tests(
     """One row per dbt test, with the number of rows currently failing it.
 
     Requires `+store_failures: true` project-wide, so each test leaves a table in
-    the audit schema holding the rows it rejected. An empty table is a *passing*
-    test — which is why this counts rather than checks existence, and why a green
-    pipeline produces a table of zeroes.
+    the audit schema holding the rows it rejected. For most tests an empty table
+    is a *passing* test — which is why this counts rather than checks existence,
+    and why a green pipeline produces a table of zeroes.
+
+    **`count(*)` is not the right count, and using it reported passing tests as
+    failures.** A test's verdict is `fail_calc` applied to its result set, which
+    defaults to `count(*)` but does not have to be: `dbt_utils.equal_rowcount`
+    uses `sum(coalesce(diff_count, 0))` and returns a one-row *summary* whether
+    it passed or failed. Counting rows scored both of this project's
+    `equal_rowcount` tests as 1 failing row against a fully green
+    `dbt build` (PASS=387, ERROR=0), so the page reporting pipeline health
+    contradicted the build. Applying `fail_calc` is exactly what dbt does. With
+    no manifest there is nothing to read it from, so it falls back to `count(*)`
+    — right for the 351 of 354 tests here that use the default.
     """
     audit_tables = [
         row[0]
@@ -195,16 +217,25 @@ def build_tests(
 
     rows = []
     for table in audit_tables:
-        failing = con.sql(f'select count(*) from {audit_schema}."{table}"').fetchone()[0]
         meta = catalogue.get(table, {})
+        fail_calc = meta.get("fail_calc") or DEFAULT_FAIL_CALC
+        severity = meta.get("severity") or "error"
+        # `sum(...)` over an empty table is null, where `count(*)` would be 0.
+        failing = con.sql(
+            f'select coalesce({fail_calc}, 0) from {audit_schema}."{table}"'
+        ).fetchone()[0]
         rows.append(
             {
                 "test_name": meta.get("test_name") or table,
                 "test_type": meta.get("test_type"),
                 "tested_model": meta.get("tested_model"),
                 "tested_column": meta.get("tested_column"),
-                "failing_rows": failing,
-                "status": "fail" if failing else "pass",
+                "severity": severity,
+                "failing_rows": int(failing),
+                # A warn-severity test with failures is not a failure: dbt does
+                # not fail the build on one, so calling it `fail` here would
+                # report a red pipeline for something dbt let through.
+                "status": ("fail" if severity == "error" else "warn") if failing else "pass",
                 "audit_table": f"{audit_schema}.{table}",
             }
         )

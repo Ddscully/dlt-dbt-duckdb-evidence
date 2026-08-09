@@ -160,6 +160,124 @@ def test_tests_split_pass_from_fail(warehouse, manifest):
     assert failing["audit_table"].startswith("dbt_test__audit.")
 
 
+def _equal_rowcount_case(tmp_path, diff_count):
+    """A warehouse + manifest for one `equal_rowcount` test with the given diff.
+
+    `dbt_utils.equal_rowcount` returns a one-row *summary* whether it passed or
+    failed, so the audit table is never empty and row-counting cannot read it.
+    """
+    path = tmp_path / "eq.duckdb"
+    con = duckdb.connect(str(path))
+    con.sql("create schema dbt_test__audit")
+    con.sql(
+        f"""
+        create table dbt_test__audit.dbt_utils_equal_rowcount_fct_f_deadbeef as
+        select * from (values (1, 1, 265035, 265035, {diff_count}))
+        as t(id_dbtutils_test_equal_rowcount_a, id_dbtutils_test_equal_rowcount_b,
+             count_a, count_b, diff_count)
+        """
+    )
+    con.close()
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "nodes": {
+                    "test.demo.eq": {
+                        "resource_type": "test",
+                        "name": "dbt_utils_equal_rowcount_fct_fx_rates_published_ref_stg_fx_rates_",
+                        "alias": "dbt_utils_equal_rowcount_fct_f_deadbeef",
+                        "attached_node": "model.demo.fct_fx_rates_published",
+                        "test_metadata": {"name": "equal_rowcount", "kwargs": {}},
+                        "config": {
+                            "fail_calc": "sum(coalesce(diff_count, 0))",
+                            "severity": "ERROR",
+                        },
+                    }
+                }
+            }
+        )
+    )
+    return path, manifest
+
+
+def test_a_passing_equal_rowcount_is_not_reported_as_a_failure(tmp_path):
+    """The bug this fixes: `count(*)` scored a passing test as one failing row.
+
+    Both `equal_rowcount` tests in this project reported `status='fail'` against a
+    `dbt build` that finished PASS=387, ERROR=0 — so the page whose job is
+    reporting pipeline health contradicted the build. The verdict is the test's
+    `fail_calc` applied to its result set, not the size of that result set.
+    """
+    warehouse, manifest = _equal_rowcount_case(tmp_path, diff_count=0)
+    con = duckdb.connect(str(warehouse), read_only=True)
+    try:
+        row = observability.build_tests(con, str(manifest)).to_dicts()[0]
+    finally:
+        con.close()
+
+    assert row["failing_rows"] == 0
+    assert row["status"] == "pass"
+    assert row["test_type"] == "equal_rowcount"
+
+
+def test_a_genuinely_failing_equal_rowcount_reports_the_row_difference(tmp_path):
+    """The other half: `fail_calc` must still count a real failure, and count it
+    as the *difference* rather than as the one summary row."""
+    warehouse, manifest = _equal_rowcount_case(tmp_path, diff_count=42)
+    con = duckdb.connect(str(warehouse), read_only=True)
+    try:
+        row = observability.build_tests(con, str(manifest)).to_dicts()[0]
+    finally:
+        con.close()
+
+    assert row["failing_rows"] == 42
+    assert row["status"] == "fail"
+
+
+def test_a_warn_severity_test_with_failures_is_not_called_a_failure(warehouse, tmp_path):
+    """dbt does not fail a build on a warn-severity test, so neither does this.
+
+    Nothing in the project uses `severity: warn` today; without this the first one
+    added would show up as a red pipeline for something dbt deliberately let
+    through.
+    """
+    manifest = tmp_path / "warn.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "nodes": {
+                    "test.demo.range": {
+                        "resource_type": "test",
+                        "name": "dbt_utils_accepted_range_fct_emissions_energy_co2_mt__0",
+                        "alias": "dbt_utils_accepted_range_fct_e_abc123",
+                        "attached_node": "model.demo.fct_emissions_energy",
+                        "test_metadata": {
+                            "name": "accepted_range",
+                            "kwargs": {"column_name": "co2_mt"},
+                        },
+                        "config": {"severity": "warn"},
+                    }
+                }
+            }
+        )
+    )
+    con = duckdb.connect(str(warehouse), read_only=True)
+    try:
+        rows = {
+            row["audit_table"]: row
+            for row in observability.build_tests(con, str(manifest)).to_dicts()
+        }
+    finally:
+        con.close()
+
+    warned = rows["dbt_test__audit.dbt_utils_accepted_range_fct_e_abc123"]
+    assert warned["failing_rows"] == 1
+    assert warned["severity"] == "warn"
+    assert warned["status"] == "warn"
+
+
 def test_tests_survive_a_missing_manifest(warehouse, tmp_path):
     """`dbt/target/` is gitignored, so the manifest can legitimately be absent."""
     con = duckdb.connect(str(warehouse), read_only=True)
