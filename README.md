@@ -54,6 +54,11 @@ layers fit together](#orchestration), [how it's tested](#tests), or just
 | [**pytest**](https://docs.pytest.org/) | unit tests over the ingest/transform logic |
 | **GitHub Actions** | fixture-backed pipeline run on every PR, live run nightly |
 
+Want this shape for your own dataset?
+[`docs/REUSING_THIS_STACK.md`](./docs/REUSING_THIS_STACK.md) covers what copies
+over unchanged, what has to be rewritten, and the four decisions that are
+expensive to revisit later.
+
 ## Data sources
 
 **Five feeds from three publishers.** All country + year keyed, freely licensed,
@@ -204,6 +209,7 @@ from the UI if you want it running.
 ├── notebooks/         # marimo reactive notebooks
 ├── reports/           # Evidence dashboard (BI as code)
 ├── docs/STYLE_GUIDE.md # SQL + model conventions (the lint rules and the rest)
+├── docs/REUSING_THIS_STACK.md # starting a different project on this shape
 ├── docs/sessions/     # exported Claude Code session logs (project history)
 ├── data/              # warehouse.duckdb lives here (gitignored)
 ├── justfile           # orchestration recipes

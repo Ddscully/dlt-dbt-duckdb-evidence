@@ -13,6 +13,11 @@ dlt (EL) → DuckDB → dbt (staging/marts) → Polars (heavy T) → Evidence (B
                     all orchestrated by Dagster
 ```
 
+Starting a *different* project on this shape is
+[`docs/REUSING_THIS_STACK.md`](docs/REUSING_THIS_STACK.md): what carries over,
+what has to be rewritten, and the decisions that are expensive to change later.
+The rest of this file is about *this* warehouse.
+
 ## Commands
 
 Use the `justfile` recipes (they map to plain `uv run …` commands):
