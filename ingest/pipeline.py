@@ -7,6 +7,9 @@ Sources (all freely licensed; country + year keyed apart from the last):
   - World Bank countries  https://api.worldbank.org/v2/country?format=json  (dimension table)
   - Eurostat prices       https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204  (EU only)
   - ECB reference rates   https://frankfurter.dev  (daily FX — the one sub-annual grain)
+  - UCI Online Retail II  https://archive.ics.uci.edu/dataset/502/online+retail+ii
+                          (order lines — the one grain below a country, and the
+                           one source that is a bulk file drop rather than an API)
 
 Set ``INGEST_FIXTURES=1`` to read checked-in payloads instead of the live
 endpoints — see `ingest/fixtures.py`. That's what CI does on pull requests.
@@ -23,13 +26,16 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import dlt
 import polars as pl
 import requests
 
 from ingest import fixtures
-from modern_data_stack.paths import warehouse_path
+from modern_data_stack import workbook
+from modern_data_stack.paths import cache_dir, warehouse_path
+from modern_data_stack.workbook import excel_serial_to_timestamp, extract_member
 
 # WAREHOUSE_PATH lets a fixture run target a throwaway file instead of the real
 # warehouse. It must be absolute: dbt resolves its own copy of this from `dbt/`,
@@ -154,6 +160,93 @@ FX_COLUMNS = {
     "base_currency": {"data_type": "text", "nullable": False},
     "quote_currency": {"data_type": "text", "nullable": False},
     "rate": {"data_type": "double"},
+}
+
+
+def _download(url: str, dest: Path, *, timeout: int = 300, chunk: int = 1 << 20) -> Path:
+    """Stream a large file to disk, writing to a temporary name first.
+
+    The rename is the point: an interrupted download that left a short file under
+    the real name would be indistinguishable from a complete one on the next run,
+    and the cache would serve a truncated workbook forever. A partial write
+    leaves a `.part` behind instead, which is retried and overwritten.
+    """
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    with requests.get(url, stream=True, timeout=timeout) as resp:
+        resp.raise_for_status()
+        with tmp.open("wb") as out:
+            for block in resp.iter_content(chunk_size=chunk):
+                out.write(block)
+    tmp.replace(dest)
+    return dest
+
+
+# UCI Online Retail II — a UK online gift retailer's transactions, 2009-12 to
+# 2011-12, CC BY 4.0. https://archive.ics.uci.edu/dataset/502/online+retail+ii
+#
+# The only source here that is a *bulk file drop* rather than an API: one 45 MB
+# zip holding one workbook of two sheets, republished when the curator revises it
+# and otherwise static. Everything downstream of that shape — the cache, the
+# workbook reader, load-time rather than fetch-time partitions — follows from it.
+RETAIL_ARCHIVE = "https://archive.ics.uci.edu/static/public/502/online+retail+ii.zip"
+RETAIL_WORKBOOK_NAME = "online_retail_II.xlsx"
+
+# The extract's own bounds — first and last transaction month. Constants rather
+# than a query because the orchestration layer needs them to *define* the
+# partitions, before any data has been loaded to read them from. They are safe to
+# hardcode in a way no other source's bounds would be: this is a closed archive,
+# the study period ended on 2011-12-09, and a revision of the file would be a
+# re-transcription of the same two years rather than an extension of them.
+# `tests/test_ingest.py` checks them against the recorded fixture, so a
+# re-recording that widened the window would fail rather than silently leave
+# months with no partition to land in.
+RETAIL_FIRST_MONTH = "2009-12"
+RETAIL_LAST_MONTH = "2011-12"
+
+# (invoice, line_number). The source has no line identifier at all, so this is
+# assigned from file position — see `retail_sql` for why content can't do it and
+# what that costs.
+RETAIL_PRIMARY_KEY = ("invoice", "line_number")
+
+# Rows per Arrow batch handed to dlt. Small enough that peak memory is flat over
+# a full 1.07M-row load, large enough that the per-batch overhead disappears.
+RETAIL_BATCH_ROWS = 100_000
+
+# Declared rather than inferred, for the same reason `wb_wdi`'s are: this is the
+# second resource whose schema isn't dropped and re-inferred each run, and a
+# partition that happened to contain only whole prices would infer `bigint` for
+# `unit_price` and shunt the next 1.25 into a `unit_price__v_double` variant.
+# `customer_id` is text on purpose — it is an identifier that happens to look
+# numeric, and the one thing nobody will ever do to it is arithmetic.
+#
+# No `nullable: False` on the key columns, unlike `wb_wdi` and `ecb_fx_rates` —
+# though not for the reason it first looks like. Every load logs a hint-mismatch
+# warning naming `invoice` and `line_number`, because Arrow fields are nullable
+# by construction and dlt's schema says they aren't; removing the explicit hints
+# does *not* silence it, since `primary_key` marks its own columns non-nullable
+# anyway. The warning is unavoidable for an Arrow resource with a key, and it is
+# harmless: dlt's hint wins and the column lands NOT NULL. They are left out
+# because they would be redundant, and the assertion is worth more in dbt
+# regardless — `not_null` there stores the offending rows rather than logging.
+RETAIL_COLUMNS = {
+    "invoice": {"data_type": "text"},
+    "line_number": {"data_type": "bigint"},
+    "stock_code": {"data_type": "text"},
+    "description": {"data_type": "text"},
+    "quantity": {"data_type": "bigint"},
+    # `timezone: False`, and it is not cosmetic. dlt's default `timestamp` maps to
+    # TIMESTAMP WITH TIME ZONE, which reads a naive value as UTC and renders it in
+    # the reader's zone: a till receipt stamped 07:45 came back as
+    # `2009-12-01 08:45:00+01:00` on a CET machine and would come back as 07:45 in
+    # CI, so the same workbook produced a different warehouse depending on where
+    # it was built. These are wall-clock shop times with no zone attached and no
+    # instant to preserve — the only faithful storage is a naive timestamp.
+    "invoice_ts": {"data_type": "timestamp", "timezone": False},
+    "invoice_month": {"data_type": "text"},
+    "unit_price": {"data_type": "double"},
+    "customer_id": {"data_type": "text"},
+    "country": {"data_type": "text"},
+    "sheet_name": {"data_type": "text"},
 }
 
 
@@ -477,13 +570,173 @@ def ecb_fx_rates():
     ]
 
 
-@dlt.source
-def public_indicators(wdi_years: tuple[int, int] | None = None):
-    """The six resources as one dlt source.
+def retail_workbook() -> Path:
+    """The extracted Online Retail II workbook, downloading it at most once.
 
-    `wdi_years` is threaded through to `wb_wdi` rather than bound onto the
-    resource afterwards, so the Dagster asset can build a source for one
-    partition range with the same call the CLI makes for an incremental run.
+    Everything else in this file is a request whose response *is* the data. This
+    is a 45 MB zip that has not changed since 2023 and never will — the study
+    period closed in 2011 — so re-fetching it per load would be 45 MB of
+    politeness to no one, and re-fetching it per *partition* would make a
+    twenty-five-month backfill a gigabyte of identical downloads. It is cached in
+    `data/cache/` instead, keyed on nothing because there is only one of it; the
+    directory is gitignored and safe to delete.
+
+    Under fixtures the zip is the recorded one and no download happens at all,
+    which is the same code path with a different byte source — the unzip, the
+    sheet discovery and the `all_varchar` read all still run.
+
+    **A fixture run caches into its own subdirectory**, and that is not tidiness.
+    The two workbooks have the same name and the same shape, so a fixture run
+    writing to the shared path would leave the 30k-row slice sitting there as
+    `online_retail_II.xlsx` — and the next *real* run would find it, skip the
+    download and load the slice into the real warehouse with no error anywhere.
+    Same failure the `_fixtures` pipeline-name suffix exists to prevent one layer
+    down, and the same one an absolute `WAREHOUSE_PATH` prevents in the tests.
+    """
+    cache = Path(cache_dir()) / ("fixtures" if fixtures.enabled() else "live")
+    extracted = cache / RETAIL_WORKBOOK_NAME
+    if extracted.exists():
+        return extracted
+
+    cache.mkdir(parents=True, exist_ok=True)
+    if fixtures.enabled():
+        archive = fixtures.path_for(RETAIL_ARCHIVE)
+    else:
+        archive = cache / "online_retail_ii.zip"
+        if not archive.exists():
+            _download(RETAIL_ARCHIVE, archive)
+    return extract_member(archive, cache, ".xlsx")
+
+
+def retail_sql(months: tuple[str, str] | None = None) -> str:
+    """The SQL that turns the workbook into `raw.retail_invoice_lines`.
+
+    A function rather than a constant because the month filter is the partition:
+    `('2010-01', '2010-03')` loads that window and nothing else. Filtering here
+    rather than after the read is what makes a partition cheap — DuckDB still
+    parses the whole workbook (a spreadsheet has no index), but only the selected
+    rows are materialised, converted and handed to dlt.
+
+    Three things happen in this SQL and each is deliberate:
+
+    * **`line_number` is assigned from file position**, because the source has no
+      line identifier and 34,337 rows are exact duplicates of another row — same
+      invoice, product, quantity, price and timestamp. They cannot be told apart
+      by content, so content cannot key them. File order can, and it is stable:
+      `preserve_insertion_order` is set explicitly rather than left to DuckDB's
+      default, because that default is what the key's determinism rests on and a
+      future release changing it would corrupt the merge silently rather than
+      loudly. `tests/test_ingest.py` reads the fixture twice and compares.
+    * **Every column is cast from text exactly once**, here, where the failure is
+      visible. See `modern_data_stack.workbook` for why the read is all-text.
+    * **Nothing is cleaned.** `Invoice` keeps its `C` and `A` prefixes, quantities
+      keep their signs, `Customer ID` keeps its 243,007 blanks and `StockCode`
+      keeps both `M` and `m`. The landing table is what the publisher sent; the
+      taxonomy those prefixes encode is a modelling decision and belongs in
+      staging, not in a cast.
+    """
+    ts = excel_serial_to_timestamp('"InvoiceDate"')
+    # Filtered on the underlying expression, not on the `invoice_month` alias, and
+    # in WHERE rather than QUALIFY. Both matter: WHERE runs before the window, so
+    # a month filter costs nothing, and it cannot renumber a kept invoice's lines
+    # because it only ever removes whole invoices — a month boundary never falls
+    # inside one.
+    where = ""
+    if months is not None:
+        where = f"where strftime(invoice_ts, '%Y-%m') between '{months[0]}' and '{months[1]}'"
+    return f"""
+        with source as (
+            select *, row_number() over () as file_row from sheets
+        ),
+        typed as (
+            select
+                "Invoice"                   as invoice,
+                "StockCode"                 as stock_code,
+                "Description"               as description,
+                cast("Quantity" as bigint)  as quantity,
+                {ts}                        as invoice_ts,
+                cast("Price" as double)     as unit_price,
+                "Customer ID"               as customer_id,
+                "Country"                   as country,
+                sheet_name,
+                file_row
+            from source
+        ),
+        filtered as (
+            select *, strftime(invoice_ts, '%Y-%m') as invoice_month
+            from typed
+            {where}
+        )
+        select
+            invoice,
+            row_number() over (partition by invoice order by file_row) as line_number,
+            stock_code,
+            description,
+            quantity,
+            invoice_ts,
+            invoice_month,
+            unit_price,
+            customer_id,
+            country,
+            sheet_name
+        from filtered
+    """
+
+
+@dlt.resource(
+    name="retail_invoice_lines",
+    write_disposition="merge",
+    primary_key=RETAIL_PRIMARY_KEY,
+    columns=RETAIL_COLUMNS,
+)
+def retail_invoice_lines(months: tuple[str, str] | None = None):
+    """A UK gift retailer's order lines, 2009-12 to 2011-12 — the first grain
+    below a country, and the first row here that is a thing somebody *did*.
+
+    Every other source in this file is a published statistic: an annual national
+    aggregate somebody else computed. This is 1,067,371 raw events, and what it
+    buys is the entire vocabulary those aggregates can't reach — a customer, an
+    order, a return, a cohort, a basket, a margin.
+
+    It is also messy in ways that are load-bearing rather than incidental, which
+    is most of why it was chosen over a synthetic set. The three prefixes on
+    `Invoice` are a taxonomy nobody documented (45,330 sales, 8,292 `C`
+    cancellations, 6 `A` bad-debt adjustments); 3,457 negative-quantity rows sit
+    on *sale* invoices and are not returns at all; and `StockCode` carries
+    postage, bank charges, Amazon fees and a literal `TEST001` alongside the
+    products. All of that is landed exactly as sent and sorted out in staging.
+
+    Yielded as Arrow record batches, not dicts: a million rows through Python
+    dictionaries costs about a minute and a couple of GB, and dlt writes Arrow
+    straight to Parquet without ever building the row objects.
+
+    **`to_arrow_reader`, never `.arrow()`.** `DuckDBPyRelation.arrow()` returns a
+    streaming `RecordBatchReader` whose default batch is 1,000,000 rows, and a
+    caller that treats it as a table gets the first batch and no warning — this
+    resource silently landed exactly 1,000,000 of its 1,067,371 rows until the
+    round number gave it away. The reader is the right object anyway, because
+    consuming it in batches is what keeps peak memory flat, but it has to be
+    *iterated*. `tests/test_ingest.py` pins the row count against the workbook's
+    own so a batch-size change can't reintroduce it.
+    """
+    con = workbook.connect()
+    con.execute(f"create or replace view sheets as {workbook.sheets_sql(retail_workbook())}")
+    yield from con.sql(retail_sql(months)).to_arrow_reader(RETAIL_BATCH_ROWS)
+
+
+@dlt.source
+def public_indicators(
+    wdi_years: tuple[int, int] | None = None,
+    retail_months: tuple[str, str] | None = None,
+):
+    """The seven resources as one dlt source.
+
+    The two window arguments are threaded through to their resources rather than
+    bound on afterwards, so the Dagster asset can build a source for one
+    partition range with the same call the CLI makes for an unpartitioned run.
+    They are separate arguments because the two are partitioned on different
+    columns at different grains — years for WDI, months for retail — and a shared
+    one would have to be a date range that neither takes directly.
     """
     return [
         owid_co2(),
@@ -492,6 +745,7 @@ def public_indicators(wdi_years: tuple[int, int] | None = None):
         wb_wdi(wdi_years),
         eu_elec_prices(),
         ecb_fx_rates(),
+        retail_invoice_lines(retail_months),
     ]
 
 
@@ -506,18 +760,30 @@ REFRESH = "drop_resources"
 # incremental costume. So the two dispositions load in two calls: replace with
 # the schema-safety refresh, merge without it.
 FULL_REFRESH_RESOURCES = ("owid_co2", "owid_energy", "wb_country", "eu_elec_prices")
-INCREMENTAL_RESOURCES = ("wb_wdi", "ecb_fx_rates")
+INCREMENTAL_RESOURCES = ("wb_wdi", "ecb_fx_rates", "retail_invoice_lines")
 
 # Which of those the orchestration layer partitions, and it is not the same
-# question as which of them merge. A partition has to be a window the API will
-# actually serve: WDI takes `&date=lo:hi` and its primary key contains `year`, so
-# a year is a re-runnable unit of work. `ecb_fx_rates` merges for the same reason
-# WDI does and is *not* partitioned — a daily partition over 7,000 days would be
-# 7,000 Dagster partitions standing in for a single three-second request. Kept
-# here rather than in `orchestration/` so the covering test in
-# `tests/test_ingest.py` can hold it to the source without importing Dagster,
-# which is an optional dependency group.
-PARTITIONED_RESOURCES = ("wb_wdi",)
+# question as which of them merge. Three answers, and the third is the one that
+# says what the rule actually is:
+#
+#   * `wb_wdi` — the *fetch* narrows. The API takes `&date=lo:hi` and `year` is in
+#     the primary key, so a year is a re-runnable unit of work end to end.
+#   * `ecb_fx_rates` — merges for the same reason WDI does and is deliberately
+#     *not* partitioned. Its entire 27-year series is one three-second request, so
+#     a daily partition would be 7,000 Dagster partitions standing in for it.
+#   * `retail_invoice_lines` — the fetch cannot narrow at all: the source is one
+#     static 45 MB workbook and there is no request to make a window out of. What
+#     narrows is the *load*. Reading and converting a month is real work, the
+#     cached download means twenty-five partitions are still one fetch, and
+#     `invoice_month` is derived from the same timestamp the partition is keyed
+#     on, so re-running one month replaces exactly that month.
+#
+# So the rule is not "the API takes a range" and never was "the disposition is
+# merge" — it is whether a partition is a re-runnable unit of *work* that maps
+# cleanly onto a slice of the destination. Kept here rather than in
+# `orchestration/` so the covering tests in `tests/test_ingest.py` can hold both
+# splits to the source without importing Dagster, an optional dependency group.
+PARTITIONED_RESOURCES = ("wb_wdi", "retail_invoice_lines")
 
 
 def load_groups(resources: Iterable[str] | None = None) -> list[tuple[list[str], dict]]:
@@ -550,6 +816,26 @@ def build_pipeline() -> dlt.Pipeline:
     fetch a five-year window on the assumption that history it never loaded is
     already there.
     """
+    # **Arrow data does not get `_dlt_load_id` unless you ask for it.** dlt adds
+    # that column when it normalises row objects, but the Arrow/Parquet path
+    # writes the table through untouched and the load-id normaliser is off by
+    # default — so `raw.retail_invoice_lines` landed without the one column every
+    # other table here has, and lost it silently: nothing errors, the load
+    # succeeds, and the table simply has no provenance.
+    #
+    # It costs three things, none of them loud. `dbt source freshness` reads
+    # exactly this column, so the source can never be checked. `pipeline_sources`
+    # skips any table lacking it, so the observability page under-reports by one
+    # row and looks complete. And `source_loaded_at` — the "which extract did
+    # this number come from" column that `dim_grid_emission_factors` exists to
+    # carry — has nothing to read.
+    #
+    # Set here rather than in an env var or `.dlt/config.toml` so it travels with
+    # the pipeline definition: the Dagster asset, the CLI and the tests all build
+    # their pipeline through this function, and a config file would be a fourth
+    # place to remember.
+    os.environ.setdefault("NORMALIZE__PARQUET_NORMALIZER__ADD_DLT_LOAD_ID", "true")
+
     suffix = "_fixtures" if fixtures.enabled() else ""
     return dlt.pipeline(
         pipeline_name=f"modern_data_stack{suffix}",

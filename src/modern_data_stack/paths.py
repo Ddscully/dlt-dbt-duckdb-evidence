@@ -44,6 +44,7 @@ ROOT_MARKER = "pyproject.toml"
 ROOT_ENV_VAR = "PROJECT_ROOT"
 WAREHOUSE_ENV_VAR = "WAREHOUSE_PATH"
 LAKE_ENV_VAR = "LAKE_DIR"
+CACHE_ENV_VAR = "INGEST_CACHE_DIR"
 
 
 def _looks_like_root(path: Path) -> bool:
@@ -92,6 +93,18 @@ def warehouse_path() -> str:
 def lake_dir() -> str:
     """The Parquet archive's destination. ``LAKE_DIR`` overrides it, as above."""
     return os.environ.get(LAKE_ENV_VAR) or str(project_root() / "data" / "lake")
+
+
+def cache_dir() -> str:
+    """Where a source too big to re-fetch per use is kept between runs.
+
+    ``INGEST_CACHE_DIR`` overrides it, as above. Gitignored and safe to delete —
+    everything here is a byte-identical copy of something a URL still serves, so
+    losing it costs a download and never data. It exists for bulk-drop sources
+    that arrive as one file: re-downloading 45 MB once per partition is the
+    difference between a backfill you can run and one you won't.
+    """
+    return os.environ.get(CACHE_ENV_VAR) or str(project_root() / "data" / "cache")
 
 
 def dbt_dir() -> Path:

@@ -41,7 +41,9 @@ LAYERS = ("staging", "marts", "analytics", "history")
 
 # dlt's landing tables, minus its internal `_dlt_*` bookkeeping.
 #
-# `ecb_fx_rates` reports a null year span, because it is keyed on `rate_date` and
+# `ecb_fx_rates` and `retail_invoice_lines` report a null year span, because both
+# are keyed on a date rather than a year and neither has a `year` column to take
+# one from. `ecb_fx_rates` is keyed on `rate_date` and
 # has no `year` column to take one from. That is the same shape `stg_country` and
 # the currency dimension already have in `pipeline_tables`, and it is left as a
 # null rather than derived: the row's job here is the row count and the load
@@ -53,6 +55,7 @@ SOURCE_TABLES = (
     "wb_wdi",
     "eu_elec_prices",
     "ecb_fx_rates",
+    "retail_invoice_lines",
 )
 
 

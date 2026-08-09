@@ -47,6 +47,12 @@ _ROUTES: list[_fixtures.Route] = [
     # and an incremental run asking for a ten-day window gets all of it back.
     # That is safe because the resource merges on (rate_date, quote_currency).
     (re.compile(r"api\.frankfurter\.dev/v1/\d{4}-\d{2}-\d{2}\.\."), "ecb_fx_rates.json.gz"),
+    # The only fixture that is not a response body but a *file* — the retail
+    # source is a zip holding a workbook, and the fixture is a smaller zip
+    # holding a smaller workbook. Same container, so the unzip, the sheet
+    # discovery and the all-text read are all exercised in CI; a bare `.xlsx`
+    # here would skip the first two, and a CSV would skip all three.
+    (re.compile(r"archive\.ics\.uci\.edu/static/public/502/"), "retail_online_retail_ii.zip"),
 ]
 
 

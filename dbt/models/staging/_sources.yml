@@ -32,3 +32,18 @@ sources:
         freshness:
           warn_after: {count: 2, period: day}
           error_after: {count: 7, period: day}
+      - name: retail_invoice_lines
+        description: >
+          UCI Online Retail II — a UK online gift retailer's order lines,
+          2009-12-01 to 2011-12-09, at (invoice, line_number). The only source
+          here below country grain and the only one that is a bulk file drop
+          rather than an API: one 45 MB workbook, republished when the curator
+          revises it. Landed exactly as sent, prefixes and blanks and negative
+          quantities included — `stg_retail_lines` is where that becomes a
+          taxonomy.
+        # Freshness is switched off rather than loosened. The study period closed
+        # in December 2011 and the file has not moved since 2023, so *every*
+        # threshold would be permanently red and would train the eye to ignore
+        # the check that matters. A stale-data alarm on a closed archive is
+        # noise, not diligence.
+        freshness: null

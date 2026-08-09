@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 import requests
 from dlt.extract.exceptions import ResourceExtractionError
 
 from ingest import fixtures, pipeline
+from modern_data_stack import workbook
 
 
 class FakeResponse:
@@ -394,6 +396,12 @@ def test_partitioned_resources_is_a_subset_of_the_incremental_ones():
     remove nothing and leave WDI's block empty.
     """
     assert set(pipeline.PARTITIONED_RESOURCES) <= set(pipeline.INCREMENTAL_RESOURCES)
+    # Named explicitly, because `orchestration/assets.py` splits this tuple again
+    # by partition *grain* — years for WDI, months for retail — into two
+    # `@dlt_assets` blocks, and Dagster forces one `partitions_def` per block. A
+    # resource added here without a matching block would land in neither and
+    # disappear from the graph, which no other assertion here would catch.
+    assert set(pipeline.PARTITIONED_RESOURCES) == {"wb_wdi", "retail_invoice_lines"}
     unpartitioned = [
         name
         for names, _ in pipeline.load_groups()
@@ -563,3 +571,145 @@ def test_ecb_fx_rates_asks_for_the_lookback_window_when_it_has_a_watermark(monke
     assert len(calls) == 1
     assert "/v1/2026-07-29.." in calls[0]
     assert "base=EUR" in calls[0]
+
+
+# --------------------------------------------------------------------------- #
+# Retail order lines (UCI Online Retail II)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def retail_con(monkeypatch, tmp_path):
+    """A connection over the *fixture* workbook, cached into a temp directory.
+
+    `INGEST_CACHE_DIR` is redirected for the same reason `just test-pipeline`
+    redirects `WAREHOUSE_PATH`: without it these tests would unpack into
+    `data/cache/`, and the fixture slice and the real 45 MB workbook share a
+    filename.
+    """
+    monkeypatch.setenv(fixtures.ENV_VAR, "1")
+    monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path))
+    con = workbook.connect()
+    con.execute(
+        f"create or replace view sheets as {workbook.sheets_sql(pipeline.retail_workbook())}"
+    )
+    return con
+
+
+def test_retail_fixture_and_live_caches_never_share_a_path(monkeypatch, tmp_path):
+    """The one that would poison the real warehouse.
+
+    Both workbooks are named `online_retail_II.xlsx`. If a fixture run unpacked
+    to the shared cache path, the next *live* run would find it, skip the
+    download and load the 41k-row slice into the real warehouse — green, silent
+    and wrong. Same failure the `_fixtures` pipeline-name suffix prevents for
+    dlt state.
+    """
+    monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv(fixtures.ENV_VAR, "1")
+    fixture_path = pipeline.retail_workbook()
+    monkeypatch.setenv(fixtures.ENV_VAR, "0")
+    live_dir = Path(pipeline.cache_dir()) / "live"
+    assert fixture_path.parent != live_dir
+    assert not (live_dir / pipeline.RETAIL_WORKBOOK_NAME).exists()
+
+
+def test_retail_yields_every_row_the_workbook_holds(retail_con):
+    """The silent truncation this cost once already.
+
+    `DuckDBPyRelation.arrow()` returns a streaming reader whose default batch is
+    1,000,000 rows, and treating it as a table lands the first batch and no
+    warning — the live load quietly stored exactly 1,000,000 of 1,067,371 rows
+    until the round number gave it away. Pinned against the workbook's own count
+    so a batch-size change can't bring it back.
+    """
+    expected = retail_con.sql("select count(*) from sheets").fetchone()[0]
+    batches = list(pipeline.retail_invoice_lines())
+    assert len(batches) >= 1
+    assert sum(b.num_rows for b in batches) == expected
+
+
+def test_retail_line_number_is_stable_across_reads(retail_con):
+    """The merge key rests on file order, so file order has to be deterministic.
+
+    34,337 rows in the full workbook are exact duplicates of another row — same
+    invoice, product, quantity, price, timestamp — so nothing in the content can
+    tell them apart. `workbook.connect()` pins `preserve_insertion_order`; this
+    is the assertion that makes that setting load-bearing rather than incidental.
+
+    Sorted before comparing, because the claim is about the *assignment* and not
+    about output order: `partition by invoice` lets DuckDB return the rows in
+    whatever order it likes, and it does. What has to hold is that a given
+    (invoice, line_number) names the same line every time.
+    """
+    read = lambda: retail_con.sql(  # noqa: E731
+        f"""select invoice, line_number, stock_code, quantity
+            from ({pipeline.retail_sql()}) order by invoice, line_number"""
+    ).fetchall()
+    assert read() == read()
+
+
+def test_retail_month_filter_is_the_partition(retail_con):
+    """A partition loads its window and nothing else, and the windows tile."""
+    all_rows = retail_con.sql(f"select count(*) from ({pipeline.retail_sql()})").fetchone()[0]
+    window = pipeline.retail_sql(("2010-01", "2010-03"))
+    months = retail_con.sql(f"select distinct invoice_month from ({window}) order by 1").fetchall()
+    assert [m[0] for m in months] == ["2010-01", "2010-02", "2010-03"]
+
+    per_month = sum(
+        retail_con.sql(f"select count(*) from ({pipeline.retail_sql((m, m))})").fetchone()[0]
+        for m in ("2010-01", "2010-02", "2010-03")
+    )
+    windowed = retail_con.sql(f"select count(*) from ({window})").fetchone()[0]
+    assert per_month == windowed
+    assert windowed < all_rows
+
+
+def test_retail_month_filter_never_splits_an_invoice(retail_con):
+    """Line numbers are assigned per invoice, so a filter that cut one in half
+    would renumber the surviving lines and change the merge key. Invoices don't
+    straddle month boundaries — this is what says so."""
+    straddling = retail_con.sql(
+        f"""select count(*) from (
+                select invoice from ({pipeline.retail_sql()})
+                group by 1 having count(distinct invoice_month) > 1)"""
+    ).fetchone()[0]
+    assert straddling == 0
+
+
+def test_retail_partition_bounds_match_the_data(retail_con):
+    """`RETAIL_FIRST_MONTH`/`RETAIL_LAST_MONTH` define the Dagster partitions and
+    are therefore hardcoded — they have to be known before anything is loaded. A
+    re-recorded fixture that widened the window would otherwise leave months with
+    no partition to land in."""
+    lo, hi = retail_con.sql(
+        f"select min(invoice_month), max(invoice_month) from ({pipeline.retail_sql()})"
+    ).fetchone()
+    assert lo >= pipeline.RETAIL_FIRST_MONTH
+    assert hi <= pipeline.RETAIL_LAST_MONTH
+
+
+def test_retail_lands_the_source_verbatim(retail_con):
+    """Staging owns the taxonomy; the landing table owns nothing.
+
+    Every one of these would be tempting to "fix" in a cast — and each one is a
+    distinction a downstream model needs to see.
+    """
+    row = retail_con.sql(
+        f"""select
+                sum(starts_with(invoice, 'C')::int) as cancellations,
+                sum(starts_with(invoice, 'A')::int) as adjustments,
+                sum((quantity < 0)::int) as negative_quantity,
+                sum((unit_price < 0)::int) as negative_price,
+                sum((customer_id is null or customer_id = '')::int) as no_customer,
+                count(distinct case when upper(stock_code) <> stock_code then stock_code end)
+                    as lowercase_codes
+            from ({pipeline.retail_sql()})"""
+    ).fetchone()
+    cancellations, adjustments, negative_qty, negative_price, no_customer, lowercase = row
+    assert cancellations > 0
+    assert adjustments == 6, "all six bad-debt adjustments must survive the fixture trim"
+    assert negative_qty > cancellations, "write-offs are negative too, and are not cancellations"
+    assert negative_price > 0
+    assert no_customer > 0
+    assert lowercase > 0, "case collisions must reach staging, which is what upper() is for"

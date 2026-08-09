@@ -53,6 +53,14 @@ vars:
   # is set larger on purpose — see the comment in that model.
   fx_incremental_lookback_days: 30
 
+  # The largest cohort age `fct_retail_customer_cohorts` generates rows for. It
+  # is an upper bound, not the answer: each cohort is then cut to the months the
+  # extract could actually have observed it in, so a value larger than the span
+  # costs nothing and a value smaller than it silently truncates the oldest
+  # cohorts into what looks like churn. The Online Retail II extract spans 25
+  # months (2009-12 to 2011-12), so 24 is exactly enough and 36 is the headroom.
+  retail_max_cohort_age_months: 36
+
 models:
   modern_data_stack:
     staging:

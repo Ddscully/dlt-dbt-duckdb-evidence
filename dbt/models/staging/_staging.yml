@@ -410,3 +410,110 @@ models:
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: -180, max_value: 180}
+
+  - name: stg_retail_lines
+    description: >
+      UCI Online Retail II order lines, cleaned and classified, at
+      (invoice, line_number) — the warehouse's finest grain and the only model
+      here below country level. Adds no rows and removes none: its whole job is
+      to name the distinctions the source encodes and never documents (three
+      invoice prefixes, write-offs that look like returns, non-product stock
+      codes) so that downstream money figures can say what they include.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [invoice, line_number]
+      # The classification's load-bearing assumption. Every one of the 3,457
+      # negative-quantity lines on a sale invoice is zero-priced, which is what
+      # makes "write-off, not return" a safe reading rather than a guess. If a
+      # priced one ever appears, this fails with the row rather than booking it
+      # silently as negative revenue.
+      - dbt_utils.expression_is_true:
+          name: stg_retail_write_offs_are_never_priced
+          arguments:
+            expression: "unit_price = 0"
+            config: {where: "is_stock_write_off"}
+      # A cancellation invoice is not the same thing as a negative quantity, and
+      # the source proves it: exactly one line (C496350, a GBP 373.57 manual
+      # adjustment) is positive on a `C` invoice. Pinned at one so that a
+      # re-record which quietly loses it is visible, and so that anyone tempted
+      # to write `is_return = starts_with(invoice, 'C')` meets a counterexample.
+      - dbt_utils.expression_is_true:
+          name: stg_retail_has_exactly_one_positive_cancellation_line
+          arguments:
+            expression: >
+              (select count(*) from {{ ref('stg_retail_lines') }}
+               where invoice_type = 'cancellation' and quantity > 0) = 1
+    columns:
+      - name: invoice
+        description: Source invoice number, prefix included.
+        data_tests: [not_null]
+      - name: line_number
+        description: >
+          Position within the invoice, assigned at ingest from file order. The
+          source has no line identifier and 34,337 rows are exact duplicates of
+          another row, so content cannot key them — see `retail_sql` in
+          `ingest/pipeline.py`.
+        data_tests: [not_null]
+      - name: invoice_type
+        description: sale (45,330 invoices), cancellation (8,292) or adjustment (6).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [sale, cancellation, adjustment]}
+      - name: stock_code
+        description: >
+          Upper-cased and trimmed. 173 codes differ from another only by case
+          (`M` and `m` are the same manual adjustment) and would otherwise be
+          two products.
+        data_tests: [not_null]
+      - name: item_type
+        description: >
+          What the line is for. Only `product` is merchandise; the rest are
+          postage, fees (AMAZONFEE alone nets -GBP 260,764), discounts, samples,
+          vouchers, manual adjustments and a literal test SKU.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [product, shipping, fee, discount, sample, adjustment, voucher, test]
+      - name: quantity
+        description: Signed. Negative on cancellations and on stock write-offs.
+        data_tests: [not_null]
+      - name: unit_price
+        description: >
+          GBP. Zero on 6,202 lines and negative on the six bad-debt adjustments,
+          so it carries no non-negative bound — the range is a fact about the
+          source, not a defect.
+        data_tests: [not_null]
+      - name: line_amount_gbp
+        description: quantity * unit_price, signed, so net revenue is a plain sum.
+        data_tests: [not_null]
+      - name: customer_id
+        description: >
+          Null on 243,007 lines (22.8%) — real sales nobody signed in for, worth
+          13.8% of net revenue. Deliberately not tested for nullity.
+      - name: country
+        data_tests: [not_null]
+      - name: invoice_ts
+        description: >
+          Wall-clock shop time, stored naive. See `RETAIL_COLUMNS` in
+          `ingest/pipeline.py` for why a timezone here would make the warehouse
+          depend on which machine built it.
+        data_tests: [not_null]
+      - name: invoice_date
+        data_tests: [not_null]
+      - name: invoice_month
+        description: '`YYYY-MM`, and the column the Dagster partition is keyed on.'
+        data_tests: [not_null]
+      - name: is_stock_write_off
+        description: >
+          Negative quantity on a sale invoice — inventory shrinkage posted
+          through the transaction table, not a customer return.
+        data_tests: [not_null]
+      - name: is_revenue_line
+        description: >
+          The model's one opinion: a product sale or genuine return that a
+          customer was charged for. Sums to GBP 19,384,356 against GBP 19,287,251
+          for every line in the table.
+        data_tests: [not_null]

@@ -21,6 +21,9 @@ data/*.xlsx
 data/export/
 # Parquet archive built by `just lake`; regenerated from the warehouse
 data/lake/
+# Downloads kept between runs so a partitioned load doesn't re-fetch a 45 MB zip
+# per partition. Byte-identical to what the URL still serves — safe to delete.
+data/cache/
 *.csv
 !dbt/seeds/*.csv
 

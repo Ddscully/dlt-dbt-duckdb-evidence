@@ -37,6 +37,8 @@ from ingest.pipeline import (
     FULL_REFRESH_RESOURCES,
     INCREMENTAL_RESOURCES,
     PARTITIONED_RESOURCES,
+    RETAIL_FIRST_MONTH,
+    RETAIL_LAST_MONTH,
     WB_WDI_INDICATORS,
     WDI_FIRST_YEAR,
     build_pipeline,
@@ -96,14 +98,36 @@ RAW_DESCRIPTIONS = {
         "quote_currency) — the one sub-annual source. Loaded incrementally: "
         "`merge` over a 10-day lookback, and *not* partitioned, unlike WDI."
     ),
+    "retail_invoice_lines": (
+        "UCI Online Retail II — a UK gift retailer's order lines at "
+        "(invoice, line_number), 2009-12 to 2011-12. The only source below "
+        "country grain and the only bulk file drop: one 45 MB workbook, cached "
+        "and then partitioned by invoice month on the *load* rather than the "
+        "fetch."
+    ),
 }
 
-# The blocks below split the six resources by whether they are partitioned, not
-# by how they load — `load_groups` still owns the refresh/merge split, and this
-# selection is passed through it. Two disjoint tuples covering the source, so an
-# added resource lands in exactly one `@dlt_assets` block: a resource in both
-# would be loaded twice per refresh, and one in neither would silently vanish
-# from the graph.
+# The blocks below split the seven resources by whether they are partitioned and
+# *at what grain*, not by how they load — `load_groups` still owns the
+# refresh/merge split, and each selection is passed through it.
+#
+# There are three blocks rather than two because **Dagster gives every asset in a
+# multi-asset the same `partitions_def`**, and the two partitioned resources are
+# not partitioned alike: WDI by year (the World Bank publishes annual series),
+# retail by month (a two-year transaction window, where a year would be one
+# partition and a day would be 740 of them for a shop that trades ~600). Putting
+# them in one block would force one grain onto both, and the only grain that fits
+# both is the finer one — 66 years of empty monthly WDI partitions.
+#
+# Three disjoint tuples covering the source, so an added resource lands in
+# exactly one block: a resource in two would be loaded twice per refresh, and one
+# in none would silently vanish from the graph. The covering assertion lives in
+# `tests/test_ingest.py`, against `PARTITIONED_RESOURCES` — deliberately over
+# there rather than in a test of this module, because `just test` runs without
+# the optional `orchestration` dependency group and a Dagster import would make
+# the guard skip exactly when it is least likely to be noticed.
+YEAR_PARTITIONED_RESOURCES = ("wb_wdi",)
+MONTH_PARTITIONED_RESOURCES = ("retail_invoice_lines",)
 UNPARTITIONED_RESOURCES = (
     *FULL_REFRESH_RESOURCES,
     *(name for name in INCREMENTAL_RESOURCES if name not in PARTITIONED_RESOURCES),
@@ -179,7 +203,7 @@ def raw_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
 
 
 @dlt_assets(
-    dlt_source=public_indicators().with_resources(*PARTITIONED_RESOURCES),
+    dlt_source=public_indicators().with_resources(*YEAR_PARTITIONED_RESOURCES),
     dlt_pipeline=build_pipeline(),
     dagster_dlt_translator=RawSchemaDltTranslator(),
     name="ingest_wdi",
@@ -233,10 +257,75 @@ def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     # `load_groups` again rather than a bare `dlt.run(...)`: it is what asserts
     # this resource loads *without* `refresh`, which would drop the table and the
     # watermark with it.
-    for names, kwargs in load_groups(PARTITIONED_RESOURCES):
+    for names, kwargs in load_groups(YEAR_PARTITIONED_RESOURCES):
         yield from dlt.run(
             context=context,
             dlt_source=public_indicators(wdi_years=years).with_resources(*names),
+            **kwargs,
+        )
+
+
+# Monthly, and bounded at both ends — unlike WDI's, which runs to the current
+# year with `end_offset=1`. This source is a closed archive: the last transaction
+# is 2011-12-09 and there will never be another, so a partition beyond that would
+# be a window nobody can fill. `end_offset` is deliberately absent for the same
+# reason it is required there.
+RETAIL_PARTITIONS = dg.TimeWindowPartitionsDefinition(
+    start=RETAIL_FIRST_MONTH,
+    end=RETAIL_LAST_MONTH,
+    fmt="%Y-%m",
+    cron_schedule="0 0 1 * *",
+)
+
+
+@dlt_assets(
+    dlt_source=public_indicators().with_resources(*MONTH_PARTITIONED_RESOURCES),
+    dlt_pipeline=build_pipeline(),
+    dagster_dlt_translator=RawSchemaDltTranslator(),
+    name="ingest_retail",
+    partitions_def=RETAIL_PARTITIONS,
+    # One run per range, as with WDI, but for the opposite reason. There the win
+    # is collapsing 330 HTTP requests into 11. Here there is only ever one file:
+    # a 25-partition backfill run per-partition would parse the same 45 MB
+    # workbook twenty-five times, which is the cost this policy removes.
+    backfill_policy=dg.BackfillPolicy.single_run(),
+)
+def raw_retail_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
+    """Retail order lines — partitioned on the *load*, not on the fetch.
+
+    This is the third answer to "what earns a partition", and the one that says
+    what the rule actually is. `wb_wdi` earns one because the API takes
+    `&date=lo:hi`. `ecb_fx_rates` is refused one although it merges and takes a
+    date range, because its whole series is a single three-second request. This
+    source can't narrow its fetch at all — there is one static 45 MB workbook and
+    no request to put a window in — and it is partitioned anyway, because reading
+    and converting a month *is* real work, the cached download means twenty-five
+    partitions are still one download, and `invoice_month` is derived from the
+    same timestamp the partition key is, so re-running one month replaces exactly
+    that month and nothing else.
+
+    So a partition is earned by being a re-runnable unit of work that maps onto a
+    slice of the destination. That it maps onto a slice of the *request* is the
+    common case, not the requirement.
+
+    The unpartitioned path has to keep working here for the same reason it does
+    for WDI: `full_refresh` contains this asset and three workflows execute that
+    job with no partition key. Same guard, and the same reason it tests both
+    properties — `has_partition_key_range` alone is False for a single-partition
+    run, which would load the whole workbook while reporting one month.
+    """
+    months = None
+    if context.has_partition_key or context.has_partition_key_range:
+        key_range = context.partition_key_range
+        months = (key_range.start, key_range.end)
+        context.log.info("loading retail_invoice_lines for %s..%s", *months)
+    else:
+        context.log.info("loading retail_invoice_lines whole (no partition key)")
+
+    for names, kwargs in load_groups(MONTH_PARTITIONED_RESOURCES):
+        yield from dlt.run(
+            context=context,
+            dlt_source=public_indicators(retail_months=months).with_resources(*names),
             **kwargs,
         )
 

@@ -994,3 +994,244 @@ models:
           is over the months that have happened. The `price_is_partial_year`
           lesson from the Eurostat models, arriving again.
         data_tests: [not_null]
+
+  - name: fct_retail_order_line
+    description: >
+      Order lines priced in GBP, EUR and USD and joined to `dim_date`, at
+      (invoice, line_number). The warehouse's finest grain and the first fact in
+      it that records something a person did. This is also where the currency and
+      calendar work stops being a demonstration: it is the only fact here with a
+      timestamp and a transactional money amount, which is the shape that
+      actually needs both.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [invoice, line_number]
+      # The fact must not lose or gain a line against staging. It is an inner
+      # join to the date dimension, so a transaction dated outside the calendar's
+      # range would vanish silently — this is what makes that loud.
+      - dbt_utils.equal_rowcount:
+          arguments: {compare_model: ref('stg_retail_lines')}
+      # Every line converts. GBP is quoted for the whole 2009-2011 window so
+      # there is no legitimate null here, and one would mean the carry-forward
+      # cap had been hit — which for GBP would be news.
+      - dbt_utils.expression_is_true:
+          name: fct_retail_every_line_converts_to_eur
+          arguments: {expression: "line_amount_eur is not null"}
+    columns:
+      - name: invoice
+        data_tests: [not_null]
+      - name: line_number
+        data_tests: [not_null]
+      - name: line_amount_gbp
+        data_tests: [not_null]
+      - name: line_amount_eur
+        description: Converted at the transaction date's ECB fixing, carried forward over closures.
+        data_tests: [not_null]
+      - name: line_amount_usd
+        description: GBP to EUR to USD, both legs at the same date's fixing.
+        data_tests: [not_null]
+      - name: fx_rate_source_date
+        description: >
+          The date of the fixing actually used. Differs from `invoice_date` on
+          13.1% of lines, almost all of them Sundays — this retailer trades on a
+          day the ECB does not quote, which is the carry-forward earning its
+          keep on real data rather than on a weekend in the abstract.
+        data_tests: [not_null]
+      - name: date_key
+        data_tests: [not_null]
+      - name: is_revenue_line
+        data_tests: [not_null]
+
+  - name: dim_retail_product
+    description: >
+      One row per stock code (5,131), with a survivorship-picked description.
+      1,192 codes carry more than one label across their lines and one carries
+      nine, so the dimension has to choose — modal, then alphabetical, so that a
+      rebuild picks the same one and a diff between builds means something.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [stock_code]}
+      # `item_type` is derived per line and asserted constant per code. It is
+      # constant by construction today; this is what stops that from becoming
+      # untrue the first time somebody edits the CASE in staging.
+      - dbt_utils.expression_is_true:
+          name: dim_retail_product_item_type_is_constant_per_code
+          arguments:
+            expression: >
+              (select count(*) from (
+                 select stock_code from {{ ref('stg_retail_lines') }}
+                 group by 1 having count(distinct item_type) > 1)) = 0
+    columns:
+      - name: stock_code
+        data_tests: [not_null, unique]
+      - name: description
+        description: >
+          Null for 4 codes that never carried one on any line. Not tested for
+          nullity: an absent label is the source's answer, not a join failure.
+      - name: item_type
+        data_tests: [not_null]
+      - name: n_descriptions
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: median_unit_price_gbp
+        description: >
+          Median, not mean. This retailer sells the same SKU at wholesale and
+          retail prices, so the mean lands between two prices that both exist and
+          on one that doesn't.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+
+  - name: dim_retail_customer
+    description: >
+      One row per identified customer (5,881 of the 5,942 ids that appear; the
+      other 61 never made a purchase). Covers 86.2% of net revenue — the rest is
+      anonymous and structurally cannot be attributed, which every per-customer
+      figure downstream inherits and which the Evidence page states rather than
+      implies.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [customer_id]}
+      # A customer cannot be active before they were acquired.
+      - dbt_utils.expression_is_true:
+          name: dim_retail_customer_last_order_is_not_before_first
+          arguments: {expression: "last_order_date >= first_order_date"}
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+      - name: cohort_month
+        description: Month of first *purchase*, not of first appearance.
+        data_tests: [not_null]
+      - name: first_order_date
+        data_tests: [not_null]
+      - name: n_orders
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: tenure_days
+        description: Zero for the 1,626 customers who ordered once — a fact, not a gap.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: return_rate_pct
+        description: >
+          By value, not by order count. Deliberately carries no upper bound: a
+          customer who returns more than they bought in the window is a real
+          pattern at the extract's edges, not a bug.
+      - name: is_left_censored_cohort
+        description: >
+          True for the 955 customers whose first order is in the extract's first
+          month and who may have been customers for years already.
+        data_tests: [not_null]
+
+  - name: fct_retail_returns
+    description: >
+      Returns matched back to the sale they reverse, one row per return line
+      (18,286). The source carries no link between the two — no order reference,
+      no RMA — so the join is inferred by an `asof` on the same customer's most
+      recent prior purchase of the same product, and the model reports how often
+      that failed: 87.7% match cleanly, 2.0% match to a smaller purchase, 8.4%
+      have no prior purchase in the window and 1.9% have no customer id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [invoice, line_number]}
+      # A return cannot be matched to a sale that happened after it. The asof
+      # join's inequality is what guarantees this, so the test is really on the
+      # join direction — the single easiest thing to get backwards here.
+      - dbt_utils.expression_is_true:
+          name: fct_retail_returns_never_match_a_later_sale
+          arguments:
+            expression: "original_invoice_date <= invoice_date"
+            config: {where: "is_matched"}
+    columns:
+      - name: invoice
+        data_tests: [not_null]
+      - name: line_number
+        data_tests: [not_null]
+      - name: quantity_returned
+        description: Positive. The signed amount stays signed in `return_amount_gbp`.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: match_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - matched
+                  - 'matched, quantity exceeds purchase'
+                  - no prior purchase in window
+                  - no customer id
+      - name: days_to_return
+        description: >
+          Median 10, mean 32, max 656. The shape is itself a check on the
+          matching rule — an arbitrary match would spread flat over the window.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: is_matched
+        data_tests: [not_null]
+
+  - name: fct_retail_customer_cohorts
+    description: >
+      Monthly acquisition cohorts and their retention, at
+      (cohort_month, months_since_first_order). Ragged on purpose: a cohort only
+      has rows for months it could have been observed in, so nothing averages in
+      a period that had no chance to happen. Retention is against the cohort's
+      own size, never against the previous month.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [cohort_month, months_since_first_order]
+      # Month zero is every cohort's own definition, so it must be exactly 100%.
+      # This is the structural check on the whole triangle: an off-by-one in the
+      # month arithmetic, a cohort assigned from the wrong date, or a customer
+      # counted in two cohorts all show up here first.
+      - dbt_utils.expression_is_true:
+          name: fct_retail_cohorts_month_zero_is_full_retention
+          arguments:
+            expression: "retention_pct = 100"
+            config: {where: "months_since_first_order = 0"}
+      # `retail_max_cohort_age_months` is an upper bound on generation, and
+      # setting it below the extract's span truncates the oldest cohorts into
+      # what reads as churn — silently, because a short curve looks like a
+      # result. The first cohort must reach the last month in the table.
+      - dbt_utils.expression_is_true:
+          name: fct_retail_cohorts_are_not_truncated
+          arguments:
+            expression: >
+              (select max(p.months_since_first_order) + 1
+               from {{ ref('fct_retail_customer_cohorts') }} as p
+               where p.cohort_month = (select min(q.cohort_month)
+                                       from {{ ref('fct_retail_customer_cohorts') }} as q))
+              = (select count(distinct r.activity_month)
+                 from {{ ref('fct_retail_customer_cohorts') }} as r)
+    columns:
+      - name: cohort_month
+        data_tests: [not_null]
+      - name: months_since_first_order
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: cohort_size
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: retention_pct
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: is_complete_period
+        description: >
+          False for each cohort's final row: the extract stops on 2011-12-09, so
+          every curve's last month is nine days long. A retention chart that ends
+          on a cliff is reading that, not a collapse in loyalty.
+        data_tests: [not_null]
