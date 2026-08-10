@@ -54,11 +54,11 @@ the pipeline stopped running, not that OWID stopped publishing. That is also why
 it is tautologically green on a freshly built copy of this site, since the build
 loads the data and then reports on the load.
 
-Note the two distinct timestamps. Four resources load with `replace` and `wb_wdi`
-loads with `merge`, and `refresh` is an argument to a dlt *run* rather than a
-property of a resource, so a single run cannot refresh the first group while
-leaving the incremental one alone. It is two loads, seconds apart, and this table
-is where that shows up.
+Note the two distinct timestamps. Four resources load with `replace` and three
+load incrementally, and `refresh` is an argument to a dlt *run*, not a property
+of a resource, so a single run cannot refresh the first group while leaving the
+second alone. It is two loads, seconds apart, and this table is where that shows
+up.
 
 ## What each layer holds
 
@@ -80,18 +80,20 @@ order by layer, table_name
 design: the spine is the complete cross join, the fact is the part of it any
 source reports. The difference is the subject of the [coverage page](/coverage).
 
-`history.snap_co2_estimates` is the one table here a rebuild cannot reproduce.
-Every other row above is derivable from the sources; the snapshot is accumulated
-state, and deleting the warehouse destroys it for good.
+The two `history` tables, `snap_co2_estimates` and `snap_grid_emission_factors`,
+are the ones a rebuild cannot reproduce. Every other row above is derivable from
+the sources. Those two are accumulated state, and deleting the warehouse destroys
+them for good.
 
 ## Test coverage
 
 ```sql tests_by_model
--- `n_tests`, not `tests`. A column called `tests` collides with something inside
--- Evidence's chart components: the BarChart renders its axis, categories and
--- value labels perfectly and simply draws no bars, with no error anywhere. The
--- only fix is the rename. `rows` behaves the same way: fine in a DataTable,
--- silently barless in a chart.
+-- `n_tests`, not `tests`, even though this one now feeds a table. A column
+-- called `tests` collides with something inside Evidence's chart components: a
+-- BarChart renders its axis, categories and value labels perfectly and simply
+-- draws no bars, with no error anywhere. `rows` behaves the same way — fine in a
+-- DataTable, silently barless in a chart. The rename is the only fix, and it is
+-- cheaper to keep the safe name than to remember which query is which.
 select
     tested_model,
     count(*)          as n_tests,
@@ -102,18 +104,11 @@ group by tested_model
 order by n_tests desc
 ```
 
-<BarChart
-    data={tests_by_model}
-    x=tested_model
-    y=n_tests
-    swapXY=true
-    sort=false
-    color="#2a78d6"
-    labels=true
-    labelFmt="0"
-    xAxisTitle="Model"
-    yAxisTitle="Tests"
-/>
+<DataTable data={tests_by_model} rows={12}>
+    <Column id=tested_model title="Model"/>
+    <Column id=n_tests title="Tests" contentType=bar/>
+    <Column id=n_failing_rows title="Failing rows" fmt="#,##0"/>
+</DataTable>
 
 ```sql tests_by_type
 select test_type, count(*) as tests
@@ -128,8 +123,8 @@ order by tests desc
 </DataTable>
 
 The distribution is deliberate. `accepted_range` dominates because the failure
-mode this warehouse actually has is a plausible-looking wrong number rather than
-a missing one: a unit error, a percentage over 100, a year outside a source's
+mode this warehouse actually has is a plausible-looking wrong number, not a
+missing one: a unit error, a percentage over 100, a year outside a source's
 range. The `unique_combination_of_columns` tests are the grain contract,
 `(country_iso3, year)` on every fact-shaped model, which is what catches a
 duplicate on either side of a join fanning rows out downstream.
@@ -139,7 +134,7 @@ not just return a count. It leaves the offending rows behind in
 `dbt_test__audit.<test_name>`, and a red check gives you the rows rather than a
 number.
 
-The bounds are calibrated to fail on bugs rather than on reality, which sometimes
+The bounds are calibrated to fail on bugs and not on reality, which sometimes
 means *not* testing a column. `trade_co2_share` has no range test because its
 real range runs from about −98% to +1023%, and `income_group` is nullable on
 purpose because the World Bank does not classify every territory.
@@ -163,7 +158,7 @@ order by failing_rows desc
 </DataTable>
 
 Each row above has a table behind it. `select * from` the `audit_table` value to
-see the exact rows that failed, rather than reproducing the test by hand.
+see the exact rows that failed, instead of reproducing the test by hand.
 
 {:else}
 

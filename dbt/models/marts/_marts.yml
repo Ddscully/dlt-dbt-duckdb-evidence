@@ -1639,6 +1639,28 @@ models:
         data_type: DOUBLE
       - name: net_revenue_gbp
         data_type: DOUBLE
+      - name: first_order_gbp
+        data_type: DOUBLE
+        description: >
+          Net revenue of the customer's first *invoice*, not of their first day —
+          393 customers bought twice on the day they arrived, and `n_orders`
+          counts invoices. Null for the 47 whose first invoice held no product
+          line (a `Manual` adjustment, the test SKU); zero would read as a free
+          order rather than as an unpriced one.
+        data_tests:
+          # A first order cannot be negative: the first *purchase* invoice is a
+          # sale invoice, and a sale line with a negative quantity is a stock
+          # write-off, which `is_revenue_line` already excludes. So this is the
+          # check that the two definitions have not drifted apart.
+          #
+          # The test this replaced was `first_order_gbp <= net_revenue_gbp` for
+          # customers with no returns, which is true by construction and **fails
+          # on 272 rows** — every one of them a one-order customer where the two
+          # columns are the same money summed in a different order. The excess
+          # tops out at 1.8e-12. Comparing two independently-summed doubles for
+          # containment is a float-equality test wearing an inequality.
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
       - name: avg_order_value_gbp
         data_type: DOUBLE
       - name: return_rate_pct

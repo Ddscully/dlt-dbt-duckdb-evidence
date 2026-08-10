@@ -165,6 +165,38 @@ def test_tests_split_pass_from_fail(warehouse, manifest):
     assert failing["audit_table"].startswith("dbt_test__audit.")
 
 
+def test_a_test_on_a_versioned_model_is_labelled_with_the_relation_not_the_version():
+    """`attached_node` for a versioned model ends in `.v1`, not in the model name.
+
+    Splitting on the final dot labels every test on `fct_emissions_energy`
+    **`v1`** or **`v2`** — which is what the pipeline page rendered until the
+    bar chart became a table and made it readable. The alias is the relation the
+    test ran against, so it agrees with `pipeline_tables` one section above.
+    """
+    nodes = {
+        "model.demo.fct_emissions_energy.v1": {
+            "name": "fct_emissions_energy",
+            "alias": "fct_emissions_energy_v1",
+        },
+        "model.demo.fct_emissions_energy.v2": {
+            "name": "fct_emissions_energy",
+            "alias": "fct_emissions_energy",
+        },
+    }
+
+    assert (
+        observability.tested_model_name("model.demo.fct_emissions_energy.v1", nodes)
+        == "fct_emissions_energy_v1"
+    )
+    assert (
+        observability.tested_model_name("model.demo.fct_emissions_energy.v2", nodes)
+        == "fct_emissions_energy"
+    )
+    # A test can attach to a source, which is not in `nodes` — hence the fallback.
+    assert observability.tested_model_name("source.demo.raw.owid_co2", {}) == "owid_co2"
+    assert observability.tested_model_name("", {}) is None
+
+
 def test_an_audit_table_the_manifest_does_not_name_is_dropped_as_stale(warehouse, tmp_path):
     """dbt writes the audit schema every build but never removes a dead table.
 

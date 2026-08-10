@@ -9,7 +9,7 @@ a company multiplies its metered kWh by to produce the purchased-electricity lin
 of a CSRD, SECR or CDP disclosure.
 
 This page is that factor for every country, with the four things a reporter needs
-beside it — the unit meter data actually arrives in, the year it belongs to, how
+beside it: the unit meter data actually arrives in, the year it belongs to, how
 stale that year is, and whether it has been restated since it was first
 published.
 
@@ -53,8 +53,8 @@ where is_latest_available
 Across the <Value data={spread} column=n_countries/> countries with a grid above 10 TWh, the current factor runs from <Value data={spread} column=cleanest_country/> at <Value data={spread} column=cleanest fmt="0.0"/> up to <Value data={spread} column=dirtiest_country/> at <Value data={spread} column=dirtiest fmt="#,##0"/> grams of CO₂ per kWh.
 
 That is a wider spread than the 24× quoted on the [findings](/findings) page,
-which uses a 150 TWh floor rather than 10. Same series, different cut, and which
-floor to apply is itself a reporting decision rather than a detail.
+which uses a 150 TWh floor instead of 10. Same series, different cut. Which floor
+to apply is itself a reporting decision, not a detail.
 
 <Alert status=info>
 
@@ -101,7 +101,7 @@ order by emission_factor_g_co2_per_kwh
 </DataTable>
 
 Two units for one number, on purpose. `gCO₂/kWh` is how the series is published
-and how a reader holds it; `tCO₂e/MWh` is the unit meter data arrives in, and
+and how a reader holds it. `tCO₂e/MWh` is the unit meter data arrives in, and
 making a reporter do the divide-by-1000 in a spreadsheet is how a filing acquires
 a factor-of-1000 error.
 
@@ -114,28 +114,48 @@ single latest year would silently drop more than half the world.
 ```sql vintage
 -- Double cast again: the category axis takes a string, and the string has to be
 -- made from an integer or it reads '2024.0'.
+--
+-- The bars are how many countries stop at each year; the line is the decision.
+-- Cumulative *descending*, because "cut at year X" means "accept a factor from X
+-- or later", so the coverage of a cut-off is everything at or above it.
+with by_year as (
+    select
+        latest_available_year,
+        count(*) as n_countries
+    from warehouse.grid_emission_factors
+    where is_latest_available
+    group by latest_available_year
+)
+
 select
     cast(cast(latest_available_year as integer) as varchar) as vintage_year,
-    count(*)                                                as n_countries,
-    sum(electricity_generation_twh)                         as twh
-from warehouse.grid_emission_factors
-where is_latest_available
-group by latest_available_year
+    n_countries                                             as countries,
+    100.0 * sum(n_countries) over (order by latest_available_year desc)
+        / sum(n_countries) over ()                          as coverage
+from by_year
 order by latest_available_year
 ```
 
 <BarChart
     data={vintage}
     x=vintage_year
-    y=n_countries
-    swapXY=true
+    y=countries
+    y2=coverage
+    y2SeriesType=line
+    y2Fmt='0"%"'
+    y2Min={0}
     sort=false
-    color="#2a78d6"
-    labels=true
-    labelFmt="#,##0"
-    xAxisTitle="Countries whose newest factor is this year"
-    yAxisTitle="Vintage"
+    xAxisTitle="Vintage"
+    yAxisTitle="Countries"
+    y2AxisTitle="Covered by this cut-off"
 />
+
+The bars are the distribution; the line is the thing a reporter has to decide.
+Insisting on a 2025 factor covers **43%** of countries. Accepting 2024 or later
+covers **94%**, and the two years below that are worth four points between them.
+So the cut-off is not a tidy "use the latest year". It is a choice about how much
+of the world you are willing to leave out of a filing, and tightening it by one
+year costs fifty points of coverage.
 
 Twelve countries are two years or more behind the frontier, and grid size is no
 protection: Ukraine's most recent published factor is 2022, on a 111 TWh grid.
@@ -285,8 +305,8 @@ order by ord
 The same <Value data={group_totals} column=mwh fmt="#,##0"/> MWh, moved nowhere except on paper: every site placed on the cleanest grid in the set, <Value data={group_extremes} column=cleanest_country/> at <Value data={group_extremes} column=cleanest_factor fmt="0.0"/> g/kWh, then every site on the dirtiest, <Value data={group_extremes} column=dirtiest_country/> at <Value data={group_extremes} column=dirtiest_factor fmt="#,##0"/> g/kWh.
 
 Both ends are countries this company already operates in, so the ratio between
-them is not hypothetical. It is the accumulated cost of siting decisions
-already taken, sitting in a number that has to be published.
+them is not hypothetical. It is the accumulated cost of siting decisions already
+taken, sitting in a number that has to be published.
 
 ## Has the factor been restated?
 
@@ -349,8 +369,8 @@ estimates.
 
 ## What this factor is not
 
-The three caveats a practitioner checks first. Naming them is not a hedge. A
-factor handed over without them is the thing that fails assurance.
+The three caveats a practitioner checks first. Naming them is not a hedge: a
+factor handed over without them is what fails assurance.
 
 <Alert status=warning>
 
@@ -373,11 +393,11 @@ consumed mix, and an exporter of coal power looks dirtier.
 
 </Alert>
 
-One more, from the warehouse rather than the standard: five territories in OWID's
-energy data (Guadeloupe, Martinique, Réunion, French Guiana and the Falklands) do
-not exist in the country dimension, so they carry no factor here. The dimension is
-authoritative for what a country is throughout this warehouse, which is also what
-keeps World Bank aggregates like `WLD` out of every fact, and the
+One more, from the warehouse and not from the standard: five territories in
+OWID's energy data (Guadeloupe, Martinique, Réunion, French Guiana and the
+Falklands) do not exist in the country dimension, so they carry no factor here.
+The dimension is authoritative for what a country is throughout this warehouse,
+which is also what keeps World Bank aggregates like `WLD` out of every fact. The
 [coverage page](/coverage) is where absences are rows.
 
 ---

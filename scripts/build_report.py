@@ -94,6 +94,7 @@ TABLE_TO_DBT_MODEL = {
     "marts.dim_currency": "dim_currency",
     "marts.dim_date": "dim_date",
     "marts.dim_grid_emission_factors": "dim_grid_emission_factors",
+    "marts.dim_retail_customer": "dim_retail_customer",
     "marts.fct_cbam_exposure": "fct_cbam_exposure",
     "marts.fct_co2_estimate_versions": "fct_co2_estimate_versions",
     "marts.fct_emissions_energy": "fct_emissions_energy",

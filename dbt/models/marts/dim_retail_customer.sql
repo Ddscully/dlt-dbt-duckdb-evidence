@@ -49,6 +49,47 @@ first_purchase as (
     group by customer_id
 ),
 
+-- What the customer arrived with. `first_order_date` says when they turned up;
+-- this says how much they spent doing it, and it is the only thing about a
+-- customer that is knowable on day one — everything else in this table needs a
+-- relationship to have happened first.
+--
+-- **An invoice, not a day.** `n_orders` counts invoices, so "order" has to mean
+-- the same thing in both columns or they quietly disagree, and 393 of the 5,881
+-- customers bought twice on the day they arrived. Ordering on `min(invoice_ts)`
+-- because 83 invoices in the file carry more than one timestamp, then on
+-- `invoice` because 11 customers opened two at the same minute — a tie-break
+-- that isn't deterministic is a column that changes between builds for no
+-- change in the data.
+first_order_line as (
+    select
+        customer_id,
+        invoice,
+        row_number() over (
+            partition by customer_id order by min(invoice_ts), invoice
+        ) as order_seq
+    from purchases
+    group by customer_id, invoice
+),
+
+-- Summed over `is_revenue_line` exactly as `net_revenue_gbp` is, so the two are
+-- the same measurement over different windows and the ratio between them means
+-- something. That also makes it **null, not zero, for the 47 customers whose
+-- first invoice carried no product line at all** — a `Manual` adjustment or the
+-- test SKU. Zero would say they bought nothing; null says this order has no
+-- revenue reading, which is what happened. 28 customers already have a null
+-- `net_revenue_gbp` for the same reason.
+first_order_value as (
+    select
+        o.customer_id,
+        sum(l.line_amount_gbp) filter (where l.is_revenue_line) as first_order_gbp
+    from first_order_line as o
+    inner join lines as l
+        on o.customer_id = l.customer_id and o.invoice = l.invoice
+    where o.order_seq = 1
+    group by o.customer_id
+),
+
 -- The extract's first month, as a row rather than as a scalar subquery in the
 -- select. Same value, but it joins instead of correlating — which is the house
 -- style and, here, also the difference between one pass and one per row.
@@ -100,6 +141,7 @@ select
     a.gross_revenue_gbp,
     a.returned_gbp,
     a.net_revenue_gbp,
+    v.first_order_gbp,
     case
         when a.n_orders > 0 then a.net_revenue_gbp / a.n_orders
     end as avg_order_value_gbp,
@@ -113,4 +155,5 @@ select
     f.cohort_month = c.first_cohort_month as is_left_censored_cohort
 from activity as a
 inner join first_purchase as f on a.customer_id = f.customer_id
+inner join first_order_value as v on a.customer_id = v.customer_id
 cross join censoring as c

@@ -141,6 +141,22 @@ def build_tables(
     return pl.DataFrame(rows)
 
 
+def tested_model_name(attached: str, nodes: dict[str, dict]) -> str | None:
+    """Readable name for the node a test is attached to.
+
+    `attached_node` is a unique id, and the last segment is only the model name
+    while the model has no versions: a versioned one is
+    `model.<project>.fct_emissions_energy.v1`, so splitting on the final dot
+    labels the test **`v1`**. Prefer the node's own `alias`, which is the
+    relation the test actually ran against (`fct_emissions_energy_v1`,
+    `fct_emissions_energy`) and so matches what every other table on the
+    pipeline page calls it. The split stays as the fallback, because a test can
+    attach to a source, which does not live in `nodes`.
+    """
+    node = nodes.get(attached) or {}
+    return node.get("alias") or attached.rsplit(".", 1)[-1] or None
+
+
 def manifest_tests(manifest_path: str) -> dict[str, dict]:
     """Map audit-table name -> {test type, model it guards, column, fail_calc, severity}.
 
@@ -159,8 +175,9 @@ def manifest_tests(manifest_path: str) -> dict[str, dict]:
         return {}
 
     manifest = json.loads(path.read_text())
+    nodes = manifest.get("nodes", {})
     out: dict[str, dict] = {}
-    for node in manifest.get("nodes", {}).values():
+    for node in nodes.values():
         if node.get("resource_type") != "test":
             continue
         metadata = node.get("test_metadata") or {}
@@ -169,8 +186,7 @@ def manifest_tests(manifest_path: str) -> dict[str, dict]:
         out[node["alias"]] = {
             "test_name": node["name"],
             "test_type": metadata.get("name") or "singular",
-            # `model.<project>.fct_emissions_energy` -> the last segment
-            "tested_model": attached.rsplit(".", 1)[-1] or None,
+            "tested_model": tested_model_name(attached, nodes),
             "tested_column": (metadata.get("kwargs") or {}).get("column_name"),
             "fail_calc": config.get("fail_calc") or DEFAULT_FAIL_CALC,
             # dbt writes this as "ERROR"/"WARN", but a yml can spell it lowercase.

@@ -7,7 +7,7 @@ sidebar_position: 4
 A rate has a direction, the calendar has holes in it, and converting a flow works
 differently from converting a balance. Each of those three turns one underlying
 figure into a different reported number, and all three show up in the European
-Central Bank's daily euro reference rates.
+Central Bank's daily euro reference rates below.
 
 This is also the only source here that publishes every business day rather than
 once a year.
@@ -44,42 +44,42 @@ The ECB fixes rates on TARGET settlement days, so most of the calendar is empty.
 
 Of <Value data={gap_days} column=calendar_days fmt='#,##0'/> calendar days since the series began, <Value data={gap_days} column=publication_days fmt='#,##0'/> carry a fixing. The rest are weekends, and <Value data={gap_days} column=missing_weekdays/> weekdays that are not.
 
-```sql by_weekday
-select
-    day_name,
-    day_of_week,
-    calendar_days,
-    publication_days,
-    days_with_no_fixing,
-    100.0 * publication_days / calendar_days as published_pct
-from warehouse.fx_calendar_gaps
-order by day_of_week
+```sql publication_calendar
+select date_day, has_fixing
+from warehouse.fx_publication_calendar
+order by date_day
 ```
 
-<BarChart
-    data={by_weekday}
-    x=day_name
-    y=published_pct
-    title="Share of days with a published fixing, by weekday"
-    yFmt='0"%"'
-    yMax={100}
-    sort={false}
+<CalendarHeatmap
+    data={publication_calendar}
+    date=date_day
+    value=has_fixing
+    title="Days with a published fixing, 2023-2025"
+    subtitle="Dark is a fixing. Sunday and Saturday are the outer rows; pale squares between them are closures."
+    colorPalette={['#eef3fa', '#2a78d6']}
+    legend=false
 />
 
-Saturday and Sunday are structurally zero. The weekdays fall short of 100% by the
-TARGET closures: Good Friday, Easter Monday, 1 May, 25 and 26 December, and
-1999-12-31 for the millennium changeover. That is why this project carries no
-holiday calendar. No weekday rule predicts those dates, so they are observed as
-absences in the data rather than asserted from a list somebody would have to
-maintain forever.
+Two of the seven rows in each year are structurally empty — the ECB does not fix
+at a weekend. The interesting part is the handful of pale squares punched out of
+the weekday block: 1 January, Good Friday, Easter Monday, 1 May, and 25 and 26
+December. Seventeen days over the three years.
+
+Read the Easter pair across the years and it moves: 7 and 10 April in 2023, 29
+March and 1 April in 2024, 18 and 21 April in 2025. That is why this project
+carries no holiday calendar. No weekday rule predicts those dates, the only rule
+that does is the Gregorian computus, so they are observed as absences in the data
+instead of being asserted from a list somebody would have to maintain forever.
+(The series has one closure no rule of any kind would give you: 1999-12-31, taken
+for the millennium changeover.)
 
 <Alert status=info>
 
 **So what.** A transaction dated on a Sunday still has to be converted, and every
-option here is a modelling decision rather than a lookup. Interpolating between
-Friday and Monday invents a rate nobody could have dealt at, and it needs the
-future to compute the past. Leaving the rate null pushes the same decision into
-every downstream query, to be answered differently each time. So
+option here is a modelling decision, not a lookup. Interpolating between Friday
+and Monday invents a rate nobody could have dealt at, and it needs the future to
+compute the past. Leaving the rate null pushes the same decision into every
+downstream query, to be answered differently each time. So
 `marts.fct_fx_rates_daily` carries the last fixing forward, which is what a
 finance system does, and records `rate_source_date` on every row so you can see
 which fixing you are quoting.
@@ -295,7 +295,7 @@ titled "European electricity prices" with no stated currency is reporting the
 exchange rate alongside the energy market. This warehouse already carried that
 warning in prose, from the case where Japan cut emissions 21% between 2010 and
 2024 and still scored 10% worse on carbon intensity because the yen fell 28%
-against the dollar. It is now a column rather than a paragraph.
+against the dollar. It is a column now, not a paragraph.
 
 </Alert>
 
@@ -304,9 +304,9 @@ against the dollar. It is now a column rather than a paragraph.
 - **The reference rate is not a dealable rate.** The ECB publishes it at 16:00
   CET for information, and nobody transacts at it. Use it for reporting and
   translation, not for pricing a trade.
-- **The fiscal calendar in `dim_date` is a policy rather than a fact.** It comes
-  from a project variable, set to April for the UK and Japanese convention, and
-  the value used is carried on every row. The same Tuesday belongs to a different
+- **The fiscal calendar in `dim_date` is a policy, not a fact.** It comes from a
+  project variable, set to April for the UK and Japanese convention, and the
+  value used is carried on every row. The same Tuesday belongs to a different
   fiscal year under a US federal October or a continental January start.
 - **`dim_date` is a calendar, not a market calendar.** It knows weekends. It does
   not know trading days, settlement days or public holidays in any jurisdiction,

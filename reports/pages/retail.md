@@ -8,7 +8,7 @@ A UK gift wholesaler's complete transaction log: every line of every invoice ove
 two years, with no cleaning applied by anyone
 ([UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)).
 
-Three questions have to be settled before a single figure can be reported — what
+Three questions have to be settled before a single figure can be reported. What
 counts as a return, which rows are revenue, and what to do about orders with
 nobody attached to them. Each has an answer that looks reasonable and produces
 the wrong number, and each one is worth six figures here.
@@ -57,8 +57,8 @@ from warehouse.retail_line_types
 order by n_lines desc
 ```
 
-All seventeen combinations in the extract, rather than the common few. The rare
-rows are the ones that cause trouble:
+All seventeen combinations in the extract, not just the common few. The rare rows
+are the ones that cause trouble:
 
 <DataTable data={line_types} rows=17>
     <Column id=invoice_type title="Invoice"/>
@@ -87,8 +87,8 @@ from warehouse.retail_line_types
 
 **So what.** These are not edge cases to filter out at the end. They decide
 whether a revenue figure means anything, so each classification is a `case`
-expression in `stg_retail_lines` with a test against it, rather than a caveat in
-a README.
+expression in `stg_retail_lines` with a test against it. A caveat in a README
+would not have stopped anyone summing the column.
 
 </Alert>
 
@@ -96,8 +96,8 @@ a README.
 
 The fact table carries every amount in three currencies, converted at the
 [daily ECB fixing](/currency) for the transaction date. Doing that against a
-transaction log turned up something the exchange-rate series had never shown on
-its own.
+transaction log turned up something the exchange-rate series had never shown by
+itself.
 
 ```sql weekday
 select
@@ -259,13 +259,13 @@ Pooled across every cohort age, a customer is active in <Value data={seasonality
 
 Few summaries keep those two readings apart. A retention curve averages the
 diagonal into the column and presents the result as ageing, which is how a
-seasonal business concludes it has a loyalty problem every January.
+seasonal business talks itself into a loyalty problem every January.
 
 <Alert status=warning>
 
-**Two caveats, both handled in the table rather than noted underneath it.** The
-triangle is ragged: a cohort formed in November 2011 has no month-12 row because
-the extract ends in December, and those cells are missing rather than zero, so
+**Two caveats, both handled in the table itself and not noted underneath it.**
+The triangle is ragged: a cohort formed in November 2011 has no month-12 row
+because the extract ends in December, and those cells are missing, not zero, so
 rows exist only for months that could have been observed. The first cohort is
 also left-censored, since December 2009 is the extract's opening month and its
 "new" customers include anyone who had been buying for years already.
@@ -275,8 +275,8 @@ also left-censored, since December 2009 is the extract's opening month and its
 
 ## How concentrated the revenue is
 
-Before asking who the customers are, it is worth knowing how few of them carry
-the business.
+Before asking who the customers are, it helps to know how few of them carry the
+business.
 
 ```sql concentration_curve
 -- Customers ranked by spend, then cumulative share of revenue at each percentile
@@ -350,9 +350,9 @@ from ranked
     <BigValue data={concentration_stats} value=top_20 fmt='0.0"%"' title="…from the top 20%"/>
 </Grid>
 
-The distance between the curve and the dashed line is the whole point. The classic
-Pareto shorthand is 80/20; this business is steeper than that, at roughly 77/20 —
-and far steeper still at the very top.
+The distance between the curve and the dashed line is what there is to read here.
+The classic Pareto shorthand is 80/20; this business is steeper than that, at
+roughly 77/20, and far steeper still at the very top.
 
 Fifty-eight customers out of <Value data={concentration_stats} column=n_customers fmt="#,##0"/> account for just under a third of everything sold, and the bottom half of the base accounts for the last 6.6%.
 
@@ -369,6 +369,180 @@ rather than a single headline metric.
 **Who acts:** whoever owns account management and the retention budget.
 **Cost of getting it wrong:** spreading spend evenly across a base where the top
 1% is worth more than the bottom half combined.
+
+</Alert>
+
+## What a customer is worth on day one
+
+Everything above is retrospective: it needs the relationship to have already
+happened. The size of a customer's first order is the one thing knowable on the
+day they arrive, and it turns out to carry most of the answer.
+
+```sql day_one
+-- The left-censored cohort is excluded throughout this section. The extract
+-- opens on 2009-12-01, so the "first order" it records for that month's
+-- customers is very often not their first order at all — including them would
+-- pair a mid-relationship purchase with a lifetime value, which is the one
+-- thing this chart must not do.
+--
+-- Both axes are logged, so both sides have to be positive — and the threshold is
+-- a penny rather than zero on purpose. Two customers bought and returned
+-- everything, and the signed line amounts do not cancel to exactly zero in
+-- floating point: they leave 3.6e-15 and 2.8e-14 behind. Both pass `> 0`, and a
+-- log axis obliged by spanning fifteen orders of magnitude to fit them, which
+-- flattened all 4,868 real points into a single band.
+--
+-- 4,868 of the 4,926 non-censored customers survive. The rest are the 47 whose
+-- first invoice carried no product line, plus those two and a few genuine
+-- all-returns cases.
+select
+    first_order_gbp,
+    net_revenue_gbp,
+    case
+        when is_repeat_customer then 'Ordered again'
+        else 'Ordered once'
+    end as customer_type
+from warehouse.retail_customers
+where not is_left_censored_cohort
+  and first_order_gbp >= 0.01
+  and net_revenue_gbp >= 0.01
+```
+
+<ScatterPlot
+    data={day_one}
+    x=first_order_gbp
+    y=net_revenue_gbp
+    series=customer_type
+    xFmt='"£"#,##0'
+    yFmt='"£"#,##0'
+    yMin={1}
+    yMax={250000}
+    echartsOptions={{xAxis: {type: 'log'}, yAxis: {type: 'log'}}}
+    seriesOptions={{progressive: 0, progressiveThreshold: 100000}}
+    pointSize=7
+    opacity=0.35
+    title="Lifetime value against first order"
+    subtitle="One point per customer. Both axes are £, both log scales."
+    xAxisTitle="First order"
+    seriesColors={{'Ordered once': '#c0932e', 'Ordered again': '#2a78d6'}}
+/>
+
+<!--
+`progressive: 0` is load-bearing, and nothing about the chart says so. ECharts
+switches a scatter series to progressive (chunked, one slice per animation
+frame) at `progressiveThreshold: 3000` points, and Evidence exposes neither
+setting. This series is 4,868 points. Measured on the built site: 2,900 points
+render in 2 s, 4,871 points never finish, and the same 4,871 with progressive
+disabled render in 1 s. It is a mode change at a threshold, not a volume
+problem — so trimming the data would have "fixed" it while hiding the cause,
+and any future scatter here over 3,000 points needs the same two lines.
+
+Both axes are logged through `echartsOptions` rather than through the
+component's own support, and each half has its own reason. There is no `xLog`
+prop at all — `ScatterPlot` has `yLog` and `yLogBase`, and `xType` only takes
+category / value / time. And `yLog` does not survive the round trip from
+markdown: `_Chart.svelte` initialises `yType = yLog === true ? 'log' : 'value'`
+once, and `yLog=true` in a page arrives as the *string* `"true"`, which is not
+`=== true`, so the axis stays linear. `yLog={true}` does set it — and then
+picks a 1-to-10 range with the data an order of magnitude above it. Setting
+`yAxis.type` directly is the one spelling that works. On a log y axis Evidence
+then drops `yAxisTitle` — it is drawn as part of the top axis label, and that
+label goes away — so the axis is named in the subtitle instead.
+-->
+
+
+The hard lower edge running diagonally across the chart is not an artefact. A
+customer who ordered once has a lifetime value **equal** to their first order by
+definition, so all 1,504 of them sit exactly on the line *y = x*, and nobody can
+sit below it. The gold band is that floor; the blue cloud above it is everyone
+who came back.
+
+### Why the correlation coefficient is the wrong number here
+
+The temptation is to quote a Pearson *r*, which is **0.641** and looks
+convincing. It is almost entirely one customer: the largest first order in the
+file is £33,168, from an account that went on to spend £235,833, and deleting
+that single row takes *r* down to **0.397**. Below £5,000 of first order it is
+0.344. A statistic that moves by a quarter of its range when you remove one of
+4,868 points is measuring the outlier, not the relationship.
+
+The **rank** correlation does not move at all: 0.592 with the outlier, 0.592
+without it, 0.590 below £5,000. Ranks are indifferent to how far out the far end
+goes. That is the number to quote, and the quintile table is what it means in
+money.
+
+```sql day_one_quintiles
+-- `ntile` is the right tool here, unlike in the RFM scoring below, and the
+-- difference is worth stating: this is a five-way split for *presentation*, over
+-- a near-continuous currency column with almost no ties. RFM assigns a score
+-- that a customer is then treated on, over a column where 1,626 customers share
+-- a single value — there, equal-sized buckets cut through the ties and score
+-- identical behaviour differently.
+with base as (
+    select *
+    from warehouse.retail_customers
+    where not is_left_censored_cohort
+      and first_order_gbp >= 0.01
+      and net_revenue_gbp >= 0.01
+),
+
+scored as (
+    select *, ntile(5) over (order by first_order_gbp) as quintile
+    from base
+)
+
+select
+    quintile,
+    count(*)                                                     as customers,
+    min(first_order_gbp)                                         as band_low,
+    max(first_order_gbp)                                         as band_high,
+    median(net_revenue_gbp)                                      as median_ltv,
+    100.0 * avg(case when is_repeat_customer then 1 else 0 end)  as repeat_pct,
+    100.0 * sum(net_revenue_gbp) / sum(sum(net_revenue_gbp)) over () as pct_revenue
+from scored
+group by quintile
+order by quintile
+```
+
+<DataTable data={day_one_quintiles} rows=5>
+    <Column id=quintile title="Quintile"/>
+    <Column id=customers title="Customers" fmt="#,##0"/>
+    <Column id=band_low title="First order from" fmt='"£"#,##0'/>
+    <Column id=band_high title="…to" fmt='"£"#,##0'/>
+    <Column id=median_ltv title="Median lifetime value" fmt='"£"#,##0' contentType=bar/>
+    <Column id=repeat_pct title="Ordered again" fmt='0"%"'/>
+    <Column id=pct_revenue title="% of cohort revenue" fmt='0.0"%"'/>
+</DataTable>
+
+Median lifetime value runs £191 → £410 → £714 → £905 → £1,885 across the
+quintiles. The top fifth spent 6.8 times what the bottom fifth did on day one
+(median £751 against £110) and went on to be worth **9.9 times** as much, so the
+signal amplifies instead of merely persisting, and that fifth accounts for 44.8%
+of the cohort's revenue.
+
+One wrinkle worth admitting: the repeat rate is not monotonic. It climbs 58% →
+65% → 73%, dips to 72% in the fourth quintile, then reaches 78% in the fifth.
+Whatever separates a £330 first order from a £400 one, it is not whether the
+customer comes back.
+
+<Alert status=info>
+
+**So what.** This is the only genuinely forward-looking number on the page. The
+concentration curve above says a small group carries the business; this says that
+group is largely identifiable on the day it arrives, from data that already exists
+at the point of sale. A first order over £516 puts a customer in the fifth that
+generates 45% of revenue, at just under 78% odds of ordering again.
+
+**Who acts:** whoever owns acquisition spend and onboarding. Bidding the same
+amount for every new customer, or running the same welcome sequence at all of
+them, is leaving the difference between £191 and £1,885 of expected value on the
+table.
+
+**Cost of getting it wrong:** the causation runs the other way just as easily. A
+big first order may signal a bigger business without creating a better customer.
+So this identifies who to look after; it does not say that pushing a first order
+from £200 to £500 buys you the difference in lifetime value. The customers here
+are shops, and a shop's opening order is mostly a statement about the shop.
 
 </Alert>
 
@@ -417,7 +591,7 @@ from (
 where segment = 'Champions'
 ```
 
-Champions are <Value data={champions} column=pct_customers fmt='0.0"%"'/> of the identified customer base and <Value data={champions} column=pct_revenue fmt='0.0"%"'/> of its revenue, which is most of what the segmentation is for.
+Champions are <Value data={champions} column=pct_customers fmt='0.0"%"'/> of the identified customer base and <Value data={champions} column=pct_revenue fmt='0.0"%"'/> of its revenue. That gap is most of what the segmentation is for.
 
 <Alert status=info>
 
@@ -430,10 +604,10 @@ Counting the four tied values that straddle a boundary, 3,227 of 5,881 customers
 could be scored differently from someone whose behaviour is identical to theirs.
 
 Polars' `qcut` cuts on the break points, so equal values always score equally.
-The buckets then come out uneven, which reflects the customer base rather than
-the method. A Dagster asset check counts any value carrying more than one score,
-since reverting to `ntile` would still produce five tidy buckets and a believable
-segment mix.
+The buckets then come out uneven, which is a fact about the customer base and not
+about the method. A Dagster asset check counts any value carrying more than one
+score, since reverting to `ntile` would still produce five tidy buckets and a
+believable segment mix.
 
 </Alert>
 
@@ -473,12 +647,12 @@ from warehouse.retail_returns
 where days_to_return is not null
 ```
 
-Each row carries its own outcome rather than being folded into a single accuracy
-figure, because the failures have different causes. "No prior purchase in
-window" usually means the extract starts in 2009 and the sale happened in 2008,
-so the data is simply absent. "Quantity exceeds purchase" means the rule matched
-the wrong sale. At 2.0% that second figure is the one worth watching, since it
-measures the inference going wrong rather than the source being incomplete.
+Each row carries its own outcome instead of being folded into a single accuracy
+figure, because the failures have different causes. "No prior purchase in window"
+usually means the extract starts in 2009 and the sale happened in 2008, so the
+data is simply absent. "Quantity exceeds purchase" means the rule matched the
+wrong sale. At 2.0% that second figure is the one to watch: it measures the
+inference going wrong, where the first measures the source being incomplete.
 
 The timing distribution is a check on whether the matches are real, and it holds up: the median return comes back <Value data={return_timing} column=median_days fmt="#,##0"/> days after purchase, and <Value data={return_timing} column=same_day fmt="#,##0"/> come back the same day. Matches drawn from arbitrary earlier sales would spread evenly across the two-year window.
 
