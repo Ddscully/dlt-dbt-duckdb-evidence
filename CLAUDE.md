@@ -157,6 +157,14 @@ pre-commit (`ruff-check` with `--fix`, then `ruff-format`).
   as a PR. `lockfile-only` there would quietly cap the site at 40.x forever.
 - **Dependabot scans the moment the config lands**, not on the next scheduled
   date — expect PRs immediately after touching that file.
+- **A yanked release stays locked until something re-resolves.** `uv.lock` held
+  `polars==1.43.1` after upstream yanked both it and 1.43.0; nothing said so
+  until an unrelated `uv lock` printed the warning in passing. Installs of a
+  yanked version keep working — that is the point of a lockfile — so the monthly
+  Dependabot PR is the only thing that would have cleared it, up to a month
+  later. `uv lock --upgrade-package <name>` is the targeted fix and leaves the
+  other 196 packages alone. Worth reading the warnings on any re-lock, since
+  that is the one moment they appear.
 - **`astral-sh/setup-uv` is pinned to an exact patch, not a major.** It stopped
   publishing moving major/minor tags at v8 as a supply-chain measure, so `@v9`
   does not resolve at all. All four workflows carry a comment saying so, because
@@ -164,6 +172,32 @@ pre-commit (`ruff-check` with `--fix`, then `ruff-format`).
 - **`pages.yml` is the only workflow that needs Node** (24; the Evidence build).
   The other three run on a bare uv checkout — see the Orchestration section for
   why the site is excluded from `full_refresh`.
+- **Python is 3.13, set in one place: `.python-version`.** No workflow passes a
+  `python-version` to `setup-uv`, so that file is what CI, the release job and a
+  contributor's venv all read. Nothing watches it — Dependabot covers
+  `github-actions`, `uv` and `npm`, none of which see it, so the interpreter is
+  the one version here that can only age deliberately. It sat on 3.12 from the
+  initial commit to 2026-08-10 for no reason anyone recorded.
+- **`requires-python` tracks it (`>=3.13`), and here that bound is *not* a
+  minimum-supported floor** — the opposite of the dependency bounds above, so
+  the exception is worth knowing. This is an application, not a library: it
+  ships a committed `uv.lock` and a `.python-version`, and nothing installs it
+  as a dependency. A floor below what CI builds is a promise no job tests. It
+  was briefly `>=3.12` against a 3.13 `.python-version` and that is the state to
+  avoid — CI reads `.python-version`, so 3.12 was claimed and never exercised.
+- **`requires-python` is what `uv.lock` resolves against, so it is not
+  cosmetic.** Raising it to `>=3.13` dropped a package (`win-precise-time`) and
+  ~400 lines of `python_full_version < '3.13'` marker branches. Lowering it
+  again is a re-lock, not an edit.
+- **Ruff's target version is inferred from `requires-python`**, with no
+  `target-version` in `[tool.ruff]` — so that one line also decides which
+  rewrites the linter will make. It reports `3.13` now; it reported `3.12`
+  before, which is why nothing 3.13-only could have been written in the gap
+  even by accident.
+- **3.14 is blocked on dbt, not on us.** `uv lock --python 3.14` resolves, but
+  that only proves the solver is happy — dbt-core 1.10 ships no 3.14 classifier,
+  and dbt Labs certifies a Python roughly a year behind. `dagster<3.15` is the
+  only hard upper bound in the tree.
 
 ## Agent skills
 
