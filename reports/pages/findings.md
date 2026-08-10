@@ -6,12 +6,12 @@ sidebar_position: 5
 
 Eight patterns in six decades of national emissions, energy and economic data.
 Each one closes with the decision it feeds, who makes that decision, and what it
-costs to get wrong — an observation nobody acts on isn't a finding, and three of
+costs to get wrong. An observation nobody acts on isn't a finding, and three of
 these are inputs to numbers a company is legally required to publish.
 
-Every chart is a live query rather than a pasted figure, so the numbers in the
-prose move when the data does. For a year-by-year interactive view of the same
-data see the [country explorer](/countries); notes on method are at the
+Every chart is a live query, not a pasted figure, so the numbers in the prose
+move when the data does. For a year-by-year interactive view of the same data see
+the [country explorer](/countries); notes on method are at the
 [bottom of the page](#notes-on-method).
 
 ```sql latest_years
@@ -257,8 +257,8 @@ cleaner per kWh than they were in 2005.**
 
 Two things the measure does *not* say. A cleaner grid is compatible with rising
 total emissions if the grid grows faster than it cleans, which is finding 7. And
-electricity is only about a third of energy use: the grid is the part of
-decarbonisation that has gone well, not the whole of it.
+electricity is only about a third of energy use. The grid is the part of
+decarbonisation that has gone well; it is not the whole of it.
 
 <DataTable data={elec_intensity} rows=12>
     <Column id=country_name title="Country"/>
@@ -348,8 +348,8 @@ for the comparison to mean something. The US grew 42% in real terms while cuttin
 emissions 20%; the UK grew 26% and cut 46%.
 
 The standing objection to any chart like this is that production moved offshore,
-so the cut is an accounting artifact of where the factory sits. That is a
-testable claim, and the next finding tests it.
+so the cut is an accounting artifact of where the factory sits. That claim is
+testable, and the next finding tests it.
 
 <Alert status=info>
 
@@ -608,8 +608,8 @@ industrial economy and 0.8% of emissions today, still carries over 4% of the
 cumulative total. That is more than India, which has four times its current
 output and twenty times its population.
 
-Neither number tells the whole story on its own. Finding 5 measures the flow;
-this measures the stock.
+Neither number stands alone. Finding 5 measures the flow; this measures the
+stock.
 
 <DataTable data={stock_vs_flow} rows=12>
     <Column id=country_name title="Country"/>
@@ -726,7 +726,7 @@ hitting the KPI and missing the outcome, in public, for a decade.
 
 ## 8. The average grid is getting cleaner. The gap between grids is not.
 
-Every finding above is about direction — who fell, who rose, who decoupled. This
+Every finding above is about direction: who fell, who rose, who decoupled. This
 one is about *spread*, and it points the other way.
 
 ```sql grid_distribution
@@ -813,20 +813,20 @@ order by 1
 
 The average grid got **18% cleaner**. The gap between the cleanest and dirtiest
 grids closed by **8%**. Because the mean fell and the spread did not, the spread
-*relative* to the mean rose by 23% — the world's grids are further apart, in
-proportional terms, than when the period started. Neither reading is a
-start-and-end-point artefact: fitted across all twenty-five years, the fall in
-the mean and the rise in relative spread both carry p-values below 0.001.
+*relative* to the mean rose by 23%: in proportional terms the world's grids are
+further apart than when the period started. Neither reading is an artefact of the
+start and end points chosen. Fitted across all twenty-five years, the fall in the
+mean and the rise in relative spread both carry p-values below 0.001.
 
 <Alert status=info>
 
 **So what.** A transition that improves every grid at roughly the same
-proportional rate leaves the ranking, and the penalty for being at the wrong end
-of it, intact. Anything priced off *where* electricity is consumed — the Scope 2
+proportional rate leaves the ranking intact, and with it the penalty for being at
+the wrong end. Anything priced off *where* electricity is consumed (the Scope 2
 line of a disclosure, the embedded carbon in an imported tonne, the siting of a
-plant — does not get cheaper to get wrong as the world decarbonises. On this
-trajectory a location premium is a permanent feature of the next two decades, not
-a transitional one.
+plant) does not get cheaper to get wrong as the world decarbonises. On this
+trajectory a location premium is a permanent feature of the next two decades
+rather than a transitional one.
 
 **Who acts:** whoever signs off site selection, long-term supply agreements or a
 decarbonisation roadmap that assumes convergence. **Cost of getting it wrong:**
@@ -847,7 +847,7 @@ of a country's apparent progress.
 
 **No year is hardcoded.** Each finding is cut to the latest year its own metrics
 can actually populate, read from the data at build time. Those years differ, and
-using one number for all of them would quietly gut the samples that run behind.
+one number applied to all of them would quietly gut the samples that run behind.
 
 ```sql latest_years_long
 select 'CO₂ emissions' as series, co2_year_label as latest_year, 1 as ord from ${latest_years}
@@ -864,8 +864,8 @@ order by ord
     <Column id=latest_year title="Latest usable year" align=left/>
 </DataTable>
 
-Where a baseline year appears (2005, throughout) it is a deliberate choice of
-starting line, not a moving target.
+Where a baseline year appears (2005, throughout) it is a fixed starting line,
+chosen once and not moved to suit a chart.
 
 ---
 

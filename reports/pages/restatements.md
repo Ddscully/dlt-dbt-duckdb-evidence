@@ -79,7 +79,7 @@ each version was valid for, and `marts.fct_co2_estimate_versions` reads the firs
 and the current version back off it.
 
 It is also the one table here that a rebuild cannot reproduce, and this site is
-rebuilt from empty on every push. So the history is carried in rather than
+rebuilt from empty on every push. So the history is carried in instead of
 recomputed: the
 [Pages build](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/pages.yml)
 copies `history` out of the most recent
@@ -102,7 +102,7 @@ version back off it.
 
 That makes the snapshot the one table here that isn't reproducible from the
 sources. Rebuild the warehouse from scratch and the history is gone, which is
-why it is carried in rather than recomputed: the
+why it is carried in instead of recomputed: the
 [Pages build](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/pages.yml)
 copies `history` out of the most recent
 [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases)

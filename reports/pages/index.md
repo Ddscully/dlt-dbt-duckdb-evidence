@@ -3,9 +3,9 @@ title: What this warehouse answers
 description: A working data warehouse covering carbon border costs, emission factors for disclosure, retail customer economics, currency effects and long-run emissions trends.
 ---
 
-Five self-contained analyses built on public data, each one ending in a decision
-somebody has to make. Every figure on every page is a live query, so the numbers
-move when the underlying data does.
+Five self-contained analyses built on public data. Each one ends in a decision
+somebody has to make, and every figure is a live query, so the numbers move when
+the underlying data does.
 
 Start with the page that matches what you are responsible for.
 
@@ -48,12 +48,12 @@ Every table is released publicly each month as both Parquet and a DuckDB file.
 
 ## Before you quote a number
 
-Two pages exist so that the figures elsewhere can be taken at face value.
+Two pages exist so the figures elsewhere can be taken at face value.
 **[Coverage](/coverage)** says which countries and years each measure actually
-covers, and where two sources disagree — worth reading before cutting any chart
-to a single latest year. **[Restatements](/restatements)** tracks figures that
-have been revised since this warehouse first recorded them, because emissions
-data is not a fixed record.
+covers, and where two sources disagree. Read it before cutting any chart to a
+single latest year. **[Restatements](/restatements)** tracks figures that have
+been revised since this warehouse first recorded them, because emissions data is
+not a fixed record.
 
 **[Pipeline](/pipeline)** reports the operational state of the load itself.
 

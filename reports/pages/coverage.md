@@ -60,8 +60,7 @@ order by series, year
     yAxisTitle="Countries reporting"
 />
 
-Three features of that chart are worth naming, because each one has bitten a
-query in this repo:
+Three features of that chart have each bitten a query in this repo:
 
 1. **The renewables ceiling.** `renewables_share_pct` flatlines at 79 countries
    in every year since 1965. OWID's broad-coverage series is the *electricity*
@@ -129,9 +128,9 @@ select
 
 `marts.fct_emissions_energy` is built on a **spine**, `marts.dim_country_year`,
 the full cross join of the country dimension with every year the warehouse
-covers. That is what makes coverage answerable at all: left-join the fact onto
+covers. That is what makes coverage answerable at all. Left-join the fact onto
 the spine and a gap comes back as a row you can count, instead of an absence you
-have to infer from what isn't there.
+have to infer from what is not there.
 
 ### A country-year no source reports at all
 
@@ -174,14 +173,14 @@ These never reach the fact. The mart inner-joins the spine to the union of what
 the sources cover, so they exist only in `dim_country_year`. Almost all of them
 are the deep past: the spine starts in 1750 because OWID's emissions series does,
 and in 1750 that series is a handful of countries. From 1990 on the spine is
-essentially complete, so the gap is a statement about history rather than about
+essentially complete, so this gap says something about history and nothing about
 the pipeline.
 
 ### A country-year in the fact where one source is silent
 
 These *do* reach the fact, carrying nulls in the columns their missing source
-would have filled. This is the case that quietly breaks queries, because the row
-is present and a `where` clause on the wrong column drops it without saying so.
+would have filled. This is the case that quietly breaks queries: the row is
+present, and a `where` clause on the wrong column drops it without saying so.
 
 Two populations are worth knowing by name.
 
@@ -230,13 +229,13 @@ order by co2_mt desc
 ## What is deliberately not here
 
 The dimension is authoritative for *what counts as a country*, so two things are
-missing on purpose rather than by omission:
+missing on purpose:
 
 - **World Bank aggregates**: `WLD`, `EUU`, `OED` and the rest. WDI returns them
   in the same series as real countries; the dimension doesn't carry them, so the
   inner join to the spine keeps them out of every rollup on this site.
 - **Antarctica.** OWID emits about 0.2 Mt of emissions for it. A null `region`
-  should mean "not a country", and Antarctica is the case that proves the rule.
+  should mean "not a country", and Antarctica is where that reading holds.
   Taiwan and ten small territories are the opposite case: they *are* countries
   the World Bank simply doesn't list, and `dbt/seeds/country_overrides.csv` puts
   them back.

@@ -130,13 +130,13 @@ select * from warehouse.latest_years
 
 ...then `(select co2_year from ${latest_years})` inside a query.
 
-**It is not `max(year)`, and the difference is the whole point.** The mart sits on
-a country-year spine, so its max year is whichever source runs furthest ahead:
-Eurostat prices, currently a year beyond everything else. Coverage also falls off
-at different rates per column: `primary_energy_twh` drops from ~210 countries to
-79 in the latest year, while `co2_mt` holds at 214. Cutting an energy chart to the
-latest CO₂ year silently discards two thirds of its sample. Each family therefore
-gets its own floor; see the comment block at the top of that file.
+**It is not `max(year)`.** The mart sits on a country-year spine, so its max year
+is whichever source runs furthest ahead: Eurostat prices, currently a year beyond
+everything else. Coverage also falls off at different rates per column.
+`primary_energy_twh` drops from ~210 countries to 79 in the latest year, while
+`co2_mt` holds at 214, so cutting an energy chart to the latest CO₂ year silently
+discards two thirds of its sample. Each family gets its own floor; see the
+comment block at the top of that file.
 
 Adding a chart on a new column? Check its coverage curve first
 (`select year, count(col) from marts.fct_emissions_energy group by year`), and add
@@ -193,13 +193,67 @@ change. `DataTable` is unaffected, so a column can be fine in a table on the sam
 page and barless in a chart three lines below it. If a chart renders labels but
 no marks, rename the column before debugging anything else.
 
-**One false alarm worth knowing about:** a headless screenshot with too small a
-`--virtual-time-budget` produces the *identical* symptom — axis, categories and
-value labels, no bars — and does it to a different chart on each run, because the
+**One false alarm.** A headless screenshot with too small a
+`--virtual-time-budget` produces the *identical* symptom (axis, categories and
+value labels, no bars) and does it to a different chart on each run, because the
 budget expires part-way through rendering a long page. `scope2.md` has three
-charts and 25 s left one of them blank each time, varying. 60 s renders all three,
-repeatably. Before believing a chart is broken, shoot it twice: a real failure is
-the same chart every time.
+charts, and 25 s left one of them blank each time, varying. 60 s renders all
+three, repeatably. Before believing a chart is broken, shoot it twice: a real
+failure is the same chart every time.
+
+## A scatter over 3,000 points stops rendering
+
+**ECharts switches a scatter series to *progressive* rendering at
+`progressiveThreshold: 3000` points** — chunked, one slice per animation frame —
+and Evidence exposes neither that nor `progressive`. The day-one chart on
+`retail.md` is 4,868 points and never finished at all: a headless screenshot that
+takes 1 s for the same chart at 2,900 points sat for twelve minutes at 4,871 and
+had to be killed.
+
+The numbers say it is a mode change at a threshold and not a volume problem:
+2,900 points render in 2 s, 4,871 never finish, and 4,871 with progressive
+disabled render in **1 s**. So the fix is two lines:
+
+```
+seriesOptions={{progressive: 0, progressiveThreshold: 100000}}
+```
+
+Trimming the query would have looked like a fix and left the next chart to
+rediscover the same thing.
+
+## Log axes: `yLog=true` silently does nothing
+
+Three separate traps, all met on the same chart.
+
+- **There is no `xLog` prop.** `ScatterPlot` takes `yLog` and `yLogBase`; `xType`
+  only accepts category / value / time. A log x axis has to go through
+  `echartsOptions={{xAxis: {type: 'log'}}}`.
+- **`yLog=true` in a page does not turn the axis on.** `_Chart.svelte` sets
+  `yType = yLog === true ? 'log' : 'value'` in a prop initialiser, which runs
+  once, and markdown passes `yLog=true` as the **string** `"true"`. The later
+  `$: yLog = toBoolean(yLog)` fixes the variable and never re-runs `yType`. The
+  axis stays linear and nothing warns. `yLog={true}` does set it — and then picks
+  a 1-to-10 range with the data four orders of magnitude above. Setting
+  `yAxis: {type: 'log'}` through `echartsOptions` is the spelling that works.
+- **`min`/`max` inside `echartsOptions` lose to the component**, which writes its
+  own `min: yMin` / `max: yMax`. Use the `yMin` / `yMax` props.
+
+And one consequence: on a log y axis the **`yAxisTitle` disappears**, because
+Evidence draws it as part of the topmost axis label. Name the axis in the chart's
+`subtitle` instead.
+
+## A log axis will happily span fifteen orders of magnitude for two rows
+
+`where net_revenue_gbp > 0` is not the same filter as "positive", and the
+difference is a chart nobody can read. Two customers bought and returned
+everything; the signed line amounts do not cancel to exactly zero in floating
+point, so they sit at 3.6e-15 and 2.8e-14. Both pass `> 0`. The log axis then
+ran from 0.0000000001 to 10,000,000,000 to fit them, flattening the other 4,866
+points into one band.
+
+Threshold on a real unit, `>= 0.01` for money, not on zero. The same arithmetic
+is why a `first_order_gbp <= net_revenue_gbp` dbt test fails on 272 rows that are
+equal; see the retail section of `CLAUDE.md`.
 
 ## Years render as `2025.0` unless you cast twice
 
@@ -209,7 +263,7 @@ against *that*, so `cast(year as varchar)` in a page produces `'2025.0'` — a
 string, so no `fmt` can rescue it, and it lands in the BigValue, the DataTable
 cell and the chart's category axis looking like a bug in the data.
 
-Two fixes, and which one depends on where the value goes:
+Which of the two fixes you want depends on where the value goes:
 
 - **A number rendered as a number** (DataTable column, BigValue): leave the year
   numeric and pass `fmt="0"`.
@@ -258,12 +312,12 @@ if a percentage ever looks like it has two extra digits, check the column name
 before you check the SQL.
 
 The suffix is matched against every tag in `builtInFormats.js`, so `_pct` is not
-the only one — `id`, `fract`, `mult`, `sci`, `num0`…`num4`, `yyyy`, `mmm` and
-the date tags are all live. Currency suffixes are *not* on that list, which is
-why `revenue_gbp` and `gdp_usd` pass through untouched and `_pct` is the one
-that bites here. A column named `customer_id` does pick up the `id` format,
-which is harmless (it suppresses thousands separators, which is what you want
-for an identifier) and is worth knowing before it looks like a bug.
+the only one: `id`, `fract`, `mult`, `sci`, `num0`…`num4`, `yyyy`, `mmm` and the
+date tags are all live. Currency suffixes are *not* on that list, which is why
+`revenue_gbp` and `gdp_usd` pass through untouched and `_pct` is the one that
+bites here. A column named `customer_id` does pick up the `id` format. That one
+is harmless — it suppresses thousands separators, which is what you want for an
+identifier — but it looks like a bug until you know.
 
 ## Chart colors
 
@@ -325,10 +379,22 @@ red/green pairing.
 
 The site is fully static. `.github/workflows/pages.yml` materializes the
 `publish_site` job (the whole pipeline against the live sources plus this site)
-and publishes `reports/build/`. `sources:strict` (which the asset runs) makes a
-missing or empty warehouse fail the build rather than deploy an empty dashboard.
+and publishes `reports/build/`. `sources:strict`, which the asset runs, makes a
+missing or empty warehouse fail the build instead of deploying an empty
+dashboard.
 
-The one thing the workflow still does by hand is append `deployment.basePath` to
-`evidence.config.yaml` before the build: project Pages serve from a subpath,
-Evidence has no env-var equivalent for it, and a committed value would break
-`npm run dev` on localhost.
+Three things nobody tells you, if you're setting this up yourself:
+
+- **Pages has to be enabled once by hand**: Settings → Pages → Source → GitHub
+  Actions.
+- **`evidence build` does not run the sources.** It renders against whatever
+  parquet `.evidence/` already holds, which locally is a warm cache and in CI is
+  nothing at all, so `sources:strict` has to run first. Skip it and you deploy a
+  perfectly working site where every chart says *Table with name emissions_energy
+  does not exist*. That ordering lives in `scripts/build_report.py`, the single
+  implementation behind both `just report` and the asset.
+- **Project Pages serve from a subpath**, so the workflow appends
+  `deployment.basePath` to `evidence.config.yaml` at build time. It's injected
+  rather than committed because a base path set in the file also applies to `npm
+  run dev`, which breaks local preview on `localhost:3000`. Evidence has no
+  env-var equivalent.

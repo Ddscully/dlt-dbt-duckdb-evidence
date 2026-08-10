@@ -18,6 +18,17 @@ Starting a *different* project on this shape is
 what has to be rewritten, and the decisions that are expensive to change later.
 The rest of this file is about *this* warehouse.
 
+**The README is the tour; the reference prose sits in `docs/`.** It was one
+1,200-line file until 2026-08-10 and is now split by topic:
+[`WAREHOUSE.md`](docs/WAREHOUSE.md) (sources, grains, schemas, the lake),
+[`ORCHESTRATION.md`](docs/ORCHESTRATION.md) (the asset graph and its three jobs),
+[`DATA_QUALITY.md`](docs/DATA_QUALITY.md) (tests, contracts, groups, exposures,
+versions), [`PUBLISHED_DATA.md`](docs/PUBLISHED_DATA.md) (the release and how to
+query it) and [`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). Those files carry the
+*explanation*; this one carries what it cost to learn, and the two should not
+start duplicating each other. A change to how a layer works usually needs an edit
+in `docs/` **and** here.
+
 ## The package (`src/modern_data_stack/`)
 
 The domain-neutral mechanisms live here — `paths`, `fixtures`, `lake`,
@@ -57,7 +68,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 5 seeds + 354 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 5 seeds + 355 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -669,6 +680,41 @@ one; the page is `retail.md`.
     review. Monetary is deliberately not in the grid: R and F say what the
     relationship is doing, M says what it is worth.
   - Champions are 14.9% of the identified base and 62.7% of its revenue.
+- **`dim_retail_customer.first_order_gbp` is the page's only forward-looking
+  number, and the statistic that describes it is not the obvious one.** Pearson
+  *r* against lifetime value is 0.641 and is almost entirely one customer: drop
+  the single largest first order (£33,168 → £235,833) and it falls to **0.397**;
+  under £5,000 it is 0.344. The **rank** correlation does not move — 0.592,
+  0.592, 0.590 across the same three cuts — so that is what the page quotes,
+  with the quintile medians (£191 → £410 → £714 → £905 → £1,885, repeat rate
+  58% → 78%) as what it means in money. A Pearson *r* on a heavy-tailed money
+  column is a statistic about the tail.
+  - **An invoice, not a day.** `n_orders` counts invoices, so "order" has to
+    mean the same thing in both columns — and 393 of the 5,881 customers bought
+    twice on the day they arrived, so the choice moves the number. Ranking is on
+    `min(invoice_ts)` (83 invoices carry more than one timestamp) then on
+    `invoice`, because 11 customers opened two at the same minute and a
+    non-deterministic tie-break is a column that changes between builds.
+  - **Null for the 47 whose first invoice held no product line** — a `Manual`
+    adjustment or the test SKU. Same `filter (where is_revenue_line)` shape as
+    `net_revenue_gbp`, which is already null for 28 customers, so this is the
+    model's existing convention rather than a new one.
+  - **`first_order_gbp <= net_revenue_gbp` is true by construction and fails as
+    a test, on 272 rows.** Every one is a one-order customer where the two
+    columns are the same money summed in a different order; the excess tops out
+    at 1.8e-12. Comparing two independently-summed doubles for containment is a
+    float-equality test wearing an inequality. The shipped test is
+    `accepted_range {min_value: 0}`, which is the same guarantee without the
+    arithmetic.
+  - **The chart cost four Evidence gotchas**, all written up in
+    `reports/README.md`: a scatter over ECharts' `progressiveThreshold: 3000`
+    never finishes rendering, `yLog=true` in markdown is the *string* `"true"`
+    and leaves the axis linear, there is no `xLog` prop at all, and `> 0` is not
+    a safe filter for a log axis when two customers carry 1e-14 of float residue.
+  - `ntile(5)` is correct for the quintile table and wrong for the RFM scoring
+    two sections below it, which is worth reading as a pair. A near-continuous
+    currency column has almost no ties to split; `frequency` has 1,626 customers
+    on one value.
 - **The FX carry-forward stops being theoretical here.** 139,658 lines (13.1%)
   convert on a rate the ECB published earlier, and **every one is a Sunday**:
   this business trades Sunday and not Saturday (139,256 lines against 402), and
@@ -749,7 +795,7 @@ the point of the layer is that none of it is a comment.
 - **Marts are `public` because the release makes them so.** Every mart ships as a
   standalone Parquet file to people who cannot be paged; `access` is a statement
   about that, not about the repo.
-- **Contracts are enforced on all 17 marts — 326 columns, each with a
+- **Contracts are enforced on all 17 marts — 327 columns, each with a
   `data_type`.** The ymls documented 179 of those columns before, so the list was
   *generated* from the built warehouse's `information_schema` and inserted
   line-wise into `_marts.yml`, reordering the existing entries into SQL order and
@@ -852,7 +898,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 351 of the 354 tests use the default. `severity` comes across
+  is what dbt does; 352 of the 355 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the

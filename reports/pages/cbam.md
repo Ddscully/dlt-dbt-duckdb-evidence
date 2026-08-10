@@ -14,7 +14,7 @@ actually made the goods, they fall back to a **country-specific default value**
 published in Annex I of [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621),
 plus a mark-up. That annex is a country × good carbon-intensity table. Multiplied
 by a carbon price it becomes a euro figure with a statutory deadline, and that
-multiplication is the whole of this page.
+multiplication is all this page does.
 
 ```sql headline
 select
@@ -146,8 +146,8 @@ the wrong lanes.
 ## Why the national grid barely enters the number
 
 The section above says the grid is not the story. This one says why, and the
-reason is not statistical — it is that the regulation mostly does not count
-electricity at all.
+reason is not statistical: the regulation mostly does not count electricity at
+all.
 
 ```sql electricity_share
 select
@@ -204,11 +204,11 @@ being priced.
 **So what.** A country's grid can be among the dirtiest in the world and barely
 move its CBAM bill, because the bill is overwhelmingly the carbon burned *in the
 process* — the coke in a blast furnace, the calcination of limestone — not the
-carbon behind the meter. That makes the weak correlation between a country's grid
-factor and its border cost a fact about the regulation rather than a quirk of
-this dataset, and it means the two carbon numbers this site publishes answer
-different questions and are not substitutes. A grid factor is the right input to
-a Scope 2 disclosure and the wrong input to a sourcing decision on steel.
+carbon behind the meter. So the weak correlation between a country's grid factor
+and its border cost is a fact about the regulation and not a quirk of this
+dataset. The two carbon numbers this site publishes answer different questions
+and are not substitutes: a grid factor is the right input to a Scope 2 disclosure
+and the wrong input to a sourcing decision on steel.
 
 **Who acts:** whoever is building a supplier-screening or carbon-cost model.
 **Cost of getting it wrong:** ranking suppliers on grid data that the border cost
@@ -281,7 +281,7 @@ order by median_2026 desc
     <Column id=median_2028 title="Median €/t, 2028" fmt='€#,##0.00'/>
 </DataTable>
 
-The mark-up is read off the published values rather than asserted from the
+The mark-up is read off the published values instead of asserted from the
 articles, and the difference matters: hardcoding 10/20/30% would overstate every
 one of the 2,457 fertiliser rows by nine points in 2026 and twenty-seven by
 2028.
@@ -298,8 +298,7 @@ which sourcing lanes are worth the effort of going to get that data.
 
 </Alert>
 
-Three more limits worth stating plainly, because a practitioner will check them
-first:
+Three more limits, stated plainly because a practitioner will check them first:
 
 - **A CN code alone does not identify a row.** 2523 10 00 is both white clinker
   and grey clinker, with default values differing by more than a factor of two.
@@ -310,7 +309,7 @@ first:
   the mark-up columns; five cement rows for Angola and Argentina compound the
   mark-up instead of adding it; Chile's line pipe is missing its 2026 cell
   entirely. The seed transcribes the regulation as it stands and the mart flags
-  each case, since a legal instrument is not this project's to tidy up.
+  each case. A legal instrument is not this project's to tidy up.
 - **The grid factor shown elsewhere in this warehouse is not the annex's.** The
   regulation's own electricity emission factors come from IEA data under a
   non-commercial licence, which this project deliberately does not redistribute.

@@ -36,10 +36,10 @@ and Taiwan, which the World Bank omits and the `country_overrides` seed exists f
 
 Rows are filtered; **columns never are**. Dropping unused columns would let a
 renamed upstream field pass CI against a fixture that agrees with a `stg_` model
-no longer matching reality. The OWID fixtures stay gzipped CSV rather than
-Parquet for the same reason — they still go through
+no longer matching reality. The OWID fixtures stay gzipped CSV instead of Parquet
+for the same reason: they still go through
 `pl.read_csv(..., infer_schema_length=None)`, so the inference gotcha is under
-test rather than bypassed.
+test and not bypassed.
 
 Re-record when a source changes shape or a WDI indicator is added, and commit the
 result. `.github/workflows/nightly.yml` is what tells you it's time: it runs the
