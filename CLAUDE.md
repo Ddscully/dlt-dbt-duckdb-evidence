@@ -64,8 +64,8 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just lake` | year-partitioned Parquet archive of the warehouse → `data/lake/` |
 | `just run` | ingest → dbt-build → transform → pipeline-status → lake (shell ordering) |
 | `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
-| `just materialize` | same pipeline, ordered by the asset graph (`full_refresh`, no Evidence) |
-| `just materialize-site` | `full_refresh` + the Evidence site (`publish_site`; needs Node) |
+| `just materialize` | same pipeline, ordered by the asset graph (`load_retail` then `full_refresh`, no Evidence) |
+| `just materialize-site` | the same two jobs + the Evidence site (`publish_site`; needs Node) |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
 | `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — the partitioned `raw/wb_wdi` asset |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
@@ -1141,15 +1141,64 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
   - Partition status starts empty even though `raw.wb_wdi` holds the full series:
     the rows came from unpartitioned runs. That's cosmetic — the merge key, not
     Dagster's partition record, is what makes a re-run idempotent.
-- **The Evidence site is an asset, and it's the one asset excluded from
-  `full_refresh`.** `reports/evidence_site` shells out to npm via
-  `scripts/build_report.py`; `ci.yml`, `nightly.yml` and `release-data.yml` all run
-  `full_refresh` on a bare uv checkout with no Node, so a site in that job would
-  break three workflows to serve one. `publish_site` is `AssetSelection.all()` and
-  `pages.yml` runs it — one job instead of the three npm steps that used to sit
-  after it. `AssetSelection.all() - site` is the only selection in
-  `definitions.py` that names what it leaves out; a second npm-shaped asset would
-  have to be excluded by hand too.
+- **Every asset and check is listed by hand in `definitions.py`, and nothing
+  tells you when one isn't.** `dg.Definitions` takes explicit lists, so an
+  omission is not an error — the asset is simply not in the graph,
+  `AssetSelection.all()` never sees it, and `dagster definitions validate`
+  passes. That is how `raw/retail_invoice_lines`, `analytics/retail_rfm` and two
+  asset checks sat unregistered from the retail and currency commits until
+  `full_refresh` failed in CI with `Catalog Error: Table with name
+  retail_invoice_lines does not exist!` — one layer downstream, in dbt, naming
+  the symptom and not the cause. The two checks failed more quietly still: an
+  unregistered check just never runs. `tests/test_definitions.py` now compares
+  what `assets.py` defines against what the graph resolves, and CI runs it in the
+  `dbt parse` step (it needs the manifest, so it skips itself in `just test`).
+  - **Compare *executable* asset keys, not `get_all_asset_keys()`.** An
+    unregistered asset that something depends on still appears in the graph as an
+    external node, so the wider set reports `analytics/retail_rfm` present purely
+    because `pipeline_status` names it in `deps` — a test that passes while the
+    pipeline is broken. Same trap one level up: `full_refresh`'s job graph
+    contains `raw/retail_invoice_lines` as an unexecutable node.
+  - **`AssetChecksDefinition` is a subclass of `AssetsDefinition`.** An
+    `isinstance` chain that tests the parent first swallows every check into the
+    asset branch, where `.keys` is empty — the check half of the test then
+    measures nothing and is green forever.
+- **An asset job may not span two partitions definitions, which is why there are
+  three jobs.** `raw/wb_wdi` is yearly and `raw/retail_invoice_lines` is monthly;
+  `define_asset_job` resolves its selection to a single `partitions_def` or
+  raises. There is no opt-out — `allow_different_partitions_defs` is hardcoded
+  `False` for named asset jobs and `True` only for Dagster's own implicit global
+  job. So `load_retail` carries the retail ingest alone, `full_refresh` is
+  `AssetSelection.all() - site - retail_ingest`, and **`load_retail` has to run
+  first** because dbt reads the table it lands. The justfile recipes and all four
+  workflows pair them; running `full_refresh` by itself against a fresh warehouse
+  reproduces the catalog error above.
+  - `dagster asset materialize --select '*'` is not a way round it: the CLI
+    refuses a partitioned asset without `--partition` ("Asset has partitions, but
+    no '--partition' option was provided"), so the unpartitioned whole-graph run
+    only exists as a job.
+  - **A job shares a namespace with the ops**, so the job is `load_retail` and
+    not `ingest_retail` — `@dlt_assets(name="ingest_retail")` already holds that
+    name, and the collision reports as `Conflicting definitions found in
+    repository with name 'ingest_retail'` naming `__ASSET_JOB`.
+- **The Evidence site is an asset, and it's the asset excluded from
+  `full_refresh` for a reason that isn't partitioning.** `reports/evidence_site`
+  shells out to npm via `scripts/build_report.py`; `ci.yml`, `nightly.yml` and
+  `release-data.yml` all run `full_refresh` on a bare uv checkout with no Node, so
+  a site in that job would break three workflows to serve one. `pages.yml` runs
+  `publish_site` — one job instead of the three npm steps that used to sit after
+  it. Both selections in `definitions.py` now name what they leave out; a second
+  npm-shaped *or* differently-partitioned asset would have to be excluded by hand
+  too.
+- **Importing `orchestration.assets` leaves a dlt pipeline active process-wide.**
+  The `@dlt_assets` decorators call `build_pipeline()` at import time and dlt
+  records the result as the ambient pipeline, so a later test calling a resource
+  generator directly reads the real `~/.dlt` state instead of none —
+  `test_wb_wdi_follows_pagination` starts asking for `&date=2021:2026` and fails
+  on pagination it never got wrong. It only bites when the whole suite runs, and
+  only on a machine that has loaded WDI at least once. `tests/test_definitions.py`
+  deactivates the pipeline on teardown; anything else under `tests/` that imports
+  the orchestration layer has to do the same.
 - **The site's deps are one per table it reads, not the single ordering edge.**
   `scripts.build_report.TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY` map the 20
   tables the source queries read to the assets that write them, and

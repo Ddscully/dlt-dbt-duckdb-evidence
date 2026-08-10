@@ -103,14 +103,20 @@ dagster:
 
 # Full pipeline, ordered by the asset graph and recorded in the Dagster instance.
 # Excludes the Evidence site, which needs Node — see `just materialize-site`.
+#
+# Two jobs, because an asset job takes a single partitions definition and the
+# retail ingest is monthly where wb_wdi is yearly (see orchestration/definitions.py).
+# `load_retail` has to come first: dbt reads raw.retail_invoice_lines.
 materialize:
     mkdir -p "$DAGSTER_HOME"
+    uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
     uv run --group orchestration dagster job execute -m orchestration.definitions -j full_refresh
 
 # The same graph plus the Evidence site on the end of it (requires Node).
 # This is what .github/workflows/pages.yml runs.
 materialize-site:
     mkdir -p "$DAGSTER_HOME"
+    uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
     uv run --group orchestration dagster job execute -m orchestration.definitions -j publish_site
 
 # Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi*'` (* = all downstream, + = one layer)

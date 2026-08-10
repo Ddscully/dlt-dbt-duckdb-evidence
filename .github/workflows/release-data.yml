@@ -126,6 +126,10 @@ jobs:
       - name: Build the warehouse from live sources
         run: |
           mkdir -p "$DAGSTER_HOME"
+          # Two jobs: an asset job takes one partitions definition, and the retail
+          # ingest is monthly where wb_wdi is yearly. dbt reads the retail table, so
+          # this one goes first (see orchestration/definitions.py).
+          uv run dagster job execute -m orchestration.definitions -j load_retail
           uv run dagster job execute -m orchestration.definitions -j full_refresh
 
       # Writes data/export/: the DuckDB copy, a Parquet per modelled table,

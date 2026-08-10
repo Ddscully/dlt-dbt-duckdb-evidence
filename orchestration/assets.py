@@ -311,10 +311,14 @@ def raw_retail_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     common case, not the requirement.
 
     The unpartitioned path has to keep working here for the same reason it does
-    for WDI: `full_refresh` contains this asset and three workflows execute that
-    job with no partition key. Same guard, and the same reason it tests both
-    properties — `has_partition_key_range` alone is False for a single-partition
-    run, which would load the whole workbook while reporting one month.
+    for WDI, but through a different job. An asset job takes a *single*
+    partitions definition, and this one is monthly where `raw/wb_wdi`'s is
+    yearly — so this asset is the one thing `full_refresh` excludes besides the
+    site, and `load_retail` runs it with no partition key ahead of every
+    `full_refresh` (see `orchestration/definitions.py`). Same guard below, and
+    the same reason it tests both properties — `has_partition_key_range` alone is
+    False for a single-partition run, which would load the whole workbook while
+    reporting one month.
     """
     months = None
     if context.has_partition_key or context.has_partition_key_range:

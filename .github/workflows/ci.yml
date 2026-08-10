@@ -39,16 +39,27 @@ jobs:
 
       # Parses the dbt manifest and resolves the whole asset graph, so a broken
       # ref, a renamed source or a dangling asset key fails before any I/O.
+      #
+      # `tests/test_definitions.py` runs here rather than in the step above: it
+      # imports orchestration.assets, which needs the manifest that `dbt parse`
+      # writes, so in the unit-test tier it skips itself. What `validate` cannot
+      # see is an asset that was never registered — the graph it checks is only
+      # the one `Definitions` was handed — so this is the step that catches it.
       - name: Validate Dagster definitions
         run: |
           cd dbt && uv run dbt deps && uv run dbt parse && cd ..
           uv run dagster definitions validate -m orchestration.definitions
+          uv run pytest tests/test_definitions.py
 
       # Runs ingest -> dbt build + test -> Polars in asset-graph order, and
       # evaluates the asset checks alongside dbt's tests — all against fixtures.
       - name: Materialize the asset graph
         run: |
           mkdir -p "$DAGSTER_HOME"
+          # Two jobs: an asset job takes one partitions definition, and the retail
+          # ingest is monthly where wb_wdi is yearly. dbt reads the retail table, so
+          # this one goes first (see orchestration/definitions.py).
+          uv run dagster job execute -m orchestration.definitions -j load_retail
           uv run dagster job execute -m orchestration.definitions -j full_refresh
 
       # The publish path (`release-data.yml`) against the fixture warehouse: a
