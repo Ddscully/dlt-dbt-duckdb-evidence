@@ -1,6 +1,6 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 358 dbt tests alongside the models, and Dagster surfaces
+`just dbt-build` runs 364 dbt tests alongside the models, and Dagster surfaces
 each one as an asset check on the model it guards. For the pytest side, see
 [`tests/README.md`](../tests/README.md).
 

@@ -5,12 +5,19 @@
 -- steel must surrender CBAM certificates for the emissions embedded in it. Where
 -- they cannot get verified data from the installation that made it, they use the
 -- country-specific default value from Annex I of Implementing Regulation (EU)
--- 2025/2621, with a mark-up. That annex is a country x good carbon-intensity
--- table; multiplied by a carbon price it is a euro figure with a statutory
--- deadline, and this model is that multiplication.
+-- 2025/2621 — as corrected by (EU) 2026/1740, which replaced that annex in full
+-- with retroactive effect from 1 January 2026 — with a mark-up. That annex is a
+-- country x good carbon-intensity table; multiplied by a carbon price it is a
+-- euro figure with a statutory deadline, and this model is that multiplication.
 --
--- Grain: one row per (country or territory listed in the annex, good). 119
--- countries plus the fallback table, x the 264 goods the annex actually prices.
+-- The mark-up is the part the correction moved. The annex used to publish each
+-- good's marked-up value for 2026, 2027 and 2028 and this model read the
+-- schedule off those columns; it now publishes only direct, indirect and total,
+-- so the schedule comes from the `cbam_markup_schedule` seed instead. Two
+-- columns went with the published ones — see `markup_2026_pct` below.
+--
+-- Grain: one row per (country or territory listed in the annex, good). 121
+-- countries plus the fallback table, x the goods the annex actually prices.
 -- Countries the annex does not list are deliberately absent — the regulation
 -- sends every one of them to the same "other countries and territories" table,
 -- so ranking them against each other would be ranking a hundred copies of one
@@ -26,6 +33,33 @@ with defaults as (
 
 goods as (
     select * from {{ ref('cbam_goods') }}
+),
+
+-- The phase-in mark-up, asserted from the regulation rather than measured off
+-- the annex — which is a change, and not one this project chose.
+--
+-- Until the 2026/1740 correction the annex published each good's value
+-- *including* the mark-up for 2026, 2027 and 2028 beside the plain total, so
+-- this model divided one by the other and read the schedule off the data. That
+-- was the better arrangement: an amendment moving a rate needed no edit here,
+-- and it is how the fertiliser exception was found rather than assumed. The
+-- correction publishes only direct, indirect and total, so there is nothing left
+-- to divide and the schedule has to be stated.
+--
+-- Stated as a seed and not as a `case` or a var, so it is still reviewable as
+-- data. The values are confirmed twice over: against the articles (10 / 20 / 30%
+-- for cement, iron and steel, aluminium and hydrogen; a flat 1% for fertilisers,
+-- a food-security carve-out) and against the February annex's own published
+-- columns, where every one of the 10,929 priced rows implies exactly those rates
+-- to within the third decimal the OJ prints.
+markup as (
+    select
+        product_group,
+        max(markup_pct) filter (where year = 2026) / 100 as rate_2026,
+        max(markup_pct) filter (where year = 2027) / 100 as rate_2027,
+        max(markup_pct) filter (where year = 2028) / 100 as rate_2028
+    from {{ ref('cbam_markup_schedule') }}
+    group by product_group
 ),
 
 countries as (
@@ -60,25 +94,6 @@ priced_goods as (
     having count(default_total_t_co2e_per_t) > 0
 ),
 
--- The mark-up each product group actually carries, taken from the annex rather
--- than from the articles that set it. Fertilisers come out at 1% in all three
--- years where every other group is 10 / 20 / 30%, which is 2,416 rows and
--- consistent across every country — so hardcoding one schedule would overstate
--- every fertiliser line by nine points in 2026 and twenty-seven in 2028.
--- Reading it off the data also means an amendment that changes a rate needs no
--- edit here.
-group_markup as (
-    select
-        g.product_group,
-        mode(round(d.default_2026_t_co2e_per_t / d.default_total_t_co2e_per_t, 4)) as rate_2026,
-        mode(round(d.default_2027_t_co2e_per_t / d.default_total_t_co2e_per_t, 4)) as rate_2027,
-        mode(round(d.default_2028_t_co2e_per_t / d.default_total_t_co2e_per_t, 4)) as rate_2028
-    from defaults as d
-    inner join goods as g on d.good_key = g.good_key
-    where d.default_total_t_co2e_per_t > 0 and d.default_2026_t_co2e_per_t is not null
-    group by g.product_group
-),
-
 -- The annex's catch-all, which is also its fallback rule: "where a country or
 -- territory is not explicitly listed, the default value for the respective good
 -- from the table 'Other countries and territories' needs to be selected", and
@@ -93,21 +108,20 @@ fallback as (
         good_key,
         default_direct_t_co2e_per_t as fallback_direct,
         default_indirect_t_co2e_per_t as fallback_indirect,
-        default_total_t_co2e_per_t as fallback_total,
-        default_2026_t_co2e_per_t as fallback_2026,
-        default_2027_t_co2e_per_t as fallback_2027,
-        default_2028_t_co2e_per_t as fallback_2028
+        default_total_t_co2e_per_t as fallback_total
     from defaults
     where country_iso3 is null
 ),
 
 -- **The fallback is a row-level rule, not a column-level one.** Picking each
 -- column from whichever source happens to have it produces a row that exists
--- nowhere in the regulation: Chile's line pipe (7306 11 00) is published with a
--- total of 2,950 and a blank 2026 cell, and a per-column coalesce paired Chile's
--- tonnage with the *fallback's* mark-up for a 100% implied rate. So the source is
--- chosen once, on whether the country has a total, and every column comes from
--- it.
+-- nowhere in the regulation. The case that proved it is gone from the source —
+-- Chile's line pipe (7306 11 00) was published with a total of 2,950 and a blank
+-- 2026 mark-up cell, and a per-column coalesce paired Chile's tonnage with the
+-- *fallback's* mark-up for a 100% implied rate — but the rule it established
+-- outlives it, and direct/indirect/total are still three columns that must be
+-- read off one row. So the source is chosen once, on whether the country has a
+-- total, and every column comes from it.
 resolved as (
     select
         d.country_or_territory,
@@ -129,45 +143,31 @@ resolved as (
                 then d.default_indirect_t_co2e_per_t
             else f.fallback_indirect
         end as indirect_t_co2e_per_t,
-        coalesce(d.default_total_t_co2e_per_t, f.fallback_total) as total_t_co2e_per_t,
-        case
-            when d.default_total_t_co2e_per_t is not null
-                then d.default_2026_t_co2e_per_t
-            else f.fallback_2026
-        end as published_2026,
-        case
-            when d.default_total_t_co2e_per_t is not null
-                then d.default_2027_t_co2e_per_t
-            else f.fallback_2027
-        end as published_2027,
-        case
-            when d.default_total_t_co2e_per_t is not null
-                then d.default_2028_t_co2e_per_t
-            else f.fallback_2028
-        end as published_2028
+        coalesce(d.default_total_t_co2e_per_t, f.fallback_total) as total_t_co2e_per_t
     from defaults as d
     inner join priced_goods as p on d.good_key = p.good_key
     left join fallback as f on d.good_key = f.good_key
 ),
 
--- Where the annex prints a total but leaves a mark-up cell blank — Chile's line
--- pipe is the only one today — the cell is filled from the product group's own
--- rate and flagged. The alternative is a null in a money column for a row whose
--- tonnage the regulation states plainly, which is the less honest of the two.
+-- Certificates per tonne: the annex's total plus the group's statutory mark-up.
+-- Every row is computed the same way now. Until the 2026/1740 correction the
+-- annex published these three columns itself and this model preferred the
+-- published figure, falling back to the computed one only where a cell was blank
+-- — so `markup_is_inferred` marked the handful of rows where that happened. With
+-- no published column left there is no distinction to draw, and the flag has
+-- been dropped rather than shipped as a constant `true`.
 priced as (
     select
         r.*,
         g.product_group,
         g.cn_code,
         g.goods_description,
-        r.published_2026 is null and r.total_t_co2e_per_t is not null as markup_is_inferred,
-        coalesce(r.published_2026, r.total_t_co2e_per_t * m.rate_2026) as certificates_2026_t_co2e_per_t,
-        coalesce(r.published_2027, r.total_t_co2e_per_t * m.rate_2027) as certificates_2027_t_co2e_per_t,
-        coalesce(r.published_2028, r.total_t_co2e_per_t * m.rate_2028) as certificates_2028_t_co2e_per_t,
-        m.rate_2028 as group_rate_2028
+        r.total_t_co2e_per_t * (1 + m.rate_2026) as certificates_2026_t_co2e_per_t,
+        r.total_t_co2e_per_t * (1 + m.rate_2027) as certificates_2027_t_co2e_per_t,
+        r.total_t_co2e_per_t * (1 + m.rate_2028) as certificates_2028_t_co2e_per_t
     from resolved as r
     inner join goods as g on r.good_key = g.good_key
-    left join group_markup as m on g.product_group = m.product_group
+    left join markup as m on g.product_group = m.product_group
 )
 
 select
@@ -191,7 +191,6 @@ select
     p.production_route_code,
     p.is_fallback_table,
     p.is_country_specific,
-    p.markup_is_inferred,
     -- The emissions embedded in one tonne of the good, before the mark-up.
     p.direct_t_co2e_per_t,
     p.indirect_t_co2e_per_t,
@@ -200,16 +199,15 @@ select
     p.certificates_2026_t_co2e_per_t,
     p.certificates_2027_t_co2e_per_t,
     p.certificates_2028_t_co2e_per_t,
+    -- Kept although it is now derivable from the product group alone: it is the
+    -- number a reader checks the mark-up with, and one column beats knowing the
+    -- schedule. `markup_schedule_is_irregular` sat beside it until the 2026/1740
+    -- correction, flagging the five Angola and Argentina cement rows that
+    -- *compounded* the mark-up where the other 10,926 added it. That was a
+    -- statement about the published columns, which no longer exist — with the
+    -- schedule applied uniformly nothing can be irregular, so a column that is
+    -- false on every row would be worse than no column.
     100 * (p.certificates_2026_t_co2e_per_t / nullif(p.total_t_co2e_per_t, 0) - 1) as markup_2026_pct,
-    -- Five cement rows (Angola and Argentina) compound the mark-up rather than
-    -- adding it — x1.1, x1.21, x1.331 — where every other row adds it. Compared
-    -- against the group's *own* 2028 rate rather than one extrapolated from its
-    -- 2026 rate: fertilisers are 1% in all three years, so an extrapolation
-    -- (1 + 3 x 0.01) flags all 2,457 of them as irregular when none of them are.
-    abs(
-        p.certificates_2028_t_co2e_per_t / nullif(p.total_t_co2e_per_t, 0)
-        - p.group_rate_2028
-    ) > 0.005 as markup_schedule_is_irregular,
     -- The euro figure. One reference price rather than a band, because the
     -- tonnage columns above are right there: the Evidence page multiplies them to
     -- draw the sensitivity across EUR 60-120 without rebuilding the model.
@@ -227,7 +225,8 @@ select
     -- Lineage, constant per row and deliberately so — this table ships as a
     -- standalone Parquet in the data release, and a euro figure detached from the
     -- instrument that sets it is worse than no figure.
-    'Implementing Regulation (EU) 2025/2621, Annex I' as source_instrument,
+    'Implementing Regulation (EU) 2025/2621, Annex I, '
+    || 'as corrected by (EU) 2026/1740' as source_instrument,
     'location-based, administrative default' as factor_basis
 from priced as p
 left join countries as c on p.country_iso3 = c.country_iso3

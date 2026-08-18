@@ -75,7 +75,7 @@ The README is the tour. The detail lives in five files:
 |---|---|
 | [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the schemas they land in, and the Parquet lake beside them |
 | [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the Dagster asset graph, the three jobs, backfills and freshness policies |
-| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 358 dbt tests, the mart contracts, and the groups, exposures and model versions around them |
+| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 364 dbt tests, the mart contracts, and the groups, exposures and model versions around them |
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
 | [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | SLA, run cost, what breaks at 1000×, what I'd do differently |
 
@@ -192,7 +192,7 @@ the live endpoints and opens an issue when a source has moved, which is the cue
 to fix the pipeline and `just record-fixtures`. Details in
 [`tests/README.md`](./tests/README.md).
 
-Alongside them, `just dbt-build` runs 358 dbt tests and enforces a schema
+Alongside them, `just dbt-build` runs 364 dbt tests and enforces a schema
 contract on all 17 marts. What each gate catches, and the groups, exposures and
 model versions built around them, are in
 [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md).
@@ -209,7 +209,7 @@ year for all of them.
 | Page | What's on it |
 |------|--------------|
 | **Home** | A routing page: pick the analysis that matches what you're responsible for. |
-| **CBAM Exposure** | What a tonne of an imported CBAM good costs at the EU border, by where it was made: Annex I of Implementing Regulation (EU) 2025/2621 priced at a carbon price you choose. Semi-finished steel runs 63× from Azerbaijan to Indonesia, and the ranking sorts by *production route* rather than by the national grid, which is the opposite of the Scope 2 story. A screening tool, not a filing. |
+| **CBAM Exposure** | What a tonne of an imported CBAM good costs at the EU border, by where it was made: Annex I of Implementing Regulation (EU) 2025/2621, as corrected by (EU) 2026/1740, priced at a carbon price you choose. Semi-finished steel runs 63× from Azerbaijan to Indonesia, and the ranking sorts by *production route* rather than by the national grid, which is the opposite of the Scope 2 story. A screening tool, not a filing. |
 | **Scope 2 Factors** | The same grid carbon-intensity series read as what it also is: the location-based Scope 2 emission factor a company multiplies its metered kWh by for a CSRD, SECR or CDP disclosure. `marts.dim_grid_emission_factors` as a reference table with its vintage and lineage, a worked example over twelve *invented* sites, and the three caveats a practitioner checks first. |
 | **Retail Transactions** | One retailer's 1.07M invoice lines, the only page here below country grain. What counts as revenue when a negative quantity on a sale invoice is a stock write-off and not a return, cohort retention read as a triangle, what a customer's first order predicts about their lifetime value, RFM segmentation where SQL's `ntile` would split 3,227 customers away from their identical peers, and returns matched to their sale by inference. |
 | **Currency** | The ECB's daily euro reference rates, and the three problems an annual warehouse never has to answer. 30% of calendar days carry no rate, so the daily table carries the last fixing forward, capped, because the two interior gaps in the series are the Icelandic króna after 2008 and the Argentine peso in 2002, not long weekends. Spot against average, and what it changes about a number already on the site: EU household electricity rose 35% or 13.5% from 2021-S1 to 2022-S2 depending only on whether you counted in euros or dollars. |
@@ -217,7 +217,7 @@ year for all of them.
 | **Country Explorer** | The same data with a year selector on it, for checking a specific country or year yourself instead of reading a conclusion. |
 | **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. |
-| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 358 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
+| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 364 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
 
 `.github/workflows/pages.yml` builds it as a single `publish_site` job. The site
 is a node in the asset graph (`reports/evidence_site`), so the workflow

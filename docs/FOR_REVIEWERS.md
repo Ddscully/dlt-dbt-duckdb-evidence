@@ -71,7 +71,7 @@ that an upstream publisher moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
 that OWID was down.
 
-**What blocks.** 358 dbt tests run inside `dbt build`, every one with
+**What blocks.** 364 dbt tests run inside `dbt build`, every one with
 `store_failures`, so a red test hands you `select * from
 dbt_test__audit.<test_name>` rather than a count. Six Dagster asset checks sit
 alongside them, and `site_pages_all_rendered` is blocking and checks page *size*
@@ -91,7 +91,7 @@ Measured on this machine against the live APIs, per stage:
 | Stage | Time | Notes |
 |-------|------|-------|
 | `just ingest` | **61.0 s** | seven sources; 55.2 s of it with the retail workbook already cached |
-| `just dbt-build` | **26.4 s** | 400 nodes — 26 models, 2 snapshots, 5 seeds, 358 tests; contracts are enforced, which is a `describe` per mart |
+| `just dbt-build` | **26.4 s** | 407 nodes — 26 models, 2 snapshots, 6 seeds, 364 tests; contracts are enforced, which is a `describe` per mart |
 | `just transform` | **2.1 s** | two Polars models |
 | `just pipeline-status` | **1.4 s** | observability tables |
 | `just lake` | **3.2 s** | 793 Parquet files, ~60 MB |

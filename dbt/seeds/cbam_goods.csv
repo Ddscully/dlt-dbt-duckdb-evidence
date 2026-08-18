@@ -19,22 +19,18 @@ good_key,product_group,cn_code,goods_description
 7612-aluminium-casks-drums-cans-boxes-and-sim,Aluminium,7612,"Aluminium casks, drums, cans, boxes and similar containers (including rigid or collapsible tubular containers), for any material (other than compressed or liquefied gas), of a capacity not exceeding 300 litres, whether or not lined or heat-insulated, but not fitted with mechanical or thermal equipment"
 76130000-aluminium-containers-for-compressed-or-l,Aluminium,7613 00 00,Aluminium containers for compressed or liquefied gas
 7614-stranded-wire-cables-plaited-bands-and-t,Aluminium,7614,"Stranded wire, cables, plaited bands and the like, of aluminium, not electrically insulated"
-76151010-cast,Aluminium,7615 10 10,Cast
-76151030-manufactured-from-foil-of-a-thickness-no,Aluminium,7615 10 30,"Manufactured from foil of a thickness not exceeding 0,2 mm"
-76151080-other,Aluminium,7615 10 80,Other
-76152000-sanitary-ware-and-parts-thereof,Aluminium,7615 20 00,Sanitary ware and parts thereof
 76161000-nails-tacks-staples-other-than-those-of,Aluminium,7616 10 00,"Nails, tacks, staples (other than those of heading 8305), screws, bolts, nuts, screw hooks, rivets, cotters, cotter pins, washers and similar articles"
 76169100-cloth-grill-netting-and-fencing-of-alumi,Aluminium,7616 91 00,"Cloth, grill, netting and fencing, of aluminium wire"
 76169910-cast,Aluminium,7616 99 10,Cast
 76169990-other,Aluminium,7616 99 90,Other
-25070080-calcined-clay,Cement,2507 00 80,Calcined clay
-25231000-grey-clinker,Cement,2523 10 00,Grey clinker
-25231000-white-clinker,Cement,2523 10 00,White clinker
+2507008080-calcined-clay,Cement,2507 00 80 80,Calcined clay
+2523100010-white-clinker,Cement,2523 10 00 10,White clinker
+2523100090-other-clinker-including-grey-clinker,Cement,2523 10 00 90,Other clinker including grey clinker
 25232100-white-portland-cement,Cement,2523 21 00,White Portland cement
 25232900-grey-portland-cement,Cement,2523 29 00,Grey Portland cement
 25233000-aluminous-cement,Cement,2523 30 00,Aluminous cement
-25239000-grey-hydraulic-cements,Cement,2523 90 00,Grey hydraulic cements
-25239000-white-hydraulic-cements,Cement,2523 90 00,White hydraulic cements
+2523900010-white-hydraulic-cement,Cement,2523 90 00 10,White hydraulic cement
+2523900090-other-hydraulic-cements-including-grey-h,Cement,2523 90 00 90,Other hydraulic cements including grey hydraulic cements
 28080000-nitric-acid-sulphonitric-acids,Fertilisers,2808 00 00,Nitric acid; sulphonitric acids
 28141000-anhydrous-ammonia,Fertilisers,2814 10 00,Anhydrous ammonia
 28142000-ammonia-in-aqueous-solution,Fertilisers,2814 20 00,Ammonia in aqueous solution

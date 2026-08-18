@@ -80,7 +80,7 @@ its publishers and is redistributed here under their licences.
 | Energy production and consumption | [Our World in Data](https://github.com/owid/energy-data) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | World Development Indicators, country dimension | [World Bank](https://data.worldbank.org/) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | Household electricity prices | [Eurostat](https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204/) | [Eurostat reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright) |
-| CBAM default values (Annex I) | [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621) | [Commission reuse decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj) |
+| CBAM default values (Annex I) | [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621), as corrected by [(EU) 2026/1740](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740) | [Commission reuse decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj) |
 | Euro foreign-exchange reference rates | [European Central Bank](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html), via [Frankfurter](https://frankfurter.dev) | [ECB reuse policy](https://www.ecb.europa.eu/services/using-our-site/copyright/html/index.en.html) |
 | Online Retail II transactions | [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/502/online+retail+ii) (Chen, D., 2019) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 
@@ -253,8 +253,22 @@ it for `{base}/download/{tag}/…`.
   is a *parameter*, not a market quote. The price this build used is stated on
   every row in `ets_price_eur_per_t`, and the tonnage columns ship beside the euro
   columns so you can re-price without rebuilding.
-  The two seeds it is built from (`cbam_default_values`, `cbam_goods`) are in the
-  DuckDB file's `main` schema, not the Parquet set.
+  The seeds it is built from (`cbam_default_values`, `cbam_goods`,
+  `cbam_markup_schedule`) are in the DuckDB file's `main` schema, not the Parquet
+  set.
+- **The CBAM annex was corrected, and this table changed shape with it.**
+  Implementing Regulation (EU) 2026/1740 replaced Annexes I and IV in full on
+  3 August 2026, retroactive to 1 January. **Two columns are gone**:
+  `markup_is_inferred` and `markup_schedule_is_irregular` both described
+  artefacts of the marked-up columns the annex used to publish and no longer
+  does, so neither has a subject any more. There is no compatibility view for
+  them — they cannot be reconstructed from the corrected annex at any price.
+  The mark-up itself is unchanged in law (10 / 20 / 30%, fertilisers a flat 1%)
+  and is now applied from the `cbam_markup_schedule` seed rather than read off
+  the annex; `markup_2026_pct` still states it per row. The values moved very
+  little — 66 of 10,503 comparable rows — but the good and country lists both
+  changed: 10-digit TARIC codes now separate goods that shared a CN code, ten
+  countries were relabelled, and Liberia and New Caledonia are new.
 - **One table in here is invented and says so:**
   `marts.fct_example_scope2_emissions` prices twelve *hypothetical* sites against
   real grid emission factors, as a worked example of

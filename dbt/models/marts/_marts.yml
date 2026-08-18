@@ -780,12 +780,10 @@ models:
         data_type: BOOLEAN
         description: >
           False where the annex prints "-" for this country and good and the
-          value below came from the fallback table. 1,601 of 12,532 rows — one in
-          eight — so a model that only handled *unlisted* countries would leave
-          that many rows with a null cost.
+          value below came from the fallback table — roughly one row in eight, so
+          a model that only handled *unlisted* countries would leave that many
+          rows with a null cost.
         data_tests: [not_null]
-      - name: markup_is_inferred
-        data_type: BOOLEAN
       - name: direct_t_co2e_per_t
         data_type: DOUBLE
       - name: indirect_t_co2e_per_t
@@ -813,23 +811,18 @@ models:
       - name: certificates_2028_t_co2e_per_t
         data_type: DOUBLE
       - name: markup_2026_pct
-        data_type: DOUBLE
         description: >
-          Derived from the published values, not asserted. Fertilisers carry 1%
-          in all three years where every other group carries 10 / 20 / 30% — 2,416
-          rows, consistent across every country, so it reads as intended. A model
-          that hardcoded 10/20/30 would overstate every fertiliser line by nine
+          Asserted from the regulation via the `cbam_markup_schedule` seed, not
+          derived — the opposite of what it was until the 2026/1740 correction,
+          which stopped publishing the marked-up columns this was read off.
+          Fertilisers carry 1% in all three years where every other group carries
+          10 / 20 / 30%, so the schedule is a property of the product group and a
+          model hardcoding one rate would overstate every fertiliser line by nine
           points in 2026 and twenty-seven in 2028.
+        data_type: DOUBLE
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 31}
-      - name: markup_schedule_is_irregular
-        data_type: BOOLEAN
-        description: >
-          Five cement rows (Angola grey clinker / grey Portland / grey hydraulic,
-          Argentina grey clinker / grey Portland) compound the mark-up — x1.1,
-          x1.21, x1.331 — where every other row adds it. Flagged, not corrected:
-          the annex is the legal instrument and this model does not overrule it.
       - name: ets_price_eur_per_t
         data_type: INTEGER
       - name: cbam_cost_2026_eur_per_t

@@ -16,6 +16,13 @@ plus a mark-up. That annex is a country × good carbon-intensity table. Multipli
 by a carbon price it becomes a euro figure with a statutory deadline, and that
 multiplication is all this page does.
 
+The values here are Annex I **as corrected by [Implementing Regulation (EU)
+2026/1740](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740)**,
+which replaced Annexes I and IV in full on 3 August 2026 and applies retroactively
+from 1 January. The numbers themselves barely moved — 66 of 10,503 comparable
+rows, mostly down by a percent or two — but the table changed shape, and two of
+the defects this page used to list have been fixed at source.
+
 ```sql headline
 select
     count(distinct good_key)                                as n_goods,
@@ -194,7 +201,7 @@ where not is_fallback_table
 
 Indirect emissions — the carbon in the electricity the plant drew — are published
 only for **cement and fertilisers**. For aluminium and hydrogen the annex carries
-no indirect column at all, and for iron and steel it is present on 32 of 6,466
+no indirect column at all, and for iron and steel it is present on 34 of 6,672
 rows. Even where it does count, it is small: 7.5% of a cement tonne and 5.5% of a
 fertiliser one. Across the whole annex, electricity is under **1%** of the carbon
 being priced.
@@ -300,16 +307,30 @@ which sourcing lanes are worth the effort of going to get that data.
 
 Three more limits, stated plainly because a practitioner will check them first:
 
-- **A CN code alone does not identify a row.** 2523 10 00 is both white clinker
-  and grey clinker, with default values differing by more than a factor of two.
-  Classification to the right description is the importer's problem and the annex
-  does not solve it.
-- **The annex has defects, and they are reproduced rather than corrected.**
-  Albania's white Portland cement is published with its three values shifted into
-  the mark-up columns; five cement rows for Angola and Argentina compound the
-  mark-up instead of adding it; Chile's line pipe is missing its 2026 cell
-  entirely. The seed transcribes the regulation as it stands and the mart flags
-  each case. A legal instrument is not this project's to tidy up.
+- **A CN code alone does not always identify a row.** It used to be reliably
+  untrue: 2523 10 00 was both white clinker and grey clinker, whose default
+  values differ by more than a factor of two. The correction gives those two
+  10-digit TARIC codes — 2523 10 00 10 and 2523 10 00 90 — so that particular
+  trap is closed, but the annex still prints 4- and 6-digit headings above the
+  rows that carry the numbers, and classification to the right description
+  remains the importer's problem.
+- **The annex's defects are reproduced rather than corrected**, and the
+  correction removed most of the ones there were. Albania's white Portland
+  cement used to be published with its three values shifted into the mark-up
+  columns, five cement rows for Angola and Argentina compounded the mark-up
+  instead of adding it, and Chile's line pipe was missing its 2026 cell; all
+  three are gone, the last two because the marked-up columns are gone with them.
+  The seed still transcribes the regulation as it stands, defects included. A
+  legal instrument is not this project's to tidy up — and the amendment is the
+  argument for that, since every one of those quirks was fixed by the body that
+  wrote it rather than by us.
+- **The mark-up is now asserted, not read off the annex.** Until the correction
+  the annex published each good's marked-up value for 2026, 2027 and 2028, and
+  this project derived the schedule from them. It publishes only direct,
+  indirect and total now, so the phase-in — 10 / 20 / 30% for cement, iron and
+  steel, aluminium and hydrogen, a flat 1% for fertilisers — comes from a seed
+  stating what the articles say. Same numbers, weaker provenance, and worth
+  knowing which it is.
 - **The grid factor shown elsewhere in this warehouse is not the annex's.** The
   regulation's own electricity emission factors come from IEA data under a
   non-commercial licence, which this project deliberately does not redistribute.
@@ -320,7 +341,8 @@ Three more limits, stated plainly because a practitioner will check them first:
   measurement.
 
 The underlying table is `marts.fct_cbam_exposure`, and the transcribed annex is
-the `cbam_default_values` and `cbam_goods` seeds. The mart ships in the
+the `cbam_default_values` and `cbam_goods` seeds, with the phase-in rates in
+`cbam_markup_schedule`. The mart ships in the
 [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest)
 both as Parquet and inside the DuckDB file; the two seeds are in the DuckDB
 file's `main` schema only.
