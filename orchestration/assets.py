@@ -267,14 +267,34 @@ def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
         )
 
 
+def _month_after(month: str) -> str:
+    """The month following `month`, in the same `%Y-%m` form.
+
+    Arithmetic rather than `strptime`, because a partition label is a label and
+    not an instant — parsing one into a datetime asks a timezone question that
+    has no answer here, which is what `DTZ007` is pointing at when it fires.
+    """
+    year, index = (int(part) for part in month.split("-"))
+    return f"{year + index // 12}-{index % 12 + 1:02d}"
+
+
 # Monthly, and bounded at both ends — unlike WDI's, which runs to the current
 # year with `end_offset=1`. This source is a closed archive: the last transaction
 # is 2011-12-09 and there will never be another, so a partition beyond that would
 # be a window nobody can fill. `end_offset` is deliberately absent for the same
 # reason it is required there.
+#
+# **`end` is exclusive**, which is why it is a month past the data rather than
+# `RETAIL_LAST_MONTH` itself. Passing the last month directly is the obvious
+# thing to write and it silently drops that month: the definition resolved to 24
+# keys ending at 2011-11, so the 25,526 lines invoiced in December 2011 had no
+# partition to land in and no key that could target them. Nothing failed — the
+# unpartitioned path every workflow uses loads the whole file — so only a
+# per-partition backfill would ever have shown it, by quietly stopping a month
+# early. `tests/test_definitions.py` pins both ends against the constants.
 RETAIL_PARTITIONS = dg.TimeWindowPartitionsDefinition(
     start=RETAIL_FIRST_MONTH,
-    end=RETAIL_LAST_MONTH,
+    end=_month_after(RETAIL_LAST_MONTH),
     fmt="%Y-%m",
     cron_schedule="0 0 1 * *",
 )
@@ -710,9 +730,30 @@ def rfm_scores_do_not_split_ties() -> dg.AssetCheckResult:
         """
     )
     unsegmented = _scalar("select count(*) from analytics.retail_rfm where segment is null")
+    # Recency and frequency are never absent — every customer in the dimension
+    # has ordered — so a null score on either is `qcut` having failed, not the
+    # data being thin. Monetary is the one axis that legitimately goes null (the
+    # 28 customers with no revenue line), and `rfm_cell`/`rfm_total` are null
+    # exactly and only where it is. Asserting the *equality* rather than allowing
+    # nulls is what keeps this from becoming a licence for them: a null leaking
+    # into recency would otherwise arrive as a plausible-looking gap.
+    unscored = _scalar(
+        """
+        select count(*) from analytics.retail_rfm
+        where recency_score is null
+           or frequency_score is null
+           or (monetary_gbp is null) <> (monetary_score is null)
+           or (monetary_score is null) <> (rfm_cell is null)
+           or (monetary_score is null) <> (rfm_total is null)
+        """
+    )
     return dg.AssetCheckResult(
-        passed=bad == 0 and unsegmented == 0,
-        metadata={"customers_scored_against_a_peer": bad, "unsegmented": unsegmented},
+        passed=bad == 0 and unsegmented == 0 and unscored == 0,
+        metadata={
+            "customers_scored_against_a_peer": bad,
+            "unsegmented": unsegmented,
+            "scores_null_where_they_should_not_be": unscored,
+        },
     )
 
 

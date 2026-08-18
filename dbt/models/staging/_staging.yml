@@ -376,7 +376,21 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: "'1999-01-04'", max_value: "current_date"}
       - name: quote_currency
-        data_tests: [not_null]
+        description: >
+          Every code here must have a `currencies` seed row, because that seed is
+          hand-maintained and `marts.dim_currency` is built `from seed left join`
+          the series — so a code the ECB starts quoting and nobody adds to the
+          seed gets no dimension row, and `fct_fx_rates_daily`'s inner join then
+          drops it silently. The published and period tables would still carry it,
+          which is the shape that makes the hole hard to notice: one currency
+          missing from the dense table only, with nothing red anywhere. This is
+          the direction the seed's own `retired_on` test cannot check.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('currencies')
+                field: currency_code
       - name: units_per_eur
         description: >
           Units of the quote currency per 1 EUR, as the ECB quotes it. Untested

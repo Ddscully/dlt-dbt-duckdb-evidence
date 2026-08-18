@@ -9,6 +9,7 @@ call to exercise. The end-to-end path lives in `just test-pipeline`.
 from __future__ import annotations
 
 import json
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -612,6 +613,38 @@ def test_retail_fixture_and_live_caches_never_share_a_path(monkeypatch, tmp_path
     live_dir = Path(pipeline.cache_dir()) / "live"
     assert fixture_path.parent != live_dir
     assert not (live_dir / pipeline.RETAIL_WORKBOOK_NAME).exists()
+
+
+def test_retail_cache_notices_a_re_recorded_archive(monkeypatch, tmp_path):
+    """The same poisoning one level in: a stale *extract* under a fresh archive.
+
+    The cache used to be keyed on the directory alone — if the workbook was
+    there, it was returned — so it could not see that the zip underneath had
+    changed. `just record-fixtures` rewrites that zip, and the next
+    `INGEST_FIXTURES=1` run would then load the *previous* slice: every fixture
+    test green against data the repo no longer contained, which is the failure
+    mode that makes a re-recording look like a no-op.
+    """
+    monkeypatch.setenv(fixtures.ENV_VAR, "1")
+    monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path / "cache"))
+
+    archive = tmp_path / "retail.zip"
+    monkeypatch.setattr(pipeline.fixtures, "path_for", lambda url: archive)
+
+    def record(payload: bytes) -> None:
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr(pipeline.RETAIL_WORKBOOK_NAME, payload)
+
+    record(b"the first recording")
+    first = pipeline.retail_workbook()
+    assert first.read_bytes() == b"the first recording"
+    # Cached: same archive, same path, no second extraction.
+    assert pipeline.retail_workbook() == first
+
+    record(b"a re-recorded slice")
+    second = pipeline.retail_workbook()
+    assert second != first
+    assert second.read_bytes() == b"a re-recorded slice"
 
 
 def test_retail_yields_every_row_the_workbook_holds(retail_con):

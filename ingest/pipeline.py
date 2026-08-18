@@ -20,6 +20,7 @@ Run:  uv run python -m ingest.pipeline
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import os
 import time
@@ -570,6 +571,15 @@ def ecb_fx_rates():
     ]
 
 
+def _content_digest(path: Path) -> str:
+    """A short content hash of a file, read in chunks rather than into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()[:12]
+
+
 def retail_workbook() -> Path:
     """The extracted Online Retail II workbook, downloading it at most once.
 
@@ -578,8 +588,7 @@ def retail_workbook() -> Path:
     period closed in 2011 — so re-fetching it per load would be 45 MB of
     politeness to no one, and re-fetching it per *partition* would make a
     twenty-five-month backfill a gigabyte of identical downloads. It is cached in
-    `data/cache/` instead, keyed on nothing because there is only one of it; the
-    directory is gitignored and safe to delete.
+    `data/cache/` instead; the directory is gitignored and safe to delete.
 
     Under fixtures the zip is the recorded one and no download happens at all,
     which is the same code path with a different byte source — the unzip, the
@@ -592,20 +601,34 @@ def retail_workbook() -> Path:
     download and load the slice into the real warehouse with no error anywhere.
     Same failure the `_fixtures` pipeline-name suffix exists to prevent one layer
     down, and the same one an absolute `WAREHOUSE_PATH` prevents in the tests.
+
+    **The extract is keyed on the archive's content**, which is the same failure
+    one level further in. Keyed on the directory alone — "it exists, return it" —
+    the cache had no way to notice that the archive underneath it had changed, so
+    `just record-fixtures` rewriting the recorded zip left the *previous* slice
+    sitting in `fixtures/` and every fixture test then passed against data the
+    repo no longer held. A digest in the path makes a re-record a cache miss.
+    Stale digest directories are left behind rather than pruned; they cost disk
+    in a gitignored cache, and deleting is the one thing this function should not
+    be doing on its own.
     """
     cache = Path(cache_dir()) / ("fixtures" if fixtures.enabled() else "live")
-    extracted = cache / RETAIL_WORKBOOK_NAME
-    if extracted.exists():
-        return extracted
-
     cache.mkdir(parents=True, exist_ok=True)
+
+    # The download moved above the cache check, because the check now needs the
+    # archive to hash. It is still at most one download: the live archive is
+    # itself cached, and the fixture one is in the repo.
     if fixtures.enabled():
         archive = fixtures.path_for(RETAIL_ARCHIVE)
     else:
         archive = cache / "online_retail_ii.zip"
         if not archive.exists():
             _download(RETAIL_ARCHIVE, archive)
-    return extract_member(archive, cache, ".xlsx")
+
+    extracted = cache / _content_digest(archive) / RETAIL_WORKBOOK_NAME
+    if extracted.exists():
+        return extracted
+    return extract_member(archive, extracted.parent, ".xlsx")
 
 
 def retail_sql(months: tuple[str, str] | None = None) -> str:

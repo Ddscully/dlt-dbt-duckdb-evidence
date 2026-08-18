@@ -1044,6 +1044,17 @@ models:
             expression: "not is_currently_published"
           config:
             where: "retired_on is not null"
+      # And the other direction of the same seed/series agreement: a seed row the
+      # series has never quoted. EUR is the one legitimate case — it is the base
+      # of every quote — so anything else unquoted is a code that was typed into
+      # the seed and never existed. The seed's `retired_on` test cannot catch it:
+      # its subquery returns NULL for a code with no rates, and `retired_on >
+      # NULL` is not false, it is null, so the row passes by being unknown.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "currency_code = 'EUR'"
+          config:
+            where: "not is_quoted"
     columns:
       - name: currency_code
         data_type: VARCHAR
@@ -1551,6 +1562,14 @@ models:
         data_type: HUGEINT
       - name: units_returned
         data_type: HUGEINT
+        description: >
+          Units cancelled, as a **positive** count — the same direction
+          `fct_retail_returns.quantity_returned` points, rather than the negative
+          sign the source carries. Null for the 2,233 products never returned,
+          which is an absence and not a zero.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
       - name: net_revenue_gbp
         data_type: DOUBLE
       - name: median_unit_price_gbp
