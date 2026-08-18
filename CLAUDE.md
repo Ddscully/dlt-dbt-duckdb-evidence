@@ -68,7 +68,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 5 seeds + 355 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 5 seeds + 358 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -465,6 +465,34 @@ a regulatory schedule, not a time series.
   says 7,717. Eleven rows across the seven spot-checked countries differed in the
   third decimal before `Decimal` + `ROUND_HALF_UP`. Small, but the column is
   multiplied by a carbon price and shown as money.
+- **An unreadable cell raises; it must never become a `None`.** `_number` used to
+  `return None` on any `ValueError`, and `None` is not an error downstream — it
+  is the annex's own "no value here", which `fct_cbam_exposure` reads as *use the
+  fallback row* and prices. So a cell the parser merely failed to understand
+  would not surface as a gap but as a plausible euro figure attributed to a
+  country the regulation never assigned it to. `NO_VALUE` is now the accepted
+  blanks and anything else stops the script. Checked against all 37,620 value
+  cells of the real workbook: **one** token was reaching that catch-all —
+  `see below`, on the 4-digit CN headings 3102 and 3105 whose numbers live in
+  the subheadings under them (2,610 cells). Its null was *right*, and arrived by
+  luck; it is in `NO_VALUE_PHRASES` now, so it is a decision. This is the same
+  argument as the Chile row above — the fallback is a rule the annex states, not
+  a landing zone for whatever didn't parse.
+- **The seeds are one amendment behind, and the extractor does not parse the
+  current workbook.** They were transcribed from Annex I v1 (2026-02-04,
+  IR 2025/2621). On 2026-08-06 the Commission published **v2** at the same URL —
+  IR 2026/1740, "correcting Implementing Regulation (EU) 2025/2621" — and it is
+  a different shape, not just different numbers: **6 columns instead of 9**, the
+  three mark-up columns (2026/2027/2028) gone entirely, the production route
+  moved to column 5, and a new `Annex IV` sheet that `SKIP_SHEETS` doesn't know
+  about. `parse_annex` dies on `row[8]` with `IndexError` against it. Also worth
+  knowing before re-transcribing: v2 appears to have *fixed* Albania's white
+  Portland cement (now a clean `-`/`-`/`-`), so one of the four documented
+  transcription quirks may no longer exist. Migrating is real work — a new
+  regulation to read, a mark-up schedule that has to come from somewhere else or
+  be dropped, and `fct_cbam_exposure`'s year columns to rethink — and it has not
+  been done. The download is gitignored (`data/*.xlsx`), so nothing in the repo
+  changed by discovering this.
 - **The ETS price is a dbt var (`eu_ets_price_eur_per_t`, EUR 75), not a
   measurement.** There is no clean free API for EUA spot. The mart ships the
   tonnage columns beside the euro columns and states the price per row, so the
@@ -524,6 +552,19 @@ follows from that rather than from the numbers.
   retirement date is the day after the last published fixing. `is_quoted` is
   false for exactly one row — EUR, which is the base of every quote and never a
   quote itself.
+  - **A hand-maintained seed needs a test in *both* directions, and only one of
+    them existed.** `dim_currency` is `from seed left join` the series, so it can
+    only ever hold seed rows — and `fct_fx_rates_daily` inner-joins it. A
+    currency the ECB starts quoting that nobody adds to the seed therefore
+    vanishes from the dense table while still appearing in
+    `fct_fx_rates_published` and `fct_fx_rates_periods`: a silent per-currency
+    hole, not a build failure, and the shape that makes it hard to spot is that
+    only *one* of the three tables is wrong. A `relationships` test on
+    `stg_fx_rates.quote_currency` closes it. The reverse — a seed row the series
+    never quoted — could not be caught by the `retired_on` test either: its
+    subquery returns NULL for a code with no rates, and `retired_on > NULL` is
+    null rather than false, so the row passed by being *unknown*. Hence the
+    `is_quoted` assertion: 47 rows, 46 quoted, EUR the one exception.
 - **Both directions of every rate ship.** `units_per_eur` is the ECB's own quote,
   `eur_per_unit` its reciprocal. Same argument as the Scope 2 factor in g/kWh
   *and* t/MWh: a consumer forced to invert it themselves will eventually forget.
@@ -623,6 +664,15 @@ one; the page is `retail.md`.
   - **There are three invoice prefixes, not two.** Beside the `C` cancellations
     sit six `A` bad-debt adjustments worth −£147,614, and they are the only
     negative *prices* in the file.
+  - **A returned quantity is positive everywhere, and for a while it wasn't.**
+    `fct_retail_returns` negates the source's sign on purpose (4 reads better
+    than −4); `dim_retail_product.units_returned` kept the raw negative until
+    2026-08-18, so the two models disagreed about which way a return points.
+    Nothing failed — the column had a `data_type` and no description — but the
+    one place a reader would put them together, `units_returned / units_sold`,
+    came out negative, and a bar of returns per product drew below the axis. It
+    is 1..80,995 now, with an `accepted_range` holding it. A sign convention that
+    is only written down in one of the two models that use it isn't one.
   - **`item_type` is not decoration.** A bare revenue sum carries £463,931 of
     postage and −£338,803 of bank fees as if they were sales.
 - **Returns have no foreign key**, so `fct_retail_returns` infers the link with
@@ -670,6 +720,18 @@ one; the page is `retail.md`.
   - **Casting a Polars Categorical straight to an integer gives the physical
     dictionary index**, i.e. order of first appearance, not label order. Via
     `String` is the only reading that means what it says.
+  - **Monetary is null for 28 customers, and the check now says so rather than
+    not looking.** `monetary_gbp` is `net_revenue_gbp`, which `dim_retail_customer`
+    already publishes as null for the customers whose orders held no revenue
+    line — so `qcut` returns null and `concat_str`/`+` propagate it into
+    `rfm_cell` and `rfm_total`. Kept null rather than coalesced to 0: a 0 scores
+    them into the bottom quintile, which reads as "measured, worth nothing"
+    instead of "nothing to measure". `segment` is unaffected, because the grid is
+    R and F only. Two things this cost: `rfm_scores_do_not_split_ties` tested
+    only `segment is null` and so could not see any of it, and Polars sorts nulls
+    **first**, so a descending sort opened the table with the 28 least
+    informative rows in the file. `nulls_last=True`, and the check now asserts
+    the nulls fall exactly where monetary is null and nowhere else.
   - **`as_of_date` is a required parameter with no default.** Recency against
     `date.today()` makes every customer in a 2011 extract equally and
     enormously lapsed, and the segmentation quietly becomes a frequency ranking.
@@ -898,7 +960,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 352 of the 355 tests use the default. `severity` comes across
+  is what dbt does; 355 of the 358 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the
@@ -1212,6 +1274,18 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
   - **`end_offset=1`, or the current year isn't a partition.** A yearly window
     only closes on 1 January, so the newest partition would be last year — the
     one you actually want to re-run wouldn't exist.
+  - **`end` is exclusive, and the retail partitions were short a month because of
+    it.** `TimeWindowPartitionsDefinition(start=RETAIL_FIRST_MONTH,
+    end=RETAIL_LAST_MONTH)` reads like a closed interval and is not one: it
+    resolved to 24 keys ending at `2011-11`, so December 2011's 25,526 lines had
+    no partition to land in and no key that could ask for them. Nothing was ever
+    red — every workflow and justfile recipe uses the *unpartitioned* path, which
+    loads the whole workbook — so the only symptom was a per-partition backfill
+    quietly stopping a month early. `_month_after(RETAIL_LAST_MONTH)` is the
+    fix, keeping the constant meaning the data's last month, and
+    `tests/test_definitions.py` now pins both ends and the key count.
+    `end_offset=1` above solves the same off-by-one for the open-ended source;
+    this is the closed-archive half of it.
   - `BackfillPolicy.single_run()` (which a `TimeWindowPartitionsDefinition` also
     defaults to) is what makes a range one request per indicator instead of one
     per year: 1990–2025 is 11 requests, not 396. It also means the CLI's
@@ -1344,6 +1418,18 @@ Gotchas:
   resolves to a file that exists.
 - **dlt wraps anything a resource generator raises** in `ResourceExtractionError`,
   so tests asserting on ingest errors match that, not the underlying exception.
+- **The retail workbook cache is keyed on the archive's content, and had to be.**
+  `retail_workbook()` unzips a 45 MB workbook into `data/cache/{fixtures,live}/`
+  and used to key that on the directory alone — if the `.xlsx` was there, it was
+  returned. Nothing could then notice that the zip *underneath* it had changed,
+  so `just record-fixtures` rewriting `retail_online_retail_ii.zip` left the
+  previous slice in place and every fixture test went on passing against data the
+  repo no longer contained — a re-recording that looks like a no-op is the worst
+  possible shape for this. A sha256 prefix in the path makes a re-record a cache
+  miss. This is the same failure as the `fixtures`/`live` split one level in, and
+  the same family as the `_fixtures` dlt pipeline-name suffix: a cache whose key
+  doesn't include everything the value depends on. Stale digest directories are
+  left rather than pruned — the cache is gitignored and safe to delete.
 - **Adding a WDI indicator means re-recording** (`just record-fixtures`), on top
   of the two places listed above.
 - `.github/workflows/nightly.yml` runs the same graph against the *live* sources

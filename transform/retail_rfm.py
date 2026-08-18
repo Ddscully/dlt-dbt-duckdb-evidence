@@ -164,6 +164,16 @@ def build_retail_rfm(customers: pl.DataFrame, as_of_date: dt.date) -> pl.DataFra
         .with_columns(
             # The concatenated cell, e.g. "555". Kept as text on purpose: it is
             # a label, and 155 is not eleven times 55.
+            #
+            # **Null for the 28 customers with no revenue line**, and left that
+            # way. `monetary_gbp` is `net_revenue_gbp`, which `dim_retail_customer`
+            # already publishes as null for the customers whose orders held only a
+            # `Manual` adjustment or postage — so `qcut` returns null, and both of
+            # these propagate it. Coalescing to 0 would score them in the bottom
+            # monetary quintile, which reads as "we measured them and they are
+            # worth nothing" rather than "there is nothing to measure", and it is
+            # the model's existing convention that the second is a null. `segment`
+            # is unaffected: the grid is R and F only, so all 5,881 are segmented.
             pl.concat_str(
                 pl.col("recency_score"), pl.col("frequency_score"), pl.col("monetary_score")
             ).alias("rfm_cell"),
@@ -192,7 +202,12 @@ def build_retail_rfm(customers: pl.DataFrame, as_of_date: dt.date) -> pl.DataFra
             "return_rate_pct",
             "is_left_censored_cohort",
         )
-        .sort(["rfm_total", "monetary_gbp"], descending=True)
+        # `nulls_last` is not a default worth taking here. Polars sorts nulls
+        # *first*, so descending by `rfm_total` opened the table with the 28
+        # customers who have no monetary score at all — the least informative
+        # rows in the file sitting where the best customers belong, on a table
+        # whose whole purpose is "read the top of it".
+        .sort(["rfm_total", "monetary_gbp"], descending=True, nulls_last=True)
     )
 
 

@@ -46,7 +46,13 @@ activity as (
         min(invoice_date) as first_sold_date,
         max(invoice_date) as last_sold_date,
         sum(quantity) filter (where invoice_type = 'sale' and quantity > 0) as units_sold,
-        sum(quantity) filter (where invoice_type = 'cancellation') as units_returned,
+        -- Negated, for the same reason `fct_retail_returns` negates its own:
+        -- a returned quantity of 4 reads better than -4 everywhere downstream.
+        -- This column kept the source's sign until 2026-08-18, so the two
+        -- models disagreed about which way a return points — the one place a
+        -- reader would compare them, `units_returned / units_sold`, came out
+        -- negative, and a bar chart of returns per product drew below the axis.
+        -sum(quantity) filter (where invoice_type = 'cancellation') as units_returned,
         sum(line_amount_gbp) filter (where is_revenue_line) as net_revenue_gbp,
         -- Median rather than mean: this retailer discounts heavily and sells the
         -- same SKU at a wholesale and a retail price, so the mean sits between

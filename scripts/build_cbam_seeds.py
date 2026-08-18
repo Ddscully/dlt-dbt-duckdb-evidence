@@ -207,7 +207,19 @@ FALLBACK_LABEL = "Other countries and territories"
 
 # `–` (en dash) is the annex's "no value". `_` and `N/A` also appear; all three
 # mean the same thing and all three route to the fallback table.
+#
+# `see below` is the fourth and it is not a blank at all — it is prose, and it
+# appears on exactly two goods: the 4-digit CN headings 3102 and 3105, whose
+# numbers live in the subheading rows underneath them. 870 rows (2,610 cells)
+# across the workbook. It reached the seed as a null anyway, because the old
+# parser returned None for anything it could not read, so the *outcome* was
+# right and the reason was luck: the same catch-all would have turned a footnote
+# marker or a changed unit into a null just as quietly, and a null here is not
+# an absence — `fct_cbam_exposure` reads it as "use the fallback row" and prices
+# it. Listing the token is what makes the null a decision. Matched
+# case-insensitively, unlike the symbols, because it is a phrase someone typed.
 NO_VALUE = {"", "-", "–", "—", "_", "N/A", "n/a", "None"}
+NO_VALUE_PHRASES = {"see below"}
 
 SKIP_SHEETS = {"Overview", "Version History"}
 
@@ -230,14 +242,34 @@ def _number(cell: object) -> float | None:
     `round()` returns as 7.716. Eleven rows across the seven countries spot-checked
     against the OJ text differed in the third decimal before this changed — small,
     but this column is multiplied by a carbon price and shown as money.
+
+    **An unrecognised token raises rather than returning None**, which is the one
+    thing this function must not get wrong. `None` is not an error downstream: it
+    is the annex's own "no value here" and `fct_cbam_exposure` reads it as "use
+    the fallback row". So a cell this parser merely failed to understand — a
+    footnote marker, a stray unit, a thousands-separated figure that leaves two
+    separators behind — would not surface as a gap. It would surface as a
+    plausible euro figure, correctly computed, attributed to a country the
+    regulation never assigned it to. `NO_VALUE` is the list of blanks this
+    transcription accepts, and anything outside it is a change in the source that
+    a person has to look at. The contract of this script is faithful
+    transcription; guessing is the failure, not stopping.
     """
-    raw = _text(cell).replace(",", ".")
-    if raw in NO_VALUE:
+    raw = _text(cell)
+    if raw in NO_VALUE or raw.casefold() in NO_VALUE_PHRASES:
         return None
+    # Comma is the OJ's *decimal* separator (7,717 is seven point seven one
+    # seven), so this is a translation and not a strip. A thousands-separated
+    # figure would leave two separators behind and land in the raise below,
+    # which is the right answer: this annex does not print one, and reading
+    # "1,234,567" as either 1.234567 or 1234567 would be a guess.
     try:
-        value = Decimal(repr(float(raw)))
-    except (ValueError, InvalidOperation):
-        return None
+        value = Decimal(repr(float(raw.replace(",", "."))))
+    except (ValueError, InvalidOperation) as exc:
+        raise ValueError(
+            f"unparsable annex cell {raw!r} — if this is a new way of writing "
+            f"'no value', add it to NO_VALUE; otherwise the source has changed shape"
+        ) from exc
     return float(value.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP))
 
 

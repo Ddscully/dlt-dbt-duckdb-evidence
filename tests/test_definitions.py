@@ -152,3 +152,24 @@ def test_retail_ingest_is_the_only_thing_full_refresh_leaves_out():
 
     # The downstream retail models are unpartitioned and must stay in the graph.
     assert dg.AssetKey(["analytics", "retail_rfm"]) in _job_keys("full_refresh")
+
+
+def test_every_retail_month_has_a_partition_to_land_in():
+    """`TimeWindowPartitionsDefinition`'s `end` is *exclusive*.
+
+    Passing `RETAIL_LAST_MONTH` straight through is the obvious thing to write
+    and it drops that month: 24 keys ending at 2011-11, with December 2011's
+    25,526 lines unreachable through the partitioned path and no key that could
+    ask for them. The unpartitioned path — every workflow, every justfile recipe
+    — loads the whole file regardless, so nothing was ever red; a backfill simply
+    stopped a month early. This asserts the closed interval the constants
+    describe, so the off-by-one cannot come back at either end.
+    """
+    from ingest.pipeline import RETAIL_FIRST_MONTH, RETAIL_LAST_MONTH
+    from orchestration.assets import RETAIL_PARTITIONS
+
+    keys = RETAIL_PARTITIONS.get_partition_keys()
+    assert keys[0] == RETAIL_FIRST_MONTH
+    assert keys[-1] == RETAIL_LAST_MONTH
+    # 2009-12 through 2011-12 inclusive, i.e. no gaps in between either.
+    assert len(keys) == 25
