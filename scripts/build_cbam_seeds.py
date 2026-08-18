@@ -10,36 +10,54 @@ the regulation itself.
     uv run python -m scripts.build_cbam_seeds            # download, then write
     uv run python -m scripts.build_cbam_seeds --xlsx X   # from a local copy
 
-Two seeds, because normalising the goods out is worth 1.6 MB. 12,532 value rows
-share 287 distinct (product group, CN code, description) triples, and the
+Two seeds, because normalising the goods out is worth 1.6 MB. 12,540 value rows
+share 283 distinct (product group, CN code, description) triples, and the
 descriptions are long — one of them runs to 250 characters. Repeated per row they
 are 1.6 MB of CSV and the same again in the warehouse table; as a dimension they
 are 38 kB.
 
+**The seeds now hold the annex as corrected by Implementing Regulation (EU)
+2026/1740**, adopted 20 July 2026, in force 3 August and applying retroactively
+from 1 January 2026. It replaces Annexes I and IV of 2025/2621 in full, and it is
+the reason the amendment path above is worth having: re-running this script was
+most of the migration. What it changed, because none of it is guessable from the
+values alone —
+
+- **The three mark-up columns are gone.** The February version published each
+  good's value *including* the phase-in mark-up for 2026, 2027 and 2028 beside
+  the plain total; this one publishes direct, indirect, total and route, and
+  nothing else. The mark-up is unchanged in law — 10 / 20 / 30% for cement, iron
+  and steel, aluminium and hydrogen, a flat 1% for fertilisers — so it moved from
+  something this project *derived* to something it must *assert*. That is the
+  `cbam_markup_schedule` seed.
+- **10-digit TARIC codes appear**, and they resolve a real ambiguity: white and
+  grey clinker were both `2523 10 00` and differ by more than 2x. They are now
+  `2523 10 00 10` and `2523 10 00 90`.
+- **Twelve sheet names changed** ("Russia" -> "Russian Federation", "Vietnam" ->
+  "Viet Nam", ...) and two countries are new (Liberia, New Caledonia).
+- **The values themselves barely moved**: 66 of 10,503 comparable rows, 38 of
+  them down by 2% or less, 28 now blank.
+
 What this script deliberately does *not* do is clean the numbers. The annex is
 the legal instrument, so the seed is a faithful transcription of it, defects
 included, and `fct_cbam_exposure` is where the published values meet the rules
-that are supposed to govern them. Three defects are known and none are ours:
+that are supposed to govern them. The correction fixed two of the three defects
+the February version had, which is worth recording because the handling that
+absorbed them is now load-bearing for nothing:
 
-- **Albania / 2523 21 00 (white Portland cement)** has `–` for direct, indirect
-  and total, and 1,230 / 0,140 / 1,370 sitting in the three *mark-up* columns —
-  i.e. the values shifted three columns right. It reads identically in the OJ
-  text and in the Commission's XLSX, so it is the regulation that says this, not
-  a transcription error. Handled by reading the mark-up columns only when a total
-  is present, which lands the row on the annex's own "field shows `–` → use
-  *Other countries and territories*" rule.
-- **Five cement rows** (Angola grey clinker / grey Portland / grey hydraulic,
-  Argentina grey clinker / grey Portland) compound the mark-up — x1.1, x1.21,
-  x1.331 — where every other row adds it: x1.1, x1.2, x1.3.
+- **Albania / 2523 21 00 (white Portland cement)** used to carry `–` for direct,
+  indirect and total with 1,230 / 0,140 / 1,370 sitting in the *mark-up* columns
+  instead — the values shifted three columns right. It is a clean `–` now.
+- **Five cement rows** (Angola and Argentina) used to compound the mark-up —
+  x1.1, x1.21, x1.331 — where the other 10,926 added it. With no published
+  mark-up column there is nothing left to compound.
 - **Fertilisers carry a 1% mark-up in all three years**, not 1/2/3% and not
-  10/20/30%. That is 2,416 rows and it is consistent across every country, so it
-  reads as intended rather than as a defect — but it means "the mark-up" is a
-  property of the product group, and a model that hardcodes 10/20/30% overstates
-  every fertiliser line by 9 points in 2026 and 27 in 2028.
+  10/20/30%. Still true, still the reason the mark-up is a property of the
+  product group rather than a constant, and now asserted rather than measured.
 
-`dbt/seeds/_seeds.yml` and `dbt/models/marts/_marts.yml` test every one of those,
-so a corrected amendment shows up as a failing test rather than as a silent change
-in a published euro figure.
+`dbt/seeds/_seeds.yml` and `dbt/models/marts/_marts.yml` test what remains, so
+the next amendment shows up as a failing test rather than as a silent change in a
+published euro figure.
 """
 
 from __future__ import annotations
@@ -65,18 +83,28 @@ ANNEX_XLSX_URL = (
 
 SEED_DIR = project_root() / "dbt" / "seeds"
 
-# The annex's 119 countries, resolved to ISO3 once, at transcription time. The
+# The annex's 121 countries, resolved to ISO3 once, at transcription time. The
 # alternative is a fuzzy join at query time, which is the same guesswork with no
 # diff to review — and the country list is part of the legal instrument, so
 # pinning all of it means an amendment that adds a country fails here with its
-# name rather than writing a null ISO3 into the seed.
+# name rather than writing a null ISO3 into the seed. That is exactly what
+# happened at the 2026/1740 correction: twelve sheets came back unmapped and the
+# script stopped, naming all twelve, instead of writing twelve blank ISO3 codes
+# and dropping those countries at the mart's join.
+#
+# In sheet order, not alphabetical, so this reads against the workbook it mirrors.
 #
 # Nineteen of these needed a human. Excel truncates a sheet name at 31 characters
 # and forbids some punctuation, so a few are the regulation's own name mangled
-# ("Democratic Republic of the Cong", "Myanmar_Burma"); the rest are the ordinary
-# gap between two publishers' country names — the World Bank calls it "Egypt,
-# Arab Rep." and the Commission calls it "Egypt". The other 100 matched
-# `stg_country` exactly.
+# ("Congo, Democratic Republic of", "North Korea (Democratic People’" — that one
+# is cut mid-word at the 31st character); the rest are the ordinary gap between
+# two publishers' country names — the World Bank calls it "Egypt, Arab Rep." and
+# the Commission calls it "Egypt". The other 102 match `stg_country` exactly.
+#
+# Ten of the names changed in the correction with no change to the country: the
+# Commission moved to ISO-style long forms ("Russia" -> "Russian Federation",
+# "Vietnam" -> "Viet Nam", "Côte d'Ivoire" -> "Ivory Coast"). Liberia and New
+# Caledonia are the only two genuinely new entries.
 SHEET_TO_ISO3 = {
     "Albania": "ALB",
     "Algeria": "DZA",
@@ -85,8 +113,8 @@ SHEET_TO_ISO3 = {
     "Armenia": "ARM",
     "Australia": "AUS",
     "Azerbaijan": "AZE",
-    "Bahrain": "BHR",
     "Bangladesh": "BGD",
+    "Bahrain": "BHR",
     "Belarus": "BLR",
     "Benin": "BEN",
     "Bolivia": "BOL",
@@ -100,11 +128,10 @@ SHEET_TO_ISO3 = {
     "China": "CHN",
     "Colombia": "COL",
     "Congo": "COG",
+    "Congo, Democratic Republic of": "COD",
     "Costa Rica": "CRI",
     "Cuba": "CUB",
     "Curaçao": "CUW",
-    "Côte d'Ivoire": "CIV",
-    "Democratic Republic of the Cong": "COD",
     "Dominican Republic": "DOM",
     "Ecuador": "ECU",
     "Egypt": "EGY",
@@ -122,18 +149,21 @@ SHEET_TO_ISO3 = {
     "Hong Kong": "HKG",
     "India": "IND",
     "Indonesia": "IDN",
-    "Iran": "IRN",
+    "Iran, Islamic Republic of": "IRN",
     "Iraq": "IRQ",
     "Israel": "ISR",
+    "Ivory Coast": "CIV",
     "Jamaica": "JAM",
     "Japan": "JPN",
     "Jordan": "JOR",
     "Kazakhstan": "KAZ",
     "Kenya": "KEN",
+    "Korea, Republic of (South Korea": "KOR",
     "Kuwait": "KWT",
     "Kyrgyzstan": "KGZ",
     "Laos": "LAO",
     "Lebanon": "LBN",
+    "Liberia": "LBR",
     "Libya": "LBY",
     "Madagascar": "MDG",
     "Malaysia": "MYS",
@@ -141,19 +171,20 @@ SHEET_TO_ISO3 = {
     "Mauritania": "MRT",
     "Mauritius": "MUS",
     "Mexico": "MEX",
-    "Moldova": "MDA",
+    "Moldova, Republic of": "MDA",
     "Mongolia": "MNG",
     "Montenegro": "MNE",
     "Morocco": "MAR",
     "Mozambique": "MOZ",
-    "Myanmar_Burma": "MMR",
+    "Myanmar": "MMR",
     "Namibia": "NAM",
     "Nepal": "NPL",
+    "New Caledonia and dependencies": "NCL",
     "New Zealand": "NZL",
     "Nicaragua": "NIC",
     "Niger": "NER",
     "Nigeria": "NGA",
-    "North Korea": "PRK",
+    "North Korea (Democratic People’": "PRK",
     "North Macedonia": "MKD",
     "Oman": "OMN",
     "Pakistan": "PAK",
@@ -163,7 +194,7 @@ SHEET_TO_ISO3 = {
     "Peru": "PER",
     "Philippines": "PHL",
     "Qatar": "QAT",
-    "Russia": "RUS",
+    "Russian Federation": "RUS",
     "Rwanda": "RWA",
     "Saudi Arabia": "SAU",
     "Senegal": "SEN",
@@ -171,20 +202,19 @@ SHEET_TO_ISO3 = {
     "Sierra Leone": "SLE",
     "Singapore": "SGP",
     "South Africa": "ZAF",
-    "South Korea": "KOR",
     "Sri Lanka": "LKA",
     "Sudan": "SDN",
     "Suriname": "SUR",
     "Syria": "SYR",
     "Taiwan": "TWN",
     "Tajikistan": "TJK",
-    "Tanzania": "TZA",
+    "Tanzania, United Republic of": "TZA",
     "Thailand": "THA",
     "Togo": "TGO",
     "Trinidad and Tobago": "TTO",
     "Tunisia": "TUN",
-    "Turkmenistan": "TKM",
     "Türkiye": "TUR",
+    "Turkmenistan": "TKM",
     "Uganda": "UGA",
     "Ukraine": "UKR",
     "United Arab Emirates": "ARE",
@@ -193,11 +223,28 @@ SHEET_TO_ISO3 = {
     "Uruguay": "URY",
     "Uzbekistan": "UZB",
     "Venezuela": "VEN",
-    "Vietnam": "VNM",
+    "Viet Nam": "VNM",
     "Yemen": "YEM",
     "Zambia": "ZMB",
     "Zimbabwe": "ZWE",
 }
+
+# Column positions on a country sheet, named because they have moved once and a
+# bare `row[8]` is what that cost. The February version had **nine** columns —
+# direct, indirect, total, then the value *including the mark-up* for 2026, 2027
+# and 2028, then the route. The 2026/1740 correction publishes six: the three
+# marked-up columns are gone and the route slid from 8 to 5. Nothing failed
+# gracefully — `row[8]` raised `IndexError` on the first sheet, which is the good
+# outcome; the bad one would have been a layout that still had nine columns
+# meaning something else. Hence the width check in `parse_annex`: this script
+# refuses a sheet it does not recognise rather than reading the wrong cell.
+#
+# The mark-up itself is unchanged in law (10/20/30%, fertilisers 1% flat) — the
+# Commission simply stopped pre-computing it per row. It is asserted from the
+# regulation in the `cbam_markup_schedule` seed now, and applied in
+# `fct_cbam_exposure`, because there is no longer a published column to derive it
+# from.
+COLUMNS = {"cn_code": 0, "description": 1, "direct": 2, "indirect": 3, "total": 4, "route": 5}
 
 # The annex's catch-all table. It is not a country and gets no ISO3: it is the
 # value an importer uses when the sourcing country is unlisted, or is listed with
@@ -221,7 +268,15 @@ FALLBACK_LABEL = "Other countries and territories"
 NO_VALUE = {"", "-", "–", "—", "_", "N/A", "n/a", "None"}
 NO_VALUE_PHRASES = {"see below"}
 
-SKIP_SHEETS = {"Overview", "Version History"}
+# `Annex IV` arrived with the 2026/1740 correction and is deliberately not
+# transcribed. It is the single *highest* default value per good with no country
+# dimension at all — a different table answering a different question, and the
+# circumstances in which a declarant must reach for it instead of the country
+# value are set by the articles, not by the annex. Those articles could not be
+# confirmed from a primary source here, and inventing a legal trigger is exactly
+# what the rest of this script refuses to do. Same posture as Annexes II and III,
+# for a different reason: those are excluded on licence, this one on not knowing.
+SKIP_SHEETS = {"Overview", "Version History", "Annex IV"}
 
 
 def _text(cell: object) -> str:
@@ -274,11 +329,23 @@ def _number(cell: object) -> float | None:
 
 
 def _cn_code(cell: object) -> str:
-    """Normalise a CN code to the spaced form the annex prints.
+    """Normalise a CN or TARIC code to the spaced form the annex prints.
 
-    1,996 of the 12,532 cells arrive as integers because Excel typed them that
-    way (28142000 for "2814 20 00"), so the same good reads two different ways
-    depending on which country's sheet it is on.
+    Many cells arrive as integers because Excel typed them that way (28142000
+    for "2814 20 00"), so the same good reads two different ways depending on
+    which country's sheet it is on.
+
+    **10 digits is a TARIC code, and it is new in the 2026/1740 correction.**
+    The column is headed "Product CN Code / TARIC Code" and the two are not the
+    same length: a CN code is 8 (4+2+2), TARIC adds a further 2. That extra pair
+    is what finally distinguishes goods this annex used to publish under one
+    number — white clinker and grey clinker were both `2523 10 00` in the
+    February version and differed by more than 2x, which is the whole reason
+    `good_key` is a slug of (code, description) rather than of the code. They are
+    `2523 10 00 10` and `2523 10 00 90` now. The composite key stays: it is what
+    kept those two rows apart for the six months the codes could not, and the
+    annex still prints 4- and 6-digit headings that no more identify a good than
+    the old 8-digit ones did.
     """
     raw = _text(cell)
     if raw.isdigit():
@@ -287,8 +354,10 @@ def _cn_code(cell: object) -> str:
         digits = re.sub(r"\s+", "", raw)
         if not digits.isdigit():
             return raw
-    # CN codes are 8 digits (4+2+2); the annex also prints 6- and 4-digit
-    # headings for whole subheadings, which stay as they are.
+    # The annex prints 4- and 6-digit headings for whole subheadings alongside
+    # the 8-digit CN codes and the 10-digit TARIC ones; all four stay as they are.
+    if len(digits) == 10:
+        return f"{digits[:4]} {digits[4:6]} {digits[6:8]} {digits[8:]}"
     if len(digits) == 8:
         return f"{digits[:4]} {digits[4:6]} {digits[6:]}"
     if len(digits) == 6:
@@ -353,12 +422,16 @@ def parse_annex(xlsx_path: Path) -> tuple[list[dict], list[dict]]:
 
         product_group = ""
         for row in workbook[sheet_name].iter_rows(min_row=3, values_only=True):
+            if len(row) < len(COLUMNS):
+                raise ValueError(
+                    f"{sheet_name!r} row has {len(row)} columns, expected "
+                    f"{len(COLUMNS)} — the annex layout has changed"
+                )
             code, description = _text(row[0]), _text(row[1])
             if not code:
                 continue
             if not description:
-                # A group banner ("Cement", "Iron and steel"), which also carries
-                # the mark-up labels for the columns to its right.
+                # A group banner ("Cement", "Iron and steel").
                 product_group = code
                 continue
 
@@ -374,29 +447,15 @@ def parse_annex(xlsx_path: Path) -> tuple[list[dict], list[dict]]:
                 },
             )
 
-            total = _number(row[4])
-            # Read the mark-up columns only when there is a total to mark up.
-            # Albania's white Portland cement has no total and three numbers in
-            # these columns anyway; taking them would publish a euro figure off a
-            # row the annex's own fallback rule says to ignore.
-            markups = (
-                (_number(row[5]), _number(row[6]), _number(row[7]))
-                if total is not None
-                else (None, None, None)
-            )
-
             values.append(
                 {
                     "country_or_territory": country,
                     "country_iso3": iso3,
                     "good_key": key,
-                    "default_direct_t_co2e_per_t": _number(row[2]),
-                    "default_indirect_t_co2e_per_t": _number(row[3]),
-                    "default_total_t_co2e_per_t": total,
-                    "default_2026_t_co2e_per_t": markups[0],
-                    "default_2027_t_co2e_per_t": markups[1],
-                    "default_2028_t_co2e_per_t": markups[2],
-                    "production_route_code": _route(row[8]),
+                    "default_direct_t_co2e_per_t": _number(row[COLUMNS["direct"]]),
+                    "default_indirect_t_co2e_per_t": _number(row[COLUMNS["indirect"]]),
+                    "default_total_t_co2e_per_t": _number(row[COLUMNS["total"]]),
+                    "production_route_code": _route(row[COLUMNS["route"]]),
                 }
             )
 
@@ -450,9 +509,6 @@ def main() -> None:
             "default_direct_t_co2e_per_t",
             "default_indirect_t_co2e_per_t",
             "default_total_t_co2e_per_t",
-            "default_2026_t_co2e_per_t",
-            "default_2027_t_co2e_per_t",
-            "default_2028_t_co2e_per_t",
             "production_route_code",
         ],
     )

@@ -112,13 +112,24 @@ seeds:
     config:
       group: compliance
     description: >
-      Annex I of Commission Implementing Regulation (EU) 2025/2621: the
-      country-specific default values for the specific embedded emissions of
-      CBAM goods, in tonnes CO2e per tonne of good, which an importer uses from
-      2026 when they cannot get verified data from the installation that made the
-      goods. One row per (country or territory, good) — 119 countries plus the
-      "other countries and territories" fallback table, x 287 goods, minus the
-      combinations the annex omits entirely.
+      Annex I of Commission Implementing Regulation (EU) 2025/2621, as corrected
+      by (EU) 2026/1740: the country-specific default values for the specific
+      embedded emissions of CBAM goods, in tonnes CO2e per tonne of good, which
+      an importer uses from 2026 when they cannot get verified data from the
+      installation that made the goods. One row per (country or territory, good)
+      — 121 countries plus the "other countries and territories" fallback table,
+      x 283 goods, minus the combinations the annex omits entirely.
+
+      **Corrected, August 2026.** IR 2026/1740 replaced Annexes I and IV in full,
+      in force 3 August and applying retroactively from 1 January 2026. The
+      values barely moved — 66 of 10,503 comparable rows, 38 of them down by 2%
+      or less — but the shape did: the three columns publishing each good's
+      *marked-up* value for 2026, 2027 and 2028 are gone, so the phase-in
+      schedule now comes from `cbam_markup_schedule` rather than being derived
+      here. 10-digit TARIC codes appear (white and grey clinker were both
+      `2523 10 00` and differ by more than 2x; they are `2523 10 00 10` and
+      `2523 10 00 90` now), twelve sheet names changed, and Liberia and New
+      Caledonia are new.
 
       **A seed rather than a dlt resource, on purpose.** Regulatory reference
       data is versioned by amendment, not by scrape; there is no API, and the
@@ -129,9 +140,11 @@ seeds:
 
       **Transcribed faithfully, defects included.** The annex is the legal
       instrument, so cleaning it here would put this project's judgement between
-      the regulation and a euro figure. Three quirks are pinned by the tests
-      below and handled in `fct_cbam_exposure` instead; see the extractor's
-      docstring for the full account.
+      the regulation and a euro figure. The correction fixed two of the three
+      quirks the February version had — Albania's white Portland cement is a
+      clean "-" now, and the five compounding cement rows had nothing left to
+      compound once the mark-up columns went. See the extractor's docstring for
+      the full account, including what the handling for them was.
 
       Verified against the OJ text rather than only against the Commission's
       "for information purposes only" workbook: for the seven countries whose
@@ -144,9 +157,12 @@ seeds:
       - name: country_iso3
         description: >
           Resolved once, at transcription time, by `SHEET_TO_ISO3` in the
-          extractor — 100 of the 119 matched `stg_country` by name and 19 needed
-          a human. Null for the "other countries and territories" row, which is a
-          rule rather than a place.
+          extractor — 102 of the 121 match `stg_country` by name and 19 need a
+          human. Null for the "other countries and territories" row, which is a
+          rule rather than a place. The map is exhaustive on purpose: when the
+          correction relabelled ten countries, the extractor stopped and named
+          all twelve unmapped sheets rather than writing blank codes and losing
+          them at the mart's join.
       - name: good_key
         description: Foreign key to `cbam_goods`.
         data_tests:
@@ -162,32 +178,102 @@ seeds:
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
-      - name: default_2026_t_co2e_per_t
-        description: >
-          The total with 2026's mark-up applied, as published. Read from the annex
-          only where a total is present: Albania's white Portland cement (2523 21
-          00) has "-" for direct, indirect and total and 1,230 / 0,140 / 1,370
-          sitting in the three mark-up columns instead — the values shifted three
-          columns right. It reads that way in the OJ *and* in the Commission's
-          workbook, so it is the regulation that says it, not a transcription
-          error, and the annex's own "field shows '-' → use the fallback" rule is
-          what that row falls to.
-        data_tests:
-          - dbt_utils.accepted_range:
-              arguments: {min_value: 0}
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [country_or_territory, good_key]
-      # The known defect, pinned by row count rather than described in prose. If a
-      # corrected amendment lands, this goes red and the docs above get revisited
-      # — the alternative is that a published euro figure changes silently.
+      # Direct + indirect = total. This is what the mark-up tests used to do —
+      # check the annex against itself — and with the mark-up columns gone it is
+      # the only internal consistency the source still offers. Rows where any of
+      # the three is blank are out of scope: a missing value is the annex's
+      # fallback rule, not an arithmetic claim.
+      #
+      # The tolerance is 0.02 and it is not slack for its own sake. The annex
+      # rounds each of the three columns *independently* before printing, so the
+      # sum of two rounded numbers is not the rounding of their sum: Albania's
+      # nitric acid is published 2,73 + 0,04 = 2,76, which is off by 0,01 and is
+      # not an error in either the regulation or this transcription. 711 of the
+      # 10,000-odd complete rows are inexact that way, every one of them by
+      # 0.001 to 0.01, so 0.02 is double the worst case the source contains.
+      # What it still catches is the failure that matters — a column read from
+      # the wrong position, which is off by whole units, not hundredths.
       - dbt_utils.expression_is_true:
           arguments:
-            expression: "default_2026_t_co2e_per_t is null"
+            expression: >
+              abs(default_direct_t_co2e_per_t + default_indirect_t_co2e_per_t
+                  - default_total_t_co2e_per_t) <= 0.02
           config:
-            where: "default_total_t_co2e_per_t is null"
+            where: >
+              default_direct_t_co2e_per_t is not null
+              and default_indirect_t_co2e_per_t is not null
+              and default_total_t_co2e_per_t is not null
             severity: error
+
+  - name: cbam_markup_schedule
+    config:
+      group: compliance
+    description: >
+      The CBAM phase-in mark-up, per product group and year: the percentage added
+      to a default value before certificates are surrendered. 15 rows — five
+      product groups x three years.
+
+      **Asserted from the regulation, not measured, and that is a change.** Until
+      the 2026/1740 correction Annex I published each good's marked-up value for
+      2026, 2027 and 2028 beside the plain total, so `fct_cbam_exposure` divided
+      one by the other and read the schedule off the data — which meant an
+      amendment moving a rate needed no edit anywhere, and which is how the
+      fertiliser exception was discovered rather than assumed. The correction
+      publishes only direct, indirect and total. There is nothing left to divide,
+      so the schedule has to be stated, and this is where it is stated.
+
+      A seed rather than vars or a `case` in the model, so it stays reviewable as
+      data and the fertiliser carve-out is a row rather than a branch. Note that
+      it is **hand-maintained**: `scripts/build_cbam_seeds.py` does not write it,
+      because it is not in the workbook. `currencies.csv` is the precedent for a
+      seed that carries what the source cannot say about itself.
+
+      Confirmed twice: against the articles (10 / 20 / 30% for cement, iron and
+      steel, aluminium and hydrogen; a flat 1% for fertilisers, a food-security
+      carve-out in the Omnibus) and against the February annex's own published
+      columns, where all 10,929 priced rows imply exactly these rates. The stated
+      rates are in fact *cleaner* than the published ones were — those carried
+      rounding noise from the OJ's three decimals, so a handful of rows implied
+      9,9% or 1,1%.
+    columns:
+      - name: product_group
+        description: >
+          Matches `cbam_goods.product_group` exactly — the annex's own group
+          banner ("Cement", "Iron and steel", ...). The mart joins on it, so an
+          unlisted group would silently price at null.
+        data_tests: [not_null]
+      - name: year
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [2026, 2027, 2028]
+                quote: false
+      - name: markup_pct
+        description: Percentage points added to the default value, e.g. 10 for +10%.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [product_group, year]
+      # Every group the goods dimension knows must appear here, or the mart's
+      # left join prices that group's rows at null with nothing to say why. This
+      # is the gate that replaces deriving the schedule from the data — the old
+      # arrangement could not have this failure, because a group with goods
+      # necessarily had published columns to divide.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              (select count(distinct product_group) from {{ ref('cbam_goods') }}
+               where product_group not in (
+                   select product_group from {{ ref('cbam_markup_schedule') }})) = 0
 
   - name: currencies
     config:

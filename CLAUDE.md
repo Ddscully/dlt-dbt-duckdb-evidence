@@ -68,7 +68,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 5 seeds + 358 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 364 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -413,11 +413,12 @@ packaging.
 
 ## CBAM exposure (`fct_cbam_exposure`, the `cbam_*` seeds, `reports/pages/cbam.md`)
 
-Annex I of Implementing Regulation (EU) 2025/2621 — the country x good default
-values an importer uses from 2026 when they have no verified supplier data —
-transcribed into two seeds and multiplied by a carbon price. 11,657 rows over 119
-countries and 264 goods. The only model here with **no year in its grain**: it is
-a regulatory schedule, not a time series.
+Annex I of Implementing Regulation (EU) 2025/2621, as corrected by (EU) 2026/1740
+— the country x good default values an importer uses from 2026 when they have no
+verified supplier data — transcribed into two seeds, priced with a third, and
+multiplied by a carbon price. 11,665 rows over 121 countries and 260 goods. The
+only model here with **no year in its grain**: it is a regulatory schedule, not a
+time series.
 
 - **A seed, not a dlt resource, and that is the interesting decision.**
   Regulatory reference data is versioned by *amendment*, not by scrape; there is
@@ -425,40 +426,64 @@ a regulatory schedule, not a time series.
   `scripts/build_cbam_seeds.py` regenerates both seeds from the Commission's
   published workbook, so the next amendment is a re-run and a reviewable diff
   rather than a re-transcription. `country_overrides.csv` is the precedent.
-- **Two seeds because normalising the goods out is worth 1.6 MB.** 12,532 value
-  rows share 287 (product group, CN code, description) triples and one
-  description runs to 250 characters. `cbam_goods` is 38 kB; inlined it would be
+- **Two seeds because normalising the goods out is worth 1.6 MB.** 12,540 value
+  rows share 283 (product group, CN code, description) triples and one
+  description runs to 250 characters. `cbam_goods` is 60 kB; inlined it would be
   1.6 MB of CSV and the same again in the warehouse.
-- **A CN code is not a key.** 2523 10 00 is both white clinker and grey clinker
-  and their values differ by more than 2x, so the grain is (CN code, description)
-  and `good_key` is a slug of the pair — readable in a diff, and stable across an
-  amendment in a way a renumbered surrogate would not be.
+- **A CN code is not a key** — it was flatly true and is now only mostly true.
+  `2523 10 00` was both white clinker and grey clinker, whose values differ by
+  more than 2x, so the grain is (CN code, description) and `good_key` is a slug
+  of the pair. The 2026/1740 correction gives those two 10-digit **TARIC** codes
+  (`2523 10 00 10` / `2523 10 00 90`) and closes that particular case, but the
+  annex still prints 4- and 6-digit headings above the rows carrying the numbers,
+  so the composite key stays. It is also what kept those two rows apart for the
+  six months the codes could not, which is the argument for not renumbering to a
+  surrogate.
 - **The transcription is faithful, defects included, and the mart is where they
   are handled.** The annex is a legal instrument; cleaning it in the seed would
-  put this project's judgement between the regulation and a euro figure. Four
-  quirks, all verified as present in the OJ text and not introduced here:
-  - Albania's white Portland cement is published with `-` for direct, indirect
-    and total and its three values sitting in the *mark-up* columns instead. The
-    extractor reads the mark-up columns only when a total is present, which lands
-    the row on the annex's own "field shows `-` → use the fallback" rule.
-  - Five cement rows (Angola, Argentina) **compound** the mark-up — x1.1, x1.21,
-    x1.331 — where the other 10,926 add it. Flagged (`markup_schedule_is_irregular`),
-    never corrected.
-  - Chile's line pipe has a total and a blank 2026 cell. This is what proves the
-    fallback is a **row-level rule, not a column-level one**: a per-column
-    `coalesce` paired Chile's tonnage with the *fallback's* mark-up and produced a
-    100% implied rate — a row that exists nowhere in the regulation.
-  - 23 of the 287 goods carry no value in any country, including the fallback.
-    They are 4-digit CN *headings* whose subheadings hold the numbers, and they
-    are excluded from the mart — 875 rows that could only be priced at null.
+  put this project's judgement between the regulation and a euro figure. **Three
+  of the four documented quirks were fixed by the 2026/1740 correction** — which
+  is the vindication of the policy, not a reason to drop it: the body that wrote
+  the instrument corrected it, and this project would have baked its guesses in.
+  Kept here because the *handling* is still the reason parts of the mart look the
+  way they do:
+  - Albania's white Portland cement used to be published with `-` for direct,
+    indirect and total and its three values sitting in the *mark-up* columns
+    instead. Clean `-` now.
+  - Five cement rows (Angola, Argentina) used to **compound** the mark-up —
+    x1.1, x1.21, x1.331 — where the other 10,926 added it. With no published
+    mark-up column there is nothing left to compound, and
+    `markup_schedule_is_irregular` went with it.
+  - Chile's line pipe had a total and a blank 2026 cell. Gone too, but it is
+    what proved the fallback is a **row-level rule, not a column-level one**: a
+    per-column `coalesce` paired Chile's tonnage with the *fallback's* mark-up
+    and produced a 100% implied rate — a row that exists nowhere in the
+    regulation. The rule outlives the row; direct/indirect/total still have to be
+    read off one source.
+  - 23 of the goods carry no value in any country, including the fallback. They
+    are 4-digit CN *headings* whose subheadings hold the numbers, and they are
+    excluded from the mart — rows that could only be priced at null. **This one
+    survives**, and it is where `see below` lives (below).
 - **Fertilisers carry a 1% mark-up in all three years**, not 10/20/30% and not
-  1/2/3%. 2,416 rows, consistent across every country, so it reads as intended.
-  The mart derives each group's rate with `mode()` rather than asserting the
-  schedule — hardcoding 10/20/30 overstates every fertiliser line by nine points
-  in 2026 and twenty-seven in 2028, and an amendment that moves a rate needs no
-  edit. The same mistake in reverse broke `markup_schedule_is_irregular` first
-  time round: extrapolating the 2028 rate from the 2026 one flagged all 2,457
-  fertiliser rows as irregular when none are.
+  1/2/3%, so the mark-up is a property of the product group — hardcoding one rate
+  overstates every fertiliser line by nine points in 2026 and twenty-seven in
+  2028. **The mart used to derive this and now asserts it**, which is a real loss
+  and not a refactor. The annex published each good's marked-up value for each
+  year, so `mode()` over published/total read the schedule off the data and an
+  amendment moving a rate needed no edit. 2026/1740 publishes only direct,
+  indirect and total. The schedule is the `cbam_markup_schedule` seed now —
+  a seed and not a var or a `case`, so the carve-out stays reviewable as data —
+  and it is confirmed against both the articles and the February annex's own
+  columns, where all 10,929 priced rows imply exactly those rates. The stated
+  rates are actually *cleaner* than the published ones: those carried rounding
+  noise from the OJ's three decimals, so some rows implied 9,9% or 1,1%.
+  - **What replaced the mark-up tests is `direct + indirect = total`**, the only
+    internal consistency the corrected source still offers. Tolerance 0.02, and
+    that is measured rather than generous: the annex rounds each of the three
+    columns *independently*, so 711 complete rows are inexact by 0.001–0.01 with
+    nothing wrong (Albania's nitric acid is 2,73 + 0,04 = 2,76). It still catches
+    the failure that matters, a column read from the wrong position, which is off
+    by whole units.
 - **Round half up, not `round()`.** The OJ prints three decimals and the
   Commission's XLSX mark-up cells are live formulas, so they arrive as binary
   floats. Python's banker's rounding turns 7,7165 into 7.716 where the regulation
@@ -478,21 +503,43 @@ a regulatory schedule, not a time series.
   luck; it is in `NO_VALUE_PHRASES` now, so it is a decision. This is the same
   argument as the Chile row above — the fallback is a rule the annex states, not
   a landing zone for whatever didn't parse.
-- **The seeds are one amendment behind, and the extractor does not parse the
-  current workbook.** They were transcribed from Annex I v1 (2026-02-04,
-  IR 2025/2621). On 2026-08-06 the Commission published **v2** at the same URL —
-  IR 2026/1740, "correcting Implementing Regulation (EU) 2025/2621" — and it is
-  a different shape, not just different numbers: **6 columns instead of 9**, the
-  three mark-up columns (2026/2027/2028) gone entirely, the production route
-  moved to column 5, and a new `Annex IV` sheet that `SKIP_SHEETS` doesn't know
-  about. `parse_annex` dies on `row[8]` with `IndexError` against it. Also worth
-  knowing before re-transcribing: v2 appears to have *fixed* Albania's white
-  Portland cement (now a clean `-`/`-`/`-`), so one of the four documented
-  transcription quirks may no longer exist. Migrating is real work — a new
-  regulation to read, a mark-up schedule that has to come from somewhere else or
-  be dropped, and `fct_cbam_exposure`'s year columns to rethink — and it has not
-  been done. The download is gitignored (`data/*.xlsx`), so nothing in the repo
-  changed by discovering this.
+- **The seeds are Annex I as corrected by IR 2026/1740** (adopted 20 July 2026,
+  in force 3 August, applying retroactively from 1 January 2026), which replaced
+  Annexes I and IV in full. Migrated 2026-08-18. The amendment path paid for
+  itself — re-running `build_cbam_seeds.py` was most of the work — but four
+  things about it are worth keeping, because none are visible in the values:
+  - **The Commission republishes at the same URL.** There is no versioned link;
+    the workbook's `Version History` sheet is the only thing that says which
+    amendment you are holding, and the `?filename=…v20260204…` query parameter in
+    `ANNEX_XLSX_URL` is *stale and cosmetic* — the document id is what resolves,
+    and it served v2 under a v1 filename. Check that sheet, not the URL.
+  - **It failed loudly, which was luck rather than design.** The layout went from
+    9 columns to 6, so `_route(row[8])` raised `IndexError` on the first sheet.
+    Had the correction *added* a column instead, every field would have shifted
+    one right and parsed fine into the wrong meaning. `COLUMNS` names the
+    positions now and `parse_annex` refuses a row that isn't the expected width.
+  - **`SHEET_TO_ISO3` being exhaustive is what caught the relabelling.** Ten
+    countries were renamed to ISO-style long forms with no change of country
+    ("Russia" → "Russian Federation", "Côte d'Ivoire" → "Ivory Coast") and two
+    are new (Liberia, New Caledonia). The script stopped and named all twelve
+    rather than writing blank ISO3 codes and dropping them at the mart's join.
+  - **The values barely moved**: 66 of 10,503 comparable rows, 38 of them down by
+    2% or less, 28 now blank. Everything expensive about the migration was
+    structural.
+- **`Annex IV` is a new sheet and is deliberately not transcribed.** It is the
+  single *highest* default value per good, with no country dimension — a
+  different table answering a different question, and the circumstances in which
+  a declarant must use it instead of the country value are set by the articles,
+  not the annex. Those articles could not be confirmed from a primary source
+  (EUR-Lex does not serve to the fetcher), and inventing a legal trigger is
+  exactly what the rest of this layer refuses to do. In `SKIP_SHEETS` with that
+  reason written next to it. Same posture as Annexes II and III, different
+  ground: those are excluded on licence, this one on not knowing.
+- **Dropping a seed column needs `dbt seed --full-refresh`.** dbt-duckdb derives
+  the CSV's column spec from the *existing* relation, so removing the three
+  mark-up columns failed with a sniffer error naming 10 columns against a file
+  that plainly had 7 — and `--no-partial-parse` does not help, because the stale
+  shape is in the warehouse and not in the manifest.
 - **The ETS price is a dbt var (`eu_ets_price_eur_per_t`, EUR 75), not a
   measurement.** There is no clean free API for EUA spot. The mart ships the
   tonnage columns beside the euro columns and states the price per row, so the
@@ -509,7 +556,8 @@ a regulatory schedule, not a time series.
   Semi-finished steel runs 63x from Azerbaijan to Indonesia, and sorting by cost
   sorts almost perfectly by the annex's route indicator (`E` scrap/EAF against
   `C`/`F` ore/BF-BOF), not by the country's grid — the correlation between a
-  country's steel default and its grid factor is 0.26.
+  country's steel default and its grid factor is 0.32 (it was 0.26 before the
+  2026/1740 correction; the spread held at 63x through it).
 - **Excel mangles the country names, so `country_display_name` exists.** Sheet
   names cap at 31 characters and forbid punctuation, which is why the annex's
   Congo arrives as `Democratic Republic of the Cong` and Myanmar as
@@ -960,7 +1008,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 355 of the 358 tests use the default. `severity` comes across
+  is what dbt does; 362 of the 364 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the
