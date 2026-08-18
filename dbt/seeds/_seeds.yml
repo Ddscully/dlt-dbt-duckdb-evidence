@@ -71,18 +71,22 @@ seeds:
     config:
       group: compliance
     description: >
-      The 287 goods Annex I of Implementing Regulation (EU) 2025/2621 sets
-      default values for, across five product groups: cement, fertilisers,
-      aluminium, hydrogen, and iron and steel.
+      The 283 goods Annex I of Implementing Regulation (EU) 2025/2621 — as
+      corrected by (EU) 2026/1740 — sets default values for, across five product
+      groups: cement, fertilisers, aluminium, hydrogen, and iron and steel.
 
       Normalised out of `cbam_default_values` because the descriptions are long
-      — one runs to 250 characters — and 12,532 value rows share these 287
+      — one runs to 250 characters — and 12,540 value rows share these 283
       triples. Repeated per row they are 1.6 MB of CSV and the same again in the
-      warehouse; as a dimension they are 38 kB.
+      warehouse; as a dimension they are 60 kB.
 
-      **A CN code is not the key.** 2523 10 00 is both white clinker and grey
-      clinker, and their default values differ by more than a factor of two, so
-      the grain is (CN code, description) and `good_key` is a slug of the pair.
+      **A CN code is not the key**, though the correction narrowed the case for
+      saying so. 2523 10 00 was both white clinker and grey clinker, whose
+      default values differ by more than a factor of two; they now carry the
+      10-digit TARIC codes 2523 10 00 10 and 2523 10 00 90. The annex still
+      prints 4- and 6-digit headings above the rows holding the numbers, so the
+      grain stays (CN code, description) and `good_key` stays a slug of the pair
+      — which is also what kept those two rows apart while the codes could not.
       An importer who knows only the customs code of what they are importing
       cannot resolve a single row here, which is a property of the annex rather
       than of this model.
@@ -100,10 +104,12 @@ seeds:
                 values: ["Cement", "Fertilisers", "Aluminium", "Hydrogen", "Iron and steel"]
       - name: cn_code
         description: >
-          Combined Nomenclature code, as the annex prints it: 8 digits in
-          4/2/2 groups, or the 6- and 4-digit forms where the annex gives a value
-          for a whole subheading. Forced to varchar in `dbt_project.yml` — "7601"
-          left to inference lands as a BIGINT and stops joining.
+          Combined Nomenclature or TARIC code, as the annex prints it: 8 digits
+          in 4/2/2 groups, 10 in 4/2/2/2 where the 2026/1740 correction split a
+          good that used to share a CN code, or the 6- and 4-digit forms where
+          the annex gives a value for a whole subheading. Forced to varchar in
+          `dbt_project.yml` — "7601" left to inference lands as a BIGINT and
+          stops joining.
         data_tests: [not_null]
       - name: goods_description
         data_tests: [not_null]
@@ -188,15 +194,22 @@ seeds:
       # the three is blank are out of scope: a missing value is the annex's
       # fallback rule, not an arithmetic claim.
       #
+      # **Which means it reaches 2,781 of the 12,540 rows, not most of them.**
+      # `indirect` is published only for cement, fertilisers and 34 iron-and-steel
+      # rows, so only that many rows have three values to add up; a further 8,129
+      # carry direct and total with no indirect and nothing here checks them.
+      # Worth stating, because "the annex checked against itself" invites the
+      # assumption that it is checked throughout.
+      #
       # The tolerance is 0.02 and it is not slack for its own sake. The annex
       # rounds each of the three columns *independently* before printing, so the
       # sum of two rounded numbers is not the rounding of their sum: Albania's
       # nitric acid is published 2,73 + 0,04 = 2,76, which is off by 0,01 and is
-      # not an error in either the regulation or this transcription. 711 of the
-      # 10,000-odd complete rows are inexact that way, every one of them by
-      # 0.001 to 0.01, so 0.02 is double the worst case the source contains.
-      # What it still catches is the failure that matters — a column read from
-      # the wrong position, which is off by whole units, not hundredths.
+      # not an error in either the regulation or this transcription. 711 of those
+      # 2,781 rows are inexact that way, every one of them by 0.001 to 0.01, so
+      # 0.02 is double the worst case the source contains. What it still catches
+      # is the failure that matters — a column read from the wrong position,
+      # which is off by whole units, not hundredths.
       - dbt_utils.expression_is_true:
           arguments:
             expression: >
@@ -263,17 +276,29 @@ seeds:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [product_group, year]
-      # Every group the goods dimension knows must appear here, or the mart's
-      # left join prices that group's rows at null with nothing to say why. This
-      # is the gate that replaces deriving the schedule from the data — the old
-      # arrangement could not have this failure, because a group with goods
-      # necessarily had published columns to divide.
+      # Every group the goods dimension knows must appear here with **all three
+      # years**, or the mart's left join prices that group at null with nothing
+      # to say why. This is the gate that replaces deriving the schedule from the
+      # data — the old arrangement could not have this failure, because a group
+      # with goods necessarily had published columns to divide.
+      #
+      # Checking presence alone is not enough, and that was the first version of
+      # this test. The mart reads each year with its own
+      # `max(markup_pct) filter (where year = ...)`, so a group seeded with only
+      # a 2026 row yields null rates for 2027 and 2028 — and null euro figures in
+      # two of the three years of a published Parquet, on a green build. The
+      # `not_null` tests on the 2027 and 2028 columns in `_marts.yml` are the
+      # other half of that; this is the half that names the cause.
       - dbt_utils.expression_is_true:
           arguments:
             expression: >
-              (select count(distinct product_group) from {{ ref('cbam_goods') }}
-               where product_group not in (
-                   select product_group from {{ ref('cbam_markup_schedule') }})) = 0
+              (select count(*) from (
+                  select g.product_group
+                  from {{ ref('cbam_goods') }} as g
+                  left join {{ ref('cbam_markup_schedule') }} as m
+                      on g.product_group = m.product_group
+                  group by g.product_group
+                  having count(distinct m.year) <> 3)) = 0
 
   - name: currencies
     config:

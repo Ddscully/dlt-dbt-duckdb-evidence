@@ -68,7 +68,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 364 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 368 tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -477,10 +477,13 @@ time series.
   columns, where all 10,929 priced rows imply exactly those rates. The stated
   rates are actually *cleaner* than the published ones: those carried rounding
   noise from the OJ's three decimals, so some rows implied 9,9% or 1,1%.
-  - **What replaced the mark-up tests is `direct + indirect = total`**, the only
-    internal consistency the corrected source still offers. Tolerance 0.02, and
-    that is measured rather than generous: the annex rounds each of the three
-    columns *independently*, so 711 complete rows are inexact by 0.001–0.01 with
+  - **What replaced the mark-up tests is `direct + indirect = total`** — the only
+    internal consistency the corrected source still offers, and it reaches
+    **2,781 of the 12,540 rows**, which is the part worth knowing before trusting
+    it. `indirect` is published only for cement, fertilisers and 34 iron-and-steel
+    rows; 8,129 rows carry direct and total with no indirect and nothing checks
+    them. Tolerance 0.02, measured rather than generous: the annex rounds each
+    column *independently*, so 711 of those 2,781 are inexact by 0.001–0.01 with
     nothing wrong (Albania's nitric acid is 2,73 + 0,04 = 2,76). It still catches
     the failure that matters, a column read from the wrong position, which is off
     by whole units.
@@ -559,11 +562,15 @@ time series.
   country's steel default and its grid factor is 0.32 (it was 0.26 before the
   2026/1740 correction; the spread held at 63x through it).
 - **Excel mangles the country names, so `country_display_name` exists.** Sheet
-  names cap at 31 characters and forbid punctuation, which is why the annex's
-  Congo arrives as `Democratic Republic of the Cong` and Myanmar as
-  `Myanmar_Burma`. The seed keeps the annex's label because it is the legally
-  meaningful one; the mart coalesces to `stg_country.country_name` for anything
-  that goes on a chart.
+  names cap at 31 characters and forbid some punctuation, which is why the annex's
+  Koreas arrive as `North Korea (Democratic People’` and
+  `Korea, Republic of (South Korea`, both cut mid-parenthesis. The seed keeps the
+  annex's label because it is the legally meaningful one; the mart coalesces to
+  `stg_country.country_name` for anything that goes on a chart. **Which names are
+  mangled moves with the amendment** — before 2026/1740 the pair to quote were
+  `Democratic Republic of the Cong` and `Myanmar_Burma`, and both of those are
+  clean now while two others became truncated. That is the argument for
+  coalescing to the dimension rather than patching labels one at a time.
 
 ## Currency and the calendar (`dim_date`, the `fx_*` models, `reports/pages/currency.md`)
 
@@ -1008,7 +1015,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 362 of the 364 tests use the default. `severity` comes across
+  is what dbt does; 366 of the 368 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the
