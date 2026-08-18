@@ -246,6 +246,19 @@ SHEET_TO_ISO3 = {
 # from.
 COLUMNS = {"cn_code": 0, "description": 1, "direct": 2, "indirect": 3, "total": 4, "route": 5}
 
+# What each of those columns must say it is, checked once per sheet by
+# `_check_layout`. Lowercased substrings of the Commission's own headings, so the
+# units and parentheses around them can be reworded without breaking the check,
+# but a column that *moves* cannot pass.
+HEADER_KEYWORDS = {
+    "cn_code": "cn code",
+    "description": "description",
+    "direct": "direct emissions",
+    "indirect": "indirect emissions",
+    "total": "total emissions",
+    "route": "production route",
+}
+
 # The annex's catch-all table. It is not a country and gets no ISO3: it is the
 # value an importer uses when the sourcing country is unlisted, or is listed with
 # a `–` for that good. `fct_cbam_exposure` resolves both cases against it.
@@ -399,6 +412,39 @@ def good_key(cn_code: str, description: str) -> str:
     return f"{digits}-{_slug(description)}"
 
 
+def _check_layout(sheet, sheet_name: str) -> None:
+    """Fail unless the sheet's header row says what `COLUMNS` assumes it says.
+
+    The width check in the row loop is necessary and not sufficient. It catches a
+    layout that *lost* columns — which is what the 2026/1740 correction did, and
+    why the previous version blew up loudly on `row[8]` — but the failure that
+    actually loses data is a layout that gains one. Every field then still parses,
+    one position out, and the only symptom is a column of empty production routes
+    or a tonnage that is really a mark-up. Nothing downstream can tell.
+
+    So position is checked against meaning, once per sheet, by reading the
+    headings the Commission prints in row 2. Substrings rather than equality: the
+    exact wording carries units and parentheses ("Default Value (direct
+    emissions) (tCO2eq/tonne of good)") that are cosmetic and have already been
+    reworded once, while the words that identify the column have not.
+    """
+    header = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), ())
+    if len(header) != len(COLUMNS):
+        raise ValueError(
+            f"{sheet_name!r} header has {len(header)} columns, expected "
+            f"{len(COLUMNS)} — the annex layout has changed; see COLUMNS"
+        )
+    for name, index in COLUMNS.items():
+        expected = HEADER_KEYWORDS[name]
+        found = _text(header[index]).casefold()
+        if expected not in found:
+            raise ValueError(
+                f"{sheet_name!r} column {index} reads {_text(header[index])!r}, "
+                f"expected it to mention {expected!r} — the annex columns have "
+                f"moved and COLUMNS is now pointing at the wrong cell"
+            )
+
+
 def parse_annex(xlsx_path: Path) -> tuple[list[dict], list[dict]]:
     """Return (goods dimension rows, default-value rows) from the annex workbook."""
     try:
@@ -420,16 +466,22 @@ def parse_annex(xlsx_path: Path) -> tuple[list[dict], list[dict]]:
             country = sheet_name
             iso3 = SHEET_TO_ISO3.get(sheet_name, "")
 
+        _check_layout(workbook[sheet_name], sheet_name)
+
         product_group = ""
         for row in workbook[sheet_name].iter_rows(min_row=3, values_only=True):
-            if len(row) < len(COLUMNS):
-                raise ValueError(
-                    f"{sheet_name!r} row has {len(row)} columns, expected "
-                    f"{len(COLUMNS)} — the annex layout has changed"
-                )
-            code, description = _text(row[0]), _text(row[1])
+            code = _text(row[0]) if row else ""
             if not code:
                 continue
+            # Exactly, not "at least". A row with *more* columns than expected is
+            # the dangerous direction — every field would still parse, one
+            # position out — and `<` waved it through.
+            if len(row) != len(COLUMNS):
+                raise ValueError(
+                    f"{sheet_name!r} row {code!r} has {len(row)} columns, expected "
+                    f"{len(COLUMNS)} — the annex layout has changed"
+                )
+            description = _text(row[1])
             if not description:
                 # A group banner ("Cement", "Iron and steel").
                 product_group = code

@@ -81,12 +81,13 @@ grid as (
     where is_latest_available
 ),
 
--- 23 of the annex's 287 rows carry a description and no default value in any
+-- 23 of the annex's 283 goods carry a description and no default value in any
 -- country, not even the fallback: they are 4-digit CN *headings* (7211, 7318,
--- 3102, ...) printed above the 6- and 8-digit subheadings that hold the numbers,
--- and every one of them has such subheadings in the annex. They stay in the seed,
+-- 3102, ...) printed above the longer subheadings that hold the numbers, and
+-- every one of them has such subheadings in the annex. Two of them say so in
+-- words, printing "see below" where a value would go. They stay in the seed,
 -- which is a transcription, and come out here, which is a table of euro costs —
--- 875 rows that could only ever have been priced at null.
+-- rows that could only ever have been priced at null.
 priced_goods as (
     select good_key
     from defaults
@@ -176,11 +177,14 @@ select
     c.country_name,
     -- What to put on a chart. `country_or_territory` is the annex's label and is
     -- kept because it is the legally meaningful one, but it arrives via Excel
-    -- sheet names — which are capped at 31 characters and forbid some
-    -- punctuation, so the Democratic Republic of the Congo is published here as
-    -- "Democratic Republic of the Cong" and Myanmar as "Myanmar_Burma". Falling
-    -- back to the annex label covers the fallback table and any territory the
-    -- country dimension does not carry.
+    -- sheet names — which are capped at 31 characters, so North Korea is
+    -- published here as "North Korea (Democratic People’" and South Korea as
+    -- "Korea, Republic of (South Korea", both cut mid-parenthesis. (Before the
+    -- 2026/1740 correction relabelled them the mangled pair were "Democratic
+    -- Republic of the Cong" and "Myanmar_Burma" — the truncation moves with the
+    -- names, which is the argument for coalescing rather than patching labels.)
+    -- Falling back to the annex label covers the fallback table and any
+    -- territory the country dimension does not carry.
     coalesce(c.country_name, p.country_or_territory) as country_display_name,
     c.region,
     c.income_group,

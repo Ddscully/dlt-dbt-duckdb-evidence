@@ -718,7 +718,8 @@ models:
       EU ETS price.
 
       Grain: one row per (country or territory listed in the annex, good) —
-      12,532 rows over 119 countries and 287 goods. Countries the annex does not
+      11,665 rows over 121 countries plus the fallback table, x the 260 goods the
+      annex actually prices. Countries the annex does not
       list are deliberately absent: the regulation sends every one of them to the
       same "other countries and territories" table, so ranking them against each
       other would be ranking a hundred copies of one number. That table is here
@@ -806,10 +807,19 @@ models:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
+      # 2027 and 2028 are `not_null` for a reason 2026 is not: they are the two
+      # years whose rate could go missing on its own. The mark-up now arrives by
+      # left join from a hand-maintained seed, one filter per year, so a seed
+      # holding only a 2026 row for some group would null these two and nothing
+      # else — null money in a published Parquet, on a green build, in two of the
+      # three years the table is about. `cbam_markup_schedule`'s own coverage
+      # test is the other half.
       - name: certificates_2027_t_co2e_per_t
         data_type: DOUBLE
+        data_tests: [not_null]
       - name: certificates_2028_t_co2e_per_t
         data_type: DOUBLE
+        data_tests: [not_null]
       - name: markup_2026_pct
         description: >
           Asserted from the regulation via the `cbam_markup_schedule` seed, not
@@ -834,8 +844,10 @@ models:
               arguments: {min_value: 0}
       - name: cbam_cost_2027_eur_per_t
         data_type: DOUBLE
+        data_tests: [not_null]
       - name: cbam_cost_2028_eur_per_t
         data_type: DOUBLE
+        data_tests: [not_null]
       - name: excess_over_cleanest_source_t_co2e_per_t
         data_type: DOUBLE
         description: >
