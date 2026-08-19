@@ -1450,10 +1450,16 @@ models:
         data_type: VARCHAR
       - name: customer_id
         data_type: VARCHAR
+        meta:
+          pii: direct_identifier
       - name: country
         data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
       - name: invoice_ts
         data_type: TIMESTAMP
+        meta:
+          pii: quasi_identifier
       - name: invoice_date
         data_type: DATE
       - name: invoice_month
@@ -1577,6 +1583,13 @@ models:
               arguments: {min_value: 0}
       - name: net_revenue_gbp
         data_type: DOUBLE
+        # Deliberately not personal, and said out loud rather than left blank. This
+        # is revenue per *product*; the name it shares with
+        # `dim_retail_customer.net_revenue_gbp` is all the two have in common, and
+        # `tests/test_privacy.py` requires the distinction be written down rather
+        # than inferred from silence.
+        meta:
+          pii: non_personal
       - name: median_unit_price_gbp
         data_type: DOUBLE
         description: >
@@ -1621,22 +1634,32 @@ models:
     columns:
       - name: customer_id
         data_type: VARCHAR
+        meta:
+          pii: direct_identifier
         data_tests: [not_null, unique]
       - name: country
         data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
       - name: n_countries
         data_type: BIGINT
       - name: has_moved_country
         data_type: BOOLEAN
       - name: first_order_date
         data_type: DATE
+        meta:
+          pii: quasi_identifier
         data_tests: [not_null]
       - name: cohort_month
         data_type: VARCHAR
         description: Month of first *purchase*, not of first appearance.
+        meta:
+          pii: quasi_identifier
         data_tests: [not_null]
       - name: last_order_date
         data_type: DATE
+        meta:
+          pii: quasi_identifier
       - name: tenure_days
         data_type: BIGINT
         description: Zero for the 1,626 customers who ordered once — a fact, not a gap.
@@ -1663,6 +1686,14 @@ models:
         data_type: DOUBLE
       - name: net_revenue_gbp
         data_type: DOUBLE
+        # A quasi-identifier, and the one that surprises people. Measured over the
+        # built warehouse, `net_revenue_gbp` on its own is unique for 5,721 of the
+        # 5,881 customers (97.3%); with `first_order_gbp` and `n_orders` beside it,
+        # 5,804 (98.7%). A near-continuous money column at person grain is an
+        # identifier whatever it is called, which is why deleting `customer_id`
+        # from an extract does not anonymise it. See `docs/DATA_PROTECTION.md`.
+        meta:
+          pii: quasi_identifier
       - name: first_order_gbp
         data_type: DOUBLE
         description: >
@@ -1671,6 +1702,11 @@ models:
           counts invoices. Null for the 47 whose first invoice held no product
           line (a `Manual` adjustment, the test SKU); zero would read as a free
           order rather than as an unpriced one.
+        # Part of the same quasi-identifying set as `net_revenue_gbp`, and the
+        # sharper half of it: `(country, first_order_date, first_order_gbp)` is
+        # unique for 5,857 of 5,881 customers.
+        meta:
+          pii: quasi_identifier
         data_tests:
           # A first order cannot be negative: the first *purchase* invoice is a
           # sale invoice, and a sale line with a negative quantity is a stock
@@ -1734,14 +1770,20 @@ models:
         data_tests: [not_null]
       - name: customer_id
         data_type: VARCHAR
+        meta:
+          pii: direct_identifier
       - name: stock_code
         data_type: VARCHAR
       - name: description
         data_type: VARCHAR
       - name: country
         data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
       - name: invoice_ts
         data_type: TIMESTAMP
+        meta:
+          pii: quasi_identifier
       - name: invoice_date
         data_type: DATE
       - name: invoice_month
@@ -1837,6 +1879,10 @@ models:
     columns:
       - name: cohort_month
         data_type: VARCHAR
+        # Cohort grain, not person grain — a row here is hundreds of customers, so
+        # the columns that identify at customer grain do not identify here.
+        meta:
+          pii: non_personal
         data_tests: [not_null]
       - name: months_since_first_order
         data_type: INTEGER
@@ -1856,6 +1902,8 @@ models:
         data_type: BIGINT
       - name: net_revenue_gbp
         data_type: DOUBLE
+        meta:
+          pii: non_personal
       - name: retention_pct
         data_type: DOUBLE
         data_tests:

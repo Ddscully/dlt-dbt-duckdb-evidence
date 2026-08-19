@@ -169,6 +169,7 @@ def export(
     repo: str | None = None,
     grain: str | None = None,
     extra_manifest: Callable[[duckdb.DuckDBPyConnection], dict] | None = None,
+    prepare_copy: Callable[[duckdb.DuckDBPyConnection], dict] | None = None,
     period_column: str = "year",
 ) -> dict:
     """Build `out_dir` from `duckdb_path`. Returns the manifest.
@@ -176,6 +177,15 @@ def export(
     `extra_manifest` is read from the *copy*, and lets a project add fields the
     generic manifest can't know about. `release_notes` receives the finished
     manifest, the repo slug and the tag.
+
+    `prepare_copy` runs against the copy **writable**, before anything is read or
+    measured, and whatever it returns is merged into the manifest. It is the hook
+    for a policy that has to hold over the whole artifact rather than over one
+    table — rewriting a classified column, say. Doing it here and not in the
+    models is what keeps a view and the table it reads in agreement: the copy's
+    views recompute from whatever `prepare_copy` left behind, and the checksums,
+    the row counts and the Parquet all describe the result rather than the
+    input.
 
     `period_column` is the column whose min/max becomes each table's coverage
     bounds; a table without it is described without them. It's threaded through
@@ -198,6 +208,17 @@ def export(
         raise ValueError(f"--out {dest_dir} would overwrite the source warehouse {src}")
     snapshot_warehouse(src, warehouse_copy)
 
+    prepared: dict = {}
+    if prepare_copy is not None:
+        writable = duckdb.connect(str(warehouse_copy))
+        try:
+            prepared = prepare_copy(writable) or {}
+            # Reclaim what the rewrite left behind, so the published file is the
+            # size of its contents rather than of its history.
+            writable.execute("checkpoint")
+        finally:
+            writable.close()
+
     # Read the tables out of the snapshot, not the original: it's the copy that
     # gets published, so the manifest should describe what shipped.
     con = duckdb.connect(str(warehouse_copy), read_only=True)
@@ -206,6 +227,7 @@ def export(
             "tag": tag,
             "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "data_loaded_at": loaded_at(con),
+            **prepared,
             **(extra_manifest(con) if extra_manifest else {}),
             "git_sha": git_sha(),
             "duckdb_version": duckdb.__version__,

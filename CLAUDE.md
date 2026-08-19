@@ -24,7 +24,9 @@ The rest of this file is about *this* warehouse.
 [`ORCHESTRATION.md`](docs/ORCHESTRATION.md) (the asset graph and its three jobs),
 [`DATA_QUALITY.md`](docs/DATA_QUALITY.md) (tests, contracts, groups, exposures,
 versions), [`PUBLISHED_DATA.md`](docs/PUBLISHED_DATA.md) (the release and how to
-query it) and [`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). Those files carry the
+query it), [`DATA_PROTECTION.md`](docs/DATA_PROTECTION.md) (the one personal
+column and what the release does to it) and
+[`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). Those files carry the
 *explanation*; this one carries what it cost to learn, and the two should not
 start duplicating each other. A change to how a layer works usually needs an edit
 in `docs/` **and** here.
@@ -852,6 +854,67 @@ one; the page is `retail.md`.
   `RETAIL_FIXTURE_SELECTION` in `scripts/record_fixtures.py` picks each shape
   explicitly and `tests/test_fixtures.py` asserts they survive. At 1.88 MB it is
   the largest file in the repo.
+
+## Personal data (`meta: {pii: …}`, `scripts/export_warehouse.py`)
+
+One column identifies a person — `dim_retail_customer.customer_id`, UCI's own
+pseudonym for a shopper. It is classified in the ymls, pseudonymised at the
+publication boundary and measured rather than asserted. Full reasoning in
+[`docs/DATA_PROTECTION.md`](docs/DATA_PROTECTION.md); what it cost to learn:
+
+- **Deleting the id does not anonymise a customer-grain extract, and the number
+  is the argument.** 5,804 of 5,881 customers (98.7%) are unique on
+  `(first_order_gbp, net_revenue_gbp, n_orders)` with no id at all; 5,721 (97.3%)
+  on `net_revenue_gbp` alone. A near-continuous money column at person grain is
+  an identifier whatever it is called, which is why `quasi_identifier` is a label
+  with no action attached: generalising those columns would delete the analysis
+  they exist for, so they ship and the page says so. `just disclosure-risk`
+  reprints the table from the warehouse.
+- **The policy is applied to the *copy*, not in a model, and both halves of that
+  matter.** `raw` ships inside the published DuckDB file, so a mask in staging
+  leaves the original one schema away; and the staging models are **views**, which
+  recompute from `raw` in the published copy — mask both and the shipped views
+  hash an already-hashed value, so views and marts disagree about who a customer
+  is with matching row counts and no error. `export()` grew a `prepare_copy` hook
+  for this: base tables are rewritten, views recompute, the two agree.
+- **`||`, never `concat()`.** DuckDB's `concat` *ignores* NULLs, so
+  `concat(customer_id, salt)` hashes the bare salt on every anonymous row — all
+  243,007 of them landing on one pseudonym indistinguishable from a real
+  customer. `||` propagates. Pinned in `tests/test_privacy.py`.
+- **The salt is required and never defaulted.** The ids run 12346–18287, so the
+  complete unsalted rainbow table takes **5 ms** to build. A missing `PII_SALT`
+  therefore raises — including for `tests/test_export.py`, whose fixture warehouse
+  holds no personal data at all and still has to supply one. The release salt is a
+  stable repository secret: a per-run salt would repseudonymise all 5,881
+  customers every month, so no consumer could tell a restatement from a
+  re-salting. `just export-data` generates a throwaway locally.
+- **51 relations carry a `customer_id` and six are declared**, so the policy
+  expands the declared set *by column name* across every schema before rewriting.
+  Two things live in that gap and neither would ever be classified by hand:
+  `raw_staging.retail_invoice_lines` (dlt's merge scratch — a full copy of the
+  landing table, 824,364 clear ids, in every release published before this), and
+  44 `dbt_test__audit` tables, which are empty only while the tests pass. The
+  export then **verifies** what it rewrote against `^[0-9a-f]{16}$`, which is
+  decisive rather than heuristic because a five-digit id cannot match it.
+- **DuckDB has no access control to enforce any of this** — `create role`,
+  `grant`, `create user` and `create policy` are each a *parser error* in 1.5.5,
+  not an unsupported feature. There is no user to attach a policy to, so the
+  enforcement point cannot be the database and a "restricted" schema would be
+  theatre. The boundary is the export, which is the only moment the data crosses
+  a machine it is on to a machine it is not.
+- **The coverage test is scoped to name collisions, not to every column.**
+  `dim_retail_product.net_revenue_gbp` (per product, identifies nobody) and
+  `dim_retail_customer.net_revenue_gbp` (per customer, identifies 97.3%) are the
+  pair that makes `non_personal` a real label: same name, opposite answer, and
+  only a person can say which is which. Labelling all ninety retail columns would
+  be paperwork; `tests/test_privacy.py` requires a label only where a name
+  collides with a classified one.
+- **The site was shipping what no chart drew.**
+  `reports/sources/warehouse/retail_rfm.sql` was `select *` — 19 columns
+  including the id, the country and three dates, downloaded by every visitor to
+  render four. `retail_customers.sql` had picked its columns and kept
+  `customer_id` anyway. Both are pruned; the scatter stays at customer grain
+  because one mark per person is what that chart *is*.
 
 ## Data-quality gates (`dbt/models/**/_*.yml`)
 
