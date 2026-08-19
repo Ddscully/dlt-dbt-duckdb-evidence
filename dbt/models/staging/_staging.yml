@@ -541,13 +541,19 @@ models:
         description: >
           Null on 243,007 lines (22.8%) — real sales nobody signed in for, worth
           13.8% of net revenue. Deliberately not tested for nullity.
+        meta:
+          pii: direct_identifier
       - name: country
+        meta:
+          pii: quasi_identifier
         data_tests: [not_null]
       - name: invoice_ts
         description: >
           Wall-clock shop time, stored naive. See `RETAIL_COLUMNS` in
           `ingest/pipeline.py` for why a timezone here would make the warehouse
           depend on which machine built it.
+        meta:
+          pii: quasi_identifier
         data_tests: [not_null]
       - name: invoice_date
         data_tests: [not_null]

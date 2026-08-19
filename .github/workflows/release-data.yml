@@ -138,8 +138,22 @@ jobs:
         id: export
         # Through the environment rather than interpolated into the script: it's
         # a string a human typed into the dispatch form.
+        #
+        # PII_SALT is the repository secret that pseudonymises `customer_id`
+        # everywhere it appears in the published artifact. It is deliberately
+        # **stable across releases**, not generated per run: a fresh salt every
+        # month would repseudonymise all 5,881 customers for no change in the
+        # data, so every retail file would differ in every release and a consumer
+        # diffing two of them could never tell a restatement from a re-salting.
+        # Stable means a consumer can follow a customer between releases, which
+        # is what a surrogate key is for, and still cannot recover who they are.
+        #
+        # If the secret is not set the export **fails** rather than publishing
+        # clear identifiers. That is the intended behaviour and not a bug to
+        # route around — see `docs/DATA_PROTECTION.md`.
         env:
           TAG_INPUT: ${{ inputs.tag }}
+          PII_SALT: ${{ secrets.PII_SALT }}
         run: |
           if [ -n "$TAG_INPUT" ]; then
             uv run python -m scripts.export_warehouse --tag "$TAG_INPUT"

@@ -38,15 +38,19 @@ summary in the manifest, and the release notes.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 from datetime import UTC
 from pathlib import Path
 
 import duckdb
 
+from modern_data_stack import privacy
 from modern_data_stack.export import default_tag, export
-from modern_data_stack.paths import warehouse_path
+from modern_data_stack.paths import dbt_manifest_path, warehouse_path
 
 DUCKDB_PATH = warehouse_path()
+MANIFEST_PATH = dbt_manifest_path()
 
 # `default_tag` is re-exported: `release-data.yml` and the tests name the tag
 # through this module rather than reaching past it.
@@ -54,9 +58,13 @@ __all__ = [
     "ATTRIBUTION",
     "DUCKDB_PATH",
     "EXPORT_DIR",
+    "EXTRA_CLASSIFICATIONS",
+    "MASKED_LABELS",
     "PUBLISHED_SCHEMAS",
+    "SALT_ENV",
     "default_tag",
     "main",
+    "pseudonymise",
     "release_notes",
     "run",
 ]
@@ -96,6 +104,92 @@ pipeline's and any error in them is ours.
 
 The pipeline code is MIT licensed.
 """
+
+
+# Which classification gets rewritten on the way out. `quasi_identifier` columns
+# are deliberately *not* in here: a country, a first-order date and a revenue
+# figure identify a customer between them, but generalising any of them would
+# destroy the analysis they exist for, and the honest answer is to publish them
+# knowing that and to say so. `docs/DATA_PROTECTION.md` measures exactly how much
+# they give away.
+MASKED_LABELS = ("direct_identifier",)
+
+# The salt is required, never defaulted, and this is the whole of the protection.
+# `customer_id` is five digits: an unsalted digest of it is reversed by hashing
+# the ten thousand possibilities, which is a few milliseconds. A missing salt
+# therefore has to be an error rather than a fallback — a plausible-looking hex
+# column that anyone can invert is worse than no column at all, because it
+# reads as though something was done.
+SALT_ENV = "PII_SALT"
+
+# The classifications dbt cannot hold. `analytics` is written by Polars,
+# downstream of dbt and invisible to it — the same boundary `tests/test_exposures.py`
+# already proves for lineage, arriving here for the same reason. Named rather
+# than inferred; the name-based sweep below would catch `customer_id` anyway, but
+# a column renamed on the way into Polars would slip straight past it.
+EXTRA_CLASSIFICATIONS: dict[tuple[str, str, str], str] = {
+    ("analytics", "retail_rfm", "customer_id"): "direct_identifier",
+    ("analytics", "retail_rfm", "country"): "quasi_identifier",
+    ("analytics", "retail_rfm", "cohort_month"): "quasi_identifier",
+    ("analytics", "retail_rfm", "first_order_date"): "quasi_identifier",
+    ("analytics", "retail_rfm", "last_order_date"): "quasi_identifier",
+    ("analytics", "retail_rfm", "monetary_gbp"): "quasi_identifier",
+}
+
+
+def classifications(manifest_path: str = MANIFEST_PATH) -> dict[tuple[str, str, str], str]:
+    """Every classified column in the warehouse: dbt's, plus `analytics`."""
+    with open(manifest_path) as fh:
+        return privacy.classifications(json.load(fh)) | EXTRA_CLASSIFICATIONS
+
+
+def pseudonymise(
+    con: duckdb.DuckDBPyConnection, manifest_path: str = MANIFEST_PATH, salt: str | None = None
+) -> dict:
+    """Rewrite every direct identifier in the published copy. Returns provenance.
+
+    Runs against the copy, not the warehouse, and against *every* schema in it
+    including `raw` — the published DuckDB file carries the landing tables, so a
+    policy that stopped at the modelled layers would ship the original one schema
+    away from the pseudonym.
+
+    The columns are expanded by name before the rewrite, and the expansion is not
+    a formality: 51 relations in this warehouse carry a `customer_id` where six
+    are declared. Two kinds of thing sit in the difference, and neither would ever
+    have been classified by hand:
+
+    * **`raw_staging.retail_invoice_lines`** — dlt's merge scratch, a full copy of
+      the landing table that no yml describes and nothing downstream reads. It
+      shipped 1,067,371 rows, 824,364 of them with a clear id, inside every
+      release made before this existed.
+    * **44 `dbt_test__audit` tables.** `store_failures` is on project-wide, so
+      every failing row of every retail test is written to a table that the
+      published database then carries. They are empty today because the tests
+      pass — which means the leak only opens on the day something goes wrong,
+      and closes again before anyone looks.
+    """
+    salt = salt if salt is not None else os.environ.get(SALT_ENV, "")
+    if not salt:
+        raise privacy.PolicyError(
+            f"{SALT_ENV} is not set. The export rewrites classified identifiers and an "
+            "unsalted digest of a five-digit id is reversed in milliseconds, so there is "
+            "no safe default. Set a stable secret for a release "
+            "(`export PII_SALT=\"$(uv run python -c 'import secrets;print(secrets.token_hex(32))')\"` "
+            "for a throwaway one)."
+        )
+
+    declared = [c for c, label in classifications(manifest_path).items() if label in MASKED_LABELS]
+    columns = privacy.expand_by_name(con, declared)
+    touched = privacy.apply_pseudonymisation(con, columns, salt)
+    privacy.verify(con, columns)
+    return {
+        "privacy": {
+            "policy": "salted-sha256",
+            "labels_rewritten": list(MASKED_LABELS),
+            "pseudonym_length": privacy.PSEUDONYM_LENGTH,
+            "columns": [f"{s}.{t}.{c}" for s, t, c in touched],
+        }
+    }
 
 
 def _history(con: duckdb.DuckDBPyConnection) -> dict | None:
@@ -237,6 +331,15 @@ it for `{base}/download/{tag}/…`.
   per-customer table covers a subset of the business, and returns are matched to
   the sale they reverse by inference — `match_status` says how confidently, per
   row, because the source has no key linking the two.
+- **`customer_id` is pseudonymised in this release and is stable across
+  releases.** It is a salted digest of the publisher's own id, applied to every
+  copy of the column in the file (`raw`, `staging`, `marts`, `analytics`), so it
+  joins the retail tables to each other and to the previous release, and it does
+  not join them back to the source workbook. The columns *beside* it are not
+  masked and are not anonymous: 5,804 of the 5,881 customers are unique on
+  `(first_order_gbp, net_revenue_gbp, n_orders)` alone. Treat these tables as
+  personal data, because that is what they are — the reasoning is in
+  [`docs/DATA_PROTECTION.md`](https://github.com/{repo}/blob/main/docs/DATA_PROTECTION.md).
 - **The FX tables are the one daily grain here.** `marts.dim_date` is a calendar,
   `marts.dim_currency` is the currency dimension, and
   `marts.fct_fx_rates_published` / `_daily` / `_periods` are the ECB's euro
@@ -321,6 +424,7 @@ def run(
         repo=repo,
         grain="(country_iso3, year)",
         extra_manifest=lambda con: {"history": _history(con)},
+        prepare_copy=pseudonymise,
     )
 
 

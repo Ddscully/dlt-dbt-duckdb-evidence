@@ -47,3 +47,34 @@ sources:
         # the check that matters. A stale-data alarm on a closed archive is
         # noise, not diligence.
         freshness: null
+        # The only source here carrying anything personal, and the classification
+        # starts at the landing table rather than at staging on purpose: `raw`
+        # ships inside the published DuckDB file, so a policy that begins one
+        # layer down has already let the clear value into the artifact.
+        #
+        # Two labels, and the difference between them is what gets done about
+        # them. A `direct_identifier` singles out a person on its own and is
+        # rewritten at the publication boundary. A `quasi_identifier` only does so
+        # in combination — and is published unchanged, because generalising it
+        # would destroy the analysis it exists for. Naming it is the point: it is
+        # what makes "we removed the id" a measurable claim rather than a
+        # comforting one. `docs/DATA_PROTECTION.md` carries the measurement.
+        columns:
+          - name: customer_id
+            description: >
+              The publisher's own pseudonym for a shopper — no name, no address,
+              nothing to contact them with. Still personal data: pseudonymised
+              data is, explicitly (GDPR Recital 26), and the label says so rather
+              than treating "it's just a number" as the end of the question.
+            meta:
+              pii: direct_identifier
+          - name: country
+            meta:
+              pii: quasi_identifier
+          - name: invoice_ts
+            description: >
+              When the till rang, to the minute. A quasi-identifier rather than a
+              bystander: anyone holding one receipt can find the line it came
+              from, and from there the rest of that customer's orders.
+            meta:
+              pii: quasi_identifier

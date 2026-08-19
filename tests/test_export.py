@@ -58,8 +58,16 @@ def warehouse(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def export(warehouse: Path, tmp_path: Path) -> dict:
-    """The manifest, with `out` added for convenience."""
+def export(warehouse: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+    """The manifest, with `out` added for convenience.
+
+    The salt is required rather than defaulted (`tests/test_privacy.py` is where
+    that is asserted), so even a fixture warehouse holding no personal data at
+    all has to supply one. That is the policy working: there is no path through
+    the exporter that publishes without a decision about identifiers having been
+    made, including this one.
+    """
+    monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
     out = tmp_path / "export"
     manifest = run(str(warehouse), str(out), tag="data-1999-12-31", repo="acme/demo")
     manifest["out"] = out

@@ -80,8 +80,22 @@ test-pipeline:
 # `.github/workflows/release-data.yml` runs this, then attaches the result to a
 # dated GitHub release.
 # Package data/export/ for publishing: DuckDB copy, Parquet, checksums, notes
+#
+# The salt pseudonymises the classified identifiers on the way out and the
+# exporter refuses to run without one. A local export gets a throwaway, which is
+# right for a local export: it is not the artifact anyone publishes, and a
+# per-run salt makes that visible rather than letting a laptop's copy look like a
+# release. `release-data.yml` passes the stable repository secret instead — see
+# `docs/DATA_PROTECTION.md` for why that one has to be stable.
 export-data:
-    uv run python -m scripts.export_warehouse
+    PII_SALT="${PII_SALT:-$(uv run python -c 'import secrets; print(secrets.token_hex(32))')}" \
+        uv run python -m scripts.export_warehouse
+
+# How identifiable is a customer once the id is gone? Prints the table in
+# docs/DATA_PROTECTION.md from the warehouse, so it can be re-checked when the
+# models move. Read-only.
+disclosure-risk:
+    uv run python -m scripts.measure_disclosure_risk
 
 # Copy `history` out of a published release into this warehouse, so `dbt build`
 # appends to that snapshot instead of starting a new one. release-data.yml runs
