@@ -138,9 +138,25 @@ EXTRA_CLASSIFICATIONS: dict[tuple[str, str, str], str] = {
 
 
 def classifications(manifest_path: str = MANIFEST_PATH) -> dict[tuple[str, str, str], str]:
-    """Every classified column in the warehouse: dbt's, plus `analytics`."""
-    with open(manifest_path) as fh:
-        return privacy.classifications(json.load(fh)) | EXTRA_CLASSIFICATIONS
+    """Every classified column in the warehouse: dbt's, plus `analytics`.
+
+    **Degrades when the manifest is absent rather than raising**, the same way
+    `observability.manifest_tests` does and for the same reason: `dbt/target/` is
+    gitignored, so a fresh clone has no manifest until something runs `dbt parse`
+    — and `just test` runs before that step in CI.
+
+    Degrading is only safe because of what the caller does next. `pseudonymise`
+    expands whatever it gets *by column name* across every relation in the
+    database, and `EXTRA_CLASSIFICATIONS` names `customer_id`, so every copy of
+    the identifier is still found and still rewritten. What is lost is a *future*
+    identifier that only dbt knows about and that shares no name with these —
+    which is why the fallback is recorded in the published manifest rather than
+    being silent.
+    """
+    path = Path(manifest_path)
+    if not path.exists():
+        return dict(EXTRA_CLASSIFICATIONS)
+    return privacy.classifications(json.loads(path.read_text())) | EXTRA_CLASSIFICATIONS
 
 
 def pseudonymise(
@@ -178,7 +194,21 @@ def pseudonymise(
             "for a throwaway one)."
         )
 
-    declared = [c for c, label in classifications(manifest_path).items() if label in MASKED_LABELS]
+    known = classifications(manifest_path)
+    declared = sorted(c for c, label in known.items() if label in MASKED_LABELS)
+    if not declared:
+        # The one path that would otherwise be fail-*open*. A declared set of
+        # nothing is what a typo in a `meta: {pii: …}` key looks like, and what a
+        # dbt version that stopped surfacing column meta would look like, and what
+        # an emptied `EXTRA_CLASSIFICATIONS` would look like. Each publishes every
+        # identifier in the clear while `manifest.json` records that a policy was
+        # applied, which is worse than having no policy at all.
+        raise privacy.PolicyError(
+            "no columns are classified as "
+            f"{'/'.join(MASKED_LABELS)} — refusing to publish. Either the classification "
+            "is broken or the labels have been renamed; an export that masks nothing "
+            "must not look like one that masked everything."
+        )
     columns = privacy.expand_by_name(con, declared)
     touched = privacy.apply_pseudonymisation(con, columns, salt)
     privacy.verify(con, columns)
@@ -187,6 +217,10 @@ def pseudonymise(
             "policy": "salted-sha256",
             "labels_rewritten": list(MASKED_LABELS),
             "pseudonym_length": privacy.PSEUDONYM_LENGTH,
+            # False when the export ran without a dbt manifest, which narrows the
+            # declared set to `EXTRA_CLASSIFICATIONS`. A consumer can tell the two
+            # apart; a release built by `release-data.yml` always has one.
+            "declared_from_dbt_manifest": Path(manifest_path).exists(),
             "columns": [f"{s}.{t}.{c}" for s, t, c in touched],
         }
     }
@@ -336,7 +370,7 @@ it for `{base}/download/{tag}/…`.
   copy of the column in the file (`raw`, `staging`, `marts`, `analytics`), so it
   joins the retail tables to each other and to the previous release, and it does
   not join them back to the source workbook. The columns *beside* it are not
-  masked and are not anonymous: 5,804 of the 5,881 customers are unique on
+  masked and are not anonymous: 98.6% of the 5,881 customers are unique on
   `(first_order_gbp, net_revenue_gbp, n_orders)` alone. Treat these tables as
   personal data, because that is what they are — the reasoning is in
   [`docs/DATA_PROTECTION.md`](https://github.com/{repo}/blob/main/docs/DATA_PROTECTION.md).

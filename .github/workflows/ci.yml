@@ -66,6 +66,13 @@ jobs:
       # renamed schema or a copy whose views don't survive fails here, on a pull
       # request, rather than on the first of the month.
       - name: Package the release artifact
+        # The exporter refuses to run without a salt, including against a fixture
+        # warehouse — see `docs/DATA_PROTECTION.md`. A fixed literal here on
+        # purpose: this artifact is thrown away at the end of the job and is
+        # never published, so a value in the clear is the honest signal that it
+        # is not a release. `release-data.yml` passes the repository secret.
+        env:
+          PII_SALT: ci-not-a-release-salt
         run: |
           uv run python -m scripts.export_warehouse
           cd data/export && sha256sum -c SHA256SUMS
