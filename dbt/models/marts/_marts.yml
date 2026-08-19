@@ -1436,6 +1436,8 @@ models:
     columns:
       - name: invoice
         data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
         data_tests: [not_null]
       - name: line_number
         data_type: BIGINT
@@ -1687,9 +1689,11 @@ models:
       - name: net_revenue_gbp
         data_type: DOUBLE
         # A quasi-identifier, and the one that surprises people. Measured over the
-        # built warehouse, `net_revenue_gbp` on its own is unique for 5,721 of the
-        # 5,881 customers (97.3%); with `first_order_gbp` and `n_orders` beside it,
-        # 5,804 (98.7%). A near-continuous money column at person grain is an
+        # built warehouse, `net_revenue_gbp` on its own is unique for 97.4% of the
+        # 5,881 customers; with `first_order_gbp` and `n_orders` beside it, 98.6%.
+        # (Shares, not counts: the counts are not reproducible between builds —
+        # `sum()` over doubles has no fixed order. See `docs/DATA_PROTECTION.md`.)
+        # A near-continuous money column at person grain is an
         # identifier whatever it is called, which is why deleting `customer_id`
         # from an extract does not anonymise it. See `docs/DATA_PROTECTION.md`.
         meta:
@@ -1704,7 +1708,7 @@ models:
           order rather than as an unpriced one.
         # Part of the same quasi-identifying set as `net_revenue_gbp`, and the
         # sharper half of it: `(country, first_order_date, first_order_gbp)` is
-        # unique for 5,857 of 5,881 customers.
+        # unique for 99.6% of the 5,881 customers.
         meta:
           pii: quasi_identifier
         data_tests:
@@ -1764,6 +1768,8 @@ models:
     columns:
       - name: invoice
         data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
         data_tests: [not_null]
       - name: line_number
         data_type: BIGINT
@@ -1801,6 +1807,8 @@ models:
         data_type: DOUBLE
       - name: original_invoice
         data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
       - name: original_line_number
         data_type: BIGINT
       - name: original_invoice_date

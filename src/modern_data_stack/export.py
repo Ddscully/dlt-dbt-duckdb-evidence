@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -213,11 +214,26 @@ def export(
         writable = duckdb.connect(str(warehouse_copy))
         try:
             prepared = prepare_copy(writable) or {}
-            # Reclaim what the rewrite left behind, so the published file is the
-            # size of its contents rather than of its history.
-            writable.execute("checkpoint")
         finally:
             writable.close()
+        # Copy the database again, rather than `CHECKPOINT`. DuckDB reuses freed
+        # blocks but never returns them to the filesystem, so a checkpoint after
+        # a rewrite of a million-row column leaves the file *larger* — measured
+        # here at 185 MB before and 210 MB after, for identical contents. Only a
+        # fresh `COPY FROM DATABASE` compacts, which is what `snapshot_warehouse`
+        # already does and what the release notes promise consumers.
+        #
+        # Into a directory rather than a sibling file, because the copy's *stem*
+        # is the catalog name the published views were compiled against — a
+        # `warehouse.compacting.duckdb` would break every one of them.
+        staging_dir = dest_dir / ".compacting"
+        staging_dir.mkdir(exist_ok=True)
+        compacted = staging_dir / warehouse_copy.name
+        try:
+            snapshot_warehouse(warehouse_copy, compacted)
+            compacted.replace(warehouse_copy)
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
     # Read the tables out of the snapshot, not the original: it's the copy that
     # gets published, so the manifest should describe what shipped.

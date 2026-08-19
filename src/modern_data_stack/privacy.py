@@ -40,7 +40,6 @@ which is what `k_anonymity` measures.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 
 import duckdb
@@ -166,6 +165,21 @@ def apply_pseudonymisation(
         if kinds.get((schema, table)) != "BASE TABLE":
             continue
         quoted = f'"{column}"'
+        # Refuse a second pass. Hashing a pseudonym yields another 16 hex
+        # characters, so `verify` cannot tell one application from two after the
+        # fact — the check has to happen before the write. Running this against a
+        # warehouse rather than a copy is the same mistake wearing a different
+        # hat, and it is unrecoverable: the clear values are gone.
+        (already,) = con.execute(
+            f'select count(*) from "{schema}"."{table}" where {quoted} is not null'
+            f"   and regexp_matches({quoted}, '{PSEUDONYM_PATTERN}')"
+        ).fetchone()
+        if already:
+            raise PolicyError(
+                f"{schema}.{table}.{column} already holds {already:,} pseudonymised values — "
+                "refusing to hash them again. Apply the policy to a fresh copy of the "
+                "warehouse, not to one it has already been applied to."
+            )
         con.execute(
             f'update "{schema}"."{table}" set {quoted} = {pseudonym_expr(quoted)}'
             f" where {quoted} is not null",
@@ -181,6 +195,11 @@ def verify(con: duckdb.DuckDBPyConnection, columns: Iterable[Column]) -> None:
     Checks views as well as tables, because a view is how an unrewritten `raw`
     column reaches a consumer without appearing to.
     """
+    # An empty set verifies clean, and that is correct *here*: a database simply
+    # holding none of the classified columns is a no-op, not a failure. What is
+    # not correct is an empty set arriving because nothing was ever classified —
+    # that belongs to whoever decides the policy, and `scripts/export_warehouse.py`
+    # refuses it there rather than letting this function decide for every caller.
     offenders = []
     for schema, table, column in sorted(set(columns)):
         (bad,) = con.execute(
@@ -192,10 +211,6 @@ def verify(con: duckdb.DuckDBPyConnection, columns: Iterable[Column]) -> None:
             offenders.append(f"{schema}.{table}.{column} ({bad:,} rows)")
     if offenders:
         raise PolicyError("classified columns are not pseudonymised: " + ", ".join(offenders))
-
-
-def is_pseudonym(value: str | None) -> bool:
-    return value is None or bool(re.match(PSEUDONYM_PATTERN, value))
 
 
 def k_anonymity(

@@ -863,13 +863,24 @@ publication boundary and measured rather than asserted. Full reasoning in
 [`docs/DATA_PROTECTION.md`](docs/DATA_PROTECTION.md); what it cost to learn:
 
 - **Deleting the id does not anonymise a customer-grain extract, and the number
-  is the argument.** 5,804 of 5,881 customers (98.7%) are unique on
-  `(first_order_gbp, net_revenue_gbp, n_orders)` with no id at all; 5,721 (97.3%)
-  on `net_revenue_gbp` alone. A near-continuous money column at person grain is
+  is the argument.** 98.6% of the 5,881 customers are unique on
+  `(first_order_gbp, net_revenue_gbp, n_orders)` with no id at all; 97.4% on
+  `net_revenue_gbp` alone. **Shares, never counts** — see the float bullet below. A near-continuous money column at person grain is
   an identifier whatever it is called, which is why `quasi_identifier` is a label
   with no action attached: generalising those columns would delete the analysis
   they exist for, so they ship and the page says so. `just disclosure-risk`
   reprints the table from the warehouse.
+- **An aggregated float column is not reproducible between builds, which is why
+  every figure above is a share and never a count.** Two consecutive
+  `dbt run --select dim_retail_customer` against byte-identical sources gave
+  5,781 and 5,785 distinct values of `net_revenue_gbp`. It is `sum()` over
+  doubles: floating-point addition is not associative and DuckDB's parallel
+  aggregation fixes no order, so the last bits of a few hundred customers' revenue
+  move per build — and exact equality is what a uniqueness count is made of. The
+  share is stable to a tenth of a point. **The lake is unaffected and the boundary
+  is worth knowing**: it archives `fct_retail_order_line`, whose money is per-row
+  arithmetic rather than an aggregate, so the "byte-identical run to run" property
+  there still holds. It is aggregation over floats that is unstable, not floats.
 - **The policy is applied to the *copy*, not in a model, and both halves of that
   matter.** `raw` ships inside the published DuckDB file, so a mask in staging
   leaves the original one schema away; and the staging models are **views**, which
@@ -904,7 +915,7 @@ publication boundary and measured rather than asserted. Full reasoning in
   a machine it is on to a machine it is not.
 - **The coverage test is scoped to name collisions, not to every column.**
   `dim_retail_product.net_revenue_gbp` (per product, identifies nobody) and
-  `dim_retail_customer.net_revenue_gbp` (per customer, identifies 97.3%) are the
+  `dim_retail_customer.net_revenue_gbp` (per customer, identifies 97.4%) are the
   pair that makes `non_personal` a real label: same name, opposite answer, and
   only a person can say which is which. Labelling all ninety retail columns would
   be paperwork; `tests/test_privacy.py` requires a label only where a name
@@ -913,8 +924,18 @@ publication boundary and measured rather than asserted. Full reasoning in
   `reports/sources/warehouse/retail_rfm.sql` was `select *` — 19 columns
   including the id, the country and three dates, downloaded by every visitor to
   render four. `retail_customers.sql` had picked its columns and kept
-  `customer_id` anyway. Both are pruned; the scatter stays at customer grain
-  because one mark per person is what that chart *is*.
+  `customer_id` anyway, and `retail_returns.sql` was `select *` too — 23 columns
+  to render three, carrying 17,934 clear identifiers. All three are pruned; the
+  scatter stays at customer grain because one mark per person is what that chart
+  *is*. **A `select *` is invisible to the obvious check**: grepping the source
+  queries for `customer_id` cannot find a query that names no columns at all,
+  which is how `retail_returns.sql` survived the first pass of this work.
+- **Changing a source query's column list needs `just report-clean`.** Evidence
+  caches a schema per source (`reports/.evidence/template/static/data/…/*.schema.json`)
+  and keys it on the source, not on the query text — so a `just report` after a
+  column is dropped builds against a schema that still declares it. Three source
+  queries changed shape here, which is exactly the case the recipe's own
+  description names.
 
 ## Data-quality gates (`dbt/models/**/_*.yml`)
 

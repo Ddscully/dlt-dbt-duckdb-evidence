@@ -24,7 +24,7 @@ carry the descriptions and the contracts.
 | `non_personal` | Shares a name with a classified column and is deliberately not one. | Nothing — but it is stated rather than left blank. |
 
 The third label exists because of one pair. `dim_retail_customer.net_revenue_gbp`
-is revenue per *customer* and singles out 97.3% of them on its own;
+is revenue per *customer* and singles out 97.4% of them on its own;
 `dim_retail_product.net_revenue_gbp` is revenue per *product* and identifies
 nobody. Same name, opposite answer, and the only way to tell them apart is for
 someone to have said so. `tests/test_privacy.py` fails if a retail column shares
@@ -44,16 +44,32 @@ identified customers, `just disclosure-risk` to reproduce:
 
 | Columns available | Customers alone in their combination |
 |---|---|
-| `country` | 10 (0.2%) |
-| `country, cohort_month` | 170 (2.9%) |
-| `country, first_order_date` | 490 (8.3%) |
-| **`country, first_order_date, first_order_gbp`** | **5,857 (99.6%)** |
-| `first_order_gbp, net_revenue_gbp, n_orders` — the site's extract with the id removed | **5,804 (98.7%)** |
-| `net_revenue_gbp` alone | 5,721 (97.3%) |
+| `country` | 0.2% (10) |
+| `country, cohort_month` | 2.9% (170) |
+| `country, first_order_date` | 8.3% (490) |
+| **`country, first_order_date, first_order_gbp`** | **99.6%** |
+| `first_order_gbp, net_revenue_gbp, n_orders` — a customer extract with the id removed | **98.6%** |
+| `net_revenue_gbp` alone | 97.4% |
+
+**The share is quoted and the count is not, and that is not a rounding
+preference.** The three rows above that involve a money column are not
+reproducible between builds: two consecutive rebuilds of `dim_retail_customer`
+from byte-identical sources gave 5,781 and 5,785 distinct values of
+`net_revenue_gbp`. It is `sum()` over doubles — floating-point addition is not
+associative and DuckDB's parallel aggregation does not fix an order — so the
+last bits of a few hundred customers' revenue differ per build, and exact
+equality is what a uniqueness count is made of. The share is stable to a tenth
+of a point; the count moves by single digits. Anything quoting the count as a
+fact is quoting one build.
+
+(The lake is unaffected, and the boundary is worth knowing precisely: it
+archives `fct_retail_order_line`, whose money columns are per-row arithmetic
+rather than aggregates, so its "byte-identical run to run" property still
+holds. It is aggregation over floats that is unstable, not floats.)
 
 **A near-continuous money column at person grain is an identifier whatever it is
 called.** Deleting `customer_id` from an extract moves the number from 100% to
-98.7%. That is the finding, and everything below is a consequence of it: the
+98.6%. That is the finding, and everything below is a consequence of it: the
 pseudonymisation is worth doing and is not a privacy story on its own, and any
 claim that a customer-grain file has been "anonymised" by dropping a key is
 false in a way that is cheap to check and nobody checks.
@@ -152,7 +168,7 @@ Every finding here ends in one.
 
 * **The identifier is pseudonymised in the release.** Salted, stable, verified
   after the fact, covering all 50 columns that carry it across five schemas.
-* **The quasi-identifiers ship unchanged**, and the 98.7% above says what that
+* **The quasi-identifiers ship unchanged**, and the 98.6% above says what that
   means. They are publishable because the source is already public — UCI
   redistributes the whole transaction log under CC BY 4.0, ids included, so
   nothing in the release discloses anything the internet does not already have.
@@ -163,9 +179,14 @@ Every finding here ends in one.
   id, the country and three dates, downloaded by every visitor to render four.
   It is four columns now. `retail_customers.sql` had already picked its columns
   and had kept `customer_id` anyway, which no chart on the page ever read.
+  `retail_returns.sql` was `select *` too — 23 columns to render three, carrying
+  17,934 clear identifiers over 2,445 customers. It survived the first pass of
+  this work precisely *because* it named no columns: grepping the source queries
+  for `customer_id` cannot find a query that mentions no column at all, which is
+  the argument for a column list being the default rather than the exception.
   Pruning is worth less than it looks (99.8% of customers are still unique on the
-  four that remain) and is still worth doing: nothing can be joined to a file
-  with no join keys in it.
+  four columns that remain in the RFM extract) and is still worth doing: nothing
+  can be joined to a file with no join keys in it.
 * **The scatter stays at customer grain.** A chart of first-order value against
   lifetime value is one mark per person; there is no aggregate that draws it. The
   alternative was to delete the chart, and the finding it carries — that

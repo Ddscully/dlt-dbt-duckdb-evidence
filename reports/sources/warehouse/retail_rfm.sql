@@ -7,8 +7,8 @@
 -- easiest query is the widest one.
 --
 -- What the pruning is worth is measured rather than assumed, and it is less than
--- it looks: over the four columns that remain, 5,869 of 5,881 customers (99.8%)
--- are still alone in their combination of values, because `monetary_gbp` is a
+-- it looks: over the four columns that remain, 99.8% of the 5,881 customers are
+-- still alone in their combination of values, because `monetary_gbp` is a
 -- near-continuous money column at person grain. Removing an identifier is not
 -- the same as removing identifiability. What the pruning does buy is real
 -- though — nobody can now join this file to anything else, because the columns

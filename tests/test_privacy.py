@@ -109,15 +109,27 @@ def test_the_exporter_refuses_to_run_without_a_salt(warehouse, monkeypatch):
         pseudonymise(warehouse)
 
 
-def test_the_same_identifier_gets_the_same_pseudonym_and_a_new_salt_changes_it(warehouse):
-    privacy.apply_pseudonymisation(warehouse, DECLARED, salt="one")
-    (distinct,) = warehouse.execute("select count(distinct customer_id) from raw.lines").fetchone()
-    assert distinct == 2, "two customers in, two pseudonyms out"
+def test_the_same_identifier_gets_the_same_pseudonym_and_a_new_salt_changes_it(tmp_path):
+    """Two *independent* copies, one salt each.
 
-    first = warehouse.execute("select customer_id from marts.dim_customer order by 1").fetchall()
-    privacy.apply_pseudonymisation(warehouse, [("marts", "dim_customer", "customer_id")], "two")
-    second = warehouse.execute("select customer_id from marts.dim_customer order by 1").fetchall()
-    assert first != second
+    Re-salting the same connection would hash the pseudonyms rather than the
+    ids, and a double hash differs from a single one whatever the salt is — so
+    the second assertion would hold even for an expression that dropped the salt
+    entirely, which is precisely the bug it exists to catch.
+    """
+
+    def build(salt: str, run: int = 0) -> list[tuple]:
+        con = duckdb.connect(str(tmp_path / f"{salt}-{run}.duckdb"))
+        con.execute(SETUP)
+        privacy.apply_pseudonymisation(con, DECLARED, salt=salt)
+        rows = con.execute("select customer_id from marts.dim_customer order by 1").fetchall()
+        distinct = con.execute("select count(distinct customer_id) from raw.lines").fetchone()
+        con.close()
+        assert distinct == (2,), "two customers in, two pseudonyms out"
+        return rows
+
+    assert build("one", 1) == build("one", 2), "the same salt has to be reproducible"
+    assert build("one", 3) != build("two", 4)
 
 
 def test_a_view_and_the_mart_below_it_still_agree_after_the_rewrite(warehouse):
@@ -241,7 +253,7 @@ def test_a_column_named_like_a_classified_one_is_never_left_unlabelled():
     Labelling all 90-odd retail columns would be paperwork nobody reads. What
     actually rots is narrower and specific: `dim_retail_product.net_revenue_gbp`
     is revenue per *product* and carries no personal data, while
-    `dim_retail_customer.net_revenue_gbp` singles out 97.3% of customers on its
+    `dim_retail_customer.net_revenue_gbp` singles out 97.4% of customers on its
     own. Same name, opposite answer — so the distinction has to be written down
     rather than inferred from one of them being blank.
     """
@@ -299,5 +311,41 @@ def test_the_polars_output_is_classified_where_dbt_cannot_see_it():
     assert rfm["customer_id"] == "direct_identifier"
     assert rfm["monetary_gbp"] == "quasi_identifier", (
         "`monetary_gbp` is `dim_retail_customer.net_revenue_gbp` under another name, "
-        "and it identifies 97.3% of customers on its own"
+        "and it identifies 97.4% of customers on its own"
     )
+
+
+def test_a_second_application_is_refused_rather_than_double_hashing(warehouse):
+    """Hashing a pseudonym gives another 16 hex characters, so `verify` cannot
+    tell one application from two after the fact — which makes a re-run, or a run
+    pointed at the real warehouse instead of a copy, silent and unrecoverable.
+    The check has to happen before the write."""
+    privacy.apply_pseudonymisation(warehouse, DECLARED, salt="s")
+    with pytest.raises(privacy.PolicyError, match="already holds"):
+        privacy.apply_pseudonymisation(warehouse, DECLARED, salt="s")
+
+
+def test_an_empty_classified_set_is_refused_at_the_boundary(warehouse, monkeypatch):
+    """The one path that would otherwise be fail-*open*: nothing classified reads
+    exactly like nothing to classify, and publishes every identifier in the clear
+    while the manifest records that a policy was applied."""
+    monkeypatch.setattr("scripts.export_warehouse.EXTRA_CLASSIFICATIONS", {})
+    with pytest.raises(privacy.PolicyError, match="refusing to publish"):
+        pseudonymise(warehouse, manifest_path="/nonexistent/manifest.json", salt="s")
+
+
+def test_a_missing_manifest_degrades_instead_of_raising(warehouse, monkeypatch):
+    """`dbt/target/` is gitignored and `just test` runs before `dbt parse`, so an
+    exporter that required a manifest broke every test in `tests/test_export.py`
+    on a fresh clone. Degrading is safe only because the sweep is by column name:
+    `EXTRA_CLASSIFICATIONS` still names `customer_id`, so every copy of it is
+    still found."""
+    monkeypatch.setattr(
+        "scripts.export_warehouse.EXTRA_CLASSIFICATIONS",
+        {("marts", "dim_customer", "customer_id"): "direct_identifier"},
+    )
+    provenance = pseudonymise(warehouse, manifest_path="/nonexistent/manifest.json", salt="s")
+    assert provenance["privacy"]["declared_from_dbt_manifest"] is False
+    assert ("raw", "lines", "customer_id") in [
+        tuple(c.split(".")) for c in provenance["privacy"]["columns"]
+    ], "the sweep still reaches the landing table nobody named"

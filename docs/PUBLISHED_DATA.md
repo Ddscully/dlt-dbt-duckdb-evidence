@@ -46,7 +46,24 @@ export copies the file as `warehouse.duckdb` and not `snapshot-2026-07-30.duckdb
 
 **The copy is made with `COPY FROM DATABASE`, not `cp`.** It's consistent
 whatever state the source was left in (a crashed run leaves a `.wal` beside it)
-and compacted, which is most of why 32 MB of warehouse ships as 29 MB.
+and compacted, which is most of why 32 MB of warehouse ships as 29 MB. The copy
+is made **twice**: once to snapshot the source, and again after the
+pseudonymisation below has rewritten a column across a million rows. `CHECKPOINT`
+would not do — DuckDB reuses freed blocks but never returns them to the
+filesystem, so checkpointing after the rewrite leaves the file 13% *larger*.
+
+**`customer_id` is pseudonymised, and it is the only column that is.** It ships
+as a salted digest of the publisher's own id — applied to every copy of the
+column in the file, `raw` and `raw_staging` included — so it joins the retail
+tables to each other and to the previous release, and does not join them back to
+the source workbook. The salt is stable across releases and is not in this
+repository.
+
+The columns *beside* it are not masked and the release is not anonymous: 98.6% of
+the 5,881 customers are unique on `(first_order_gbp, net_revenue_gbp, n_orders)`
+with no identifier at all. Treat the retail tables as personal data, because that
+is what they are. [`DATA_PROTECTION.md`](./DATA_PROTECTION.md) has the
+classification, the measurement and the decisions.
 
 **The DuckDB file has a storage format.** It was written by whatever version the
 workflow resolved, recorded in `manifest.json`, and older clients may refuse it.

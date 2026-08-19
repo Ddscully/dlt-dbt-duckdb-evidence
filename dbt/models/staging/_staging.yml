@@ -495,6 +495,8 @@ models:
     columns:
       - name: invoice
         description: Source invoice number, prefix included.
+        meta:
+          pii: quasi_identifier
         data_tests: [not_null]
       - name: line_number
         description: >

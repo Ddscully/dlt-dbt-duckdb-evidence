@@ -17,8 +17,8 @@
 -- The four that remain are quasi-identifiers and they stay, which is a decision
 -- rather than an oversight: a scatter of first-order value against lifetime
 -- value *is* one mark per customer, so there is no version of this chart that
--- is not per-person data. 5,804 of the 5,881 customers (98.7%) are unique on
--- these money columns alone — a number `docs/DATA_PROTECTION.md` states rather
+-- is not per-person data. 98.6% of the 5,881 customers are unique on these
+-- money columns alone — a share `docs/DATA_PROTECTION.md` states rather
 -- than leaves to be discovered. It is publishable because the source is already
 -- public —
 -- UCI redistributes the whole transaction log under CC BY 4.0 — and the day
@@ -26,7 +26,6 @@
 select
     first_order_gbp,
     net_revenue_gbp,
-    n_orders,
     is_repeat_customer,
     is_left_censored_cohort
 from marts.dim_retail_customer
