@@ -1,0 +1,240 @@
+"""The course material, checked against the repo it teaches.
+
+`docs/course/` quotes file paths, `just` recipes and module links out of the rest
+of the tree. None of that is executable, so it rots in exactly the way an
+exposure does: the module still renders, the prose still reads correctly, and the
+path it tells a learner to open was renamed six commits ago. A course that sends
+someone to a file that is not there is worse than no course, because the reader
+assumes they are the one who is wrong.
+
+The same argument as `tests/test_exposures.py` and `tests/test_report.py`: an
+assertion about the *outside* of a system needs a test on the outside of it.
+
+No warehouse and no dbt manifest here — `just test` has neither, so everything
+below reads markdown and the justfile as text.
+"""
+
+from __future__ import annotations
+
+import re
+
+import pytest
+
+from modern_data_stack.paths import project_root
+
+COURSE_DIR = project_root() / "docs" / "course"
+INDEX = COURSE_DIR / "README.md"
+JUSTFILE = project_root() / "justfile"
+
+# Top-level directories a module may cite. `data/` is deliberately absent: it is
+# gitignored and built, so a path under it is correct even on a fresh clone where
+# it does not exist yet.
+CITABLE_ROOTS = (
+    "dbt",
+    "docs",
+    "ingest",
+    "lake",
+    "notebooks",
+    "orchestration",
+    "reports",
+    "scripts",
+    "src",
+    "tests",
+    "transform",
+)
+
+# A backticked path, e.g. `dbt/models/marts/dim_country_year.sql`. Anchored on the
+# citable roots so prose like `country_iso3` and `PASS=402` can't match.
+_CITED_PATH = re.compile(
+    r"`((?:" + "|".join(CITABLE_ROOTS) + r")/[A-Za-z0-9_./*-]+)`",
+)
+
+# `just course-rebuild`. Searched only inside code — a fenced block or an inline
+# span — because "just" is also an English word and the prose is full of it
+# ("exactly what the publisher just served"). Comments inside a fenced block are
+# prose too, and are stripped before the search for the same reason.
+_CITED_RECIPE = re.compile(r"\bjust ([a-z][a-z0-9-]*)")
+_FENCED = re.compile(r"^```[^\n]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
+_INLINE_CODE = re.compile(r"`([^`\n]+)`")
+_SHELL_COMMENT = re.compile(r"#[^\n]*")
+
+# A recipe definition in the justfile: name, then optional args which may carry a
+# default (`backfill-wdi start end=''`), then the colon. The default matters —
+# without it that recipe reads as undefined and every citation of it fails.
+_RECIPE_DEF = re.compile(r"^([a-z][a-z0-9-]*)(?: [a-z_]+(?:=[^\s:]*)?)*:", re.MULTILINE)
+
+# A markdown link to a sibling module, e.g. [00 — Setup](./00-setup.md).
+_MODULE_LINK = re.compile(r"\]\(\./([0-9]{2}-[a-z0-9-]+\.md)\)")
+
+
+def modules() -> list:
+    """Every numbered module file, in order."""
+    return sorted(COURSE_DIR.glob("[0-9][0-9]-*.md"))
+
+
+def course_files() -> list:
+    """The index plus every module — everything a learner reads."""
+    return [INDEX, *modules()]
+
+
+def recipes() -> set[str]:
+    """Every recipe name the justfile defines."""
+    return set(_RECIPE_DEF.findall(JUSTFILE.read_text()))
+
+
+def _ids(paths) -> list[str]:
+    return [p.name for p in paths]
+
+
+def test_the_course_has_an_index_and_at_least_one_module():
+    assert INDEX.exists(), "docs/course/README.md is the entry point; it must exist"
+    assert modules(), "docs/course/ has an index but no numbered modules"
+
+
+@pytest.mark.parametrize("doc", course_files(), ids=_ids(course_files()))
+def test_every_path_a_module_cites_exists(doc):
+    """A renamed model must not leave the course pointing at a dead path."""
+    missing = sorted(
+        {
+            cited
+            for cited in _CITED_PATH.findall(doc.read_text())
+            # A glob is a description of a set, not a path to open.
+            if "*" not in cited and not (project_root() / cited).exists()
+        }
+    )
+    assert not missing, f"{doc.name} cites paths that no longer exist: {missing}"
+
+
+def code_spans(text: str) -> list[str]:
+    """Every fenced block (comments stripped) and inline code span in a module."""
+    return [_SHELL_COMMENT.sub("", block) for block in _FENCED.findall(text)] + (
+        _INLINE_CODE.findall(_FENCED.sub("", text))
+    )
+
+
+@pytest.mark.parametrize("doc", course_files(), ids=_ids(course_files()))
+def test_every_just_recipe_a_module_cites_exists(doc):
+    """`just course-rebuild` in a command a learner will paste must be a recipe."""
+    defined = recipes()
+    missing = sorted(
+        {
+            cited
+            for span in code_spans(doc.read_text())
+            for cited in _CITED_RECIPE.findall(span)
+            if cited not in defined
+        }
+    )
+    assert not missing, f"{doc.name} cites justfile recipes that don't exist: {missing}"
+
+
+@pytest.mark.parametrize("doc", course_files(), ids=_ids(course_files()))
+def test_every_module_link_resolves(doc):
+    """The next/previous links and the index table must all land somewhere."""
+    missing = sorted(
+        {link for link in _MODULE_LINK.findall(doc.read_text()) if not (COURSE_DIR / link).exists()}
+    )
+    assert not missing, f"{doc.name} links to modules that don't exist: {missing}"
+
+
+def test_the_index_lists_every_module_that_exists():
+    """A module nobody can navigate to may as well not be written."""
+    linked = set(_MODULE_LINK.findall(INDEX.read_text()))
+    on_disk = {module.name for module in modules()}
+    assert on_disk - linked == set(), (
+        f"modules exist but the index doesn't link them: {sorted(on_disk - linked)}"
+    )
+
+
+# 🔧 break-and-fix, 🔍 investigate, 💬 design defence. A module marks its
+# exercises with these in the section heading.
+EXERCISE_MARKERS = ("\U0001f527", "\U0001f50d", "\U0001f4ac")
+
+# Setup carries no exercises by design, so the exercise rules below don't apply
+# to it. Exempted by name rather than by "has no markers", which would excuse
+# every module that forgot to write any.
+SETUP_MODULE = "00-setup.md"
+
+_HEADING = re.compile(r"^## .*$", re.MULTILINE)
+
+REVEAL = "<details>"
+
+
+def sections(text: str) -> list[tuple[str, str]]:
+    """`[(heading, body), …]` for each `##` section, preamble discarded."""
+    starts = [match.start() for match in _HEADING.finditer(text)]
+    bounds = [*starts, len(text)]
+    return [
+        (text[start : text.index("\n", start)], text[start : bounds[i + 1]])
+        for i, start in enumerate(starts)
+    ]
+
+
+def is_exercise(heading: str) -> bool:
+    return any(mark in heading for mark in EXERCISE_MARKERS)
+
+
+def missing_sections(text: str, name: str) -> list[str]:
+    """What a complete module is missing, or `[]` if it carries everything.
+
+    The tests above keep the course from pointing at things that moved. This is
+    the pedagogical contract instead: what a reader is entitled to find in *any*
+    module, so a half-written one fails here rather than shipping and
+    disappointing someone.
+
+    Two rules beyond the boilerplate, and the second is the interesting one:
+
+    - **`00-setup.md` is exempt from the exercise rules by name.** It is setup
+      and deliberately carries no drills. Exempting it by name rather than by
+      "this module happens to have no markers" matters — the latter excuses every
+      module that forgot to write any, which is the case the check exists for.
+    - **One reveal per exercise marker, enforced as a section-level bijection:**
+      every `##` section whose heading is marked must contain at least one
+      `<details>`, and no `<details>` may sit outside a marked section. Strict in
+      both directions — an exercise with no answer fails, and so does an answer
+      with no question.
+
+      Not `count(marker) == count(<details>)`, which sounds like the same rule
+      and is not: `01-grain.md` has three marked headings and five reveals,
+      because its design-defence section asks (a), (b) and (c) and answers each.
+      Counting would fail the one module we know is complete, which is an
+      argument about the rule rather than about the module.
+
+    Returns human-readable names, so the assertion tells an author what to write
+    rather than only that something is wrong.
+    """
+    missing: list[str] = []
+
+    if "**Objectives.**" not in text:
+        missing.append("an **Objectives.** line")
+    if "[Course index](./README.md)" not in text:
+        missing.append("a nav link back to the course index")
+
+    found = sections(text)
+    if not found:
+        missing.append("any `##` sections")
+        return missing
+
+    exercises = [(heading, body) for heading, body in found if is_exercise(heading)]
+
+    if name != SETUP_MODULE:
+        if not exercises:
+            missing.append(f"at least one exercise section marked {' '.join(EXERCISE_MARKERS)}")
+        if "## What to carry forward" not in text:
+            missing.append("a `## What to carry forward` summary")
+
+    for heading, body in exercises:
+        if REVEAL not in body:
+            missing.append(f"a <details> reveal under {heading.removeprefix('## ').strip()!r}")
+
+    orphans = sum(body.count(REVEAL) for heading, body in found if not is_exercise(heading))
+    if orphans:
+        missing.append(f"{orphans} <details> reveal(s) outside any exercise section")
+
+    return missing
+
+
+@pytest.mark.parametrize("module", modules(), ids=_ids(modules()))
+def test_every_module_is_structurally_complete(module):
+    """A module that renders is not the same as a module that teaches."""
+    missing = missing_sections(module.read_text(), module.name)
+    assert not missing, f"{module.name} is structurally incomplete, missing: {missing}"

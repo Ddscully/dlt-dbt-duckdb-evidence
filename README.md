@@ -69,7 +69,7 @@ expensive to revisit later.
 
 ## The docs
 
-The README is the tour. The detail lives in five files:
+The README is the tour. The detail lives in six files:
 
 | | |
 |---|---|
@@ -79,6 +79,12 @@ The README is the tour. The detail lives in five files:
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
 | [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | SLA, run cost, what breaks at 1000×, what I'd do differently |
+
+And [`docs/course/`](./docs/course/) teaches the same warehouse as material: ten
+modules for analytics engineers, built around the failures that stay green — a
+one-word join edit that drops two thirds of the countries with all 368 tests
+still passing, a cross-section that silently loses 115 of 205 countries. It has
+its own sandbox (`just course-sandbox`) so the exercises can break things.
 
 Plus [`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) for SQL and model
 conventions, [`tests/README.md`](./tests/README.md) for the two test tiers,

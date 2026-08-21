@@ -1575,6 +1575,95 @@ Gotchas:
   daily and opens (or comments on) a `nightly-failure` issue. That's the signal
   that the fixtures have drifted from reality.
 
+## The course (`docs/course/`)
+
+Ten modules teaching this warehouse as training material for analytics
+engineers, built around the failures that stay green rather than the happy path.
+Modules 00 and 01 are written and set the format; 02-10 are outlined in
+`docs/course/README.md`. Three exercise types, marked in the text: break-and-fix
+drills, investigate-the-data questions, design defences.
+
+- **It has its own sandbox, and the reason is that a drill has to leave a mess
+  behind.** `just test-pipeline` builds into `mktemp` and is right to — CI wants
+  a warehouse nobody can find afterwards. A drill wants the opposite: break a
+  model, look at the wrong number, fix it, compare. `just course-sandbox` is the
+  same offline fixture build at a stable gitignored path (`data/course/`), plus
+  `course-rebuild` (dbt only, the inner loop) and `course-query` (one read-only
+  query). **`just dbt-build` is the trap**: it targets the real warehouse, so a
+  drill run through the wrong recipe writes a deliberately broken model into
+  `data/warehouse.duckdb`. The course says so in 00 and the recipes set
+  `WAREHOUSE_PATH` themselves.
+- **The 17-country fixture slice is taught, not apologised for.** Break-and-fix
+  runs on the sandbox; investigate-the-data runs on the real warehouse, because
+  coverage is usually the point of those questions and 17 countries cannot show
+  it. The split is the "a threshold 17 countries pass and 200+ break" lesson made
+  operational.
+- **The sandbox's own numbers are a lesson.** 228 countries in `stg_country`
+  (`wb_country` is one of the three untrimmed fixtures), 41 in Eurostat (a
+  JSON-stat grid cannot be subset), 17 in CO2, 16 in WDI — so the fact reaches 52
+  countries on a 17-country slice. Three different numbers, none of them 17.
+- **Every number in the material was measured, including the drill's.** Module
+  01's drill (`left join co2` -> `inner join co2` in
+  `dbt/models/marts/fct_emissions_energy_v2.sql`) was run: the mart goes 4,096 ->
+  3,487 rows and **52 -> 17 countries**, EU price rows 701 -> 104, and `dbt build`
+  reports `PASS=402 WARN=0 ERROR=0` either way. Don't quote a drill's numbers
+  without seeding it — the whole claim of the course is that the verdict doesn't
+  move.
+- **`tests/test_course.py` is what stops it rotting**, the same argument as
+  `test_exposures.py`: cited repo paths must exist, cited `just` recipes must
+  exist, module links must resolve, and the index must link every module on disk.
+  A course pointing at a renamed file is worse than no course, because the reader
+  assumes they are the one who is wrong. `data/` is deliberately outside the
+  citable roots — it is gitignored and built, so a path under it is correct on a
+  fresh clone where it does not exist.
+- **Module 02's drills are measured too, and one of them changed the repo's
+  understanding of an old bug.** The merge-key drill (drop `indicator` from
+  `WDI_PRIMARY_KEY`) takes `raw.wb_wdi` from 6,336 rows to **576** and 11
+  indicators to **1**, while `staging.stg_wdi` stays at **576 rows** — unchanged,
+  because a pivot's output grain does not depend on how many input rows feed it.
+  Ten of eleven columns go to 100% null at a constant row count, so the obvious
+  sanity check is structurally blind to it. `dbt build` reports
+  `PASS=402 ERROR=0` either way.
+- **`.arrow()` no longer reproduces the 1,000,000-row truncation as written.** In
+  DuckDB 1.5.5 `.arrow(n)` returns a `RecordBatchReader` (the same object as
+  `to_arrow_reader(n)`) and dlt *drains* it, so `yield con.sql(...).arrow(n)`
+  lands every row. The drill stages the original mistake explicitly with
+  `yield next(...)` — a caller taking the first batch and treating it as the
+  table. The guidance in `ingest/pipeline.py` is still right; what changed is
+  that the failure now needs writing on purpose rather than falling out of the
+  obvious call.
+- **A shape test protects the shape, not the quantity — and the boundary decides
+  whether it fires.** Truncating the retail read to 10,000 rows *does* fail
+  `stg_retail_has_exactly_one_positive_cancellation_line`. The real 1,000,000-row
+  truncation would **not** have: `C496350` sits at position ~76,800 of 1,067,371
+  (7% in, first sheet), and a 1M cut drops only the last 67,371 rows. So the
+  fixture slice fails a check production passes — the mirror image of the
+  17-country trap, and the reason `tests/test_ingest.py` counts rows against the
+  workbook's own count instead.
+- **`tests/test_course.py` scans for `just <recipe>` inside code only.** "just"
+  is an English word and this documentation is full of it ("exactly what the
+  publisher just served"), so the search is restricted to fenced blocks and
+  inline spans, with `#` comments stripped from the blocks — comments are prose.
+  `_RECIPE_DEF` also has to allow a default (`backfill-wdi start end=''`), or
+  that recipe reads as undefined and every citation of it fails. Both bugs were
+  found by the guard failing on module 02 rather than by review.
+- **The structural contract is a section-level bijection, not a count.** Every
+  `##` section whose heading carries an exercise marker must hold at least one
+  `<details>` reveal, and no reveal may sit outside a marked section — strict
+  both ways, so an exercise with no answer and an answer with no question each
+  fail. `count(marker) == count(<details>)` sounds like the same rule and is not:
+  `01-grain.md` has three marked headings and five reveals, because its
+  design-defence section asks (a), (b) and (c) and answers each. `00-setup.md` is
+  exempt from the exercise rules **by name**, not by "has no markers" — the
+  latter excuses exactly the half-written module the check exists to catch.
+  Verified by breaking all six rules and reading the messages back.
+- **Absence is the blind spot the whole course is organised around.** Every test
+  in this project asserts something about rows that are *present* — `not_null`,
+  `accepted_range`, `unique_combination_of_columns`, `relationships` — and
+  deleting rows makes all four *more* likely to pass. Fan-out fails loudly; row
+  loss fails silently. That asymmetry is module 01's punchline and it is true of
+  the real project, not just the drill.
+
 ## Verifying changes
 
 After changing ingestion or models, run the real pipeline (`just run`) and
