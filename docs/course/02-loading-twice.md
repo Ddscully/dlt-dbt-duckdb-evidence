@@ -1,6 +1,6 @@
 # 02 — Loading twice
 
-← [01 — Grain is the contract](./01-grain.md) · [Course index](./README.md) · next: 03 — Tests that fail on bugs
+← [01 — Grain is the contract](./01-grain.md) · [Course index](./README.md) · next: [03 — Tests that fail on bugs](./03-tests.md)
 
 **Objectives.** Say what a second run of a pipeline does to the rows the first
 one landed. Choose between `replace` and `merge`, and pick a merge key that
@@ -477,4 +477,4 @@ would have silently given it yearly partitions.
 - A shape test protects the shape, not the quantity. Row counts need an
   independent source of truth.
 
-← [01 — Grain is the contract](./01-grain.md) · [Course index](./README.md) · next: 03 — Tests that fail on bugs
+← [01 — Grain is the contract](./01-grain.md) · [Course index](./README.md) · next: [03 — Tests that fail on bugs](./03-tests.md)

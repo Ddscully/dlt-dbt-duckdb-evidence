@@ -1579,7 +1579,7 @@ Gotchas:
 
 Ten modules teaching this warehouse as training material for analytics
 engineers, built around the failures that stay green rather than the happy path.
-Modules 00 and 01 are written and set the format; 02-10 are outlined in
+Modules 00-03 are written and set the format; 04-10 are outlined in
 `docs/course/README.md`. Three exercise types, marked in the text: break-and-fix
 drills, investigate-the-data questions, design defences.
 
@@ -1657,12 +1657,59 @@ drills, investigate-the-data questions, design defences.
   exempt from the exercise rules **by name**, not by "has no markers" — the
   latter excuses exactly the half-written module the check exists to catch.
   Verified by breaking all six rules and reading the messages back.
+- **The index's promise that "every drill ends with a verification query" is
+  enforced now, and the second half of the rule is what makes it worth having.**
+  `missing_verification()` in `tests/test_course.py` requires the
+  `**Verification.**` marker *and* a fenced block after it — the literal alone
+  passes a drill that carries the words and no command, which is the promise
+  broken in the way that reads as kept. The fenced search is bounded at
+  `<details>`: every reveal is full of fenced SQL, so an unbounded search finds a
+  block whatever the drill itself holds and the check measures nothing. What it
+  deliberately does *not* require is the marker alone on its line — `01-grain.md`
+  writes "**Verification.** When you think it is fixed:" with the block below,
+  which is good prose and a bad thing to forbid.
 - **Absence is the blind spot the whole course is organised around.** Every test
   in this project asserts something about rows that are *present* — `not_null`,
   `accepted_range`, `unique_combination_of_columns`, `relationships` — and
   deleting rows makes all four *more* likely to pass. Fan-out fails loudly; row
   loss fails silently. That asymmetry is module 01's punchline and it is true of
   the real project, not just the drill.
+- **Module 03 measured how much of the warehouse the 368 tests actually look
+  at, and the answer is the module.** `dbt_utils.accepted_range` compiles to
+  `where not (col >= min)`, and `not (null >= 0)` is *null*, so every range test
+  silently skips its nulls. On `fct_emissions_energy` that means each of the
+  fourteen range tests examines between **1.6%** (`electricity_price_eur_kwh`,
+  701 of 43,138) and **54%** (`co2_mt`) of the fact — except `year`, the one
+  column that is never null, at 100%. 162 of the 367 `marts` columns carry any
+  test at all, against 17 of 17 marts under a type contract: two different
+  guarantees, and worth being able to say which one you have. The audit schema
+  is measurable too — **389 tables against 368 tests** right now, i.e. 21
+  orphans, which is the stale-audit-table bullet under *Pipeline observability*
+  showing up as a number.
+- **Module 03's drill 1 is the calibration trap with a second axis nobody
+  expects.** Adding `max_value: 50` to `stg_co2.co2_per_capita` builds
+  `PASS=402 WARN=0 ERROR=0` on the sandbox, whose maximum is **22.22 — the USA
+  in 1973**, a real and satisfying peak that is 35x too small. On the real
+  warehouse it rejects **124 rows across 6 countries** (Sint Maarten 782.7,
+  Kuwait 364.8, Brunei 245.1, Qatar, Curaçao, UAE — refinery economies with tiny
+  denominators). The part that changes the lesson: **117 of those 124 rows are
+  before 2000 and none at all are since 2020**, so a reviewer who did the right
+  thing and checked the full 213-country *current* cross-section would have
+  shipped the same ceiling. A bound is calibrated against every row the model
+  will ever hold, and a warehouse with history has two axes to be wrong along.
+- **Module 03's drill 2 is why `dim_currency` needs the `is_quoted` test, stated
+  as a general rule about SQL tests.** Appending a phantom row to
+  `dbt/seeds/currencies.csv` leaves **all seven of the seed's own tests green**
+  and fails one mart test. The seed's `retired_on` check does a correlated
+  `max(rate_date)` lookup, which returns NULL for a code with no rates, so
+  `retired_on > NULL` is null, `not null` is null, and the row is never selected:
+  **the test asks "can I prove this false", and unknown scores as innocent.** The
+  reverse direction (`sed -i '/^PLN,/d'`) fires the `relationships` test with
+  7,066 results, and neither test can do the other's job because they scan
+  different relations. Without the `is_quoted` test the damage would be
+  `fct_fx_rates_daily` losing PLN's **10,078** rows while
+  `fct_fx_rates_published` (7,066) and `fct_fx_rates_periods` (527) stay correct
+  — one of three tables wrong, which has no signature.
 
 ## Verifying changes
 

@@ -158,6 +158,53 @@ _HEADING = re.compile(r"^## .*$", re.MULTILINE)
 
 REVEAL = "<details>"
 
+# The break-and-fix marker specifically. The index promises that *drills* end
+# with a verification query — investigate and design-defence sections have
+# nothing to verify, so the promise is narrower than "every exercise".
+DRILL_MARKER = "\U0001f527"
+
+VERIFICATION = "**Verification.**"
+
+
+def missing_verification(heading: str, body: str) -> str | None:
+    """The name of what a 🔧 drill section is missing, or None if it is complete.
+
+    `docs/course/README.md` promises a learner: "Every drill ends with a
+    **verification query**, because 'it looks right now' is the failure mode the
+    course exists to break." All five drills written so far honour it, and
+    nothing enforces it — which is the exact shape this file exists to catch, one
+    level up. An unenforced promise in the index is a claim about the outside of
+    the material, and it rots the same way a renamed path does.
+
+    Two levels of strictness, because the literal alone is not worth much: a
+    drill could carry the words and no command, which is the promise broken in
+    the way that reads as kept.
+
+    - the `**Verification.**` marker is present, and
+    - a fenced block follows it, before the reveal.
+
+    "Before the reveal" is doing real work and is not an ordering rule for its
+    own sake. Every reveal is full of fenced SQL, so an unbounded search finds a
+    block whatever the drill itself carries and the second check measures
+    nothing. Bounding it at `<details>` is what makes the fenced half an
+    assertion about the drill rather than about the answer.
+
+    Deliberately *not* checked: that the marker sits on a line of its own.
+    `01-grain.md` writes "**Verification.** When you think it is fixed:" with the
+    block on the next line, which is good prose and a bad thing to forbid.
+
+    Called once per section; only 🔧 sections are passed in.
+    """
+    start = body.find(VERIFICATION)
+    if start == -1:
+        return "a **Verification.** block"
+
+    reveal = body.find(REVEAL, start)
+    drill = body[start:reveal] if reveal != -1 else body[start:]
+    if not _FENCED.search(drill):
+        return "a runnable command in the **Verification.** block"
+    return None
+
 
 def sections(text: str) -> list[tuple[str, str]]:
     """`[(heading, body), …]` for each `##` section, preamble discarded."""
@@ -225,6 +272,8 @@ def missing_sections(text: str, name: str) -> list[str]:
     for heading, body in exercises:
         if REVEAL not in body:
             missing.append(f"a <details> reveal under {heading.removeprefix('## ').strip()!r}")
+        if DRILL_MARKER in heading and (gap := missing_verification(heading, body)):
+            missing.append(f"{gap} under {heading.removeprefix('## ').strip()!r}")
 
     orphans = sum(body.count(REVEAL) for heading, body in found if not is_exercise(heading))
     if orphans:
