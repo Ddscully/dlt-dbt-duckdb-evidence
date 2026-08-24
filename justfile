@@ -32,6 +32,13 @@ dbt-deps:
 dbt-build: dbt-deps
     cd dbt && uv run dbt build
 
+# Unit tests only — mocked inputs, asserted outputs, no warehouse read. The inner
+# loop when changing model *logic*: `dbt build` runs these too, but this is ~2s
+# against a full build. Parents must exist in the warehouse (schema only is
+# enough); `just dbt-build` once if they don't.
+dbt-unit-test: dbt-deps
+    cd dbt && uv run dbt test --select test_type:unit
+
 # Is the warehouse stale? Compares dlt's `_dlt_load_id` against the thresholds
 # in models/staging/_sources.yml (warn at 7 days, error at 30). This measures
 # when the pipeline last ran, not when the publishers last updated.
