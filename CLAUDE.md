@@ -70,7 +70,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 368 data tests + 6 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 368 data tests + 10 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -476,6 +476,11 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   `dbt_project.prepare_if_dev()` covers it under `dagster dev` only — outside the
   UI, `dbt deps && dbt parse` has to happen before the asset graph will load at
   all, because the manifest lives in the gitignored `dbt/target/`.
+- **One `unit_tests:` key per yml file.** Appending a second block to
+  `_unit_tests.yml` parses and runs — dbt *merges* the two lists rather than
+  letting the last win — but it warns `DuplicateYAMLKeysDeprecation`, and
+  deprecated in 1.10 means gone in Fusion. The tolerant behaviour is the
+  dangerous half: nothing is red and nothing is missing, so it survives review.
 - **Test args go under `arguments:`, and the key is `data_tests:`.** The flat
   `tests: [- some_test: {arg: …}]` form is deprecated in dbt 1.10 and gone in
   Fusion; the whole project uses the new spelling, so match it.
@@ -492,7 +497,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are six unit tests, over two models, and they exist because a data
+- **There are ten unit tests, over three models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -532,6 +537,34 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
     `invoice_type <> 'adjustment'` has never once been the deciding term and
     nothing in the data can reach it. The unit test poses the row the source has
     not sent.
+- **`fct_cbam_exposure` is the third, and the hardest of the three to test any
+  other way.** It is a table of euro costs with a statutory deadline whose every
+  figure is plausible, transcribed from a legal instrument — so there is no
+  independent quantity to check the numbers against and its 19 data tests are
+  `not_null` and `accepted_range` with bounds that have to be generous. What is
+  left to test is the *rules*. Mutated against a warehouse copy: resolving the
+  fallback **per column instead of per row** changes not one number in the
+  warehouse and all 19 pass; **hardcoding the mark-up at 10/20/30** moves the
+  fertiliser average from EUR 105.76 to EUR 115.18 a tonne and all 19 pass;
+  partitioning `excess_over_cleanest_source` **by product group instead of by
+  good** takes the total from 18,989 t to 30,599 t and all 19 pass. Only
+  `count(*)` in place of `count(<total>)` in `priced_goods` goes red, on seven
+  `not_null`s, because the 875 heading rows it lets through have no price at all.
+  - **`markup_2026_pct` cannot be unit tested and that is the finding.** It is a
+    ratio of two doubles, and the warehouse holds three distinct values of it
+    that all print as `10.0` — 9.99999999999998578915, 10.00000000000000888178
+    and 10.00000000000003197442. A column with no exact value can carry a range
+    test and nothing else, which is the real cost of the 2026/1740 correction
+    forcing the schedule from measured to asserted. The fixtures pick totals that
+    *are* exact under the mark-up (2.5, 5, 10, 20, 40, 80 for 10/20/30%; 50 and
+    almost nothing else for the fertilisers' 1%) so the certificate columns can
+    be compared at all.
+  - **`production_route_code` does not follow the row-level fallback rule.** It
+    is read off the country's row while direct, indirect and total come from the
+    fallback — the exact split the rule exists to forbid. All 755 fallen-back
+    rows carry a null route today, so the model is consistent by luck rather than
+    by construction. The unit test poses a row with a route and pins the current
+    behaviour, so changing it is a decision rather than a discovery.
 - **`expect` is full-set equality, so a model that generates its own rows needs a
   fixture file.** `dim_date` expands its bounds to whole calendar years, so any
   mocked `stg_fx_rates` inside one year yields 366 rows and all 366 must be

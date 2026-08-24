@@ -223,6 +223,46 @@ time series.
   tonnage columns beside the euro columns and states the price per row, so the
   page draws its EUR 60-120 sensitivity from one build and a release consumer can
   re-price without rebuilding.
+### What the unit tests hold
+
+Four of them, in `dbt/models/marts/_unit_tests.yml`. This model's 19 data tests
+are `not_null` and generous `accepted_range`s, and they cannot be anything else:
+the numbers are transcribed from a legal instrument, so there is no independent
+quantity to check them against. What is testable is the *rules*, and mutation
+against a warehouse copy says how much they were worth:
+
+| mutation | 19 data tests | effect |
+|---|---|---|
+| fallback resolved per column, not per row | **all pass** | **nothing moves at all** |
+| mark-up hardcoded at 10/20/30% | **all pass** | fertiliser avg EUR 105.76 -> 115.18 /t |
+| `excess_over_cleanest_source` partitioned by product group | **all pass** | 18,989 t -> 30,599 t |
+| `count(*)` for `count(<total>)` in `priced_goods` | 7 fail | +875 unpriced heading rows |
+
+- **The fallback rule is now unreachable by data, which is the argument for
+  testing it.** Zero of the 12,540 seed rows have a null total beside a non-null
+  direct or indirect — the Chile line pipe that proved the rule was corrected out
+  of the annex in July 2026. The mutation is therefore *completely* invisible:
+  not one figure in the warehouse changes. Same category as `dim_date`'s eleven
+  unbuilt fiscal policies.
+- **`markup_2026_pct` cannot be asserted at all.** It is a ratio of two doubles
+  and the warehouse holds three distinct values that all print as `10.0`
+  (9.99999999999998578915, 10.00000000000000888178, 10.00000000000003197442).
+  A column with no exact value can carry a range test and nothing else — which is
+  the real cost of the correction forcing the schedule from measured to asserted.
+  The fixtures therefore use totals that *are* float-exact under the mark-up:
+  2.5, 5, 10, 20, 40 and 80 for the 10/20/30% groups, and **50 and almost nothing
+  else** for the fertilisers' 1%. Mali's hydrogen total is `0.0`, which is the one
+  row where `nullif(total, 0)` makes the column null — the guard on real data.
+- **`production_route_code` does not follow the row-level rule.** It is read off
+  the country's row while the tonnages come from the fallback, which is the split
+  the rule exists to forbid. All 755 fallen-back rows carry a null route today,
+  so the model is consistent by luck. The unit test poses a row with a route and
+  pins current behaviour, so changing it is a decision.
+- **The fallback row is `is_country_specific = true`.** All 260 of them, because
+  the flag keys on "this row has a total of its own" and the fallback does.
+  `is_fallback_table` is the column that identifies it. Reads oddly, so it is
+  pinned rather than left to be rediscovered.
+
 ### Licence and scope limits
 
 - **Annexes II and III are deliberately not ingested.** They are the country
