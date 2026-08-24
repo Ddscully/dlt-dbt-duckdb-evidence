@@ -1301,33 +1301,77 @@ Two tiers, and the split is the point — see [`tests/README.md`](tests/README.m
 
 Gotchas:
 
-- **A count cited in prose is an untested assertion, and three of them went
-  stale at once.** `tests/test_documented_counts.py` scans tracked markdown and
-  the two `_unit_tests.yml` headers for any integer in front of a test-noun and
-  requires it to be one the manifest actually produces. It exists because
-  adding a single data test moved 368 to 369 in two files and left it wrong in
-  fourteen — including `README.md` labelling `docs/DATA_QUALITY.md` with a
-  count of 368 while linking to a file that already said 369 — and because a
-  figure of 22 for `stg_retail_lines`' data tests was wrong in thirteen places
-  (it has 19; the 22 was `dbt build`'s node total, which counts the model
-  itself).
+- **The way a test here earns its place is mutation, and the method has two
+  traps.** Break the model in a plausible way against a *copy* of the warehouse
+  (`WAREHOUSE_PATH` at an absolute path — `just dbt-build` targets the real
+  one), run its full data-test suite, and record the number that moves. "Nothing
+  went red" is the finding, not the all-clear: across the five models mutated
+  this way — `stg_retail_lines`, `fct_cbam_exposure`, `fct_fx_rates_daily`,
+  `fct_fx_rates_periods`, `fct_retail_returns` — 24 mutations were run and the
+  data tests caught 3.
+  - **Run the unmutated baseline inside every batch.** A mutation that fails to
+    *apply* is indistinguishable from a test that caught it, and both happened
+    here — a `sed` pattern that spanned a hard wrap matched nothing, and a `cd`
+    inside a shell function broke every relative path in the loop. The tell in
+    both cases was the baseline row disagreeing with itself.
+  - **Restore from a copy, never `git checkout <file>`.** During this work the
+    tree is dirty by definition; `git checkout` is a revert to HEAD, not an
+    undo, and it destroyed a round of uncommitted edits to three files.
+- **A determinism fix invalidates the evidence gathered for it.** Everything
+  measured while diagnosing `fct_retail_returns`' tied `asof` came from a model
+  that gave a different answer every build, and those figures were then quoted
+  in the commit that fixed it — six numbers wrong, replicated across four files.
+  After stabilising anything, re-measure the whole investigation rather than the
+  figures you happen to doubt. The tell was internal inconsistency, not
+  implausibility: two mutations that move the identical row set were written
+  down with different deltas.
+- **`dbt build --select <model>` does not report that model's test count, and
+  five places in this repo said it did.** Its PASS total counts the model node
+  itself, plus anything eagerly selected — so `stg_retail_lines` was written
+  down as 22 where it has 19, and `fct_fx_rates_daily`, `fct_fx_rates_periods`,
+  `fct_retail_returns` and `dim_date` were each written down as one more than
+  they have. The `dim_date` one shipped in the PR that added its unit tests and
+  survived until a scanner went looking. The count that means "tests attached to
+  this model" is the manifest's, filtered on `attached_node`; nothing printed by
+  a build is it.
+- **A count cited in prose is an untested assertion, and this repo produced
+  about forty stale ones.** `tests/test_documented_counts.py` scans tracked
+  markdown and the two `_unit_tests.yml` headers for any integer in front of a
+  test-noun and requires it to be one the manifest actually produces. It exists
+  because adding a single data test moved 368 to 369 in two files and left it
+  wrong in fourteen — including `README.md` labelling `docs/DATA_QUALITY.md`
+  with a count of 368 while linking to a file that already said 369. `lint`,
+  `pytest` and `dbt build` were green through all of it.
 
     The guard forbids quoting a superseded count directly in front of a
     test-noun, which is why this bullet phrases the old figures the long way
     round. That is the intended cost — an exemption comment would be a hole
     someone eventually parks a real staleness in.
-  `lint`, `pytest` and `dbt build` were green through all of it.
   - **Scan whole-file, never line by line.** These docs are hard wrapped at ~80
     characters and the claims straddle the wraps — `docs/DATA_QUALITY.md` ends a
     line on "10 unit" and starts the next with "tests.". A per-line scan missed
     3 of 31 claims and passed a mutated unit-test count; it was a mutation that
     found that, not review.
-  - **The allowed set is derived from the manifest and deliberately global**, so
-    a per-model count could satisfy a project-wide sentence. Anchoring each
-    citation to its own site would catch that and would drift on every reflow.
-    Only per-model counts that are genuinely cited belong in the set: each one
-    added widens it for every other check.
-  - `seen > 25` is the vacuity guard. A scanner whose patterns stop matching
+  - **Per-model counts are scoped to their own model, and were not at first.**
+    Folding them into one allowed set put `fct_retail_returns`' 10 and
+    `fct_fx_rates_daily`' 14 into the *project-wide* set — and 10 had been the
+    project-wide unit-test total one commit earlier, so a sentence still
+    claiming that old total became legal anywhere, and the guard silently
+    reopened the staleness it exists to catch. (Writing the example out here
+    fails the guard, which is the bullet above demonstrating itself.) A count is now accepted only where the nearest *preceding* model
+    mention owns it, which is how these documents establish context: a heading,
+    then prose about that model. Adding a model to `CITED_MODELS` is therefore
+    cheap — but a model whose count is cited and *not* listed is unguarded
+    rather than wrong, which is the failure mode to watch.
+  - **The number is not always adjacent to the noun.** `of those` / `of the` may
+    sit between them ("Eighteen of those tests"), and CLAUDE.md writes counts as
+    words. Both are handled; words only from ten up, because below that they are
+    always local ("Two unit tests catch all five") and admitting them produced
+    nine false positives against zero finds. Anything longer than that filler is
+    deliberately out — "367 of the 369 tests" has to capture 369, not 367. What
+    still escapes is a number with no test-noun after it at all ("pass all 14:"),
+    so phrase a count with its noun.
+  - `seen > 35` is the vacuity guard. A scanner whose patterns stop matching
     passes by not looking — the same failure `_ROUTES` reachability exists for.
 
 - **`WAREHOUSE_PATH` overrides the DuckDB file** for `ingest`, `transform`, `lake`
@@ -1420,6 +1464,33 @@ uv run python -c "import duckdb; \
   print(duckdb.connect('data/warehouse.duckdb', read_only=True).sql(\
   'select * from marts.fct_emissions_energy limit 5').df())"
 ```
+
+## Branches and PRs
+
+Every PR here is **squash-merged**, so `main` is linear and one commit per PR —
+`git log --merges main` is empty. That is a setting with consequences worth
+knowing before stacking work.
+
+- **A PR is a commit on `main`, so PR count is a content decision, not a
+  process one.** Eight commits over two PRs squash to two messages; the eight
+  individual messages survive only on the PR pages. Group by what makes one
+  writable summary — "a body of testing plus the defect it uncovered" worked
+  twice — rather than one per branch.
+- **Stacked PRs need a rebase after the one below merges, and the conflicts are
+  predictable.** Squashing rewrites the base's identity, so the child is rebased
+  onto commits it has never seen: `git rebase --onto origin/main <old-base>
+  <branch>`. Every extra level in the stack is one more of those.
+  - What conflicts is whatever both sides touch, which in this repo means the
+    running totals in `CLAUDE.md` and `docs/DATA_QUALITY.md`. **A derived total
+    written into prose behaves like a lock** — no two commits touching it can be
+    reordered or cherry-picked independently. The `_unit_tests.yml` additions
+    barely conflict at all, being appends to different blocks; it is the
+    one-line summary above them that welds a stack into a fixed order.
+- **`git branch --merged` is useless here.** The squashed commit shares no SHA
+  with the branch, so five fully-merged branches reported as unmerged and
+  `git branch -d` refuses them. The check that works is `git diff main..<branch>`
+  being empty. Where it is *not* empty, look before deleting: a stale branch and
+  a branch with unique work look the same to `-D`.
 
 ## Session history
 
