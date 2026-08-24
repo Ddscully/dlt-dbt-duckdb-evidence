@@ -441,3 +441,119 @@ unit_tests:
         - {date_day: "2024-01-14", units_per_eur: 20.0, days_since_published_rate: 3, is_rate_stale: false}
         - {date_day: "2024-01-15", units_per_eur: 20.0, days_since_published_rate: 4, is_rate_stale: false}
         - {date_day: "2024-01-16", units_per_eur: 20.0, days_since_published_rate: 5, is_rate_stale: false}
+
+  # ---------------------------------------------------------------------------
+  # fct_fx_rates_periods — the aggregation.
+  #
+  # Five mutations against a warehouse copy. The model has 21 data tests and
+  # only one of them notices anything:
+  #
+  # | mutation                                    | 21 data tests | effect                                        |
+  # |---------------------------------------------|---------------|-----------------------------------------------|
+  # | `avg_eur_per_unit` = 1 / `avg_units_per_eur`| all pass      | USD 2008 0.683499 -> 0.679923; ISK 2008 off 11.9% |
+  # | `max()` for `arg_max(.., rate_date)`        | all pass      | USD 2014 period end 1.2141 -> 1.3953, `period_end_vs_avg_pct` **flips** -8.61% -> +5.03% |
+  # | `min()` for `arg_min(.., rate_date)`        | all pass      | `period_start_units_per_eur` wrong on 16,975 rows (85.9%) |
+  # | `period_is_complete` `<` instead of `<=`    | all pass      | **nothing at all** — no period ends on the series end |
+  # | average over dense `fct_fx_rates_daily`     | **1 fails**   | caught by `fx_periods_annual_buckets_cover_every_fixing` |
+  #
+  # The one that fails is the reason to keep that model-level test: summing
+  # `n_published_days` over the year buckets and comparing it with the published
+  # row count is what makes averaging the gap-filled table impossible to miss.
+  # Everything else here is a number that is positive, non-null and inside every
+  # range, which is all the column tests can ask.
+
+  - name: fx_periods_takes_the_last_fixing_of_a_period_not_the_highest
+    model: fct_fx_rates_periods
+    description: >
+      `period_end_*` is `arg_max(.., rate_date)` and `period_start_units_per_eur`
+      is `arg_min(.., rate_date)` — the *chronologically* last and first fixing,
+      not the largest and smallest. `max()` and `min()` are the plausible slips
+      and neither is visible: both return a real rate from inside the period,
+      positive and in range. `min()` for the start is wrong on 85.9% of the
+      warehouse; `max()` for the end flips the sign of `period_end_vs_avg_pct` on
+      USD 2014, which is the column the whole model exists to provide. The
+      fixture therefore makes the period *fall* to a low it did not start at and
+      peak in the middle, so last, first, max and min are four different numbers.
+    given:
+      - input: ref('fct_fx_rates_published')
+        rows:
+          - {rate_date: "2024-03-01", quote_currency: "TST", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
+          - {rate_date: "2024-03-15", quote_currency: "TST", base_currency: "EUR", units_per_eur: 30.0, eur_per_unit: 0.0333333}
+          - {rate_date: "2024-03-29", quote_currency: "TST", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-03-01", year: 2024, quarter: 1, half: 1, month_start_date: "2024-03-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-03-15", year: 2024, quarter: 1, half: 1, month_start_date: "2024-03-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-03-29", year: 2024, quarter: 1, half: 1, month_start_date: "2024-03-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+    expect:
+      rows:
+        # All three fixings fall in one month, so every period type sees the
+        # same three and the four rows differ only in their labels and bounds.
+        # start 20 (not the min, 10), end 10 (not the max, 30), avg 20,
+        # so period_end_vs_avg_pct is -50 and `max()` would make it +50.
+        - {period_type: "month",   period_label: "2024-03",  period_start_units_per_eur: 20.0, period_end_units_per_eur: 10.0, min_units_per_eur: 10.0, max_units_per_eur: 30.0, avg_units_per_eur: 20.0, period_end_vs_avg_pct: -50.0, intra_period_range_pct: 200.0, n_published_days: 3}
+        - {period_type: "quarter", period_label: "2024-q1", period_start_units_per_eur: 20.0, period_end_units_per_eur: 10.0, min_units_per_eur: 10.0, max_units_per_eur: 30.0, avg_units_per_eur: 20.0, period_end_vs_avg_pct: -50.0, intra_period_range_pct: 200.0, n_published_days: 3}
+        - {period_type: "half",    period_label: "2024-1",  period_start_units_per_eur: 20.0, period_end_units_per_eur: 10.0, min_units_per_eur: 10.0, max_units_per_eur: 30.0, avg_units_per_eur: 20.0, period_end_vs_avg_pct: -50.0, intra_period_range_pct: 200.0, n_published_days: 3}
+        - {period_type: "year",    period_label: "2024",    period_start_units_per_eur: 20.0, period_end_units_per_eur: 10.0, min_units_per_eur: 10.0, max_units_per_eur: 30.0, avg_units_per_eur: 20.0, period_end_vs_avg_pct: -50.0, intra_period_range_pct: 200.0, n_published_days: 3}
+
+  - name: fx_periods_averages_each_direction_over_its_own_series
+    model: fct_fx_rates_periods
+    description: >
+      The mean of the reciprocals is not the reciprocal of the mean, and
+      `avg_eur_per_unit` is the former. Writing it as `1 / avg_units_per_eur` is
+      the natural-looking simplification and it passes all 21 data tests: the
+      number stays positive and non-null, and it is only 0.07% out in a calm
+      year. The gap grows with how far the rate moved inside the period — 0.52%
+      for EUR/USD in 2008 and **11.9% for the Icelandic krona that same year** —
+      so it is largest exactly when someone is most likely to be looking. Two
+      fixings four-fold apart make the two constructions unmistakable: the mean
+      of 0.5 and 0.125 is 0.3125, while one over the mean of 2 and 8 is 0.2.
+      Every value here is exact in binary floating point on purpose.
+      `period_end_eur_per_unit` is asserted alongside because a single point
+      *does* invert exactly — 1/8 is 0.125 — and that asymmetry is the reason
+      only the averages need care.
+    given:
+      - input: ref('fct_fx_rates_published')
+        rows:
+          - {rate_date: "2024-05-10", quote_currency: "TST", base_currency: "EUR", units_per_eur: 2.0, eur_per_unit: 0.5}
+          - {rate_date: "2024-05-20", quote_currency: "TST", base_currency: "EUR", units_per_eur: 8.0, eur_per_unit: 0.125}
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-05-10", year: 2024, quarter: 2, half: 1, month_start_date: "2024-05-01", quarter_start_date: "2024-04-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-05-20", year: 2024, quarter: 2, half: 1, month_start_date: "2024-05-01", quarter_start_date: "2024-04-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+    expect:
+      rows:
+        - {period_type: "month",   period_label: "2024-05",  avg_units_per_eur: 5.0, avg_eur_per_unit: 0.3125, period_end_eur_per_unit: 0.125}
+        - {period_type: "quarter", period_label: "2024-q2", avg_units_per_eur: 5.0, avg_eur_per_unit: 0.3125, period_end_eur_per_unit: 0.125}
+        - {period_type: "half",    period_label: "2024-1",  avg_units_per_eur: 5.0, avg_eur_per_unit: 0.3125, period_end_eur_per_unit: 0.125}
+        - {period_type: "year",    period_label: "2024",    avg_units_per_eur: 5.0, avg_eur_per_unit: 0.3125, period_end_eur_per_unit: 0.125}
+
+  - name: fx_periods_counts_a_period_complete_on_the_day_the_series_reaches_its_end
+    model: fct_fx_rates_periods
+    description: >
+      `period_is_complete` is `period_end_date <= max(rate_date)`, and its
+      boundary is unreachable by the warehouse: **no period ends on the series
+      end date**, so changing `<=` to `<` moves nothing at all. It is only live
+      on the days the ECB's last fixing happens to land on a month, quarter,
+      half or year end — roughly one day in thirty for the month grain and one
+      in three hundred and sixty-five for the year. Same category as `dim_date`'s
+      eleven unbuilt fiscal policies: a branch the data cannot reach, so the
+      fixture poses it. The last fixing here is 31 January, so the month is
+      complete on the nose and the three longer periods are not.
+    given:
+      - input: ref('fct_fx_rates_published')
+        rows:
+          - {rate_date: "2024-01-02", quote_currency: "TST", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-01-31", quote_currency: "TST", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-01-02", year: 2024, quarter: 1, half: 1, month_start_date: "2024-01-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-01-31", year: 2024, quarter: 1, half: 1, month_start_date: "2024-01-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+    expect:
+      rows:
+        # The month ends exactly on the series end: complete under `<=`, and the
+        # single row a `<` would take away.
+        - {period_type: "month",   period_end_date: "2024-01-31", period_is_complete: true}
+        - {period_type: "quarter", period_end_date: "2024-03-31", period_is_complete: false}
+        - {period_type: "half",    period_end_date: "2024-06-30", period_is_complete: false}
+        - {period_type: "year",    period_end_date: "2024-12-31", period_is_complete: false}

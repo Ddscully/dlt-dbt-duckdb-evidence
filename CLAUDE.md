@@ -70,7 +70,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 12 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 15 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -497,7 +497,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are twelve unit tests, over four models, and they exist because a data
+- **There are fifteen unit tests, over five models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -626,6 +626,37 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
     ARS goes 0.89130 to 1.76373 across its 26-day gap. Carrying either forward
     converts at a rate 132% and 98% from the next real quote. That is the
     argument for the cap being 7 rather than generous.
+- **`fct_fx_rates_periods` is the fifth, and the only model so far where an
+  existing test caught one of the mutations.** 21 data tests; five mutations,
+  four of them green on every one. `avg_eur_per_unit` written as
+  `1 / avg_units_per_eur` moves USD 2008 from 0.683499 to 0.679923; `max()` in
+  place of `arg_max(.., rate_date)` takes USD 2014's period end from 1.2141 to
+  1.3953 and **flips the sign of `period_end_vs_avg_pct`, -8.61% to +5.03%**;
+  `min()` for `arg_min` puts the wrong `period_start_units_per_eur` on 16,975
+  rows (85.9%); and `period_is_complete` on `<` instead of `<=` changes nothing
+  at all. Averaging the dense `fct_fx_rates_daily` instead of the published
+  fixings is the one that fails, on
+  `fx_periods_annual_buckets_cover_every_fixing`.
+  - **That test is the model to copy.** It sums `n_published_days` over the year
+    buckets and compares it with the row count of `fct_fx_rates_published`, so
+    the *shape* of the input is pinned rather than any value. It was written to
+    guard the `dim_date` join and it catches an unrelated bug for free, which is
+    what a structural assertion buys over a per-column range.
+  - **`arg_max(x, rate_date)` against `max(x)` is the slip to watch for here**,
+    because on a rising period they agree and the model has four columns of that
+    shape. The fixture makes the period peak in the middle and close below where
+    it opened, so last, first, max and min are four different numbers.
+  - **The reciprocal gap is worst exactly when someone is looking.** 0.07% for
+    EUR/USD in calm 2015, 0.52% in 2008 — and **11.9% for the Icelandic krona in
+    2008**, which is the number that makes the rule matter rather than the USD
+    one. Fixture values are chosen exact in binary floating point: mean of 0.5
+    and 0.125 is 0.3125 against one over the mean of 2 and 8, which is 0.2.
+  - **`period_is_complete`'s boundary is unreachable and stays that way.** No
+    period ends on the series end date, so `<` and `<=` are indistinguishable in
+    the warehouse; the branch is live only on the days the last fixing lands on
+    a month, quarter, half or year end. `dim_date`'s eleven unbuilt fiscal
+    policies and the retail `<> 'adjustment'` clause are the same category, and
+    that is now three of the five models.
 - **`expect` is full-set equality, so a model that generates its own rows needs a
   fixture file.** `dim_date` expands its bounds to whole calendar years, so any
   mocked `stg_fx_rates` inside one year yields 366 rows and all 366 must be

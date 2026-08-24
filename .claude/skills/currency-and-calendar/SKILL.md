@@ -84,6 +84,20 @@ follows from that rather than from the numbers.
     `is_quoted` assertion: 47 rows, 46 quoted, EUR the one exception.
 ### Both directions, and spot against average
 
+- **`fct_fx_rates_periods` has 21 data tests and four of five mutations pass
+  every one of them.** `avg_eur_per_unit` as `1 / avg_units_per_eur` (USD 2008
+  0.683499 -> 0.679923), `max()` for `arg_max(.., rate_date)` (USD 2014's period
+  end 1.2141 -> 1.3953, and `period_end_vs_avg_pct` **flips sign**, -8.61% ->
+  +5.03%), `min()` for `arg_min` (85.9% of `period_start_units_per_eur` wrong),
+  and `period_is_complete` on `<` (nothing moves — no period ends on the series
+  end date). The fifth, averaging the dense daily table, is caught by
+  `fx_periods_annual_buckets_cover_every_fixing`, which pins the input's shape
+  rather than any value and catches this for free. Three unit tests in
+  `dbt/models/marts/_unit_tests.yml` hold all five.
+  - **The reciprocal gap's headline number should be the krona, not the
+    dollar.** 0.07% for EUR/USD in 2015 and 0.52% in 2008 read as rounding; the
+    ISK in 2008 is **11.9%**. The gap scales with intra-period movement, so it
+    is largest in exactly the periods someone is investigating.
 - **Both directions of every rate ship.** `units_per_eur` is the ECB's own quote,
   `eur_per_unit` its reciprocal. Same argument as the Scope 2 factor in g/kWh
   *and* t/MWh: a consumer forced to invert it themselves will eventually forget.
