@@ -44,7 +44,34 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # the legitimate neighbouring figures all precede a *different* noun — "291 of
 # the 369", "391 audit tables", "22 orphans", "367 of the 369 tests" — so they
 # are never captured and never need exempting.
-CLAIM = re.compile(r"\b(\d+)\s+(?:dbt\s+|data\s+|unit\s+)?tests?\b")
+# CLAUDE.md writes some counts as words ("There are eighteen unit tests"), so
+# the pattern reads both — `fct_retail_returns` shipped "all eleven data tests"
+# for a model with ten, and a digits-only scanner passed it twice.
+#
+# Only ten and above. Below that the words are always local ("Two unit tests
+# catch all five", "four tests", "one test"), never a project-wide or per-model
+# total, and including them produced nine false positives against zero finds.
+WORDS = {
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+CLAIM = re.compile(
+    rf"\b(\d+|{'|'.join(WORDS)})\s+(?:dbt\s+|data\s+|unit\s+)?tests?\b", re.IGNORECASE
+)
+
+
+def as_int(token: str) -> int:
+    return int(token) if token.isdigit() else WORDS[token.lower()]
+
 
 # Prose that makes these claims. `git ls-files` rather than a glob, so the
 # gitignored `docs/sessions/` transcripts (which quote historical counts by
@@ -109,6 +136,9 @@ def expected_counts(man: dict) -> set[int]:
         data + unit,  # the "N tests alongside the models" figure
         attached_to(man, "stg_retail_lines"),  # cited 3x
         attached_to(man, "fct_cbam_exposure"),  # cited 4x
+        attached_to(man, "fct_fx_rates_daily"),  # cited 3x
+        attached_to(man, "fct_fx_rates_periods"),  # cited 4x
+        attached_to(man, "fct_retail_returns"),  # cited 2x
     }
 
 
@@ -126,7 +156,7 @@ def test_every_documented_test_count_is_one_dbt_actually_builds():
         text = path.read_text()
         for match in CLAIM.finditer(text):
             seen += 1
-            if int(match.group(1)) not in allowed:
+            if as_int(match.group(1)) not in allowed:
                 line = text.count("\n", 0, match.start()) + 1
                 rel = path.relative_to(REPO_ROOT)
                 claim = " ".join(match.group(0).split())

@@ -627,7 +627,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
     converts at a rate 132% and 98% from the next real quote. That is the
     argument for the cap being 7 rather than generous.
 - **`fct_fx_rates_periods` is the fifth, and the only model so far where an
-  existing test caught one of the mutations.** 21 data tests; five mutations,
+  existing test caught one of the mutations.** 20 data tests; five mutations,
   four of them green on every one. `avg_eur_per_unit` written as
   `1 / avg_units_per_eur` moves USD 2008 from 0.683499 to 0.679923; `max()` in
   place of `arg_max(.., rate_date)` takes USD 2014's period end from 1.2141 to
@@ -658,7 +658,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
     policies and the retail `<> 'adjustment'` clause are the same category, and
     that is now three of the five models.
 - **`fct_retail_returns` is the sixth, and unit-testing it turned up that the
-  model is not deterministic.** Six mutations, all eleven data tests green on
+  model is not deterministic.** Six mutations, all ten data tests green on
   every one: checking "no prior purchase" before "no customer id" relabels the
   352 unmatchable rows; `>=` for "quantity exceeds purchase" takes matched from
   16,031 to 10,398; `<` for `quantity_is_consistent` takes consistent to 10,404;

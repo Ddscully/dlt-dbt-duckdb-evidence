@@ -317,7 +317,7 @@ unit_tests:
   # Five mutations against a warehouse copy, every one of them passing all 15 of
   # the model's data tests:
   #
-  # | mutation                              | 15 data tests | effect                                    |
+  # | mutation                              | 14 data tests | effect                                    |
   # |---------------------------------------|---------------|-------------------------------------------|
   # | cap 7 -> 30 days                      | all pass      | 46 stale rows gain a rate                 |
   # | cap removed entirely                  | all pass      | all 3,359 stale rows priced, self-contradictory |
@@ -340,7 +340,7 @@ unit_tests:
       The carry window is partitioned by currency, and dropping that partition
       is the worst of the five mutations: `last_value(... ignore nulls)` then
       reaches across currencies and 29.7% of the table quotes somebody else's
-      fixing — GBP's 0.7094 becomes 0.3718 — with all 15 data tests green,
+      fixing — GBP's 0.7094 becomes 0.3718 — with all 14 data tests green,
       because the dates still move forward and the grain is still unique. The
       fixture is built so a missing partition is unmissable: BBB publishes
       *later* than AAA on every day AAA has to carry, so an unpartitioned window
@@ -445,10 +445,10 @@ unit_tests:
   # ---------------------------------------------------------------------------
   # fct_fx_rates_periods — the aggregation.
   #
-  # Five mutations against a warehouse copy. The model has 21 data tests and
+  # Five mutations against a warehouse copy. The model has 20 data tests and
   # only one of them notices anything:
   #
-  # | mutation                                    | 21 data tests | effect                                        |
+  # | mutation                                    | 20 data tests | effect                                        |
   # |---------------------------------------------|---------------|-----------------------------------------------|
   # | `avg_eur_per_unit` = 1 / `avg_units_per_eur`| all pass      | USD 2008 0.683499 -> 0.679923; ISK 2008 off 11.9% |
   # | `max()` for `arg_max(.., rate_date)`        | all pass      | USD 2014 period end 1.2141 -> 1.3953, `period_end_vs_avg_pct` **flips** -8.61% -> +5.03% |
@@ -501,7 +501,7 @@ unit_tests:
     description: >
       The mean of the reciprocals is not the reciprocal of the mean, and
       `avg_eur_per_unit` is the former. Writing it as `1 / avg_units_per_eur` is
-      the natural-looking simplification and it passes all 21 data tests: the
+      the natural-looking simplification and it passes all 20 data tests: the
       number stays positive and non-null, and it is only 0.07% out in a calm
       year. The gap grows with how far the rate moved inside the period — 0.52%
       for EUR/USD in 2008 and **11.9% for the Icelandic krona that same year** —
@@ -561,7 +561,7 @@ unit_tests:
   # ---------------------------------------------------------------------------
   # fct_retail_returns — the inferred join.
   #
-  # Six mutations against a warehouse copy, all eleven data tests green on every
+  # Six mutations against a warehouse copy, all ten data tests green on every
   # one:
   #
   # | mutation                                      | effect                                          |
