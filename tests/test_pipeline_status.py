@@ -15,6 +15,7 @@ import duckdb
 import pytest
 
 from modern_data_stack import observability
+from modern_data_stack.db import scalar
 from transform import pipeline_status
 
 
@@ -359,6 +360,6 @@ def test_run_writes_all_three_tables(warehouse, manifest):
     con = duckdb.connect(str(warehouse), read_only=True)
     try:
         for name in written:
-            assert con.sql(f"select count(*) from analytics.{name}").fetchone()[0] > 0
+            assert scalar(con, f"select count(*) from analytics.{name}") > 0
     finally:
         con.close()

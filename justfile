@@ -175,6 +175,15 @@ notebook:
 lint: dbt-deps
     cd dbt && uv run sqlfluff lint models snapshots
 
+# ty is pre-1.0 and nothing in pre-commit or CI runs it, so a version bump can
+# move the count without turning a workflow red. Suppressions go inline as
+# `# ty: ignore[rule]` at the decision rather than into a rules list; [tool.ty]
+# in pyproject.toml overrides nothing. `uv run`, not a global `ty`, so the
+# locked version is the one that answers — the sqlfluff single-pin rule.
+# Type-check the Python — reports, gates nothing
+typecheck:
+    uv run ty check
+
 # Build the Evidence dashboard (requires Node; see reports/README.md).
 # Wraps the same module the `reports/evidence_site` asset calls, so the recipe and
 # the asset graph can't run different builds.

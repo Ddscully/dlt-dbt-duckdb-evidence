@@ -222,6 +222,14 @@ def run(duckdb_path: str = DUCKDB_PATH) -> int:
         # The extract's own horizon, read from the data rather than assumed, so
         # a re-run against a longer extract re-bases the scores automatically.
         as_of_date = customers["last_order_date"].max()
+        # `Series.max()` returns None on an empty frame and is typed as a
+        # ten-element union either way, so both failures land deep inside the
+        # recency expression as arithmetic against the wrong thing. Name them
+        # here instead — and they are two different faults, not one.
+        if as_of_date is None:
+            raise ValueError("marts.dim_retail_customer is empty — build the mart before scoring")
+        if not isinstance(as_of_date, dt.date):
+            raise TypeError(f"last_order_date holds {type(as_of_date).__name__}, expected a date")
         out = build_retail_rfm(customers, as_of_date)
         con.sql("create schema if not exists analytics")
         con.register("out_df", out)  # DuckDB reads Polars frames directly

@@ -11,12 +11,20 @@
     },
     "duckdb-skills": {
       "source": { "source": "github", "repo": "duckdb/duckdb-skills" }
+    },
+    "modern-data-stack": {
+      "source": { "source": "directory", "path": "./.claude/marketplace" }
+    },
+    "astral-sh": {
+      "source": { "source": "github", "repo": "astral-sh/claude-code-plugins" }
     }
   },
   "enabledPlugins": {
     "dbt@dbt-agent-marketplace": true,
     "dagster-expert@dagster": true,
     "polars@polars": true,
-    "duckdb-skills@duckdb-skills": true
+    "duckdb-skills@duckdb-skills": true,
+    "ty-lsp@modern-data-stack": true,
+    "astral@astral-sh": true
   }
 }

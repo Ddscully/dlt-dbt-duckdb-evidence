@@ -47,6 +47,7 @@ from ingest.pipeline import (
     public_indicators,
 )
 from lake.archive import ARCHIVED_TABLES, LAKE_DIR, run as write_lake, table_dir
+from modern_data_stack.db import row, scalar
 from orchestration.resources import dbt_project
 from scripts.build_report import (
     BUILD_DIR,
@@ -588,9 +589,10 @@ FX_STALE_AFTER_DAYS = 8
 
 
 def _scalar(query: str):
+    """`db.scalar` against a fresh read-only connection to the warehouse."""
     con = duckdb.connect(DUCKDB_PATH, read_only=True)
     try:
-        return con.sql(query).fetchone()[0]
+        return scalar(con, query)
     finally:
         con.close()
 
@@ -634,7 +636,7 @@ def mart_covers_recent_years() -> dg.AssetCheckResult:
     selects = ", ".join(f"max(year) filter (where {col} is not null)" for col in columns)
     con = duckdb.connect(DUCKDB_PATH, read_only=True)
     try:
-        max_years = con.sql(f"select {selects} from marts.fct_emissions_energy").fetchone()
+        max_years = row(con, f"select {selects} from marts.fct_emissions_energy")
     finally:
         con.close()
 
@@ -772,13 +774,14 @@ def lake_matches_warehouse() -> dg.AssetCheckResult:
         mismatches = {}
         for table in ARCHIVED_TABLES:
             glob = f"{table_dir(LAKE_DIR, table)}/**/*.parquet"
-            warehouse = con.sql(f"select count(*), min(year), max(year) from {table}").fetchone()
-            archived = con.sql(
+            warehouse = row(con, f"select count(*), min(year), max(year) from {table}")
+            archived = row(
+                con,
                 f"""
                 select count(*), min(year), max(year)
                 from read_parquet('{glob}', hive_partitioning = 1)
-                """
-            ).fetchone()
+                """,
+            )
             if warehouse != archived:
                 mismatches[table] = {"warehouse": list(warehouse), "lake": list(archived)}
     finally:

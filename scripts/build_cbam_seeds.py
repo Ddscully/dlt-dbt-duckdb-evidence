@@ -448,7 +448,7 @@ def _check_layout(sheet, sheet_name: str) -> None:
 def parse_annex(xlsx_path: Path) -> tuple[list[dict], list[dict]]:
     """Return (goods dimension rows, default-value rows) from the annex workbook."""
     try:
-        import openpyxl
+        import openpyxl  # ty: ignore[unresolved-import]  # optional; see below
     except ModuleNotFoundError:  # pragma: no cover - dev-only dependency
         sys.exit("openpyxl is required: uv run --with openpyxl python -m scripts.build_cbam_seeds")
 
