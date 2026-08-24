@@ -501,7 +501,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
-  and every fiscal quarter in the warehouse is wrong while **all 20 data tests on
+  and every fiscal quarter in the warehouse is wrong while **all 19 data tests on
   the model pass** — measured, not argued. Its three unit tests fail on it.
   `fiscal_year_start_date` and `fiscal_year_end_date` had no test of any kind
   before this.
@@ -599,7 +599,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
       null route, and `=` is unknown on a null, which `where not(...)` discards
       — the test would pass by not looking.
 - **`fct_fx_rates_daily` is the fourth, and it is the one where the data tests
-  look adequate and are not.** Fifteen of them: the grain, `rate_source_date <=
+  look adequate and are not.** Fourteen of them: the grain, `rate_source_date <=
   date_day` (no backfill from the future), `rate_source_date = date_day` on
   published rows, positive rates, a non-negative age. **Five mutations, all
   fifteen green on every one.** Widening the cap from 7 days to 30 prices 46
@@ -685,10 +685,10 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
     Parquet in the release and feeds `reports/pages/retail.md`, so figures moved
     between releases with no upstream change.
     - **The tie-break picks one line and deliberately does not sum them, and
-      the cost of that is measured.** Of the 604 tied matches, 70 are flagged
-      'matched, quantity exceeds purchase' and **63 would be plain matches if
+      the cost of that is measured.** Of the 604 tied matches, 63 are flagged
+      'matched, quantity exceeds purchase' and **56 would be plain matches if
       the tied lines were added up** — the customer did buy that many, across
-      two lines of one order. That is 17% of the 367 rows in the bucket the
+      two lines of one order. That is 15% of the 366 rows in the bucket the
       model calls its most interesting number, so **that bucket is an upper
       bound on "the rule found the wrong sale", not a count of it.** Summing is
       a re-specification of the matching rule (`original_line_number` would have
@@ -719,8 +719,8 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  ten cost 2.5s. A broken fiscal calendar should stop `release-data.yml`, not
-  ride along in it. `just dbt-unit-test` is the ~2s inner loop.
+  eighteen cost 3.4s. A broken fiscal calendar should stop `release-data.yml`,
+  not ride along in it. `just dbt-unit-test` is the ~3s inner loop.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.
   It is tautologically green in CI (which loads and then checks), which is why

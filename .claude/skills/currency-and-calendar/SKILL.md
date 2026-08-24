@@ -35,7 +35,8 @@ follows from that rather than from the numbers.
   five mutations prove it.** They guard the grain, the direction of the carry
   (`rate_source_date <= date_day`) and positivity — all real, none sufficient,
   because a rate carried 8 days or 3,341 days is a well-formed positive number
-  with a source date in the past. All five mutations below pass all 15:
+  with a source date in the past. All five mutations below pass all 14 data
+  tests:
 
   | mutation | effect on the warehouse |
   |---|---|
@@ -92,8 +93,11 @@ follows from that rather than from the numbers.
   and `period_is_complete` on `<` (nothing moves — no period ends on the series
   end date). The fifth, averaging the dense daily table, is caught by
   `fx_periods_annual_buckets_cover_every_fixing`, which pins the input's shape
-  rather than any value and catches this for free. Three unit tests in
-  `dbt/models/marts/_unit_tests.yml` hold all five.
+  rather than any value and catches this for free. The three unit tests in
+  `dbt/models/marts/_unit_tests.yml` hold the other four — so between them all
+  five are covered, but the fifth rests on that one data test alone. Deleting it
+  as redundant would leave the only mutation the existing suite catches
+  uncovered.
   - **The reciprocal gap's headline number should be the krona, not the
     dollar.** 0.07% for EUR/USD in 2015 and 0.52% in 2008 read as rounding; the
     ISK in 2008 is **11.9%**. The gap scales with intra-period movement, so it

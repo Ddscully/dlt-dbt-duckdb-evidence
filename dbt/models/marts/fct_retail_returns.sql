@@ -88,14 +88,21 @@ returns as (
 -- measured rather than waved past. Summing the tied lines would change what
 -- `original_quantity` means and leave `original_line_number` with nothing to
 -- point at, so it is a re-specification of the matching rule and not a fix for
--- an unstable one. But it is not free: of the 604 tied matches, 70 are flagged
--- 'matched, quantity exceeds purchase' and **63 of them would be plain matches
+-- an unstable one. But it is not free: of the 604 tied matches, 63 are flagged
+-- 'matched, quantity exceeds purchase' and **56 of them would be plain matches
 -- if the tied lines were added up** — the customer did buy that many, across
--- two lines of one order. That is 17% of the 367 rows in the bucket this model
+-- two lines of one order. That is 15% of the 366 rows in the bucket this model
 -- calls its most interesting number, so the bucket is an upper bound on "the
 -- rule found the wrong sale" rather than a count of it. Left as a separate
--- decision on purpose; a determinism fix should not quietly move 63 rows
+-- decision on purpose; a determinism fix should not quietly move 56 rows
 -- between buckets.
+--
+-- These five figures are measured against the warehouse this model *now*
+-- builds. The first version of this comment quoted 70 / 63 / 367, taken while
+-- diagnosing the instability — i.e. from the model that gave a different answer
+-- every build. A determinism fix invalidates the evidence gathered for it, so
+-- everything here was re-measured afterwards. This comment is the one copy that
+-- carries the numbers; CLAUDE.md and the retail skill cite it.
 purchases as (
     select
         invoice,

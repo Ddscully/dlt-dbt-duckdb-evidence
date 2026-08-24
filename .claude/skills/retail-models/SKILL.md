@@ -69,14 +69,14 @@ one; the page is `retail.md`.
   float-aggregation instability on `net_revenue_gbp` — that is `sum()` over
   doubles, this is row selection.
   - **'matched, quantity exceeds purchase' is an upper bound, not a count.** Of
-    the 604 tied matches, 70 carry that flag and **63 would be plain matches if
+    the 604 tied matches, 63 carry that flag and **56 would be plain matches if
     the tied lines were summed** — the customer bought that many across two
-    lines of one order. 17% of the bucket. Summing is a re-specification of the
+    lines of one order. 15% of the bucket. Summing is a re-specification of the
     rule and was deliberately kept out of the determinism fix.
   - The tie-break is stable, not meaningful: `invoice` is a string so the order
     is lexicographic, and nothing claims the chosen line is the better match.
 - **Ten data tests, six mutations, none caught** (`dbt/models/marts/_unit_tests.yml`
-  holds the two that do). The `accepted_values` on `match_status` is the same
+  holds the three that do). The `accepted_values` on `match_status` is the same
   trap as `item_type`: reordering the `case` so "no prior purchase" is tested
   before "no customer id" relabels 352 rows and stays green. `>=` for "quantity
   exceeds purchase" moves 5,633 rows; `<` for `quantity_is_consistent` moves

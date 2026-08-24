@@ -567,12 +567,19 @@ unit_tests:
   # | mutation                                      | effect                                          |
   # |-----------------------------------------------|-------------------------------------------------|
   # | `match_status` checks "no prior purchase" first | 352 unmatchable rows change bucket            |
-  # | "quantity exceeds" uses `>=`                  | matched 16,031 -> 10,398, excess 367 -> 6,000   |
-  # | `quantity_is_consistent` uses `<`             | consistent 16,031 -> 10,404                     |
+  # | "quantity exceeds" uses `>=`                  | matched 16,032 -> 10,416, excess 366 -> 5,982   |
+  # | `quantity_is_consistent` uses `<`             | consistent 16,032 -> 10,416                     |
   # | `returns` drops `item_type = 'product'`       | +1,207 rows: postage and fee cancellations      |
   # | `purchases` drops `quantity > 0`              | **nothing** — every write-off is anonymous, so  |
   # |                                               | `customer_id is not null` already excludes them |
-  # | asof `>=` becomes `>`                         | 2 rows                                          |
+  # | asof `>=` becomes `>`                         | 88 rows re-resolved: 2 unmatched, 86 moved to   |
+  # |                                               | an older sale. `matched` *rises* by 2           |
+  #
+  # The middle two land on the same 10,416 because they are the same rows seen
+  # twice: both turn on `quantity_returned = original_quantity`, which is 5,616
+  # rows, so their deltas are equal by construction. An earlier version of this
+  # table gave them different numbers, which was the tell that they had been
+  # measured against the pre-tie-break model — see the determinism note below.
   #
   # `accepted_values` on `match_status` is the trap the retail skill already
   # names: it proves the answer is in the list, never that it is the right
@@ -595,7 +602,11 @@ unit_tests:
       `accepted_values`. The POST cancellation is here to stay out: without
       `item_type = 'product'` the warehouse gains 1,207 rows and reports
       returning things nobody buys. The last pair is bought and returned in the
-      same instant, which the asof condition admits because it is `>=`.
+      same instant, which the asof condition admits because it is `>=` — and
+      that boundary is worth more than it looks: 88 matches in the warehouse
+      share their purchase's instant, so tightening it to `>` costs 2 of them a
+      match and silently re-points the other 86 at an older sale, rewriting five
+      columns with no change to the row count.
     given:
       - input: ref('stg_retail_lines')
         rows:
@@ -678,7 +689,7 @@ unit_tests:
       rows:
         # Invoice 700 line 3 wins: lowest invoice, then lowest line within it.
         # Its quantity is 2, so the return of 4 exceeds it — the artefact the
-        # model comment quantifies. 63 of the warehouse's 367 rows in that bucket
+        # model comment quantifies. 56 of the warehouse's 366 rows in that bucket
         # would be plain matches if tied lines were summed instead of chosen
         # between. That is a separate decision and this test pins today's.
         - {invoice: "C700", original_invoice: "700", original_line_number: 3, original_quantity: 2, quantity_returned: 4, match_status: "matched, quantity exceeds purchase", quantity_is_consistent: false}
