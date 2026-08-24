@@ -1,6 +1,6 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 378 tests alongside the models — 368 data tests and 10 unit
+`just dbt-build` runs 379 tests alongside the models — 369 data tests and 10 unit
 tests. Dagster surfaces the data tests as asset checks on the models they guard.
 For the pytest side, see [`tests/README.md`](../tests/README.md).
 
@@ -45,7 +45,7 @@ arrive lowercase, into product with the same 22 green.
 
 `fct_cbam_exposure` is the hardest of the three. Its numbers are transcribed from
 a legal instrument, so there is nothing independent to check them against and its
-19 data tests can only be `not_null` and generous ranges. What a unit test reaches
+20 data tests are almost all `not_null` and generous ranges. What a unit test reaches
 instead is the rules: hardcoding the phase-in mark-up at 10/20/30% moves the
 fertiliser average from €105.76 to €115.18 a tonne — fertilisers carry a flat 1%
 food-security carve-out — with all 19 green, and measuring

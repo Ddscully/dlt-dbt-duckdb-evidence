@@ -775,6 +775,39 @@ models:
                 field: good_key
       - name: production_route_code
         data_type: VARCHAR
+        description: >
+          Annex I's production route indicator for the row the value came from
+          — (C) carbon steel via BF/BOF, (E) via scrap/EAF, (K) primary
+          aluminium, (L) secondary, and the combined forms C/F and E/H. It is a
+          property of the *value*, not of the country: it explains why one row
+          says 8,21 tCO2e/t and another 0,13, which is why a fallen-back row
+          carries the fallback's route and not the sourcing country's. Null
+          where the annex prints no route (4,976 rows, chiefly fertilisers).
+        data_tests:
+          # The row-level rule, asserted against the annex rather than against
+          # the mart's own other rows: a fallen-back row must carry the route
+          # the fallback row it took its tonnages from was published with.
+          # `is not distinct from` and not `=`, because 553 of the 755 fallen
+          # -back rows correctly resolve to a null route and `=` is unknown on
+          # a null, which a `where not(...)` then discards — the test would
+          # pass by not looking.
+          #
+          # The `or is_country_specific` exemption is in the expression rather
+          # than in a `config: where:`, which is where it belongs and is not a
+          # style choice: `where` makes dbt_utils wrap the model as
+          # `dbt_subquery`, and the correlated reference then has to name that
+          # alias instead of the relation — coupling the test to the package's
+          # internals. A country with its own total keeps its own route by
+          # definition, so exempting it is part of the rule anyway.
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: >
+                  is not distinct from (
+                      select d.production_route_code
+                      from {{ ref('cbam_default_values') }} as d
+                      where d.good_key = fct_cbam_exposure.good_key
+                        and d.country_iso3 is null
+                  ) or is_country_specific
       - name: is_fallback_table
         data_type: BOOLEAN
       - name: is_country_specific

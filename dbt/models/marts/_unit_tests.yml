@@ -132,23 +132,25 @@ unit_tests:
       row was corrected out of the annex in July 2026 and **no row in the current
       source can reach this branch**: zero of the 12,540 seed rows have a null
       total beside a non-null direct or indirect. Chile is posed here for that
-      reason. `production_route_code` is the one column that does *not* follow
-      the rule — it is read off the country's row while the tonnages come from
-      the fallback — and it is asserted as such so that changing it is a
-      decision. All 755 fallen-back rows in the warehouse carry a null route, so
-      the model is consistent today by luck rather than by construction.
+      reason. `production_route_code` follows the rule too, and the fixture is
+      built to prove it rather than to record it: Chile carries a route of its
+      own ("B") and the fallback carries a different one ("F"), so the only way
+      to expect "F" is to read the route off the row the tonnages came from. It
+      did not follow the rule until 2026-08-24 — 202 warehouse rows showed a
+      blank route beside a tonnage whose fallback row had one.
     given:
       - input: ref('cbam_default_values')
         rows:
           # The annex's catch-all. Its own `country_iso3` is null, which is what
           # makes it the fallback, and it is `is_country_specific` because the
           # number on it is its own.
-          - {country_or_territory: "Other countries and territories", country_iso3: null,  good_key: "7601-unwrought-aluminium", default_direct_t_co2e_per_t: 3.0, default_indirect_t_co2e_per_t: 7.0, default_total_t_co2e_per_t: 10.0, production_route_code: null}
+          - {country_or_territory: "Other countries and territories", country_iso3: null,  good_key: "7601-unwrought-aluminium", default_direct_t_co2e_per_t: 3.0, default_indirect_t_co2e_per_t: 7.0, default_total_t_co2e_per_t: 10.0, production_route_code: "F"}
           # A listed country with a value of its own: keeps all three columns.
           - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "7601-unwrought-aluminium", default_direct_t_co2e_per_t: 1.5, default_indirect_t_co2e_per_t: 3.5, default_total_t_co2e_per_t: 5.0, production_route_code: "A"}
-          # The trap. Direct and indirect published, total absent, route present.
-          # Under the rule this line is the fallback's 3.0 / 7.0 / 10.0 — never
-          # its own 4.0 / 6.0 with someone else's total.
+          # The trap. Direct and indirect published, total absent, route
+          # present *and different from the fallback's*. Under the rule this
+          # line is the fallback's 3.0 / 7.0 / 10.0 on route F — never its own
+          # 4.0 / 6.0 with someone else's total, and never route B.
           - {country_or_territory: "Chile", country_iso3: "CHL", good_key: "7601-unwrought-aluminium", default_direct_t_co2e_per_t: 4.0, default_indirect_t_co2e_per_t: 6.0, default_total_t_co2e_per_t: null, production_route_code: "B"}
       - input: ref('cbam_goods')
         rows:
@@ -168,9 +170,9 @@ unit_tests:
         rows: []
     expect:
       rows:
-        - {country_or_territory: "Other countries and territories", country_display_name: "Other countries and territories", is_fallback_table: true,  is_country_specific: true,  production_route_code: null, direct_t_co2e_per_t: 3.0, indirect_t_co2e_per_t: 7.0, total_t_co2e_per_t: 10.0, certificates_2026_t_co2e_per_t: 11.0}
+        - {country_or_territory: "Other countries and territories", country_display_name: "Other countries and territories", is_fallback_table: true,  is_country_specific: true,  production_route_code: "F", direct_t_co2e_per_t: 3.0, indirect_t_co2e_per_t: 7.0, total_t_co2e_per_t: 10.0, certificates_2026_t_co2e_per_t: 11.0}
         - {country_or_territory: "Norway", country_display_name: "Norway", is_fallback_table: false, is_country_specific: true,  production_route_code: "A", direct_t_co2e_per_t: 1.5, indirect_t_co2e_per_t: 3.5, total_t_co2e_per_t: 5.0,  certificates_2026_t_co2e_per_t: 5.5}
-        - {country_or_territory: "Chile",  country_display_name: "Chile",  is_fallback_table: false, is_country_specific: false, production_route_code: "B", direct_t_co2e_per_t: 3.0, indirect_t_co2e_per_t: 7.0, total_t_co2e_per_t: 10.0, certificates_2026_t_co2e_per_t: 11.0}
+        - {country_or_territory: "Chile",  country_display_name: "Chile",  is_fallback_table: false, is_country_specific: false, production_route_code: "F", direct_t_co2e_per_t: 3.0, indirect_t_co2e_per_t: 7.0, total_t_co2e_per_t: 10.0, certificates_2026_t_co2e_per_t: 11.0}
 
   - name: cbam_exposure_drops_the_headings_that_no_country_prices
     model: fct_cbam_exposure

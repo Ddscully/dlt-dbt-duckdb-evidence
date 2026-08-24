@@ -109,7 +109,8 @@ fallback as (
         good_key,
         default_direct_t_co2e_per_t as fallback_direct,
         default_indirect_t_co2e_per_t as fallback_indirect,
-        default_total_t_co2e_per_t as fallback_total
+        default_total_t_co2e_per_t as fallback_total,
+        production_route_code as fallback_route
     from defaults
     where country_iso3 is null
 ),
@@ -128,7 +129,16 @@ resolved as (
         d.country_or_territory,
         d.country_iso3,
         d.good_key,
-        d.production_route_code,
+        -- Read off the same row as the tonnages, for the reason above: the
+        -- route is a property of the *value*, not of the country. Annex I
+        -- prints it in the row it explains — "(C) carbon steel via BF/BOF" is
+        -- why that row says 8,21 and another says 0,13 — so a fallen-back row
+        -- takes the fallback's route with the fallback's numbers.
+        case
+            when d.default_total_t_co2e_per_t is not null
+                then d.production_route_code
+            else f.fallback_route
+        end as production_route_code,
         d.country_iso3 is null as is_fallback_table,
         -- Which of the two the number came from. A reporter needs to know: a
         -- country-specific value estimates that country's average, and the
