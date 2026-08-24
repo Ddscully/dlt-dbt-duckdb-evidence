@@ -1,7 +1,7 @@
-"""The course material, checked against the repo it teaches.
+"""The course material and the project skills, checked against the repo they cite.
 
-`docs/course/` quotes file paths, `just` recipes and module links out of the rest
-of the tree. None of that is executable, so it rots in exactly the way an
+`docs/course/` and `.claude/skills/*/SKILL.md` quote file paths, `just` recipes
+and module links out of the rest of the tree. None of that is executable, so it rots in exactly the way an
 exposure does: the module still renders, the prose still reads correctly, and the
 path it tells a learner to open was renamed six commits ago. A course that sends
 someone to a file that is not there is worse than no course, because the reader
@@ -25,6 +25,16 @@ from modern_data_stack.paths import project_root
 COURSE_DIR = project_root() / "docs" / "course"
 INDEX = COURSE_DIR / "README.md"
 JUSTFILE = project_root() / "justfile"
+
+# The project skills quote the repo exactly as the course does — several were
+# split out of CLAUDE.md so they load only for the task that needs them — so they
+# rot the same way and are checked by the same two citation tests below. Not by
+# the structural ones: those are about a module's exercises.
+#
+# Globbed, not listed. A hand-maintained list is the `definitions.py` failure
+# CLAUDE.md documents: the omission is not an error, it is simply a file nothing
+# checks. A skill added later is guarded whether or not anyone remembers this.
+SKILLS_DIR = project_root() / ".claude" / "skills"
 
 # Top-level directories a module may cite. `data/` is deliberately absent: it is
 # gitignored and built, so a path under it is correct even on a fresh clone where
@@ -82,8 +92,23 @@ def recipes() -> set[str]:
     return set(_RECIPE_DEF.findall(JUSTFILE.read_text()))
 
 
+def skills() -> list:
+    """Every project skill, guarded for the reason the course is."""
+    return sorted(SKILLS_DIR.glob("*/SKILL.md"))
+
+
+def cited_files() -> list:
+    """Everything that quotes the repo at a reader: the course, plus the skills."""
+    return [*course_files(), *skills()]
+
+
+def _label(doc) -> str:
+    """`SKILL.md` alone says nothing; name a skill by its directory."""
+    return doc.parent.name if doc.name == "SKILL.md" else doc.name
+
+
 def _ids(paths) -> list[str]:
-    return [p.name for p in paths]
+    return [_label(p) for p in paths]
 
 
 def test_the_course_has_an_index_and_at_least_one_module():
@@ -91,7 +116,7 @@ def test_the_course_has_an_index_and_at_least_one_module():
     assert modules(), "docs/course/ has an index but no numbered modules"
 
 
-@pytest.mark.parametrize("doc", course_files(), ids=_ids(course_files()))
+@pytest.mark.parametrize("doc", cited_files(), ids=_ids(cited_files()))
 def test_every_path_a_module_cites_exists(doc):
     """A renamed model must not leave the course pointing at a dead path."""
     missing = sorted(
@@ -102,7 +127,7 @@ def test_every_path_a_module_cites_exists(doc):
             if "*" not in cited and not (project_root() / cited).exists()
         }
     )
-    assert not missing, f"{doc.name} cites paths that no longer exist: {missing}"
+    assert not missing, f"{_label(doc)} cites paths that no longer exist: {missing}"
 
 
 def code_spans(text: str) -> list[str]:
@@ -112,7 +137,7 @@ def code_spans(text: str) -> list[str]:
     )
 
 
-@pytest.mark.parametrize("doc", course_files(), ids=_ids(course_files()))
+@pytest.mark.parametrize("doc", cited_files(), ids=_ids(cited_files()))
 def test_every_just_recipe_a_module_cites_exists(doc):
     """`just course-rebuild` in a command a learner will paste must be a recipe."""
     defined = recipes()
@@ -124,7 +149,7 @@ def test_every_just_recipe_a_module_cites_exists(doc):
             if cited not in defined
         }
     )
-    assert not missing, f"{doc.name} cites justfile recipes that don't exist: {missing}"
+    assert not missing, f"{_label(doc)} cites justfile recipes that don't exist: {missing}"
 
 
 @pytest.mark.parametrize("doc", course_files(), ids=_ids(course_files()))
