@@ -550,6 +550,12 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   good** takes the total from 18,989 t to 30,599 t and all 19 pass. Only
   `count(*)` in place of `count(<total>)` in `priced_goods` goes red, on seven
   `not_null`s, because the 875 heading rows it lets through have no price at all.
+  It is caught because it is the only one of the four with **no near-miss**:
+  `having count(*) > 0` is a tautology over a `group by` (283 goods out, not
+  260), so it deletes the filter rather than weakening it. A rule that is binary
+  has no plausible wrong answer; the other three do, which is the whole table.
+  The unit test is still worth having, because the seven `not_null`s name the
+  symptom — 875 nulls in three columns — and it names the heading rows.
   - **`markup_2026_pct` cannot be unit tested and that is the finding.** It is a
     ratio of two doubles, and the warehouse holds three distinct values of it
     that all print as `10.0` — 9.99999999999998578915, 10.00000000000000888178

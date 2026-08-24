@@ -238,6 +238,17 @@ against a warehouse copy says how much they were worth:
 | `excess_over_cleanest_source` partitioned by product group | **all pass** | 18,989 t -> 30,599 t |
 | `count(*)` for `count(<total>)` in `priced_goods` | 7 fail | +875 unpriced heading rows |
 
+- **The one the data tests catch is the one with no near-miss, and that is what
+  the table is really measuring.** `having count(*) > 0` is a tautology over a
+  `group by` — 283 goods out where the real clause gives 260 — so the mutation
+  deletes the filter rather than weakening it. `priced_goods` is a binary rule:
+  a good has a total somewhere or it has not, and there is no subtly-wrong
+  version to write. The other three rules all have a plausible wrong answer, and
+  all three are invisible to 19 data tests. Keep the unit test anyway: the seven
+  `not_null`s report 875 nulls across three columns, the unit test reports the
+  two heading rows by `good_key`, and a failing unit test stops the model
+  materialising instead of finding it afterwards.
+
 - **The fallback rule is now unreachable by data, which is the argument for
   testing it.** Zero of the 12,540 seed rows have a null total beside a non-null
   direct or indirect — the Chile line pipe that proved the rule was corrected out
