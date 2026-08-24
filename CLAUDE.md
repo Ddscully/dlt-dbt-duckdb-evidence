@@ -290,6 +290,7 @@ knowledge.
 | `polars@polars` | [Polars' skill](https://github.com/polars-inc/skills) — idiomatic lazy-API Polars |
 | `duckdb-skills@duckdb-skills` | [DuckDB's skills](https://github.com/duckdb/duckdb-skills) — querying, file formats, docs search |
 | `astral@astral-sh` | [Astral's skills](https://github.com/astral-sh/claude-code-plugins) — uv, ruff and ty, the three tools this repo's Python half is built on |
+| `skill-creator@claude-plugins-official` | authoring and evaluating the project skills below — the one entry here that is about the repo's own tooling rather than a layer of the stack |
 
 Not enabled, but worth knowing about: `dbt-migration@dbt-agent-marketplace`
 (one-off dbt Core → Fusion work), `dignified-python@dagster`, and dltHub's
@@ -299,7 +300,7 @@ its own scaffolding, so prefer the `adding-a-data-source` skill below for the
 pipeline that already exists here.
 
 `.claude/marketplace/` is a repo-local marketplace, declared in `settings.json`
-beside the five vendor ones. It holds `ty-lsp`, which runs the dev group's ty as
+beside the six vendor ones. It holds `ty-lsp`, which runs the dev group's ty as
 a language server — there is no published ty plugin, and an LSP server is a
 ten-line `.lsp.json`. Its command is `uv run ty server` rather than a bare `ty`
 for the pinning reason above, which means it has to be launched with the project

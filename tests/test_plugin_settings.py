@@ -16,14 +16,29 @@ SETTINGS = project_root() / ".claude" / "settings.json"
 TY_LSP = "ty-lsp@modern-data-stack"
 ASTRAL = "astral@astral-sh"
 
+# Every plugin this repo offers a contributor who trusts it. An exact set rather
+# than a membership check: a plugin added here is offered to everyone who opens
+# the repo, so it should be a deliberate edit in a diff, not something that
+# accumulates. Removing one should be equally visible — that is how the astral
+# entry went missing once, silently, as a side effect of an unrelated CLI
+# command that rewrote this file.
+DECLARED = {
+    "dbt@dbt-agent-marketplace",
+    "dagster-expert@dagster",
+    "polars@polars",
+    "duckdb-skills@duckdb-skills",
+    TY_LSP,
+    ASTRAL,
+    "skill-creator@claude-plugins-official",
+}
+
 
 def enabled() -> list[str]:
     return list(json.loads(SETTINGS.read_text())["enabledPlugins"])
 
 
-def test_both_python_plugins_are_enabled():
-    assert TY_LSP in enabled()
-    assert ASTRAL in enabled()
+def test_the_declared_plugins_are_exactly_what_is_enabled():
+    assert set(enabled()) == DECLARED
 
 
 def test_ty_lsp_is_declared_before_astral():

@@ -25,6 +25,7 @@
     "polars@polars": true,
     "duckdb-skills@duckdb-skills": true,
     "ty-lsp@modern-data-stack": true,
-    "astral@astral-sh": true
+    "astral@astral-sh": true,
+    "skill-creator@claude-plugins-official": true
   }
 }
