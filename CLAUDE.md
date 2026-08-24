@@ -241,6 +241,16 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 - **`querying-the-warehouse`** — read-only connections, the single-writer lock,
   clean schema names, checking `raw` column names before writing SQL.
 - **`building-evidence-reports`** — the Evidence layer, which has no vendor skill.
+- **`authoring-course-modules`** — writing `docs/course/`: the sandbox recipes,
+  the measure-every-number rule, and what `tests/test_course.py` enforces.
+- **`compliance-models`** — the Scope 2 factors and the CBAM annex: vintages,
+  the fabricated worked example, and the transcription policy.
+- **`retail-models`** — the transaction grain: returns inference, cohorts, RFM.
+- **`currency-and-calendar`** — the ECB rates, `dim_date`, and spot vs average.
+
+The last three were split out of this file rather than written fresh; they are
+domain reasoning that only one task in ten needs. `tests/test_course.py` checks
+the paths and recipes all four of them cite.
 
 ## Warehouse schemas (one DuckDB file: `data/warehouse.duckdb`)
 
@@ -352,508 +362,23 @@ this is the only place a revision leaves a trace.
   the page filters on `is_revised` itself, rather than the source pre-filtering
   to the revised ones.
 
-## Scope 2 emission factors (`dim_grid_emission_factors`, `reports/pages/scope2.md`)
+## Domain models with their own skills
 
-`carbon_intensity_elec_g_kwh` is already in the wide fact. It is modelled a
-second time as `marts.dim_grid_emission_factors` because under the GHG Protocol
-that series **is** the location-based Scope 2 emission factor — the number a
-multi-site company multiplies its metered kWh by for the electricity line of a
-CSRD / SECR / CDP disclosure. No new ingestion, no new analysis: the work was
-packaging.
+Three domains carry enough hard-won detail to be worth loading on demand rather
+than in every session. The models are listed under *Warehouse schemas* above;
+the reasoning lives in `.claude/skills/`.
 
-- **It is a product table, so the columns beside the factor carry the weight.**
-  The factor in both units (`g_co2_per_kwh` as published, `t_co2_per_mwh` as
-  meter data arrives — shipping only the first is how a filing gains a factor of
-  1000), the vintage, and the lineage (`factor_basis`, `source_dataset`,
-  `source_loaded_at`). The three constant-per-row columns are deliberate: the
-  table ships as a standalone Parquet in the data release, and a factor detached
-  from its basis is the one thing a reporter must not be handed.
-- **`is_latest_available` is a filter, not a year, and that is the whole vintage
-  problem.** "The most recent published factor for country X" resolves to 2025
-  for 90 countries, 2024 for 105, 2023 for 10 and 2022 for 2, so a
-  `where year = 2025` cross-section drops more than half the world. Same lesson
-  as `latest_years.sql`, load-bearing here for a number with a legal
-  consequence. A `unique_combination_of_columns` test with
-  `config: {where: "is_latest_available"}` is what holds it to one row per
-  country. Grid size is no protection: Ukraine's newest factor is 2022, on a
-  111 TWh grid.
-- **Not built on the spine, unlike every other model here.** A country-year with
-  no factor is an absence, not a reference value; `dim_country_year` is where
-  absences are rows. The dimension is still authoritative for what a country is,
-  so five OWID territories (Guadeloupe, Martinique, Réunion, French Guiana,
-  Falklands) carry no factor — the page says so rather than leaving the count
-  unexplained.
-- **`source_loaded_at` is why `stg_energy` now selects `_dlt_load_id`.** Same
-  expression `dbt source freshness` uses. It answers "which extract did this
-  number come out of", which is the assurance question, and it is the only
-  reason that column exists in staging.
-- **`fct_example_scope2_emissions` is invented and must stay obviously invented.**
-  Twelve hypothetical sites (`seeds/example_scope2_sites.csv`) x real factors:
-  582.5 GWh, 232,456 tCO2e, and the two cleanest-grid plants drawing 17% of the
-  power for 1.7% of the tonnes. It is the only fabricated data in the warehouse
-  and it *ships in the public data release*, so the "example" in both names, the
-  seed description, the mart description, the `<Alert status=warning>` above the
-  table and the release notes bullet are all load-bearing. Don't quietly rename
-  it to something that reads as real.
-- **The seed's countries must come from the fixture slice**, i.e. `COUNTRIES` in
-  `scripts/record_fixtures.py`. The `not_null` tests on the factor join are real
-  gates, and CI builds against the 17-country fixtures — the first draft was a
-  twelve-site *European* group, which passed locally and failed `dbt build` with
-  8 null factors under `INGEST_FIXTURES=1`, because only six of the fixture
-  countries are European. This is the usual fixture-slice trap (CLAUDE.md's
-  "17 countries will happily pass a threshold the full 200+ would break") running
-  the other way: the slice is too *narrow* for a seed that joins to it. The
-  global footprint is the fix and the spread is better for it.
-- **The three caveats are stated on the page, not hidden.** Location-based only
-  (market-based needs RECs/GOs, which no public dataset carries), an annual
-  average rather than hourly matching, and production- rather than
-  consumption-based. Naming them is the difference between a credible reference
-  table and a liability; a practitioner checks all three first.
-- The page quotes a 57x spread across grids above 10 TWh where `findings.md`
-  quotes 24x above 150 TWh. Both are correct and the page says why — if one
-  moves, check the other.
+| Domain | Skill | What is in it |
+|--------|-------|---------------|
+| Scope 2 factors and CBAM (the dbt `compliance` group) | `compliance-models` | the vintage filter that cannot be a year literal, the fabricated worked example, the annex transcription policy, the 2026/1740 migration, and why Annexes II–IV are left out |
+| Retail transactions (the `retail` group) | `retail-models` | the three cleaning decisions whose wrong answers are plausible, the returns inference, the ragged cohort triangle, and why `ntile(5)` is wrong for RFM |
+| ECB rates and the calendar | `currency-and-calendar` | the 7-day carry-forward cap, spot against average, ISO year against calendar year, and the project's one incremental model |
 
-## CBAM exposure (`fct_cbam_exposure`, the `cbam_*` seeds, `reports/pages/cbam.md`)
-
-Annex I of Implementing Regulation (EU) 2025/2621, as corrected by (EU) 2026/1740
-— the country x good default values an importer uses from 2026 when they have no
-verified supplier data — transcribed into two seeds, priced with a third, and
-multiplied by a carbon price. 11,665 rows over 121 countries and 260 goods. The
-only model here with **no year in its grain**: it is a regulatory schedule, not a
-time series.
-
-- **A seed, not a dlt resource, and that is the interesting decision.**
-  Regulatory reference data is versioned by *amendment*, not by scrape; there is
-  no API, and the values change when a new implementing regulation says so.
-  `scripts/build_cbam_seeds.py` regenerates both seeds from the Commission's
-  published workbook, so the next amendment is a re-run and a reviewable diff
-  rather than a re-transcription. `country_overrides.csv` is the precedent.
-- **Two seeds because normalising the goods out is worth 1.6 MB.** 12,540 value
-  rows share 283 (product group, CN code, description) triples and one
-  description runs to 250 characters. `cbam_goods` is 60 kB; inlined it would be
-  1.6 MB of CSV and the same again in the warehouse.
-- **A CN code is not a key** — it was flatly true and is now only mostly true.
-  `2523 10 00` was both white clinker and grey clinker, whose values differ by
-  more than 2x, so the grain is (CN code, description) and `good_key` is a slug
-  of the pair. The 2026/1740 correction gives those two 10-digit **TARIC** codes
-  (`2523 10 00 10` / `2523 10 00 90`) and closes that particular case, but the
-  annex still prints 4- and 6-digit headings above the rows carrying the numbers,
-  so the composite key stays. It is also what kept those two rows apart for the
-  six months the codes could not, which is the argument for not renumbering to a
-  surrogate.
-- **The transcription is faithful, defects included, and the mart is where they
-  are handled.** The annex is a legal instrument; cleaning it in the seed would
-  put this project's judgement between the regulation and a euro figure. **Three
-  of the four documented quirks were fixed by the 2026/1740 correction** — which
-  is the vindication of the policy, not a reason to drop it: the body that wrote
-  the instrument corrected it, and this project would have baked its guesses in.
-  Kept here because the *handling* is still the reason parts of the mart look the
-  way they do:
-  - Albania's white Portland cement used to be published with `-` for direct,
-    indirect and total and its three values sitting in the *mark-up* columns
-    instead. Clean `-` now.
-  - Five cement rows (Angola, Argentina) used to **compound** the mark-up —
-    x1.1, x1.21, x1.331 — where the other 10,926 added it. With no published
-    mark-up column there is nothing left to compound, and
-    `markup_schedule_is_irregular` went with it.
-  - Chile's line pipe had a total and a blank 2026 cell. Gone too, but it is
-    what proved the fallback is a **row-level rule, not a column-level one**: a
-    per-column `coalesce` paired Chile's tonnage with the *fallback's* mark-up
-    and produced a 100% implied rate — a row that exists nowhere in the
-    regulation. The rule outlives the row; direct/indirect/total still have to be
-    read off one source.
-  - 23 of the goods carry no value in any country, including the fallback. They
-    are 4-digit CN *headings* whose subheadings hold the numbers, and they are
-    excluded from the mart — rows that could only be priced at null. **This one
-    survives**, and it is where `see below` lives (below).
-- **Fertilisers carry a 1% mark-up in all three years**, not 10/20/30% and not
-  1/2/3%, so the mark-up is a property of the product group — hardcoding one rate
-  overstates every fertiliser line by nine points in 2026 and twenty-seven in
-  2028. **The mart used to derive this and now asserts it**, which is a real loss
-  and not a refactor. The annex published each good's marked-up value for each
-  year, so `mode()` over published/total read the schedule off the data and an
-  amendment moving a rate needed no edit. 2026/1740 publishes only direct,
-  indirect and total. The schedule is the `cbam_markup_schedule` seed now —
-  a seed and not a var or a `case`, so the carve-out stays reviewable as data —
-  and it is confirmed against both the articles and the February annex's own
-  columns, where all 10,929 priced rows imply exactly those rates. The stated
-  rates are actually *cleaner* than the published ones: those carried rounding
-  noise from the OJ's three decimals, so some rows implied 9,9% or 1,1%.
-  - **What replaced the mark-up tests is `direct + indirect = total`** — the only
-    internal consistency the corrected source still offers, and it reaches
-    **2,781 of the 12,540 rows**, which is the part worth knowing before trusting
-    it. `indirect` is published only for cement, fertilisers and 34 iron-and-steel
-    rows; 8,129 rows carry direct and total with no indirect and nothing checks
-    them. Tolerance 0.02, measured rather than generous: the annex rounds each
-    column *independently*, so 711 of those 2,781 are inexact by 0.001–0.01 with
-    nothing wrong (Albania's nitric acid is 2,73 + 0,04 = 2,76). It still catches
-    the failure that matters, a column read from the wrong position, which is off
-    by whole units.
-- **Round half up, not `round()`.** The OJ prints three decimals and the
-  Commission's XLSX mark-up cells are live formulas, so they arrive as binary
-  floats. Python's banker's rounding turns 7,7165 into 7.716 where the regulation
-  says 7,717. Eleven rows across the seven spot-checked countries differed in the
-  third decimal before `Decimal` + `ROUND_HALF_UP`. Small, but the column is
-  multiplied by a carbon price and shown as money.
-- **An unreadable cell raises; it must never become a `None`.** `_number` used to
-  `return None` on any `ValueError`, and `None` is not an error downstream — it
-  is the annex's own "no value here", which `fct_cbam_exposure` reads as *use the
-  fallback row* and prices. So a cell the parser merely failed to understand
-  would not surface as a gap but as a plausible euro figure attributed to a
-  country the regulation never assigned it to. `NO_VALUE` is now the accepted
-  blanks and anything else stops the script. Checked against all 37,620 value
-  cells of the real workbook: **one** token was reaching that catch-all —
-  `see below`, on the 4-digit CN headings 3102 and 3105 whose numbers live in
-  the subheadings under them (2,610 cells). Its null was *right*, and arrived by
-  luck; it is in `NO_VALUE_PHRASES` now, so it is a decision. This is the same
-  argument as the Chile row above — the fallback is a rule the annex states, not
-  a landing zone for whatever didn't parse.
-- **The seeds are Annex I as corrected by IR 2026/1740** (adopted 20 July 2026,
-  in force 3 August, applying retroactively from 1 January 2026), which replaced
-  Annexes I and IV in full. Migrated 2026-08-18. The amendment path paid for
-  itself — re-running `build_cbam_seeds.py` was most of the work — but four
-  things about it are worth keeping, because none are visible in the values:
-  - **The Commission republishes at the same URL.** There is no versioned link;
-    the workbook's `Version History` sheet is the only thing that says which
-    amendment you are holding, and the `?filename=…v20260204…` query parameter in
-    `ANNEX_XLSX_URL` is *stale and cosmetic* — the document id is what resolves,
-    and it served v2 under a v1 filename. Check that sheet, not the URL.
-  - **It failed loudly, which was luck rather than design.** The layout went from
-    9 columns to 6, so `_route(row[8])` raised `IndexError` on the first sheet.
-    Had the correction *added* a column instead, every field would have shifted
-    one right and parsed fine into the wrong meaning. `COLUMNS` names the
-    positions now and `parse_annex` refuses a row that isn't the expected width.
-  - **`SHEET_TO_ISO3` being exhaustive is what caught the relabelling.** Ten
-    countries were renamed to ISO-style long forms with no change of country
-    ("Russia" → "Russian Federation", "Côte d'Ivoire" → "Ivory Coast") and two
-    are new (Liberia, New Caledonia). The script stopped and named all twelve
-    rather than writing blank ISO3 codes and dropping them at the mart's join.
-  - **The values barely moved**: 66 of 10,503 comparable rows, 38 of them down by
-    2% or less, 28 now blank. Everything expensive about the migration was
-    structural.
-- **`Annex IV` is a new sheet and is deliberately not transcribed.** It is the
-  single *highest* default value per good, with no country dimension — a
-  different table answering a different question, and the circumstances in which
-  a declarant must use it instead of the country value are set by the articles,
-  not the annex. Those articles could not be confirmed from a primary source
-  (EUR-Lex does not serve to the fetcher), and inventing a legal trigger is
-  exactly what the rest of this layer refuses to do. In `SKIP_SHEETS` with that
-  reason written next to it. Same posture as Annexes II and III, different
-  ground: those are excluded on licence, this one on not knowing.
-- **Dropping a seed column needs `dbt seed --full-refresh`.** dbt-duckdb derives
-  the CSV's column spec from the *existing* relation, so removing the three
-  mark-up columns failed with a sniffer error naming 10 columns against a file
-  that plainly had 7 — and `--no-partial-parse` does not help, because the stale
-  shape is in the warehouse and not in the manifest.
-- **The ETS price is a dbt var (`eu_ets_price_eur_per_t`, EUR 75), not a
-  measurement.** There is no clean free API for EUA spot. The mart ships the
-  tonnage columns beside the euro columns and states the price per row, so the
-  page draws its EUR 60-120 sensitivity from one build and a release consumer can
-  re-price without rebuilding.
-- **Annexes II and III are deliberately not ingested.** They are the country
-  electricity emission factors, and they are IEA data under **CC BY-NC-SA 4.0** —
-  redistributing them would put a non-commercial and share-alike restriction on a
-  data release that is otherwise entirely CC BY 4.0. `dim_grid_emission_factors`
-  (OWID) sits beside the annex's numbers as context and **is not the same
-  measurement**; the page says so. This is also why the mart carries only the grid
-  factor and no derived reconciliation against the annex's indirect column.
-- **The story is production route, not grid** — the opposite of the Scope 2 page.
-  Semi-finished steel runs 63x from Azerbaijan to Indonesia, and sorting by cost
-  sorts almost perfectly by the annex's route indicator (`E` scrap/EAF against
-  `C`/`F` ore/BF-BOF), not by the country's grid — the correlation between a
-  country's steel default and its grid factor is 0.32 (it was 0.26 before the
-  2026/1740 correction; the spread held at 63x through it).
-- **Excel mangles the country names, so `country_display_name` exists.** Sheet
-  names cap at 31 characters and forbid some punctuation, which is why the annex's
-  Koreas arrive as `North Korea (Democratic People’` and
-  `Korea, Republic of (South Korea`, both cut mid-parenthesis. The seed keeps the
-  annex's label because it is the legally meaningful one; the mart coalesces to
-  `stg_country.country_name` for anything that goes on a chart. **Which names are
-  mangled moves with the amendment** — before 2026/1740 the pair to quote were
-  `Democratic Republic of the Cong` and `Myanmar_Burma`, and both of those are
-  clean now while two others became truncated. That is the argument for
-  coalescing to the dimension rather than patching labels one at a time.
-
-## Currency and the calendar (`dim_date`, the `fx_*` models, `reports/pages/currency.md`)
-
-The ECB's daily euro reference rates, via [Frankfurter](https://frankfurter.dev)
-— no key, no quota, the whole 1999-2026 series in one 3.6 MB request. It is the
-**first sub-annual grain in the warehouse**, and everything interesting about it
-follows from that rather than from the numbers.
-
-- **The source is small on purpose.** The modelling is the point: a date
-  dimension, a gap-filled daily series, a spot-vs-average decision and the first
-  incremental model. A harder API would have bought nothing.
-- **30% of calendar days carry no rate**, and that is the model. 7,066 of 10,078
-  days have a fixing; the rest are 2,878 weekend days and 134 weekday TARGET
-  closures. `fct_fx_rates_daily` carries the last fixing forward, which is what a
-  finance system does and is the same operation as a slowly-changing lookup —
-  and `rate_source_date` says which fixing every row is quoting.
-- **The carry-forward is capped at 7 days (`fx_max_carry_forward_days`), and the
-  bound is measured.** The longest closure the ECB has ever taken is 5 days
-  (36 times, the Christmas/New Year runs). What the cap refuses is the two
-  *interior* gaps in the whole series, and both are currency crises rather than
-  calendars: the Icelandic krona has no rate for 3,341 days from the 2008 banking
-  collapse to February 2018, the Argentine peso none for 34 days from the January
-  2002 breaking of the dollar peg. Those 3,359 rows keep their place with a null
-  rate and `is_rate_stale` set. An uncapped fill would have put a pre-collapse
-  krona on nine years of charts.
-- **The currency panel is not fixed, which is why `dim_currency` exists.** 46
-  codes have been quoted and 29 still are. Ten stop on the last business day
-  before their country adopted the euro (GRD 2000 through BGN 2025), two at a
-  redenomination where the money continues under a new code (TRL→TRY at
-  1,000,000:1, ROL→RON at 10,000:1 — a chart following the *code* has a cliff in
-  2005), and five simply cease. **The `currencies` seed carries the twelve dates
-  that are matters of public record and deliberately guesses at none of the
-  other five**, and a test checks each one against the series: every asserted
-  retirement date is the day after the last published fixing. `is_quoted` is
-  false for exactly one row — EUR, which is the base of every quote and never a
-  quote itself.
-  - **A hand-maintained seed needs a test in *both* directions, and only one of
-    them existed.** `dim_currency` is `from seed left join` the series, so it can
-    only ever hold seed rows — and `fct_fx_rates_daily` inner-joins it. A
-    currency the ECB starts quoting that nobody adds to the seed therefore
-    vanishes from the dense table while still appearing in
-    `fct_fx_rates_published` and `fct_fx_rates_periods`: a silent per-currency
-    hole, not a build failure, and the shape that makes it hard to spot is that
-    only *one* of the three tables is wrong. A `relationships` test on
-    `stg_fx_rates.quote_currency` closes it. The reverse — a seed row the series
-    never quoted — could not be caught by the `retired_on` test either: its
-    subquery returns NULL for a code with no rates, and `retired_on > NULL` is
-    null rather than false, so the row passed by being *unknown*. Hence the
-    `is_quoted` assertion: 47 rows, 46 quoted, EUR the one exception.
-- **Both directions of every rate ship.** `units_per_eur` is the ECB's own quote,
-  `eur_per_unit` its reciprocal. Same argument as the Scope 2 factor in g/kWh
-  *and* t/MWh: a consumer forced to invert it themselves will eventually forget.
-- **Spot or average is a real decision and the model refuses to make it.** Stocks
-  (a balance at an instant) convert at the closing rate; flows (revenue, spend, a
-  price over a period) at the period average. `period_end_vs_avg_pct` measures
-  the cost of choosing wrong — +11.7% for EUR/USD in 2003, -8.6% in 2014, +98%
-  for the krona in 2008.
-  - **Average over published fixings, never over the dense table.** Averaging
-    `fct_fx_rates_daily` counts every Friday three times and four or five times
-    around a holiday, weighting the mean toward whichever weekday sits next to a
-    closure. `fct_fx_rates_periods` reads `fct_fx_rates_published` for that
-    reason alone.
-  - **`avg_eur_per_unit` is not `1 / avg_units_per_eur`** — the mean of
-    reciprocals is not the reciprocal of the mean. 0.07% apart in a calm year,
-    0.53% in 2008. Each column is the mean of its own series; the period-*end*
-    columns invert exactly, because a single point has no averaging in it.
-- **`dim_date` is a calendar and not a market calendar.** It knows weekends; it
-  does not know trading days in any jurisdiction, and the TARGET closures are
-  observed as absences rather than asserted from a list that would need
-  maintaining forever. Two traps it exists to stop:
-  - **ISO year is not calendar year.** 2021-01-01 is a Friday in ISO week 53 of
-    ISO year *2020*, and 2019-12-30 is already in week 1 of 2020. Grouping by
-    `(year, iso_week)` splits one week over two buckets. Pair `iso_year` with
-    `iso_week`, or group on `iso_week_start_date`.
-  - **`/` is float division in DuckDB, and `cast(... as integer)` rounds.** The
-    fiscal-quarter expression `((month - start + 12) % 12) / 3 + 1` gives 4.67
-    for March under an April year start, which cast to an integer is **quarter
-    5**. `floor()` is the fix, and the test that caught it is an
-    `accepted_range` of 1-4.
-  - The fiscal columns come from the `fiscal_year_start_month` var (4 = April)
-    and **the value used is carried on every row**, because the same Tuesday is
-    in a different fiscal year on someone else's books. `fiscal_year` is the year
-    the fiscal year *ends* in, which is what makes it collapse onto `year` when
-    the var is 1.
-- **`fct_fx_rates_published` is the only `materialized='incremental'` model in
-  the project, and it is the right one rather than the biggest one.** Every other
-  table here re-derives a source that gets fully re-fetched, so rebuilding it is
-  how a restatement is picked up, not waste. This one grows ~30 rows a day
-  forever and a published fixing never changes. Numbers, honestly: incremental
-  0.16 s against 0.24 s full-refresh at 265k rows — the saving is 0.08 s and the
-  argument is the shape of the curve, not today's seconds.
-  - **`delete+insert` on the grain, not `append`.** Ingestion re-asks for a
-    lookback window and an append would duplicate every row in it. Same
-    idempotence argument as `wb_wdi`'s merge key one layer up.
-  - **Two lookback windows, deliberately not equal.**
-    `fx_incremental_lookback_days` (30) must be **no smaller** than
-    `FX_LOOKBACK_DAYS` (10) in `ingest/pipeline.py`. Two constants that have to
-    match are a drift bug; one that only has to be no smaller costs a few rows a
-    run and cannot fail in the direction that loses data.
-  - A `dbt_utils.equal_rowcount` against `stg_fx_rates` is the guard. It only
-    works because this model is a faithful copy of the view — keep it that way,
-    or that one cheap test stops meaning anything.
-- **The FX watermark is one value for the table, where WDI's is one per
-  indicator.** Every currency comes back in the *same* request, so a newly listed
-  one is covered by the table-wide high-water mark. WDI needs the per-indicator
-  form precisely because adding an indicator adds a request that has never been
-  made before. Same mechanism, opposite answer, for a reason worth keeping
-  straight.
-- **The FX fixture is the whole series, gzipped** (3.6 MB → 843 kB), and it is
-  the one fixture that isn't trimmed. Every discontinuity above is something a
-  model is tested against, so cutting the date range would take the euro
-  changeovers, the rouble and Iceland out of CI. It is also the reason `_get_json`
-  has a `.gz` branch.
-- **The one thing it changes about a number already on the site.** Eurostat's
-  household electricity price is the warehouse's only euro-denominated
-  measurement, sitting beside the World Bank's dollar GDP. Converted at the
-  half-year average, the 39 countries present in both halves rose **35%** from
-  2021-S1 to 2022-S2 in euros and **13.5%** in dollars, because the euro fell
-  from 1.205 to 1.014 over the same eighteen months. Neither is wrong; a chart of
-  "European electricity prices" with no stated currency is reporting the exchange
-  rate as if it were an energy market. That is the `gdp_usd` vs
-  `gdp_constant_usd` gotcha below, finally measured instead of narrated.
-- **`marts.fct_fx_rates_daily` is archived to the lake and `raw.ecb_fx_rates` is
-  not** — the reverse of every other table there. The landing table is keyed on
-  `rate_date` and has no `year` to partition on. It is also the only table that
-  improves the archive's small-file arithmetic: 381k rows over 28 partitions.
-
-## Retail transactions (the `retail_*` models, `analytics.retail_rfm`, `reports/pages/retail.md`)
-
-[UCI Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
-— a UK gift wholesaler's complete transaction log, 1,067,371 lines over
-2009-12-01 to 2011-12-09. **The first grain below a country**, the first source
-that is a bulk file drop rather than an API, and the first fact recording what a
-person did rather than what an agency published. Six dbt models plus a Polars
-one; the page is `retail.md`.
-
-- **The mess is the deliverable.** Nothing about this source has been cleaned by
-  anyone, so the modelling *is* the value — and each decision has a wrong answer
-  that produces a plausible number. The three that matter, all measured:
-  - **A negative quantity is not a return.** 3,457 negative lines sit on *sale*
-    invoices, every one priced at exactly zero with no customer: inventory
-    write-offs (damage, stock counts, one row labelled `check`). Reading them as
-    returns inflates the return count by a fifth and the returned value by
-    nothing — an error that survives review because the money still balances.
-    `is_stock_write_off` and a test hold it.
-  - **There are three invoice prefixes, not two.** Beside the `C` cancellations
-    sit six `A` bad-debt adjustments worth −£147,614, and they are the only
-    negative *prices* in the file.
-  - **A returned quantity is positive everywhere, and for a while it wasn't.**
-    `fct_retail_returns` negates the source's sign on purpose (4 reads better
-    than −4); `dim_retail_product.units_returned` kept the raw negative until
-    2026-08-18, so the two models disagreed about which way a return points.
-    Nothing failed — the column had a `data_type` and no description — but the
-    one place a reader would put them together, `units_returned / units_sold`,
-    came out negative, and a bar of returns per product drew below the axis. It
-    is 1..80,995 now, with an `accepted_range` holding it. A sign convention that
-    is only written down in one of the two models that use it isn't one.
-  - **`item_type` is not decoration.** A bare revenue sum carries £463,931 of
-    postage and −£338,803 of bank fees as if they were sales.
-- **Returns have no foreign key**, so `fct_retail_returns` infers the link with
-  an `asof left join` to the same customer's most recent earlier purchase of the
-  same product. 87.6% match cleanly, 2.0% match a *smaller* purchase, 8.4% have
-  no prior purchase in the window, 1.9% have no customer id. **The 2.0% is the
-  interesting number**, not the 87.6% — it is the rule being wrong rather than
-  the data being absent. Reported per row instead of tuned into one headline; the
-  median return comes back in 10 days, which is the evidence the rule isn't
-  latching onto arbitrary sales.
-- **`dim_retail_customer` covers a subset of the business and says so.** 22.8%
-  of lines have no customer id — £2.67M, 13.8% of revenue. The two shares differ
-  because an order nobody signed in for is a smaller order, and quoting the line
-  share as the revenue share overstates the hole by nine points. Also: 5,881 of
-  the 5,942 ids reach the dimension (61 never purchased), and `cohort_month` is
-  the first *purchase*, not the first appearance.
-- **The cohort triangle is ragged and left-censored, and both are columns.** A
-  cohort born in November 2011 has no month-12 row — that is an absence, not a
-  zero, so rows are generated only up to the last observable month.
-  December 2009 is the extract's first month, so its "new" customers include
-  everyone already buying; `is_left_censored_cohort` excludes them everywhere.
-  Retention is against the cohort's own size, never against the previous month.
-  - **Read a triangle by direction: down a column is ageing, along a diagonal is
-    the calendar.** The heatmap's dark band is a diagonal — autumn. Pooled over
-    every cohort age, a customer is active in 23.6% of September–November months
-    against 15.3% for the rest of the year (Jan 11.2%, Nov 27.0%). The month-12
-    "recovery" in the average curve is the same fact edge-on, since a cohort's
-    twelfth month lands in the calendar month it was born in. A retention *curve*
-    averages the diagonal into the column and reports the blend as ageing.
-  - `retail_max_cohort_age_months` (36) is a var, not a literal, because it is
-    the one number that can silently **truncate** the answer.
-    `fct_retail_cohorts_are_not_truncated` asserts the first cohort reaches the
-    last month.
-- **`analytics.retail_rfm` is where the Polars layer stops being a division.**
-  The operation is "cut a column into quintiles", and SQL's primitive for it —
-  `ntile(5)` — is *wrong*: it fills buckets of equal size, so it cuts through a
-  run of equal values wherever the boundary lands. 1,626 customers have placed
-  exactly one order, and across the four tied values that straddle a boundary
-  **3,227 of 5,881 customers** could be scored differently from someone whose
-  behaviour is identical. `qcut` cuts on break points, so equal values always
-  score equally and the buckets come out uneven — which is a fact about the
-  customer base, not an artefact. `rfm_scores_do_not_split_ties` is a blocking
-  asset check, because a regression to `ntile` still yields five tidy buckets and
-  a plausible segment mix.
-  - **Casting a Polars Categorical straight to an integer gives the physical
-    dictionary index**, i.e. order of first appearance, not label order. Via
-    `String` is the only reading that means what it says.
-  - **Monetary is null for 28 customers, and the check now says so rather than
-    not looking.** `monetary_gbp` is `net_revenue_gbp`, which `dim_retail_customer`
-    already publishes as null for the customers whose orders held no revenue
-    line — so `qcut` returns null and `concat_str`/`+` propagate it into
-    `rfm_cell` and `rfm_total`. Kept null rather than coalesced to 0: a 0 scores
-    them into the bottom quintile, which reads as "measured, worth nothing"
-    instead of "nothing to measure". `segment` is unaffected, because the grid is
-    R and F only. Two things this cost: `rfm_scores_do_not_split_ties` tested
-    only `segment is null` and so could not see any of it, and Polars sorts nulls
-    **first**, so a descending sort opened the table with the 28 least
-    informative rows in the file. `nulls_last=True`, and the check now asserts
-    the nulls fall exactly where monetary is null and nowhere else.
-  - **`as_of_date` is a required parameter with no default.** Recency against
-    `date.today()` makes every customer in a 2011 extract equally and
-    enormously lapsed, and the segmentation quietly becomes a frequency ranking.
-    It is read from the data and shipped as a column.
-  - **The segment map is a 25-cell grid, not a rule list.** The widely-copied
-    version ("Champions: R>=4 and F>=4", "Loyal: R>=3 and F>=3", …) has
-    *overlapping* conditions, so the label depends on branch order — invisible in
-    review. Monetary is deliberately not in the grid: R and F say what the
-    relationship is doing, M says what it is worth.
-  - Champions are 14.9% of the identified base and 62.7% of its revenue.
-- **`dim_retail_customer.first_order_gbp` is the page's only forward-looking
-  number, and the statistic that describes it is not the obvious one.** Pearson
-  *r* against lifetime value is 0.641 and is almost entirely one customer: drop
-  the single largest first order (£33,168 → £235,833) and it falls to **0.397**;
-  under £5,000 it is 0.344. The **rank** correlation does not move — 0.592,
-  0.592, 0.590 across the same three cuts — so that is what the page quotes,
-  with the quintile medians (£191 → £410 → £714 → £905 → £1,885, repeat rate
-  58% → 78%) as what it means in money. A Pearson *r* on a heavy-tailed money
-  column is a statistic about the tail.
-  - **An invoice, not a day.** `n_orders` counts invoices, so "order" has to
-    mean the same thing in both columns — and 393 of the 5,881 customers bought
-    twice on the day they arrived, so the choice moves the number. Ranking is on
-    `min(invoice_ts)` (83 invoices carry more than one timestamp) then on
-    `invoice`, because 11 customers opened two at the same minute and a
-    non-deterministic tie-break is a column that changes between builds.
-  - **Null for the 47 whose first invoice held no product line** — a `Manual`
-    adjustment or the test SKU. Same `filter (where is_revenue_line)` shape as
-    `net_revenue_gbp`, which is already null for 28 customers, so this is the
-    model's existing convention rather than a new one.
-  - **`first_order_gbp <= net_revenue_gbp` is true by construction and fails as
-    a test, on 272 rows.** Every one is a one-order customer where the two
-    columns are the same money summed in a different order; the excess tops out
-    at 1.8e-12. Comparing two independently-summed doubles for containment is a
-    float-equality test wearing an inequality. The shipped test is
-    `accepted_range {min_value: 0}`, which is the same guarantee without the
-    arithmetic.
-  - **The chart cost four Evidence gotchas**, all written up in
-    `reports/README.md`: a scatter over ECharts' `progressiveThreshold: 3000`
-    never finishes rendering, `yLog=true` in markdown is the *string* `"true"`
-    and leaves the axis linear, there is no `xLog` prop at all, and `> 0` is not
-    a safe filter for a log axis when two customers carry 1e-14 of float residue.
-  - `ntile(5)` is correct for the quintile table and wrong for the RFM scoring
-    two sections below it, which is worth reading as a pair. A near-continuous
-    currency column has almost no ties to split; `frequency` has 1,626 customers
-    on one value.
-- **The FX carry-forward stops being theoretical here.** 139,658 lines (13.1%)
-  convert on a rate the ECB published earlier, and **every one is a Sunday**:
-  this business trades Sunday and not Saturday (139,256 lines against 402), and
-  it closes on exactly the days TARGET does, so no weekday closure ever
-  coincides with an order. A model assuming "weekend" means Saturday and Sunday
-  equally reads it backwards.
-- **`fct_retail_order_line` carries a plain `year` beside `iso_year`**, because
-  the lake partitions on it. The two agree on every row *only* because the
-  business shuts 23 December to 4 January, so nothing lands on the three days a
-  year where ISO week 1 crosses the new year. Partitioning on `iso_year` would be
-  correct today and wrong the first New Year they trade.
-- **It is the only table whose lake partitioning is sensible**: 1.07M rows over
-  three years is three files of 13 MB / 12 MB / 836 kB, against the CO2
-  archive's 275 files averaging 47 kB. The grain is a transaction and the
-  partition is a year, so the ratio is 350,000:1 rather than 150:1.
-- **The fixture is selected by shape, not sampled.** A 4% random draw keeps the
-  volume and loses all six `A` adjustments and the single positive `C` line.
-  `RETAIL_FIXTURE_SELECTION` in `scripts/record_fixtures.py` picks each shape
-  explicitly and `tests/test_fixtures.py` asserts they survive. At 1.88 MB it is
-  the largest file in the repo.
+The one-liners that must not depend on a skill loading are already in *Warehouse
+schemas* above and stay there: `fct_example_scope2_emissions` is the only
+fabricated data in the warehouse and it ships in the public release,
+`fct_cbam_exposure` has no year in its grain, and the retail models are the only
+ones at a grain below a country.
 
 ## Personal data (`meta: {pii: …}`, `scripts/export_warehouse.py`)
 
@@ -1347,13 +872,26 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
 - **Divide by `gdp_constant_usd`, never `gdp_usd`, for anything measured over
   time.** `gdp_usd` (`NY.GDP.MKTP.CD`) is *current* US$, so it moves with
   inflation and the exchange rate: on that basis Japan cut emissions 21% from
-  2010–2024 and still scored 10% *worse* on carbon intensity, purely because the
-  yen fell 28% against the dollar. `gdp_constant_usd` (`NY.GDP.MKTP.KD`, constant
-  2015 US$) is the real-terms series. Current US$ is fine for single-year
-  cross-sections, wrong for trends. **The same failure is now measurable rather
-  than narrated** — see the Currency section: the EU household electricity price
-  rose 35% or 13.5% between 2021-S1 and 2022-S2 depending only on whether you
-  counted in euros or dollars.
+  2010–2024 and still scored 10% *worse* on carbon intensity.
+  `gdp_constant_usd` (`NY.GDP.MKTP.KD`, constant 2015 US$) is the real-terms
+  series. **The same failure is now measurable rather than narrated** — see the
+  Currency section: the EU household electricity price rose 35% or 13.5% between
+  2021-S1 and 2022-S2 depending only on whether you counted in euros or dollars.
+  - **The yen figure was wrong here and in `transform/co2_intensity.py` until
+    2026-08-24, and it was wrong in the way a plausible number is.** It said the
+    yen "fell 28% against the dollar"; 28% is Japan's *current-dollar GDP* fall
+    (5.812 → 4.190 tn), i.e. the effect written down as the cause. The yen went
+    **87.7 → 151.4 JPY/USD** on ECB annual averages — it lost **42%** of its
+    dollar value. The full decomposition, which is worth keeping because it shows
+    the currency term dominating: current-$ GDP ×0.721 = real growth ×1.104 ×
+    dollar value of the yen ×0.579 × a ×1.128 residual (domestic prices).
+  - **"Current US$ is fine for single-year cross-sections" is the shorthand, and
+    it means *internally consistent*, not *the same answer*.** Ranking countries
+    within income group for 2024 on each basis moves **166 of 194 — 86% — to a
+    different rank**, worst move 26 places. Over time it is worse than a ranking
+    change: of the 193 countries with both series in 2010 and 2024, **30 flip the
+    sign of their decarbonisation trend**, five from improving to worsening
+    (Nigeria −13.5% → +76.3%, then Brazil, Japan, Lesotho, Namibia).
 - **World Bank WDI** is fetched long (one row per indicator/country/year) and
   pivoted to wide columns in `stg_wdi.sql`. Add indicators in two places:
   `WB_WDI_INDICATORS` in `ingest/pipeline.py` and a `max(case …)` in `stg_wdi.sql`.
@@ -1629,6 +1167,22 @@ Gotchas:
 - `.github/workflows/nightly.yml` runs the same graph against the *live* sources
   daily and opens (or comments on) a `nightly-failure` issue. That's the signal
   that the fixtures have drifted from reality.
+
+## The course (`docs/course/`)
+
+Ten modules teaching this warehouse as training material for analytics
+engineers, built around the failures that stay green rather than the happy path.
+Modules 00-04 are written and set the format; 05-10 are outlined in
+`docs/course/README.md`, and `tests/test_course.py` stops the material rotting
+against the repo it cites.
+
+**Authoring a module is the `authoring-course-modules` skill.** It carries the
+sandbox recipes, the rule that every number in the material is measured, what
+the structural guard enforces, and the findings the drills produced. Two things
+worth knowing without loading it: the course builds into `data/course/` via
+`just course-sandbox`, and **`just dbt-build` is the trap** — it targets the real
+warehouse, so a drill run through the wrong recipe writes a deliberately broken
+model into `data/warehouse.duckdb`.
 
 ## Verifying changes
 

@@ -97,7 +97,13 @@ uv run --group orchestration dagster definitions validate
 
 then open `just dagster` and confirm the new asset has an edge into `staging`.
 
-## 5. Mart column — `dbt/models/marts/fct_emissions_energy.sql`
+## 5. Mart column — `dbt/models/marts/fct_emissions_energy_v2.sql`
+
+**The mart is versioned**, so the file is `_v2.sql` while the relation stays
+`marts.fct_emissions_energy` (v2 is aliased back to the bare name). You do not
+need to touch v1: it is a `select * exclude (…)` view over v2 and its contract is
+declared `include: all`, so a new column reaches both on its own — which also
+means it ships to v1's consumers without a second decision.
 
 Add an import CTE, a `left join` on `(country_iso3, year)`, and the column in the
 right source group with a `--` comment. The left joins hang off

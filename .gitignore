@@ -24,6 +24,9 @@ data/lake/
 # Downloads kept between runs so a partitioned load doesn't re-fetch a 45 MB zip
 # per partition. Byte-identical to what the URL still serves — safe to delete.
 data/cache/
+# The course sandbox (`just course-sandbox`): a fixture warehouse the exercises
+# in docs/course/ break on purpose. Rebuilt in ~40s; safe to delete.
+data/course/
 *.csv
 !dbt/seeds/*.csv
 # Unit-test fixtures. Same exception as the seeds and for the same reason: the

@@ -186,3 +186,73 @@ report:
 # Nuke the cache + reprocess sources, then build. Use after mart columns change.
 report-clean:
     uv run python -m scripts.build_report --clean
+
+# ---------------------------------------------------------------------------
+# Course (docs/course/) — the sandbox the exercises break on purpose
+# ---------------------------------------------------------------------------
+
+# Same offline, deterministic build as `just test-pipeline`, but at a *stable*
+# path instead of a mktemp one — a drill breaks a model, looks at the wrong
+# number, then fixes it, and the warehouse has to still be there on the next
+# command.
+#
+# It is the 17-country fixture slice, which the course leans on rather than
+# apologises for: a threshold those 17 pass and the full 200+ would break is one
+# of the failures the material is about. Investigate-the-data exercises read the
+# real warehouse instead.
+#
+# Build the course sandbox in data/course/ (gitignored) from the fixtures
+course-sandbox:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export INGEST_FIXTURES=1
+    # Absolute, or dbt (which runs from dbt/) and the Python layers (which run
+    # from the repo root) resolve it to two different files.
+    export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"
+    export LAKE_DIR="{{ justfile_directory() }}/data/course/lake"
+    mkdir -p "$(dirname "$WAREHOUSE_PATH")"
+    rm -f "$WAREHOUSE_PATH" "$WAREHOUSE_PATH.wal"
+    echo "course sandbox: $WAREHOUSE_PATH"
+    uv run python -m ingest.pipeline
+    cd dbt && uv run dbt deps && uv run dbt build && cd ..
+    uv run python -m transform.co2_intensity
+    uv run python -m transform.retail_rfm
+    uv run python -m transform.pipeline_status
+    uv run python -m lake.archive
+    echo "sandbox ready — 'just course-rebuild' after you change a model"
+
+# Seconds rather than a full `just course-sandbox`, because the fixtures have
+# already landed and nothing about a broken *model* requires re-ingesting.
+#
+# The drill inner loop: rebuild the dbt layer against the sandbox
+course-rebuild:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"
+    test -f "$WAREHOUSE_PATH" || { echo "no sandbox yet — run: just course-sandbox" >&2; exit 1; }
+    cd dbt && uv run dbt build
+
+# The Polars layer runs *after* dbt and is not part of `just course-rebuild`, so
+# a drill on a derived metric (module 04's denominator) needs this instead. It is
+# a recipe rather than a line in the material for one reason: the raw form is
+# `WAREHOUSE_PATH=... uv run python -m transform.co2_intensity`, and a learner who
+# forgets the variable rewrites `analytics` in the *real* warehouse.
+#
+# Re-run the Polars derived metrics against the course sandbox
+course-transform:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"
+    test -f "$WAREHOUSE_PATH" || { echo "no sandbox yet — run: just course-sandbox" >&2; exit 1; }
+    uv run python -m transform.co2_intensity
+    uv run python -m transform.retail_rfm
+
+# Read-only on purpose: DuckDB takes one writer at a time, so a REPL left open is
+# what makes the next `just course-rebuild` fail on a lock.
+#   just course-query 'select count(*) from marts.dim_country_year'
+#
+# Run one read-only query against the course sandbox
+course-query sql:
+    @uv run python -c "import duckdb,sys; \
+        print(duckdb.connect('{{ justfile_directory() }}/data/course/warehouse.duckdb', read_only=True).sql(sys.argv[1]))" \
+        {{ quote(sql) }}
