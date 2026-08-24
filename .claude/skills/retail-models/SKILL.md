@@ -44,9 +44,9 @@ one; the page is `retail.md`.
     `M`'s 1,421, and the source sends one bare `GIFT` that really is a product,
     which is why the pattern carries the underscore. None of this is visible to a
     data test: `accepted_values` on `item_type` sees `product` and is satisfied.
-    Mutated, all 22 of the model's data tests stay green while net revenue moves
+    Mutated, all 19 of the model's data tests stay green while net revenue moves
     £1,702 — and sending `AMAZONFEE` to `product` moves it £260,764 with the same
-    22 green. `dbt/models/staging/_unit_tests.yml` is what catches both now.
+    19 green. `dbt/models/staging/_unit_tests.yml` is what catches both now.
 ### Returns, customers and cohorts
 
 - **Returns have no foreign key**, so `fct_retail_returns` infers the link with

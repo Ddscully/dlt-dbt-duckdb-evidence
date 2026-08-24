@@ -17,7 +17,7 @@ for the pivot that turns row loss into column emptiness.
 ## 1. The census
 
 A dbt test is a `select` that must return no rows. That is the whole mechanism,
-and everything below is a consequence of it. This project has 368 of them:
+and everything below is a consequence of it. This project has 369 of them:
 
 | test | n | what it asserts |
 |---|---|---|
@@ -36,7 +36,7 @@ select test_type, count(*) as n from analytics.pipeline_tests
 group by 1 order by 2 desc"
 ```
 
-Read the shape of that table rather than the total. **291 of the 368 — 79% — are
+Read the shape of that table rather than the total. **291 of the 369 — 79% — are
 `not_null` and `accepted_range`**, both of which are per-column statements about
 rows that are *present*. That is module 01's punchline restated as a census: the
 test suite is overwhelmingly made of assertions that a deletion makes *more*
@@ -97,7 +97,7 @@ the credibility of the other 367 with it.
 ## 3. Three ways a row escapes a test
 
 This is the part that is not in the dbt documentation, and it is the whole reason
-368 tests is not the reassuring number it looks like.
+369 tests is not the reassuring number it looks like.
 
 **(a) The value is null.** `dbt_utils.accepted_range` compiles to:
 
@@ -171,11 +171,11 @@ Two consequences that are not obvious:
   failure against a build that finished `ERROR=0`, which is how the pipeline
   health page came to contradict the build it was reporting on.
   `src/modern_data_stack/observability.py` reads `fail_calc` out of the manifest
-  and applies it; 366 of the 368 tests here use the default.
+  and applies it; 367 of the 369 tests here use the default.
 - **dbt writes that schema every build and never cleans it.** An audit table
   whose test has been renamed or deleted stays, is empty, and therefore scores as
-  passing. The real warehouse currently holds **389 audit tables against 368
-  tests** — 21 orphans. `transform/pipeline_status.py` filters them against the
+  passing. The real warehouse currently holds **391 audit tables against 369
+  tests** — 22 orphans. `transform/pipeline_status.py` filters them against the
   manifest for that reason.
 
 ---
@@ -436,7 +436,7 @@ each get a self-consistent answer, and the two only meet in a meeting.
 
 ---
 
-## 🔍 Investigate 1 — how much of the warehouse do 368 tests actually look at?
+## 🔍 Investigate 1 — how much of the warehouse do 369 tests actually look at?
 
 > Real warehouse (`data/warehouse.duckdb`), not the sandbox.
 
@@ -510,7 +510,7 @@ column is the one place a cents/euros mix-up could enter — is being asked abou
 for knowing the number before you quote "43,138 rows, fully range-checked" to
 anybody.
 
-**3. 389 audit tables against 368 tests: 21 orphans.** dbt writes the audit
+**3. 391 audit tables against 369 tests: 22 orphans.** dbt writes the audit
 schema on every build and never removes a table whose test has gone, and the
 alias hash is computed over the test's arguments — so renaming a model orphans
 every audit table attached to it. Being empty, an orphan scores as *passing*, so
@@ -527,7 +527,7 @@ coverage are the sparse ones, which is backwards — sparse columns are where a
 join went wrong.
 
 *Correctly built:* tests are not free, and their cost is not runtime — it is that
-every test which can fail on reality trains people to ignore failures. 368 tests
+every test which can fail on reality trains people to ignore failures. 369 tests
 that have never had a false positive are worth more than 900 with a standing
 amber. The uncovered columns are largely OWID pass-throughs whose values this
 project does not compute; a bound on them tests the publisher, not the pipeline.
@@ -536,7 +536,7 @@ The synthesis, and the actual answer: **coverage is the wrong metric.** The righ
 question is per column, "what is the wrong value I could plausibly get here, and
 would anything notice?" That produces very few tests on pass-through columns,
 several on anything this repo *derives* (a ratio, a conversion, a gap-fill), and
-one on every join that could drop rows — which is the assertion the 368 are
+one on every join that could drop rows — which is the assertion the 369 are
 thinnest on and which no `accepted_range` can ever be.
 </details>
 
@@ -593,7 +593,7 @@ One row, zero difference, passing. `count(*)` reads it as one failure.
 
 The principle: **do not reimplement the verdict of a tool you are reporting on.**
 The health page's whole value is agreeing with the build; a second, simpler
-definition of "failing" that agrees 366 times out of 368 is worse than no page,
+definition of "failing" that agrees 367 times out of 369 is worse than no page,
 because the two disagreements are exactly where someone will trust the wrong one.
 The manifest already carries `fail_calc` and `severity` per node, so reading them
 is both correct and less code than the shortcut.

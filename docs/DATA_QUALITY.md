@@ -36,16 +36,18 @@ cannot.
 **A legal answer that is the wrong one.** `dim_date`'s `fiscal_quarter` is bounded
 1–4, so a quarter of 5 is caught and a quarter of 2 where 3 was right is not:
 January scoring Q2 under a July year start passes every test in the project.
-`stg_retail_lines` is the same problem in a different shape — it is three `case`
-expressions and two flags, and `accepted_values` proves an answer is in the list,
+`stg_retail_lines` is the same problem in a different shape — it is two `case`
+expressions and two boolean flags built off them, and `accepted_values` proves an answer is in the list,
 never that it is the right member of it. Misclassifying `AMAZONFEE` as a product
-moves net revenue by £260,764 with all 22 of that model's data tests green;
+moves net revenue by £260,764 with all 19 of that model's data tests green;
 dropping the `upper()` from `stock_code` sends all 100 voucher lines, which
-arrive lowercase, into product with the same 22 green.
+arrive lowercase, into product with the same 19 green.
 
 `fct_cbam_exposure` is the hardest of the three. Its numbers are transcribed from
 a legal instrument, so there is nothing independent to check them against and its
-20 data tests are almost all `not_null` and generous ranges. What a unit test reaches
+20 data tests are almost all `not_null` and generous ranges — 19 of them when
+the mutations below were run, the twentieth being the route test that came out
+of them. What a unit test reaches
 instead is the rules: hardcoding the phase-in mark-up at 10/20/30% moves the
 fertiliser average from €105.76 to €115.18 a tonne — fertilisers carry a flat 1%
 food-security carve-out — with all 19 green, and measuring

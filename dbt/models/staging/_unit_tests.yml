@@ -4,20 +4,21 @@ version: 2
 #
 # The model adds no rows, removes none and computes one product. What it does is
 # assign labels — `invoice_type`, `item_type`, `is_stock_write_off` and
-# `is_revenue_line`, all four `case` expressions over the same row — and that is
+# `is_revenue_line`: two `case` expressions and two boolean flags built off
+# them — and that is
 # the shape a data test is worst at. `accepted_values` proves the answer is a
 # member of the list; it cannot prove it is the *right* member, and a
 # misclassification here moves money between buckets without changing any total,
 # so no row-level constraint can see it.
 #
 # Measured rather than argued, by mutating the model against a copy of the
-# warehouse and running its 22 data tests each time:
+# warehouse and running its 19 data tests each time:
 #
 #   | mutation                                    | data tests | net revenue  |
 #   |---------------------------------------------|------------|--------------|
-#   | drop `upper()` from `stock_code`            | 22 pass    | +GBP 1,702   |
-#   | `AMAZONFEE` falls through to `product`      | 22 pass    | -GBP 260,764 |
-#   | `is_revenue_line` loses its adjustment term | 22 pass    | unchanged    |
+#   | drop `upper()` from `stock_code`            | 19 pass    | +GBP 1,702   |
+#   | `AMAZONFEE` falls through to `product`      | 19 pass    | -GBP 260,764 |
+#   | `is_revenue_line` loses its adjustment term | 19 pass    | unchanged    |
 #   | `is_stock_write_off` loses `invoice_type`   | **1 fails**| unchanged    |
 #
 # Three of the four are invisible to everything the project had. The fourth is
@@ -96,7 +97,7 @@ unit_tests:
       Every branch of the `item_type` case, one row each, with the real codes.
       Seven of the eight families are a handful of codes that arrived in the same
       column as the mugs, and getting one wrong is worth money the tests cannot
-      see — moving AMAZONFEE into `product` costs GBP 260,764 with all 22 data
+      see — moving AMAZONFEE into `product` costs GBP 260,764 with all 19 data
       tests green. The paired-case rows are here because `upper(trim(...))` turns
       out to be load-bearing for a whole branch: every one of the 100 voucher
       lines arrives lowercase (`gift_0001_20`), so without the fold the `voucher`

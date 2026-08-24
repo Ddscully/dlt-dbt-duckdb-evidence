@@ -512,16 +512,17 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   collapse onto `year`) and July (where the boundary falls mid-calendar-year).
   No data test can reach a value the project never builds.
 - **`stg_retail_lines` is the other model, and there the blind spot is
-  `accepted_values`.** It is four `case` expressions — `invoice_type`,
-  `item_type`, `is_stock_write_off`, `is_revenue_line` — and `accepted_values`
+  `accepted_values`.** It is two `case` expressions —
+  `invoice_type` and `item_type` — and two boolean flags built off them,
+  `is_stock_write_off` and `is_revenue_line`. `accepted_values`
   proves an answer is *in* the list, never that it is the right member of it. A
   misclassification moves money between buckets without changing any total, so no
   row-level constraint can see it. Mutated against a warehouse copy, running the
-  model's 22 data tests each time: dropping `upper()` from `stock_code` moves net
-  revenue by **+GBP 1,702** and all 22 pass; sending `AMAZONFEE` to `product`
-  moves it by **-GBP 260,764** and all 22 pass; removing
+  model's 19 data tests each time: dropping `upper()` from `stock_code` moves net
+  revenue by **+GBP 1,702** and all 19 pass; sending `AMAZONFEE` to `product`
+  moves it by **-GBP 260,764** and all 19 pass; removing
   `invoice_type <> 'adjustment'` from `is_revenue_line` changes **nothing at all**
-  and all 22 pass. Only the fourth mutation goes red — `is_stock_write_off`
+  and all 19 pass. Only the fourth mutation goes red — `is_stock_write_off`
   losing its `invoice_type` term takes the flag from 3,457 rows to 22,950 — and
   only as a side effect of `stg_retail_write_offs_are_never_priced`, which
   notices because cancellations carry a price.
@@ -617,7 +618,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  three cost 1.9s. A broken fiscal calendar should stop `release-data.yml`, not
+  ten cost 2.5s. A broken fiscal calendar should stop `release-data.yml`, not
   ride along in it. `just dbt-unit-test` is the ~2s inner loop.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.
@@ -751,7 +752,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 366 of the 368 tests use the default. `severity` comes across
+  is what dbt does; 367 of the 369 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the
