@@ -26,6 +26,11 @@ data/lake/
 data/cache/
 *.csv
 !dbt/seeds/*.csv
+# Unit-test fixtures. Same exception as the seeds and for the same reason: the
+# blanket rule above is aimed at downloaded data, and these are source. Without
+# this line `dbt test` passes locally against files git never took, and CI fails
+# on a fixture that is not there.
+!dbt/tests/fixtures/*.csv
 
 # dbt
 dbt/target/
