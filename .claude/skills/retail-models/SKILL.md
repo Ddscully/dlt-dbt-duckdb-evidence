@@ -57,6 +57,33 @@ one; the page is `retail.md`.
   the data being absent. Reported per row instead of tuned into one headline; the
   median return comes back in 10 days, which is the evidence the rule isn't
   latching onto arbitrary sales.
+- **`fct_retail_returns` was not reproducible between builds until
+  2026-08-24.** Three consecutive runs against byte-identical sources: `matched`
+  16,031 / 16,032 / 16,030, `sum(original_quantity)` 637,411 / 636,410 /
+  636,208. An `asof join` picks arbitrarily among rows tied on its inequality
+  key, and **33,518 groups share a (customer, product, instant)** — 70,174 of
+  802,716 purchase lines, 8.7% — with 604 returns (3.68%) landing on one, up to
+  20 deep. `purchases` now carries a `qualify row_number()` on
+  `(invoice, line_number)`, the same settlement `dim_retail_customer` reached by
+  ranking on `min(invoice_ts)` then `invoice`. Unrelated to the
+  float-aggregation instability on `net_revenue_gbp` — that is `sum()` over
+  doubles, this is row selection.
+  - **'matched, quantity exceeds purchase' is an upper bound, not a count.** Of
+    the 604 tied matches, 63 carry that flag and **56 would be plain matches if
+    the tied lines were summed** — the customer bought that many across two
+    lines of one order. 15% of the bucket. Summing is a re-specification of the
+    rule and was deliberately kept out of the determinism fix.
+  - The tie-break is stable, not meaningful: `invoice` is a string so the order
+    is lexicographic, and nothing claims the chosen line is the better match.
+- **Ten data tests, six mutations, none caught** (`dbt/models/marts/_unit_tests.yml`
+  holds the three that do). The `accepted_values` on `match_status` is the same
+  trap as `item_type`: reordering the `case` so "no prior purchase" is tested
+  before "no customer id" relabels 352 rows and stays green. `>=` for "quantity
+  exceeds purchase" moves 5,633 rows; `<` for `quantity_is_consistent` moves
+  5,613, which is **34% of all matches**, because a complete return is ordinary.
+  Dropping `item_type = 'product'` from the `returns` CTE adds 1,207 cancelled
+  postage and fee lines. Dropping `quantity > 0` from `purchases` does nothing —
+  every write-off is anonymous, so the customer filter already excludes them.
 - **`dim_retail_customer` covers a subset of the business and says so.** 22.8%
   of lines have no customer id — £2.67M, 13.8% of revenue. The two shares differ
   because an order nobody signed in for is a smaller order, and quoting the line

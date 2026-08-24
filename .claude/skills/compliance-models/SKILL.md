@@ -245,7 +245,7 @@ against a warehouse copy says how much they were worth:
   deletes the filter rather than weakening it. `priced_goods` is a binary rule:
   a good has a total somewhere or it has not, and there is no subtly-wrong
   version to write. The other three rules all have a plausible wrong answer, and
-  all three are invisible to those 19 data tests. Keep the unit test anyway: the seven
+  all three are invisible to every one of them. Keep the unit test anyway: the seven
   `not_null`s report 875 nulls across three columns, the unit test reports the
   two heading rows by `good_key`, and a failing unit test stops the model
   materialising instead of finding it afterwards.

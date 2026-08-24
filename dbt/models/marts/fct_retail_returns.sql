@@ -69,6 +69,40 @@ returns as (
         and quantity < 0
 ),
 
+-- One candidate per (customer, product, instant), because an `asof join` that
+-- has several rows tied on its inequality key picks one of them arbitrarily —
+-- and 33,518 groups here are tied, covering 70,174 of the 802,716 purchase
+-- lines (8.7%). 604 return lines (3.68%) land on one of those groups, up to 20
+-- deep, and before this the model was **not reproducible between builds**:
+-- three consecutive runs against byte-identical sources gave 16,031 / 16,032 /
+-- 16,030 clean matches and `sum(original_quantity)` of 637,411 / 636,410 /
+-- 636,208. `dim_retail_customer` had already met this and settled it the same
+-- way, ranking on `min(invoice_ts)` then `invoice`.
+--
+-- The tie-break is the lowest invoice then the lowest line number. `invoice` is
+-- a string, so that ordering is lexicographic rather than numeric — which is
+-- fine for the job, since the point is that the choice is *fixed*, not that it
+-- is meaningful. Nothing here claims the chosen line is the better match.
+--
+-- **Deliberately one line and not their sum**, and the cost of that is
+-- measured rather than waved past. Summing the tied lines would change what
+-- `original_quantity` means and leave `original_line_number` with nothing to
+-- point at, so it is a re-specification of the matching rule and not a fix for
+-- an unstable one. But it is not free: of the 604 tied matches, 63 are flagged
+-- 'matched, quantity exceeds purchase' and **56 of them would be plain matches
+-- if the tied lines were added up** — the customer did buy that many, across
+-- two lines of one order. That is 15% of the 366 rows in the bucket this model
+-- calls its most interesting number, so the bucket is an upper bound on "the
+-- rule found the wrong sale" rather than a count of it. Left as a separate
+-- decision on purpose; a determinism fix should not quietly move 56 rows
+-- between buckets.
+--
+-- These five figures are measured against the warehouse this model *now*
+-- builds. The first version of this comment quoted 70 / 63 / 367, taken while
+-- diagnosing the instability — i.e. from the model that gave a different answer
+-- every build. A determinism fix invalidates the evidence gathered for it, so
+-- everything here was re-measured afterwards. This comment is the one copy that
+-- carries the numbers; CLAUDE.md and the retail skill cite it.
 purchases as (
     select
         invoice,
@@ -86,6 +120,10 @@ purchases as (
         and item_type = 'product'
         and quantity > 0
         and customer_id is not null
+    qualify row_number() over (
+        partition by customer_id, stock_code, invoice_ts
+        order by invoice, line_number
+    ) = 1
 ),
 
 matched as (

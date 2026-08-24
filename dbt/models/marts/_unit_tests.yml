@@ -310,3 +310,386 @@ unit_tests:
         # a group-wide minimum of 11.0 would make it 33.0.
         - {country_or_territory: "Norway", good_key: "2523290000-portland-cement", certificates_2026_t_co2e_per_t: 44.0, excess_over_cleanest_source_t_co2e_per_t: 0.0}
         - {country_or_territory: "Chile",  good_key: "2523290000-portland-cement", certificates_2026_t_co2e_per_t: 88.0, excess_over_cleanest_source_t_co2e_per_t: 44.0}
+
+  # ---------------------------------------------------------------------------
+  # fct_fx_rates_daily — the carry-forward.
+  #
+  # Five mutations against a warehouse copy, every one of them passing all 15 of
+  # the model's data tests:
+  #
+  # | mutation                              | 14 data tests | effect                                    |
+  # |---------------------------------------|---------------|-------------------------------------------|
+  # | cap 7 -> 30 days                      | all pass      | 46 stale rows gain a rate                 |
+  # | cap removed entirely                  | all pass      | all 3,359 stale rows priced, self-contradictory |
+  # | `<=` cap becomes `<`                  | all pass      | 2 rows at exactly the cap lose their rate |
+  # | `is_rate_stale` uses `>=` not `>`     | all pass      | 2 rows stale *and* priced                 |
+  # | window loses `partition by currency`  | all pass      | 113,479 rows (29.7%) carry another currency's rate |
+  #
+  # The tests that exist guard direction (`rate_source_date <= date_day`, so no
+  # backfill from the future) and the grain. Nothing guards the *cap*, because a
+  # rate carried 8 days or 3,341 days is still a positive number with a source
+  # date in the past. What the cap refuses is worth a number: the ISK's last
+  # fixing before the 2008 collapse is 290.00 and the first after the nine-year
+  # gap is 125.01, and the ARS goes 0.89130 to 1.76373 across its 26-day gap.
+  # Carrying either one forward converts at a rate that is 132% and 98% away
+  # from the next real quote.
+
+  - name: fx_daily_never_carries_one_currency_rate_into_another
+    model: fct_fx_rates_daily
+    description: >
+      The carry window is partitioned by currency, and dropping that partition
+      is the worst of the five mutations: `last_value(... ignore nulls)` then
+      reaches across currencies and 29.7% of the table quotes somebody else's
+      fixing — GBP's 0.7094 becomes 0.3718 — with all 14 data tests green,
+      because the dates still move forward and the grain is still unique. The
+      fixture is built so a missing partition is unmissable: BBB publishes
+      *later* than AAA on every day AAA has to carry, so an unpartitioned window
+      hands AAA the wrong number on all three of its carried days. BBB's
+      lifetime also starts a day after AAA's, which pins the spine clipping to
+      each currency's own quoted life rather than to the calendar.
+    given:
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-01-01", date_key: 20240101, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-02", date_key: 20240102, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-03", date_key: 20240103, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-04", date_key: 20240104, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+      - input: ref('dim_currency')
+        rows:
+          - {currency_code: "AAA", is_quoted: true, first_published_date: "2024-01-01", last_published_date: "2024-01-04"}
+          # Quoted from the 2nd, so it must have no row on the 1st.
+          - {currency_code: "BBB", is_quoted: true, first_published_date: "2024-01-02", last_published_date: "2024-01-04"}
+      - input: ref('fct_fx_rates_published')
+        rows:
+          - {rate_date: "2024-01-01", quote_currency: "AAA", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
+          - {rate_date: "2024-01-02", quote_currency: "BBB", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
+          - {rate_date: "2024-01-04", quote_currency: "BBB", base_currency: "EUR", units_per_eur: 40.0, eur_per_unit: 0.025}
+    expect:
+      rows:
+        # AAA carries its own 10.0 for three days. Unpartitioned it would read
+        # 20.0, 20.0 and 40.0 off BBB.
+        - {currency_code: "AAA", date_day: "2024-01-01", units_per_eur: 10.0, rate_source_date: "2024-01-01", days_since_published_rate: 0, is_published_rate: true,  is_carried_forward: false, is_rate_stale: false}
+        - {currency_code: "AAA", date_day: "2024-01-02", units_per_eur: 10.0, rate_source_date: "2024-01-01", days_since_published_rate: 1, is_published_rate: false, is_carried_forward: true,  is_rate_stale: false}
+        - {currency_code: "AAA", date_day: "2024-01-03", units_per_eur: 10.0, rate_source_date: "2024-01-01", days_since_published_rate: 2, is_published_rate: false, is_carried_forward: true,  is_rate_stale: false}
+        - {currency_code: "AAA", date_day: "2024-01-04", units_per_eur: 10.0, rate_source_date: "2024-01-01", days_since_published_rate: 3, is_published_rate: false, is_carried_forward: true,  is_rate_stale: false}
+        # BBB has no 2024-01-01 row at all: outside its quoted lifetime.
+        - {currency_code: "BBB", date_day: "2024-01-02", units_per_eur: 20.0, rate_source_date: "2024-01-02", days_since_published_rate: 0, is_published_rate: true,  is_carried_forward: false, is_rate_stale: false}
+        - {currency_code: "BBB", date_day: "2024-01-03", units_per_eur: 20.0, rate_source_date: "2024-01-02", days_since_published_rate: 1, is_published_rate: false, is_carried_forward: true,  is_rate_stale: false}
+        - {currency_code: "BBB", date_day: "2024-01-04", units_per_eur: 40.0, rate_source_date: "2024-01-04", days_since_published_rate: 0, is_published_rate: true,  is_carried_forward: false, is_rate_stale: false}
+
+  - name: fx_daily_stops_carrying_a_rate_once_it_passes_the_cap
+    model: fct_fx_rates_daily
+    description: >
+      `fx_max_carry_forward_days` is 7, and no data test can see it: a rate
+      carried 8 days is as well-formed as one carried 2. Removing the cap
+      altogether prices all 3,359 stale rows and leaves the model contradicting
+      itself — `is_rate_stale` true beside a usable rate — with every data test
+      green. One currency, one gap that runs past the cap, then a second fixing
+      that resets the age: the last row proves the carry restarts rather than
+      staying stale for the rest of the series. The calendar deliberately runs
+      wider than the currency's quoted life at both ends, so the 1st and the
+      17th must not appear.
+    given:
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-01-01", date_key: 20240101, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-02", date_key: 20240102, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-03", date_key: 20240103, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-04", date_key: 20240104, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-05", date_key: 20240105, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-06", date_key: 20240106, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-07", date_key: 20240107, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-08", date_key: 20240108, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-09", date_key: 20240109, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-10", date_key: 20240110, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-11", date_key: 20240111, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-12", date_key: 20240112, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-13", date_key: 20240113, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-14", date_key: 20240114, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-15", date_key: 20240115, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-16", date_key: 20240116, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-17", date_key: 20240117, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+      - input: ref('dim_currency')
+        rows:
+          - {currency_code: "TST", is_quoted: true, first_published_date: "2024-01-02", last_published_date: "2024-01-16"}
+      - input: ref('fct_fx_rates_published')
+        rows:
+          - {rate_date: "2024-01-02", quote_currency: "TST", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
+          # The gap runs 01-03 to 01-10, then a fresh fixing lands.
+          - {rate_date: "2024-01-11", quote_currency: "TST", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
+    expect:
+      rows:
+        # The fixing itself, then the first carried day. Pattern for the rest.
+        - {date_day: "2024-01-02", units_per_eur: 10.0, days_since_published_rate: 0, is_rate_stale: false}
+        - {date_day: "2024-01-03", units_per_eur: 10.0, days_since_published_rate: 1, is_rate_stale: false}
+        - {date_day: "2024-01-04", units_per_eur: 10.0, days_since_published_rate: 2, is_rate_stale: false}
+        - {date_day: "2024-01-05", units_per_eur: 10.0, days_since_published_rate: 3, is_rate_stale: false}
+        - {date_day: "2024-01-06", units_per_eur: 10.0, days_since_published_rate: 4, is_rate_stale: false}
+        - {date_day: "2024-01-07", units_per_eur: 10.0, days_since_published_rate: 5, is_rate_stale: false}
+        - {date_day: "2024-01-08", units_per_eur: 10.0, days_since_published_rate: 6, is_rate_stale: false}
+        # Age 7 is the last day inside the cap: `<= 7` keeps the rate and
+        # `> 7` leaves the flag false. Both mutations of that boundary land here.
+        - {date_day: "2024-01-09", units_per_eur: 10.0, days_since_published_rate: 7, is_rate_stale: false}
+        # Age 8. The rate goes null the moment the row is stale — the two are
+        # one decision, which is what an `is_rate_stale` of `>=` would break.
+        - {date_day: "2024-01-10", units_per_eur: null, days_since_published_rate: 8, is_rate_stale: true}
+        # A fresh fixing resets the age; the carry restarts rather than staying
+        # stale for the rest of the currency's life.
+        - {date_day: "2024-01-11", units_per_eur: 20.0, days_since_published_rate: 0, is_rate_stale: false}
+        - {date_day: "2024-01-12", units_per_eur: 20.0, days_since_published_rate: 1, is_rate_stale: false}
+        - {date_day: "2024-01-13", units_per_eur: 20.0, days_since_published_rate: 2, is_rate_stale: false}
+        - {date_day: "2024-01-14", units_per_eur: 20.0, days_since_published_rate: 3, is_rate_stale: false}
+        - {date_day: "2024-01-15", units_per_eur: 20.0, days_since_published_rate: 4, is_rate_stale: false}
+        - {date_day: "2024-01-16", units_per_eur: 20.0, days_since_published_rate: 5, is_rate_stale: false}
+
+  # ---------------------------------------------------------------------------
+  # fct_fx_rates_periods — the aggregation.
+  #
+  # Five mutations against a warehouse copy. The model has 20 data tests and
+  # only one of them notices anything:
+  #
+  # | mutation                                    | 20 data tests | effect                                        |
+  # |---------------------------------------------|---------------|-----------------------------------------------|
+  # | `avg_eur_per_unit` = 1 / `avg_units_per_eur`| all pass      | USD 2008 0.683499 -> 0.679923; ISK 2008 off 11.9% |
+  # | `max()` for `arg_max(.., rate_date)`        | all pass      | USD 2014 period end 1.2141 -> 1.3953, `period_end_vs_avg_pct` **flips** -8.61% -> +5.03% |
+  # | `min()` for `arg_min(.., rate_date)`        | all pass      | `period_start_units_per_eur` wrong on 16,975 rows (85.9%) |
+  # | `period_is_complete` `<` instead of `<=`    | all pass      | **nothing at all** — no period ends on the series end |
+  # | average over dense `fct_fx_rates_daily`     | **1 fails**   | caught by `fx_periods_annual_buckets_cover_every_fixing` |
+  #
+  # The one that fails is the reason to keep that model-level test: summing
+  # `n_published_days` over the year buckets and comparing it with the published
+  # row count is what makes averaging the gap-filled table impossible to miss.
+  # Everything else here is a number that is positive, non-null and inside every
+  # range, which is all the column tests can ask.
+
+  - name: fx_periods_takes_the_last_fixing_of_a_period_not_the_highest
+    model: fct_fx_rates_periods
+    description: >
+      `period_end_*` is `arg_max(.., rate_date)` and `period_start_units_per_eur`
+      is `arg_min(.., rate_date)` — the *chronologically* last and first fixing,
+      not the largest and smallest. `max()` and `min()` are the plausible slips
+      and neither is visible: both return a real rate from inside the period,
+      positive and in range. `min()` for the start is wrong on 85.9% of the
+      warehouse; `max()` for the end flips the sign of `period_end_vs_avg_pct` on
+      USD 2014, which is the column the whole model exists to provide. The
+      fixture therefore makes the period *fall* to a low it did not start at and
+      peak in the middle, so last, first, max and min are four different numbers.
+    given:
+      - input: ref('fct_fx_rates_published')
+        rows:
+          - {rate_date: "2024-03-01", quote_currency: "TST", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
+          - {rate_date: "2024-03-15", quote_currency: "TST", base_currency: "EUR", units_per_eur: 30.0, eur_per_unit: 0.0333333}
+          - {rate_date: "2024-03-29", quote_currency: "TST", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-03-01", year: 2024, quarter: 1, half: 1, month_start_date: "2024-03-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-03-15", year: 2024, quarter: 1, half: 1, month_start_date: "2024-03-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-03-29", year: 2024, quarter: 1, half: 1, month_start_date: "2024-03-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+    expect:
+      rows:
+        # All three fixings fall in one month, so every period type sees the
+        # same three and the four rows differ only in their labels and bounds.
+        # start 20 (not the min, 10), end 10 (not the max, 30), avg 20,
+        # so period_end_vs_avg_pct is -50 and `max()` would make it +50.
+        - {period_type: "month",   period_label: "2024-03",  period_start_units_per_eur: 20.0, period_end_units_per_eur: 10.0, min_units_per_eur: 10.0, max_units_per_eur: 30.0, avg_units_per_eur: 20.0, period_end_vs_avg_pct: -50.0, intra_period_range_pct: 200.0, n_published_days: 3}
+        - {period_type: "quarter", period_label: "2024-q1", period_start_units_per_eur: 20.0, period_end_units_per_eur: 10.0, min_units_per_eur: 10.0, max_units_per_eur: 30.0, avg_units_per_eur: 20.0, period_end_vs_avg_pct: -50.0, intra_period_range_pct: 200.0, n_published_days: 3}
+        - {period_type: "half",    period_label: "2024-1",  period_start_units_per_eur: 20.0, period_end_units_per_eur: 10.0, min_units_per_eur: 10.0, max_units_per_eur: 30.0, avg_units_per_eur: 20.0, period_end_vs_avg_pct: -50.0, intra_period_range_pct: 200.0, n_published_days: 3}
+        - {period_type: "year",    period_label: "2024",    period_start_units_per_eur: 20.0, period_end_units_per_eur: 10.0, min_units_per_eur: 10.0, max_units_per_eur: 30.0, avg_units_per_eur: 20.0, period_end_vs_avg_pct: -50.0, intra_period_range_pct: 200.0, n_published_days: 3}
+
+  - name: fx_periods_averages_each_direction_over_its_own_series
+    model: fct_fx_rates_periods
+    description: >
+      The mean of the reciprocals is not the reciprocal of the mean, and
+      `avg_eur_per_unit` is the former. Writing it as `1 / avg_units_per_eur` is
+      the natural-looking simplification and it passes all 20 data tests: the
+      number stays positive and non-null, and it is only 0.07% out in a calm
+      year. The gap grows with how far the rate moved inside the period — 0.52%
+      for EUR/USD in 2008 and **11.9% for the Icelandic krona that same year** —
+      so it is largest exactly when someone is most likely to be looking. Two
+      fixings four-fold apart make the two constructions unmistakable: the mean
+      of 0.5 and 0.125 is 0.3125, while one over the mean of 2 and 8 is 0.2.
+      Every value here is exact in binary floating point on purpose.
+      `period_end_eur_per_unit` is asserted alongside because a single point
+      *does* invert exactly — 1/8 is 0.125 — and that asymmetry is the reason
+      only the averages need care.
+    given:
+      - input: ref('fct_fx_rates_published')
+        rows:
+          - {rate_date: "2024-05-10", quote_currency: "TST", base_currency: "EUR", units_per_eur: 2.0, eur_per_unit: 0.5}
+          - {rate_date: "2024-05-20", quote_currency: "TST", base_currency: "EUR", units_per_eur: 8.0, eur_per_unit: 0.125}
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-05-10", year: 2024, quarter: 2, half: 1, month_start_date: "2024-05-01", quarter_start_date: "2024-04-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-05-20", year: 2024, quarter: 2, half: 1, month_start_date: "2024-05-01", quarter_start_date: "2024-04-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+    expect:
+      rows:
+        - {period_type: "month",   period_label: "2024-05",  avg_units_per_eur: 5.0, avg_eur_per_unit: 0.3125, period_end_eur_per_unit: 0.125}
+        - {period_type: "quarter", period_label: "2024-q2", avg_units_per_eur: 5.0, avg_eur_per_unit: 0.3125, period_end_eur_per_unit: 0.125}
+        - {period_type: "half",    period_label: "2024-1",  avg_units_per_eur: 5.0, avg_eur_per_unit: 0.3125, period_end_eur_per_unit: 0.125}
+        - {period_type: "year",    period_label: "2024",    avg_units_per_eur: 5.0, avg_eur_per_unit: 0.3125, period_end_eur_per_unit: 0.125}
+
+  - name: fx_periods_counts_a_period_complete_on_the_day_the_series_reaches_its_end
+    model: fct_fx_rates_periods
+    description: >
+      `period_is_complete` is `period_end_date <= max(rate_date)`, and its
+      boundary is unreachable by the warehouse: **no period ends on the series
+      end date**, so changing `<=` to `<` moves nothing at all. It is only live
+      on the days the ECB's last fixing happens to land on a month, quarter,
+      half or year end — roughly one day in thirty for the month grain and one
+      in three hundred and sixty-five for the year. Same category as `dim_date`'s
+      eleven unbuilt fiscal policies: a branch the data cannot reach, so the
+      fixture poses it. The last fixing here is 31 January, so the month is
+      complete on the nose and the three longer periods are not.
+    given:
+      - input: ref('fct_fx_rates_published')
+        rows:
+          - {rate_date: "2024-01-02", quote_currency: "TST", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-01-31", quote_currency: "TST", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-01-02", year: 2024, quarter: 1, half: 1, month_start_date: "2024-01-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-01-31", year: 2024, quarter: 1, half: 1, month_start_date: "2024-01-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+    expect:
+      rows:
+        # The month ends exactly on the series end: complete under `<=`, and the
+        # single row a `<` would take away.
+        - {period_type: "month",   period_end_date: "2024-01-31", period_is_complete: true}
+        - {period_type: "quarter", period_end_date: "2024-03-31", period_is_complete: false}
+        - {period_type: "half",    period_end_date: "2024-06-30", period_is_complete: false}
+        - {period_type: "year",    period_end_date: "2024-12-31", period_is_complete: false}
+
+  # ---------------------------------------------------------------------------
+  # fct_retail_returns — the inferred join.
+  #
+  # Six mutations against a warehouse copy, all ten data tests green on every
+  # one:
+  #
+  # | mutation                                      | effect                                          |
+  # |-----------------------------------------------|-------------------------------------------------|
+  # | `match_status` checks "no prior purchase" first | 352 unmatchable rows change bucket            |
+  # | "quantity exceeds" uses `>=`                  | matched 16,032 -> 10,416, excess 366 -> 5,982   |
+  # | `quantity_is_consistent` uses `<`             | consistent 16,032 -> 10,416                     |
+  # | `returns` drops `item_type = 'product'`       | +1,207 rows: postage and fee cancellations      |
+  # | `purchases` drops `quantity > 0`              | **nothing** — every write-off is anonymous, so  |
+  # |                                               | `customer_id is not null` already excludes them |
+  # | asof `>=` becomes `>`                         | 88 rows re-resolved: 2 unmatched, 86 moved to   |
+  # |                                               | an older sale. `matched` *rises* by 2           |
+  #
+  # The middle two land on the same 10,416 because they are the same rows seen
+  # twice: both turn on `quantity_returned = original_quantity`, which is 5,616
+  # rows, so their deltas are equal by construction. An earlier version of this
+  # table gave them different numbers, which was the tell that they had been
+  # measured against the pre-tie-break model — see the determinism note below.
+  #
+  # `accepted_values` on `match_status` is the trap the retail skill already
+  # names: it proves the answer is in the list, never that it is the right
+  # member, and the first three mutations move tens of thousands of rows between
+  # legal buckets without touching a total.
+  #
+  # The first two fixtures contain no tie — no purchase shares a customer,
+  # product and instant with another — because they are about the matching rule
+  # rather than about tie resolution. The third is nothing but a tie.
+
+  - name: retail_returns_names_each_miss_by_the_reason_it_missed
+    model: fct_retail_returns
+    description: >
+      Four outcomes and the order they are tested in. A return with no customer
+      id is structurally unmatchable and a return whose purchase predates the
+      extract is left-censored; both come out of the asof join with a null
+      original, so only the order of the `case` separates them. Swapping the
+      first two branches relabels all 352 no-customer rows as "no prior purchase
+      in window" and every data test stays green, because both strings are in
+      `accepted_values`. The POST cancellation is here to stay out: without
+      `item_type = 'product'` the warehouse gains 1,207 rows and reports
+      returning things nobody buys. The last pair is bought and returned in the
+      same instant, which the asof condition admits because it is `>=` — and
+      that boundary is worth more than it looks: 88 matches in the warehouse
+      share their purchase's instant, so tightening it to `>` costs 2 of them a
+      match and silently re-points the other 86 at an older sale, rewriting five
+      columns with no change to the row count.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          # The one purchase everything matches against.
+          - {invoice: "500", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 5, unit_price: 2.0, line_amount_gbp: 10.0, invoice_ts: "2024-01-05 10:00:00", invoice_date: "2024-01-05"}
+          # Within the purchase: a clean match.
+          - {invoice: "C601", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -3, unit_price: 2.0, line_amount_gbp: -6.0, invoice_ts: "2024-01-10 10:00:00", invoice_date: "2024-01-10"}
+          # More than was bought: the rule found a sale, but the wrong one.
+          - {invoice: "C602", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -8, unit_price: 2.0, line_amount_gbp: -16.0, invoice_ts: "2024-01-12 10:00:00", invoice_date: "2024-01-12"}
+          # No customer id: nothing to match *on*. Kept, not dropped.
+          - {invoice: "C603", line_number: 1, customer_id: null, stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -1, unit_price: 2.0, line_amount_gbp: -2.0, invoice_ts: "2024-01-11 10:00:00", invoice_date: "2024-01-11"}
+          # A customer who never bought this in the window: left-censored.
+          - {invoice: "C604", line_number: 1, customer_id: "C2", stock_code: "SKU9", invoice_type: "cancellation", item_type: "product", quantity: -2, unit_price: 2.0, line_amount_gbp: -4.0, invoice_ts: "2024-01-11 11:00:00", invoice_date: "2024-01-11"}
+          # A cancelled postage line. A correction, not a return: must not appear.
+          - {invoice: "C605", line_number: 1, customer_id: "C1", stock_code: "POST", invoice_type: "cancellation", item_type: "shipping", quantity: -1, unit_price: 18.0, line_amount_gbp: -18.0, invoice_ts: "2024-01-13 10:00:00", invoice_date: "2024-01-13"}
+          # Bought and sent back in the same instant. The asof condition is `>=`
+          # rather than `>` so this matches — only 2 rows in the warehouse, but
+          # the alternative silently calls a same-batch reversal unmatchable.
+          - {invoice: "503", line_number: 1, customer_id: "C3", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 4, unit_price: 3.0, line_amount_gbp: 12.0, invoice_ts: "2024-01-06 12:00:00", invoice_date: "2024-01-06"}
+          - {invoice: "C606", line_number: 1, customer_id: "C3", stock_code: "SKU3", invoice_type: "cancellation", item_type: "product", quantity: -2, unit_price: 3.0, line_amount_gbp: -6.0, invoice_ts: "2024-01-06 12:00:00", invoice_date: "2024-01-06"}
+    expect:
+      rows:
+        - {invoice: "C601", quantity_returned: 3, match_status: "matched",                            is_matched: true,  original_quantity: 5,    quantity_is_consistent: true}
+        - {invoice: "C602", quantity_returned: 8, match_status: "matched, quantity exceeds purchase", is_matched: true,  original_quantity: 5,    quantity_is_consistent: false}
+        - {invoice: "C603", quantity_returned: 1, match_status: "no customer id",                     is_matched: false, original_quantity: null, quantity_is_consistent: null}
+        - {invoice: "C604", quantity_returned: 2, match_status: "no prior purchase in window",        is_matched: false, original_quantity: null, quantity_is_consistent: null}
+        - {invoice: "C606", quantity_returned: 2, match_status: "matched",                            is_matched: true,  original_quantity: 4,    quantity_is_consistent: true}
+
+  - name: retail_returns_takes_the_latest_purchase_before_the_return_and_no_other
+    model: fct_retail_returns
+    description: >
+      The asof join is "most recent prior", and all three words carry weight.
+      Three purchases of the same product by the same customer: an earlier one,
+      the one that should win, and one *after* the return that must never be
+      reachable. `original_quantity` is the tell — 10 would mean the join took
+      the first, 99 would mean it looked forward. Returning exactly what was
+      bought is a complete return and therefore consistent: `<=`, not `<`, which
+      the data tests cannot see and which moves 5,613 rows (34% of all matches)
+      when it flips.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          - {invoice: "500", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 10, unit_price: 2.0, line_amount_gbp: 20.0, invoice_ts: "2024-01-01 09:00:00", invoice_date: "2024-01-01"}
+          - {invoice: "501", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 5,  unit_price: 2.0, line_amount_gbp: 10.0, invoice_ts: "2024-01-05 09:00:00", invoice_date: "2024-01-05"}
+          # After the return. Reachable only by a join that looks forward.
+          - {invoice: "502", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 99, unit_price: 2.0, line_amount_gbp: 198.0, invoice_ts: "2024-01-20 09:00:00", invoice_date: "2024-01-20"}
+          # Exactly what invoice 501 sold: a complete return, five days later.
+          - {invoice: "C601", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -5, unit_price: 2.0, line_amount_gbp: -10.0, invoice_ts: "2024-01-10 09:00:00", invoice_date: "2024-01-10"}
+    expect:
+      rows:
+        - {invoice: "C601", original_invoice: "501", original_quantity: 5, original_invoice_date: "2024-01-05", days_to_return: 5, match_status: "matched", quantity_is_consistent: true, price_differs_from_original: false}
+
+  - name: retail_returns_breaks_a_tied_purchase_the_same_way_every_build
+    model: fct_retail_returns
+    description: >
+      An `asof join` with several rows tied on its inequality key picks one
+      arbitrarily, and 33,518 groups in the purchase universe are tied — 70,174
+      of 802,716 lines, 8.7%. 604 return lines land on one. Until 2026-08-24 the
+      model was therefore not reproducible: three runs against byte-identical
+      sources gave 16,031 / 16,032 / 16,030 clean matches. `purchases` now keeps
+      the lowest invoice then the lowest line number at each (customer, product,
+      instant), so the choice is stated instead of emergent. Three lines of the
+      same product at one instant, deliberately given out of order and with
+      different quantities, so which one wins is visible in `original_quantity`
+      and not only in `original_line_number`. Nothing asserts the chosen line is
+      the *better* match — only that it is always the same one.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          # All three at the identical instant, and the lowest *line number* is
+          # deliberately on the highest *invoice*: ordering by line first would
+          # pick 701/1, so the fixture separates `(invoice, line_number)` from
+          # `(line_number, invoice)` instead of passing under both. Listed out
+          # of order so a fixture-order dependency would show as 700/5 winning.
+          - {invoice: "700", line_number: 5, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 9, unit_price: 1.0, line_amount_gbp: 9.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
+          - {invoice: "701", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 7, unit_price: 1.0, line_amount_gbp: 7.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
+          - {invoice: "700", line_number: 3, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 2, unit_price: 1.0, line_amount_gbp: 2.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
+          - {invoice: "C700", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -4, unit_price: 1.0, line_amount_gbp: -4.0, invoice_ts: "2024-02-05 09:00:00", invoice_date: "2024-02-05"}
+    expect:
+      rows:
+        # Invoice 700 line 3 wins: lowest invoice, then lowest line within it.
+        # Its quantity is 2, so the return of 4 exceeds it — the artefact the
+        # model comment quantifies. 56 of the warehouse's 366 rows in that bucket
+        # would be plain matches if tied lines were summed instead of chosen
+        # between. That is a separate decision and this test pins today's.
+        - {invoice: "C700", original_invoice: "700", original_line_number: 3, original_quantity: 2, quantity_returned: 4, match_status: "matched, quantity exceeds purchase", quantity_is_consistent: false}

@@ -44,7 +44,41 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # the legitimate neighbouring figures all precede a *different* noun — "291 of
 # the 369", "391 audit tables", "22 orphans", "367 of the 369 tests" — so they
 # are never captured and never need exempting.
-CLAIM = re.compile(r"\b(\d+)\s+(?:dbt\s+|data\s+|unit\s+)?tests?\b")
+# CLAUDE.md writes some counts as words ("There are eighteen unit tests"), so
+# the pattern reads both — `fct_retail_returns` shipped "all eleven data tests"
+# for a model with ten, and a digits-only scanner passed it twice.
+#
+# Only ten and above. Below that the words are always local ("Two unit tests
+# catch all five", "four tests", "one test"), never a project-wide or per-model
+# total, and including them produced nine false positives against zero finds.
+WORDS = {
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+# `of those` / `of the` may sit between the number and the noun — CLAUDE.md and
+# DATA_QUALITY.md both write "Eighteen of those tests are dbt unit tests", and a
+# strictly adjacent pattern skipped it. Anything longer than that is left out on
+# purpose: the further the noun drifts from the number, the more the pattern
+# starts matching arithmetic ("367 of the 369 tests" must capture 369, not 367).
+CLAIM = re.compile(
+    rf"\b(\d+|{'|'.join(WORDS)})\s+(?:of\s+(?:those|the|them|its)\s+)?"
+    rf"(?:dbt\s+|data\s+|unit\s+)?tests?\b",
+    re.IGNORECASE,
+)
+
+
+def as_int(token: str) -> int:
+    return int(token) if token.isdigit() else WORDS[token.lower()]
+
 
 # Prose that makes these claims. `git ls-files` rather than a glob, so the
 # gitignored `docs/sessions/` transcripts (which quote historical counts by
@@ -85,36 +119,66 @@ def attached_to(man: dict, model: str) -> int:
     return sum(1 for v in data_tests(man) if (v.get("attached_node") or "").endswith(f".{model}"))
 
 
-def expected_counts(man: dict) -> set[int]:
-    """Every test count this project's prose is allowed to state.
+# Models whose per-model test count is quoted in prose. A count here is only
+# accepted near a mention of its own model, so adding one does not widen what a
+# project-wide sentence may claim.
+CITED_MODELS = (
+    "dim_date",
+    "stg_retail_lines",
+    "fct_cbam_exposure",
+    "fct_fx_rates_daily",
+    "fct_fx_rates_periods",
+    "fct_retail_returns",
+)
 
-    Derived, never written down. A literal here would be the same untested
-    assertion one layer further in, and the point of the file is that a count
-    nobody re-measures goes stale — so a model that gains a test moves its own
-    citations' expected value with it.
 
-    The two per-model entries widen the set and the cost is real: with 19 in it,
-    nothing can catch a sentence claiming "19 dbt tests" of the whole project.
-    They earn it because the error that prompted this file *was* a per-model
-    count, wrong in thirteen places, and leaving them out would put the class
-    that actually broke outside the guard. Only models whose count is genuinely
-    cited belong — an entry for a model no prose mentions widens the set for
-    nothing.
+def owning_model(text: str, pos: int) -> str | None:
+    """Which model the prose at `pos` is talking about.
+
+    The nearest *preceding* mention, unbounded, because that is how these
+    documents establish context: a heading names the model and everything under
+    it is about that model until the next one. A fixed-width window round the
+    number does not work — `compliance-models/SKILL.md` writes "This model's 20
+    data tests" with `fct_cbam_exposure` several paragraphs up.
     """
+    before = text[:pos]
+    best, best_at = None, -1
+    for model in CITED_MODELS:
+        at = before.rfind(model)
+        if at > best_at:
+            best, best_at = model, at
+    return best if best_at >= 0 else None
+
+
+def project_counts(man: dict) -> set[int]:
+    """Counts a sentence may state about the project as a whole."""
     data = len(data_tests(man))
     unit = len(man.get("unit_tests", {}))
-    return {
-        data,  # project-wide data tests
-        unit,  # project-wide unit tests
-        data + unit,  # the "N tests alongside the models" figure
-        attached_to(man, "stg_retail_lines"),  # cited 3x
-        attached_to(man, "fct_cbam_exposure"),  # cited 4x
-    }
+    return {data, unit, data + unit}
+
+
+def model_counts(man: dict) -> dict[str, int]:
+    """Per-model counts, each admissible only near its own model's name.
+
+    Keeping these out of the project-wide set is not fussiness. `attached_to`
+    returns 10 for `fct_retail_returns` and 14 for `fct_fx_rates_daily`, and 10
+    was the project-wide unit-test total one commit ago — so folding them into
+    one set made "10 unit tests" legal anywhere and silently reopened the exact
+    staleness this file exists to catch. Scoping them to their own model is what
+    lets the set grow without every addition weakening every other check.
+    """
+    return {m: attached_to(man, m) for m in CITED_MODELS}
+
+
+def expected_counts(man: dict) -> set[int]:
+    """Everything that is a true count somewhere. Used only for reporting."""
+    return project_counts(man) | set(model_counts(man).values())
 
 
 def test_every_documented_test_count_is_one_dbt_actually_builds():
     man = manifest()
-    allowed = expected_counts(man)
+    project = project_counts(man)
+    per_model = model_counts(man)
     stale: list[str] = []
     seen = 0
     for path in tracked_prose():
@@ -126,12 +190,19 @@ def test_every_documented_test_count_is_one_dbt_actually_builds():
         text = path.read_text()
         for match in CLAIM.finditer(text):
             seen += 1
-            if int(match.group(1)) not in allowed:
-                line = text.count("\n", 0, match.start()) + 1
-                rel = path.relative_to(REPO_ROOT)
-                claim = " ".join(match.group(0).split())
-                stale.append(f"  {rel}:{line}: {claim!r} — allowed: {sorted(allowed)}")
-    assert seen > 25, (
+            value = as_int(match.group(1))
+            if value in project:
+                continue
+            owner = owning_model(text, match.start())
+            if owner is not None and per_model[owner] == value:
+                continue
+            line = text.count("\n", 0, match.start()) + 1
+            rel = path.relative_to(REPO_ROOT)
+            claim = " ".join(match.group(0).split())
+            owners = sorted(m for m, n in per_model.items() if n == value)
+            hint = f" (reads as {owner or 'no model'}; {value} is {'/'.join(owners) or 'no model'})"
+            stale.append(f"  {rel}:{line}: {claim!r}{hint} — project-wide: {sorted(project)}")
+    assert seen > 35, (
         f"scanner matched only {seen} claims; the patterns or the file list have drifted"
     )
     assert not stale, "test counts in prose disagree with the dbt manifest:\n" + "\n".join(stale)

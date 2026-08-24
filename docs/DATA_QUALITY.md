@@ -1,6 +1,6 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 379 tests alongside the models — 369 data tests and 10 unit
+`just dbt-build` runs 387 tests alongside the models — 369 data tests and 18 unit
 tests. Dagster surfaces the data tests as asset checks on the models they guard.
 For the pytest side, see [`tests/README.md`](../tests/README.md).
 
@@ -27,8 +27,9 @@ happily pass a threshold the full 200+ would break.
 
 ## Unit tests
 
-Ten of those tests are dbt *unit* tests, over `dim_date`, `stg_retail_lines` and
-`fct_cbam_exposure`. They run a model against fixed input rows and compare the
+Eighteen of those tests are dbt *unit* tests, over six models — `dim_date`,
+`stg_retail_lines`, `fct_cbam_exposure`, `fct_fx_rates_daily`,
+`fct_fx_rates_periods` and `fct_retail_returns`. They run a model against fixed input rows and compare the
 entire output, rather than asserting a property of whatever the warehouse happens
 to hold — which is what lets them reach two things a data test structurally
 cannot.
@@ -43,7 +44,7 @@ moves net revenue by £260,764 with all 19 of that model's data tests green;
 dropping the `upper()` from `stock_code` sends all 100 voucher lines, which
 arrive lowercase, into product with the same 19 green.
 
-`fct_cbam_exposure` is the hardest of the three. Its numbers are transcribed from
+`fct_cbam_exposure` is the hardest of them. Its numbers are transcribed from
 a legal instrument, so there is nothing independent to check them against and its
 20 data tests are almost all `not_null` and generous ranges — 19 of them when
 the mutations below were run, the twentieth being the route test that came out
@@ -70,15 +71,15 @@ changes not one number in the warehouse.
 Fixtures live in `dbt/tests/fixtures/` (dbt's `test-paths`, not the pytest
 fixtures). `dim_date` needs CSV files there because it generates its own rows —
 one input year expands to a whole calendar year, and `expect` is full-set
-equality over all 366. The other two are 1:1 on their inputs, so their cases are
-inline. `fct_cbam_exposure`'s fixtures also pick totals that are float-exact
+equality over all 366. The other five are 1:1 on their inputs, or close enough
+that posing the rows directly is clearer, so their cases are inline. `fct_cbam_exposure`'s fixtures also pick totals that are float-exact
 under the mark-up, because `markup_2026_pct` is a ratio of two doubles and the
 warehouse holds three distinct values of it that all print as `10.0`.
 
 They run inside `dbt build` rather than being excluded from it. dbt Labs
 recommends keeping unit tests out of production runs to save warehouse spend;
 that argument is about a cloud warehouse, and this is a local DuckDB build where
-all ten cost about three seconds. `just dbt-unit-test` is the inner loop.
+all eighteen cost 3.4 seconds. `just dbt-unit-test` is the inner loop.
 
 ## Who it's for
 

@@ -31,6 +31,34 @@ follows from that rather than from the numbers.
   2002 breaking of the dollar peg. Those 3,359 rows keep their place with a null
   rate and `is_rate_stale` set. An uncapped fill would have put a pre-collapse
   krona on nine years of charts.
+- **Nothing in the 14 data tests on `fct_fx_rates_daily` can see the cap, and
+  five mutations prove it.** They guard the grain, the direction of the carry
+  (`rate_source_date <= date_day`) and positivity — all real, none sufficient,
+  because a rate carried 8 days or 3,341 days is a well-formed positive number
+  with a source date in the past. All five mutations below pass all 14 data
+  tests:
+
+  | mutation | effect on the warehouse |
+  |---|---|
+  | cap 7 -> 30 days | 46 stale rows gain a rate |
+  | cap removed | all 3,359 priced; `is_rate_stale` true beside a usable rate |
+  | `<=` becomes `<` | 2 rows at exactly the cap lose their rate |
+  | `is_rate_stale` on `>=` | 2 rows stale *and* priced |
+  | window loses `partition by currency_code` | **113,479 rows (29.7%) quote another currency** |
+
+  - The last is the one to remember: GBP's 0.7094 becomes 0.3718 and the grain
+    is still unique, every date still moves forward, every rate is still
+    positive. **Direction and identity are independent properties and only
+    direction was asserted.**
+  - **A fixture for a partitioning bug has to make the partitions disagree.**
+    Two currencies publishing on the same day return the right answer with no
+    partition at all. The test has BBB publishing *later* than AAA on every day
+    AAA must carry.
+  - The cap's value is defensible in numbers: ISK 290.00 before the 2008
+    collapse against 125.01 after the nine-year gap, ARS 0.89130 against
+    1.76373 across its 26-day one — 132% and 98% from the next real quote.
+  - Held by two unit tests in `dbt/models/marts/_unit_tests.yml`, which catch
+    all five.
 - **The currency panel is not fixed, which is why `dim_currency` exists.** 46
   codes have been quoted and 29 still are. Ten stop on the last business day
   before their country adopted the euro (GRD 2000 through BGN 2025), two at a
@@ -57,6 +85,23 @@ follows from that rather than from the numbers.
     `is_quoted` assertion: 47 rows, 46 quoted, EUR the one exception.
 ### Both directions, and spot against average
 
+- **`fct_fx_rates_periods` has 20 data tests and four of five mutations pass
+  every one of them.** `avg_eur_per_unit` as `1 / avg_units_per_eur` (USD 2008
+  0.683499 -> 0.679923), `max()` for `arg_max(.., rate_date)` (USD 2014's period
+  end 1.2141 -> 1.3953, and `period_end_vs_avg_pct` **flips sign**, -8.61% ->
+  +5.03%), `min()` for `arg_min` (85.9% of `period_start_units_per_eur` wrong),
+  and `period_is_complete` on `<` (nothing moves — no period ends on the series
+  end date). The fifth, averaging the dense daily table, is caught by
+  `fx_periods_annual_buckets_cover_every_fixing`, which pins the input's shape
+  rather than any value and catches this for free. The three unit tests in
+  `dbt/models/marts/_unit_tests.yml` hold the other four — so between them all
+  five are covered, but the fifth rests on that one data test alone. Deleting it
+  as redundant would leave the only mutation the existing suite catches
+  uncovered.
+  - **The reciprocal gap's headline number should be the krona, not the
+    dollar.** 0.07% for EUR/USD in 2015 and 0.52% in 2008 read as rounding; the
+    ISK in 2008 is **11.9%**. The gap scales with intra-period movement, so it
+    is largest in exactly the periods someone is investigating.
 - **Both directions of every rate ship.** `units_per_eur` is the ECB's own quote,
   `eur_per_unit` its reciprocal. Same argument as the Scope 2 factor in g/kWh
   *and* t/MWh: a consumer forced to invert it themselves will eventually forget.

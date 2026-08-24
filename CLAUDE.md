@@ -70,7 +70,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 10 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 18 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -497,11 +497,11 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are ten unit tests, over three models, and they exist because a data
+- **There are eighteen unit tests, over six models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
-  and every fiscal quarter in the warehouse is wrong while **all 20 data tests on
+  and every fiscal quarter in the warehouse is wrong while **all 19 data tests on
   the model pass** — measured, not argued. Its three unit tests fail on it.
   `fiscal_year_start_date` and `fiscal_year_end_date` had no test of any kind
   before this.
@@ -598,6 +598,107 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
       `is not distinct from`, not `=`: 553 of the 755 correctly resolve to a
       null route, and `=` is unknown on a null, which `where not(...)` discards
       — the test would pass by not looking.
+- **`fct_fx_rates_daily` is the fourth, and it is the one where the data tests
+  look adequate and are not.** Fourteen of them: the grain, `rate_source_date <=
+  date_day` (no backfill from the future), `rate_source_date = date_day` on
+  published rows, positive rates, a non-negative age. **Five mutations, all
+  fifteen green on every one.** Widening the cap from 7 days to 30 prices 46
+  stale rows; removing the cap prices all 3,359 and leaves the model
+  contradicting itself, `is_rate_stale` true beside a usable rate; `<=` to `<`
+  costs 2 rows their rate; `is_rate_stale` on `>=` instead of `>` flags 2 rows
+  stale *and* priced. Worst is dropping `partition by currency_code` from the
+  carry window: **113,479 rows, 29.7% of the table, then quote another
+  currency's fixing** — GBP's 0.7094 becomes 0.3718 — and the grain is still
+  unique and every date still moves forward, so nothing sees it. Two unit tests
+  catch all five.
+  - **The existing tests guard direction and provenance, never identity.**
+    `rate_source_date <= date_day` is a real test that stops a real bug (a
+    default window frame reaching forward), and mixing currencies moves no date
+    backwards, so it cannot help. Two independent properties, one asserted.
+  - **A fixture for a partitioning bug has to make the partitions disagree.**
+    The obvious symmetric setup — both currencies publishing on day 1 — returns
+    the right answer with no partition at all, and the test is green forever.
+    `fx_daily_never_carries_one_currency_rate_into_another` has BBB publishing
+    *later* than AAA on every day AAA must carry, so an unpartitioned window
+    hands AAA the wrong number three times out of three.
+  - **What the cap refuses is worth a number.** The ISK's last fixing before the
+    2008 collapse is 290.00 and the first after the nine-year gap is 125.01; the
+    ARS goes 0.89130 to 1.76373 across its 26-day gap. Carrying either forward
+    converts at a rate 132% and 98% from the next real quote. That is the
+    argument for the cap being 7 rather than generous.
+- **`fct_fx_rates_periods` is the fifth, and the only model so far where an
+  existing test caught one of the mutations.** 20 data tests; five mutations,
+  four of them green on every one. `avg_eur_per_unit` written as
+  `1 / avg_units_per_eur` moves USD 2008 from 0.683499 to 0.679923; `max()` in
+  place of `arg_max(.., rate_date)` takes USD 2014's period end from 1.2141 to
+  1.3953 and **flips the sign of `period_end_vs_avg_pct`, -8.61% to +5.03%**;
+  `min()` for `arg_min` puts the wrong `period_start_units_per_eur` on 16,975
+  rows (85.9%); and `period_is_complete` on `<` instead of `<=` changes nothing
+  at all. Averaging the dense `fct_fx_rates_daily` instead of the published
+  fixings is the one that fails, on
+  `fx_periods_annual_buckets_cover_every_fixing`.
+  - **That test is the model to copy.** It sums `n_published_days` over the year
+    buckets and compares it with the row count of `fct_fx_rates_published`, so
+    the *shape* of the input is pinned rather than any value. It was written to
+    guard the `dim_date` join and it catches an unrelated bug for free, which is
+    what a structural assertion buys over a per-column range.
+  - **`arg_max(x, rate_date)` against `max(x)` is the slip to watch for here**,
+    because on a rising period they agree and the model has four columns of that
+    shape. The fixture makes the period peak in the middle and close below where
+    it opened, so last, first, max and min are four different numbers.
+  - **The reciprocal gap is worst exactly when someone is looking.** 0.07% for
+    EUR/USD in calm 2015, 0.52% in 2008 — and **11.9% for the Icelandic krona in
+    2008**, which is the number that makes the rule matter rather than the USD
+    one. Fixture values are chosen exact in binary floating point: mean of 0.5
+    and 0.125 is 0.3125 against one over the mean of 2 and 8, which is 0.2.
+  - **`period_is_complete`'s boundary is unreachable and stays that way.** No
+    period ends on the series end date, so `<` and `<=` are indistinguishable in
+    the warehouse; the branch is live only on the days the last fixing lands on
+    a month, quarter, half or year end. `dim_date`'s eleven unbuilt fiscal
+    policies and the retail `<> 'adjustment'` clause are the same category, and
+    that is now three of the five models.
+- **`fct_retail_returns` is the sixth, and unit-testing it turned up that the
+  model is not deterministic.** Six mutations, all ten data tests green on
+  every one: checking "no prior purchase" before "no customer id" relabels the
+  352 unmatchable rows; `>=` for "quantity exceeds purchase" takes matched from
+  16,031 to 10,398; `<` for `quantity_is_consistent` takes consistent to 10,404;
+  dropping `item_type = 'product'` from `returns` adds **1,207 rows** of
+  cancelled postage and fees; the asof `>` costs 2 rows; and dropping
+  `quantity > 0` from `purchases` does **nothing at all**, because every stock
+  write-off is anonymous and `customer_id is not null` already excludes them.
+  - **`accepted_values` on `match_status` is the trap, and it is the same one
+    `stg_retail_lines` has.** All four strings stay legal while tens of
+    thousands of rows move between them, and no total changes.
+  - **`quantity_is_consistent`'s `<=` is worth 5,613 rows — 34% of all
+    matches** — because a complete return is the ordinary case, not an edge one.
+  - **The model was not reproducible between builds, and it is a different
+    mechanism from the float one.** Three consecutive `dbt run` against
+    byte-identical sources gave `matched` = 16,031 / 16,032 / 16,030 and
+    `sum(original_quantity)` = 637,411 / 636,410 / 636,208. The cause is ties in
+    the `asof join`, which picks arbitrarily among rows tied on its inequality
+    key: **33,518 groups share a (customer, product, instant)**, covering 70,174
+    of 802,716 purchase lines (8.7%), and 604 returns (3.68%) land on one, up to
+    20 deep. `dim_retail_customer` had already met this and settled it by
+    ranking on `min(invoice_ts)` then `invoice`; `purchases` now does the same
+    with a `qualify row_number()` on `(invoice, line_number)`. Three builds now
+    agree to the penny. It mattered more here than there — the table ships as
+    Parquet in the release and feeds `reports/pages/retail.md`, so figures moved
+    between releases with no upstream change.
+    - **The tie-break picks one line and deliberately does not sum them, and
+      the cost of that is measured.** Of the 604 tied matches, 63 are flagged
+      'matched, quantity exceeds purchase' and **56 would be plain matches if
+      the tied lines were added up** — the customer did buy that many, across
+      two lines of one order. That is 15% of the 366 rows in the bucket the
+      model calls its most interesting number, so **that bucket is an upper
+      bound on "the rule found the wrong sale", not a count of it.** Summing is
+      a re-specification of the matching rule (`original_line_number` would have
+      nothing to point at) and belongs in its own decision, not inside a
+      determinism fix.
+    - **A tie-break fixture has to separate the ordering from its permutations.**
+      The first version put the winning row on both the lowest invoice *and* the
+      lowest line number, so `order by line_number, invoice` passed it too. It
+      now puts the lowest line number on the highest invoice, and all three
+      permutations fail.
 - **`expect` is full-set equality, so a model that generates its own rows needs a
   fixture file.** `dim_date` expands its bounds to whole calendar years, so any
   mocked `stg_fx_rates` inside one year yields 366 rows and all 366 must be
@@ -618,8 +719,8 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  ten cost 2.5s. A broken fiscal calendar should stop `release-data.yml`, not
-  ride along in it. `just dbt-unit-test` is the ~2s inner loop.
+  eighteen cost 3.4s. A broken fiscal calendar should stop `release-data.yml`,
+  not ride along in it. `just dbt-unit-test` is the ~3s inner loop.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.
   It is tautologically green in CI (which loads and then checks), which is why
