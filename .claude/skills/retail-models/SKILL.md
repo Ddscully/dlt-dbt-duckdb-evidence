@@ -57,17 +57,24 @@ one; the page is `retail.md`.
   the data being absent. Reported per row instead of tuned into one headline; the
   median return comes back in 10 days, which is the evidence the rule isn't
   latching onto arbitrary sales.
-- **`fct_retail_returns` is not reproducible between builds.** Three
-  consecutive runs against byte-identical sources: `matched` 16,031 / 16,032 /
-  16,030, `sum(original_quantity)` 637,411 / 636,410 / 636,208. **604 returns
-  (3.68%) have two or more purchases of the same product by the same customer at
-  the identical `invoice_ts`** — up to 20 — and the `asof join` picks one
-  arbitrarily. This is the bug `dim_retail_customer` already fixed one model
-  over, by ranking on `min(invoice_ts)` then `invoice`; the same tie-break would
-  fix it here. It matters more here, because the table ships as Parquet in the
-  public release and feeds the retail page, so figures move between releases
-  with no upstream change. Unrelated to the float-aggregation instability on
-  `net_revenue_gbp` — that is `sum()` over doubles, this is row selection.
+- **`fct_retail_returns` was not reproducible between builds until
+  2026-08-24.** Three consecutive runs against byte-identical sources: `matched`
+  16,031 / 16,032 / 16,030, `sum(original_quantity)` 637,411 / 636,410 /
+  636,208. An `asof join` picks arbitrarily among rows tied on its inequality
+  key, and **33,518 groups share a (customer, product, instant)** — 70,174 of
+  802,716 purchase lines, 8.7% — with 604 returns (3.68%) landing on one, up to
+  20 deep. `purchases` now carries a `qualify row_number()` on
+  `(invoice, line_number)`, the same settlement `dim_retail_customer` reached by
+  ranking on `min(invoice_ts)` then `invoice`. Unrelated to the
+  float-aggregation instability on `net_revenue_gbp` — that is `sum()` over
+  doubles, this is row selection.
+  - **'matched, quantity exceeds purchase' is an upper bound, not a count.** Of
+    the 604 tied matches, 70 carry that flag and **63 would be plain matches if
+    the tied lines were summed** — the customer bought that many across two
+    lines of one order. 17% of the bucket. Summing is a re-specification of the
+    rule and was deliberately kept out of the determinism fix.
+  - The tie-break is stable, not meaningful: `invoice` is a string so the order
+    is lexicographic, and nothing claims the chosen line is the better match.
 - **Eleven data tests, six mutations, none caught** (`dbt/models/marts/_unit_tests.yml`
   holds the two that do). The `accepted_values` on `match_status` is the same
   trap as `item_type`: reordering the `case` so "no prior purchase" is tested

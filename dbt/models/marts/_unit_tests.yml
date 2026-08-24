@@ -579,9 +579,9 @@ unit_tests:
   # member, and the first three mutations move tens of thousands of rows between
   # legal buckets without touching a total.
   #
-  # **The fixtures must not contain a tie**, because the model is not
-  # deterministic where one exists — see the note in CLAUDE.md. No purchase here
-  # shares a customer, product and instant with another.
+  # The first two fixtures contain no tie — no purchase shares a customer,
+  # product and instant with another — because they are about the matching rule
+  # rather than about tie resolution. The third is nothing but a tie.
 
   - name: retail_returns_names_each_miss_by_the_reason_it_missed
     model: fct_retail_returns
@@ -647,3 +647,38 @@ unit_tests:
     expect:
       rows:
         - {invoice: "C601", original_invoice: "501", original_quantity: 5, original_invoice_date: "2024-01-05", days_to_return: 5, match_status: "matched", quantity_is_consistent: true, price_differs_from_original: false}
+
+  - name: retail_returns_breaks_a_tied_purchase_the_same_way_every_build
+    model: fct_retail_returns
+    description: >
+      An `asof join` with several rows tied on its inequality key picks one
+      arbitrarily, and 33,518 groups in the purchase universe are tied — 70,174
+      of 802,716 lines, 8.7%. 604 return lines land on one. Until 2026-08-24 the
+      model was therefore not reproducible: three runs against byte-identical
+      sources gave 16,031 / 16,032 / 16,030 clean matches. `purchases` now keeps
+      the lowest invoice then the lowest line number at each (customer, product,
+      instant), so the choice is stated instead of emergent. Three lines of the
+      same product at one instant, deliberately given out of order and with
+      different quantities, so which one wins is visible in `original_quantity`
+      and not only in `original_line_number`. Nothing asserts the chosen line is
+      the *better* match — only that it is always the same one.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          # All three at the identical instant, and the lowest *line number* is
+          # deliberately on the highest *invoice*: ordering by line first would
+          # pick 701/1, so the fixture separates `(invoice, line_number)` from
+          # `(line_number, invoice)` instead of passing under both. Listed out
+          # of order so a fixture-order dependency would show as 700/5 winning.
+          - {invoice: "700", line_number: 5, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 9, unit_price: 1.0, line_amount_gbp: 9.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
+          - {invoice: "701", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 7, unit_price: 1.0, line_amount_gbp: 7.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
+          - {invoice: "700", line_number: 3, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 2, unit_price: 1.0, line_amount_gbp: 2.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
+          - {invoice: "C700", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -4, unit_price: 1.0, line_amount_gbp: -4.0, invoice_ts: "2024-02-05 09:00:00", invoice_date: "2024-02-05"}
+    expect:
+      rows:
+        # Invoice 700 line 3 wins: lowest invoice, then lowest line within it.
+        # Its quantity is 2, so the return of 4 exceeds it — the artefact the
+        # model comment quantifies. 63 of the warehouse's 367 rows in that bucket
+        # would be plain matches if tied lines were summed instead of chosen
+        # between. That is a separate decision and this test pins today's.
+        - {invoice: "C700", original_invoice: "700", original_line_number: 3, original_quantity: 2, quantity_returned: 4, match_status: "matched, quantity exceeds purchase", quantity_is_consistent: false}
