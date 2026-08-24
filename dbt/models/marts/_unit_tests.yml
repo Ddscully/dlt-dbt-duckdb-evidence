@@ -85,3 +85,228 @@ unit_tests:
     expect:
       format: csv
       fixture: dim_date_fiscal_july
+
+# ---------------------------------------------------------------------------
+# Unit tests for `fct_cbam_exposure`.
+#
+# The most complex model in the project and the one whose wrong answers are
+# hardest to see: it is a table of euro costs with a statutory deadline, and
+# every figure on it is plausible. Its data tests are `not_null` and
+# `accepted_range` with generous bounds, which is all they can be — the numbers
+# are transcribed from a legal instrument, so there is no independent quantity to
+# check them against. What is left for a unit test is the *rules*: which row a
+# value is read off, which goods are priced at all, which mark-up a product group
+# gets, and what a window function partitions by.
+#
+# Three of the four tests below pose rows the source does not contain, and that
+# is deliberate rather than incidental. `is_country_specific`, the row-level
+# fallback and the heading filter are all reachable only through shapes the
+# 2026/1740 annex happens not to publish; the Chile line pipe that proved the
+# fallback rule was corrected out of the source in July 2026, taking with it the
+# only data that could ever have exercised it.
+#
+# **Every fixture total is chosen to be float-exact under the mark-up**, which is
+# not decoration. `total * (1 + 10/100)` is exact for 2.5, 5, 10, 20, 40 and 80
+# and inexact for 1, 2, 4, 8 and 50; the 1% fertiliser rate is exact for 50 and
+# for almost nothing else. `markup_2026_pct` is not asserted anywhere below for
+# the same reason — it is a ratio of two doubles and the warehouse holds three
+# distinct values of it that all print as `10.0`
+# (9.99999999999998578915, 10.00000000000000888178, 10.00000000000003197442).
+# A column with no exact value can only ever carry a range test, which is the
+# argument for the mark-up schedule being a seed rather than something measured
+# off the annex.
+#
+# All five inputs are declared in every test. Three are seeds, and an undeclared
+# seed input is not empty — dbt uses the seed's own CSV, which here is 12,540
+# rows of Annex I.
+
+  - name: cbam_exposure_takes_the_fallback_row_whole_or_not_at_all
+    model: fct_cbam_exposure
+    description: >
+      The fallback is a row-level rule, not a column-level one. Where a listed
+      country has no total for a good, the regulation sends the whole line to the
+      "Other countries and territories" table — so direct, indirect and total
+      must all come from that one row. Picking each column from whichever source
+      happens to hold it produces a line that exists nowhere in the regulation,
+      which is what a per-column `coalesce` once did to Chile's line pipe. That
+      row was corrected out of the annex in July 2026 and **no row in the current
+      source can reach this branch**: zero of the 12,540 seed rows have a null
+      total beside a non-null direct or indirect. Chile is posed here for that
+      reason. `production_route_code` follows the rule too, and the fixture is
+      built to prove it rather than to record it: Chile carries a route of its
+      own ("B") and the fallback carries a different one ("F"), so the only way
+      to expect "F" is to read the route off the row the tonnages came from. It
+      did not follow the rule until 2026-08-24 — 202 warehouse rows showed a
+      blank route beside a tonnage whose fallback row had one.
+    given:
+      - input: ref('cbam_default_values')
+        rows:
+          # The annex's catch-all. Its own `country_iso3` is null, which is what
+          # makes it the fallback, and it is `is_country_specific` because the
+          # number on it is its own.
+          - {country_or_territory: "Other countries and territories", country_iso3: null,  good_key: "7601-unwrought-aluminium", default_direct_t_co2e_per_t: 3.0, default_indirect_t_co2e_per_t: 7.0, default_total_t_co2e_per_t: 10.0, production_route_code: "F"}
+          # A listed country with a value of its own: keeps all three columns.
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "7601-unwrought-aluminium", default_direct_t_co2e_per_t: 1.5, default_indirect_t_co2e_per_t: 3.5, default_total_t_co2e_per_t: 5.0, production_route_code: "A"}
+          # The trap. Direct and indirect published, total absent, route
+          # present *and different from the fallback's*. Under the rule this
+          # line is the fallback's 3.0 / 7.0 / 10.0 on route F — never its own
+          # 4.0 / 6.0 with someone else's total, and never route B.
+          - {country_or_territory: "Chile", country_iso3: "CHL", good_key: "7601-unwrought-aluminium", default_direct_t_co2e_per_t: 4.0, default_indirect_t_co2e_per_t: 6.0, default_total_t_co2e_per_t: null, production_route_code: "B"}
+      - input: ref('cbam_goods')
+        rows:
+          - {good_key: "7601-unwrought-aluminium", product_group: "Aluminium", cn_code: "7601", goods_description: "Unwrought aluminium"}
+      - input: ref('cbam_markup_schedule')
+        rows:
+          - {product_group: "Aluminium", year: 2026, markup_pct: 10}
+          - {product_group: "Aluminium", year: 2027, markup_pct: 20}
+          - {product_group: "Aluminium", year: 2028, markup_pct: 30}
+      - input: ref('stg_country')
+        rows:
+          - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
+          - {country_iso3: "CHL", country_name: "Chile",  region: "Latin America & Caribbean", income_group: "High income"}
+      # No factor for either country: the grid columns are context on a left
+      # join, and a missing one must not drop the exposure row.
+      - input: ref('dim_grid_emission_factors')
+        rows: []
+    expect:
+      rows:
+        - {country_or_territory: "Other countries and territories", country_display_name: "Other countries and territories", is_fallback_table: true,  is_country_specific: true,  production_route_code: "F", direct_t_co2e_per_t: 3.0, indirect_t_co2e_per_t: 7.0, total_t_co2e_per_t: 10.0, certificates_2026_t_co2e_per_t: 11.0}
+        - {country_or_territory: "Norway", country_display_name: "Norway", is_fallback_table: false, is_country_specific: true,  production_route_code: "A", direct_t_co2e_per_t: 1.5, indirect_t_co2e_per_t: 3.5, total_t_co2e_per_t: 5.0,  certificates_2026_t_co2e_per_t: 5.5}
+        - {country_or_territory: "Chile",  country_display_name: "Chile",  is_fallback_table: false, is_country_specific: false, production_route_code: "F", direct_t_co2e_per_t: 3.0, indirect_t_co2e_per_t: 7.0, total_t_co2e_per_t: 10.0, certificates_2026_t_co2e_per_t: 11.0}
+
+  - name: cbam_exposure_drops_the_headings_that_no_country_prices
+    model: fct_cbam_exposure
+    description: >
+      23 of the annex's 283 goods carry a description and no value anywhere, not
+      even in the fallback table: they are 4-digit CN headings printed above the
+      subheadings that hold the numbers, and two of them say "see below" where a
+      value would go. They belong in the seed, which is a transcription, and not
+      in a table of euro costs, where they could only ever be priced at null. The
+      filter is `having count(<total>) > 0` and the `count` is over the column
+      rather than `count(*)` — the distinction is the entire test, because a
+      heading has plenty of rows and no values. Asserted on which rows exist
+      rather than on any number, since a heading's whole failure mode is being
+      present.
+    given:
+      - input: ref('cbam_default_values')
+        rows:
+          # CN heading 3102: rows in every country, a value in none of them.
+          - {country_or_territory: "Other countries and territories", country_iso3: null,  good_key: "3102-mineral-or-chemical-fertilisers-nitrogenous", default_direct_t_co2e_per_t: null, default_indirect_t_co2e_per_t: null, default_total_t_co2e_per_t: null, production_route_code: null}
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "3102-mineral-or-chemical-fertilisers-nitrogenous", default_direct_t_co2e_per_t: null, default_indirect_t_co2e_per_t: null, default_total_t_co2e_per_t: null, production_route_code: null}
+          # The subheading beneath it, which is where the numbers actually are.
+          - {country_or_territory: "Other countries and territories", country_iso3: null,  good_key: "3102100000-urea", default_direct_t_co2e_per_t: 40.0, default_indirect_t_co2e_per_t: 10.0, default_total_t_co2e_per_t: 50.0, production_route_code: null}
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "3102100000-urea", default_direct_t_co2e_per_t: 40.0, default_indirect_t_co2e_per_t: 10.0, default_total_t_co2e_per_t: 50.0, production_route_code: "A"}
+      - input: ref('cbam_goods')
+        rows:
+          - {good_key: "3102-mineral-or-chemical-fertilisers-nitrogenous", product_group: "Fertilisers", cn_code: "3102", goods_description: "Mineral or chemical fertilisers, nitrogenous"}
+          - {good_key: "3102100000-urea", product_group: "Fertilisers", cn_code: "3102 10 00 00", goods_description: "Urea, whether or not in aqueous solution"}
+      - input: ref('cbam_markup_schedule')
+        rows:
+          - {product_group: "Fertilisers", year: 2026, markup_pct: 1}
+          - {product_group: "Fertilisers", year: 2027, markup_pct: 1}
+          - {product_group: "Fertilisers", year: 2028, markup_pct: 1}
+      - input: ref('stg_country')
+        rows:
+          - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
+      - input: ref('dim_grid_emission_factors')
+        rows: []
+    expect:
+      rows:
+        - {country_or_territory: "Other countries and territories", good_key: "3102100000-urea", total_t_co2e_per_t: 50.0}
+        - {country_or_territory: "Norway", good_key: "3102100000-urea", total_t_co2e_per_t: 50.0}
+
+  - name: cbam_exposure_marks_fertilisers_up_one_percent_and_holds_it_flat
+    model: fct_cbam_exposure
+    description: >
+      The mark-up is a property of the product group, not a constant. Cement,
+      iron and steel, aluminium and hydrogen phase in at 10 / 20 / 30% across
+      2026-28; fertilisers carry a flat **1% in all three years**, a
+      food-security carve-out written into the articles. Hardcoding the common
+      schedule overstates every fertiliser line by nine points in 2026 and
+      twenty-seven in 2028 — 2,457 rows of the mart — and `markup_2026_pct`'s
+      `accepted_range 0-31` cannot see it, because 10 is a legal answer. The
+      model used to read this schedule off the annex's own published columns and
+      now asserts it from a seed, which is the loss the 2026/1740 correction
+      caused; this test is what stands in for the arithmetic that used to check
+      it. `eu_ets_price_eur_per_t` is overridden to 100 rather than inherited, on
+      the same argument as `dim_date`'s fiscal var: the warehouse only ever
+      builds 75, so nothing otherwise proves the price is wired through rather
+      than baked in.
+    overrides:
+      vars:
+        eu_ets_price_eur_per_t: 100
+    given:
+      - input: ref('cbam_default_values')
+        rows:
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "3102100000-urea", default_direct_t_co2e_per_t: 40.0, default_indirect_t_co2e_per_t: 10.0, default_total_t_co2e_per_t: 50.0, production_route_code: "A"}
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "2523100090-other-clinker", default_direct_t_co2e_per_t: 9.0, default_indirect_t_co2e_per_t: 1.0, default_total_t_co2e_per_t: 10.0, production_route_code: "A"}
+      - input: ref('cbam_goods')
+        rows:
+          - {good_key: "3102100000-urea", product_group: "Fertilisers", cn_code: "3102 10 00 00", goods_description: "Urea, whether or not in aqueous solution"}
+          - {good_key: "2523100090-other-clinker", product_group: "Cement", cn_code: "2523 10 00 90", goods_description: "Other clinker, including grey clinker"}
+      - input: ref('cbam_markup_schedule')
+        rows:
+          - {product_group: "Fertilisers", year: 2026, markup_pct: 1}
+          - {product_group: "Fertilisers", year: 2027, markup_pct: 1}
+          - {product_group: "Fertilisers", year: 2028, markup_pct: 1}
+          - {product_group: "Cement", year: 2026, markup_pct: 10}
+          - {product_group: "Cement", year: 2027, markup_pct: 20}
+          - {product_group: "Cement", year: 2028, markup_pct: 30}
+      - input: ref('stg_country')
+        rows:
+          - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
+      - input: ref('dim_grid_emission_factors')
+        rows: []
+    expect:
+      rows:
+        # Flat: 50 x 1.01 in every year, and the euro figure at the overridden
+        # price rather than the project's 75.
+        - {good_key: "3102100000-urea", total_t_co2e_per_t: 50.0, certificates_2026_t_co2e_per_t: 50.5, certificates_2027_t_co2e_per_t: 50.5, certificates_2028_t_co2e_per_t: 50.5, ets_price_eur_per_t: 100, cbam_cost_2026_eur_per_t: 5050.0}
+        # Phased: 10 x 1.1 / 1.2 / 1.3.
+        - {good_key: "2523100090-other-clinker", total_t_co2e_per_t: 10.0, certificates_2026_t_co2e_per_t: 11.0, certificates_2027_t_co2e_per_t: 12.0, certificates_2028_t_co2e_per_t: 13.0, ets_price_eur_per_t: 100, cbam_cost_2026_eur_per_t: 1100.0}
+
+  - name: cbam_exposure_measures_excess_against_the_same_good_not_the_group
+    model: fct_cbam_exposure
+    description: >
+      `excess_over_cleanest_source_t_co2e_per_t` is a window minimum, and the
+      procurement question it answers is "against the cheapest source **of this
+      good**". Partitioning it by product group instead of `good_key` compares
+      clinker with cement and steel screws with hot-rolled coil — a number that
+      is still non-negative, still monotone in the right direction, and wrong.
+      `accepted_range min_value 0` passes it, because subtracting a group-wide
+      minimum can only make the figure larger. Two goods in one product group is
+      the smallest fixture that separates the two partitions: under `good_key`
+      the cheapest row of *each* good is zero, under `product_group` only one row
+      in the whole table is.
+    given:
+      - input: ref('cbam_default_values')
+        rows:
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "2523100090-other-clinker", default_direct_t_co2e_per_t: 9.0,  default_indirect_t_co2e_per_t: 1.0,  default_total_t_co2e_per_t: 10.0, production_route_code: "A"}
+          - {country_or_territory: "Chile",  country_iso3: "CHL", good_key: "2523100090-other-clinker", default_direct_t_co2e_per_t: 18.0, default_indirect_t_co2e_per_t: 2.0,  default_total_t_co2e_per_t: 20.0, production_route_code: "A"}
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "2523290000-portland-cement", default_direct_t_co2e_per_t: 36.0, default_indirect_t_co2e_per_t: 4.0,  default_total_t_co2e_per_t: 40.0, production_route_code: "A"}
+          - {country_or_territory: "Chile",  country_iso3: "CHL", good_key: "2523290000-portland-cement", default_direct_t_co2e_per_t: 72.0, default_indirect_t_co2e_per_t: 8.0,  default_total_t_co2e_per_t: 80.0, production_route_code: "A"}
+      - input: ref('cbam_goods')
+        rows:
+          - {good_key: "2523100090-other-clinker", product_group: "Cement", cn_code: "2523 10 00 90", goods_description: "Other clinker, including grey clinker"}
+          - {good_key: "2523290000-portland-cement", product_group: "Cement", cn_code: "2523 29 00 00", goods_description: "Other Portland cement"}
+      - input: ref('cbam_markup_schedule')
+        rows:
+          - {product_group: "Cement", year: 2026, markup_pct: 10}
+          - {product_group: "Cement", year: 2027, markup_pct: 20}
+          - {product_group: "Cement", year: 2028, markup_pct: 30}
+      - input: ref('stg_country')
+        rows:
+          - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
+          - {country_iso3: "CHL", country_name: "Chile",  region: "Latin America & Caribbean", income_group: "High income"}
+      - input: ref('dim_grid_emission_factors')
+        rows: []
+    expect:
+      rows:
+        # Cheapest clinker: zero. Under a group-wide partition it stays zero,
+        # which is why this row alone would not catch the mutation.
+        - {country_or_territory: "Norway", good_key: "2523100090-other-clinker",   certificates_2026_t_co2e_per_t: 11.0, excess_over_cleanest_source_t_co2e_per_t: 0.0}
+        - {country_or_territory: "Chile",  good_key: "2523100090-other-clinker",   certificates_2026_t_co2e_per_t: 22.0, excess_over_cleanest_source_t_co2e_per_t: 11.0}
+        # Cheapest cement: also zero, and this is the row that separates them —
+        # a group-wide minimum of 11.0 would make it 33.0.
+        - {country_or_territory: "Norway", good_key: "2523290000-portland-cement", certificates_2026_t_co2e_per_t: 44.0, excess_over_cleanest_source_t_co2e_per_t: 0.0}
+        - {country_or_territory: "Chile",  good_key: "2523290000-portland-cement", certificates_2026_t_co2e_per_t: 88.0, excess_over_cleanest_source_t_co2e_per_t: 44.0}

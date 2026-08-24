@@ -70,7 +70,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 368 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 10 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -476,6 +476,11 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   `dbt_project.prepare_if_dev()` covers it under `dagster dev` only — outside the
   UI, `dbt deps && dbt parse` has to happen before the asset graph will load at
   all, because the manifest lives in the gitignored `dbt/target/`.
+- **One `unit_tests:` key per yml file.** Appending a second block to
+  `_unit_tests.yml` parses and runs — dbt *merges* the two lists rather than
+  letting the last win — but it warns `DuplicateYAMLKeysDeprecation`, and
+  deprecated in 1.10 means gone in Fusion. The tolerant behaviour is the
+  dangerous half: nothing is red and nothing is missing, so it survives review.
 - **Test args go under `arguments:`, and the key is `data_tests:`.** The flat
   `tests: [- some_test: {arg: …}]` form is deprecated in dbt 1.10 and gone in
   Fusion; the whole project uses the new spelling, so match it.
@@ -492,19 +497,107 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are three unit tests, all on `dim_date`, and they exist because a range
-  test cannot see a wrong answer that is in range.** `fiscal_quarter` carries
-  `accepted_range 1-4`, which is what caught the `/3 + 1` float-division bug at
-  quarter *5*. Change the same expression to `/ 4` and every fiscal quarter in
-  the warehouse is wrong while **all 20 data tests on the model pass** — measured,
-  not argued. The three unit tests fail on it. `fiscal_year_start_date` and
-  `fiscal_year_end_date` had no test of any kind before this.
+- **There are ten unit tests, over three models, and they exist because a data
+  test cannot see a wrong answer that is a legal one.** `dim_date`'s
+  `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
+  `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
+  and every fiscal quarter in the warehouse is wrong while **all 20 data tests on
+  the model pass** — measured, not argued. Its three unit tests fail on it.
+  `fiscal_year_start_date` and `fiscal_year_end_date` had no test of any kind
+  before this.
 - **`overrides.vars` is the real reason to unit test this model.**
   `fiscal_year_start_month` is configurable and the warehouse only ever builds
   `4`, so eleven of the twelve policies the model claims to support were untested
   *by construction*. The tests pin April, January (where `fiscal_year` must
   collapse onto `year`) and July (where the boundary falls mid-calendar-year).
   No data test can reach a value the project never builds.
+- **`stg_retail_lines` is the other model, and there the blind spot is
+  `accepted_values`.** It is two `case` expressions —
+  `invoice_type` and `item_type` — and two boolean flags built off them,
+  `is_stock_write_off` and `is_revenue_line`. `accepted_values`
+  proves an answer is *in* the list, never that it is the right member of it. A
+  misclassification moves money between buckets without changing any total, so no
+  row-level constraint can see it. Mutated against a warehouse copy, running the
+  model's 19 data tests each time: dropping `upper()` from `stock_code` moves net
+  revenue by **+GBP 1,702** and all 19 pass; sending `AMAZONFEE` to `product`
+  moves it by **-GBP 260,764** and all 19 pass; removing
+  `invoice_type <> 'adjustment'` from `is_revenue_line` changes **nothing at all**
+  and all 19 pass. Only the fourth mutation goes red — `is_stock_write_off`
+  losing its `invoice_type` term takes the flag from 3,457 rows to 22,950 — and
+  only as a side effect of `stg_retail_write_offs_are_never_priced`, which
+  notices because cancellations carry a price.
+  - **The `upper()` number is the one to remember, because its scale is
+    invisible.** Five lowercase `m` lines is what the model's comment warns
+    about; the cost is actually the vouchers, because **all 100 of them arrive
+    lowercase** (`gift_0001_20`, never `GIFT_`). The `voucher` branch is
+    reachable *only* through the case fold, so dropping it books the entire
+    family as product. The source also sends one bare `GIFT`, which is a product
+    — the underscore in the pattern is doing work.
+  - **The adjustment clause is the retail equivalent of the eleven unbuilt
+    fiscal policies.** No `A` invoice has ever carried a product code, so
+    `invoice_type <> 'adjustment'` has never once been the deciding term and
+    nothing in the data can reach it. The unit test poses the row the source has
+    not sent.
+- **`fct_cbam_exposure` is the third, and the hardest of the three to test any
+  other way.** It is a table of euro costs with a statutory deadline whose every
+  figure is plausible, transcribed from a legal instrument — so there is no
+  independent quantity to check the numbers against and its 20 data tests are
+  `not_null` and `accepted_range` with bounds that have to be generous, bar the
+  one added with the route fix below. What is
+  left to test is the *rules*. Mutated against a warehouse copy: resolving the
+  fallback **per column instead of per row** changes not one number in the
+  warehouse and all 19 pass; **hardcoding the mark-up at 10/20/30** moves the
+  fertiliser average from EUR 105.76 to EUR 115.18 a tonne and all 19 pass;
+  partitioning `excess_over_cleanest_source` **by product group instead of by
+  good** takes the total from 18,989 t to 30,599 t and all 19 pass. Only
+  `count(*)` in place of `count(<total>)` in `priced_goods` goes red, on seven
+  `not_null`s, because the 875 heading rows it lets through have no price at all.
+  It is caught because it is the only one of the four with **no near-miss**:
+  `having count(*) > 0` is a tautology over a `group by` (283 goods out, not
+  260), so it deletes the filter rather than weakening it. A rule that is binary
+  has no plausible wrong answer; the other three do, which is the whole table.
+  The unit test is still worth having, because the seven `not_null`s name the
+  symptom — 875 nulls in three columns — and it names the heading rows.
+  - **`markup_2026_pct` cannot be unit tested and that is the finding.** It is a
+    ratio of two doubles, and the warehouse holds three distinct values of it
+    that all print as `10.0` — 9.99999999999998578915, 10.00000000000000888178
+    and 10.00000000000003197442. A column with no exact value can carry a range
+    test and nothing else, which is the real cost of the 2026/1740 correction
+    forcing the schedule from measured to asserted. The fixtures pick totals that
+    *are* exact under the mark-up (2.5, 5, 10, 20, 40, 80 for 10/20/30%; 50 and
+    almost nothing else for the fertilisers' 1%) so the certificate columns can
+    be compared at all.
+  - **`production_route_code` did not follow the row-level fallback rule, and
+    "consistent by luck" was the wrong reading of it.** It was read off the
+    country's row while direct, indirect and total came from the fallback — the
+    exact split the rule exists to forbid. The *output* was uniformly null on
+    all 755 fallen-back rows, which is what made it look benign; the *input* was
+    not. 202 of those rows took their tonnages from a fallback row that carries
+    a route, and the mart discarded it. The clearest statement of it was six
+    rows of grey hydraulic cement holding an identical 1.28 / 0.09 / 1.37: the
+    fallback row showed route `A` and the five countries using that same number
+    showed blank. "1.37 tCO2e/t with no production route" is a row Annex I does
+    not publish. Fixed 2026-08-24; the route now comes off the row the tonnages
+    came from.
+    - **Nothing moved but the metadata**, which is why it survived. 202 rows
+      gained a route, the row count held at 11,665 and the euro total held at
+      EUR 2,462,927.40 to the cent. Every `accepted_range` and `not_null` on
+      this mart is over a numeric column and the defect lived entirely in a
+      VARCHAR that no test named — `_marts.yml` gave it a `data_type` and
+      nothing else. A contract pins a column's shape; only a test pins its
+      meaning.
+    - **The mutation table missed it because a mutation can only break a rule
+      that was written down.** All four mutations targeted encoded rules; this
+      was a rule the model's own comment stated in prose and the SQL never
+      implemented. Read the comments as claims to check, not as documentation.
+    - Held now by `dbt_utils.expression_is_true` on the column, which catches
+      exactly the 202 rows when the fix is reverted. Its scope sits **in the
+      expression** (`… or is_country_specific`) and not in a `config: where:`,
+      because `where` makes dbt_utils wrap the model as `dbt_subquery` and the
+      correlated reference then has to name that alias instead of the relation.
+      `is not distinct from`, not `=`: 553 of the 755 correctly resolve to a
+      null route, and `=` is unknown on a null, which `where not(...)` discards
+      — the test would pass by not looking.
 - **`expect` is full-set equality, so a model that generates its own rows needs a
   fixture file.** `dim_date` expands its bounds to whole calendar years, so any
   mocked `stg_fx_rates` inside one year yields 366 rows and all 366 must be
@@ -512,7 +605,10 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   Python `tests/fixtures/ingest/`) — and `.gitignore` needed
   `!dbt/tests/fixtures/*.csv`, because the blanket `*.csv` there had exactly one
   exception for the seeds. Without it `dbt test` passes locally against files git
-  never took and CI fails on a missing fixture. `format: csv` and `dict` allow a subset of
+  never took and CI fails on a missing fixture. `stg_retail_lines` is 1:1 on its
+  input, so its cases are inline `dict` rows and the truth table *is* the
+  fixture — the CSV files are the price of a model that generates rows, not of
+  unit testing. `format: csv` and `dict` allow a subset of
   *columns*; `format: sql` does not — it fails with `Binder Error: Referenced
   column "date_key" not found`, which is how that was established.
 - **The expected values are generated by a different formulation than the one
@@ -522,7 +618,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  three cost 1.9s. A broken fiscal calendar should stop `release-data.yml`, not
+  ten cost 2.5s. A broken fiscal calendar should stop `release-data.yml`, not
   ride along in it. `just dbt-unit-test` is the ~2s inner loop.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.
@@ -656,7 +752,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 366 of the 368 tests use the default. `severity` comes across
+  is what dbt does; 367 of the 369 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the
@@ -1103,6 +1199,35 @@ Two tiers, and the split is the point — see [`tests/README.md`](tests/README.m
   so a red PR build means the repo broke, not that OWID was down.
 
 Gotchas:
+
+- **A count cited in prose is an untested assertion, and three of them went
+  stale at once.** `tests/test_documented_counts.py` scans tracked markdown and
+  the two `_unit_tests.yml` headers for any integer in front of a test-noun and
+  requires it to be one the manifest actually produces. It exists because
+  adding a single data test moved 368 to 369 in two files and left it wrong in
+  fourteen — including `README.md` labelling `docs/DATA_QUALITY.md` with a
+  count of 368 while linking to a file that already said 369 — and because a
+  figure of 22 for `stg_retail_lines`' data tests was wrong in thirteen places
+  (it has 19; the 22 was `dbt build`'s node total, which counts the model
+  itself).
+
+    The guard forbids quoting a superseded count directly in front of a
+    test-noun, which is why this bullet phrases the old figures the long way
+    round. That is the intended cost — an exemption comment would be a hole
+    someone eventually parks a real staleness in.
+  `lint`, `pytest` and `dbt build` were green through all of it.
+  - **Scan whole-file, never line by line.** These docs are hard wrapped at ~80
+    characters and the claims straddle the wraps — `docs/DATA_QUALITY.md` ends a
+    line on "10 unit" and starts the next with "tests.". A per-line scan missed
+    3 of 31 claims and passed a mutated unit-test count; it was a mutation that
+    found that, not review.
+  - **The allowed set is derived from the manifest and deliberately global**, so
+    a per-model count could satisfy a project-wide sentence. Anchoring each
+    citation to its own site would catch that and would drift on every reflow.
+    Only per-model counts that are genuinely cited belong in the set: each one
+    added widens it for every other check.
+  - `seen > 25` is the vacuity guard. A scanner whose patterns stop matching
+    passes by not looking — the same failure `_ROUTES` reachability exists for.
 
 - **`WAREHOUSE_PATH` overrides the DuckDB file** for `ingest`, `transform`, `lake`
   *and* dbt's profile. It must be **absolute**: dbt resolves its path from `dbt/`,

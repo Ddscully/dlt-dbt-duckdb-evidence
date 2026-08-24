@@ -775,6 +775,56 @@ models:
                 field: good_key
       - name: production_route_code
         data_type: VARCHAR
+        description: >
+          Annex I's production route indicator for the row the value came from.
+          Eleven values are present — C (2,781), L (888), F (864), K (744),
+          E (618), A and B (202 each), H (192), C/F (162) and E/H (36). The
+          annex's footnote maps some of them — (C) carbon steel via BF/BOF, (E)
+          via scrap/EAF, (K) primary aluminium, (L) secondary, and so on — and
+          this project has not confirmed the rest from a primary source, so the
+          list is the codes present rather than a glossary. It is a property of
+          the *value*, not of the country: it explains why one row says 8,21
+          tCO2e/t and another 0,13, which is why a fallen-back row carries the
+          fallback's route and not the sourcing country's. Null where the annex
+          prints no route — 4,976 rows, 49% fertilisers and 41% iron and steel.
+        data_tests:
+          # The row-level rule, asserted against the annex rather than against
+          # the mart's own other rows: every row carries the route published on
+          # the row its tonnages came from — its own where the country has a
+          # total, the fallback's where it does not.
+          #
+          # The subquery selects that row rather than exempting a branch, and
+          # the difference is not cosmetic. This test first compared only
+          # against the fallback row and carried `or is_country_specific`, which
+          # made it vacuous on all 10,910 country-specific rows: the mirror
+          # -image defect, reading *every* route off the fallback, passed all 20
+          # data tests. Scoping an assertion with `or <the other case>` reads
+          # like narrowing to the rows in question and is an exemption — it
+          # makes the rule unfalsifiable exactly where it was not being thought
+          # about. The seed is unique on (country_iso3, good_key), so the
+          # correlated subquery returns at most one row.
+          #
+          # `is not distinct from` and not `=`, because 553 of the 755 fallen
+          # -back rows correctly resolve to a null route and `=` is unknown on
+          # a null, which a `where not(...)` then discards — the test would
+          # pass by not looking.
+          #
+          # The comparison stays inside the expression rather than a `config:
+          # where:`, which is not a style choice: `where` makes dbt_utils wrap
+          # the model as `dbt_subquery`, and the correlated reference then has
+          # to name that alias instead of the relation.
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: >
+                  is not distinct from (
+                      select d.production_route_code
+                      from {{ ref('cbam_default_values') }} as d
+                      where d.good_key = fct_cbam_exposure.good_key
+                        and d.country_iso3 is not distinct from case
+                            when fct_cbam_exposure.is_country_specific
+                                then fct_cbam_exposure.country_iso3
+                        end
+                  )
       - name: is_fallback_table
         data_type: BOOLEAN
       - name: is_country_specific

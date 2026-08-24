@@ -1,0 +1,182 @@
+version: 2
+
+# Unit tests for `stg_retail_lines`' classification.
+#
+# The model adds no rows, removes none and computes one product. What it does is
+# assign labels — `invoice_type`, `item_type`, `is_stock_write_off` and
+# `is_revenue_line`: two `case` expressions and two boolean flags built off
+# them — and that is
+# the shape a data test is worst at. `accepted_values` proves the answer is a
+# member of the list; it cannot prove it is the *right* member, and a
+# misclassification here moves money between buckets without changing any total,
+# so no row-level constraint can see it.
+#
+# Measured rather than argued, by mutating the model against a copy of the
+# warehouse and running its 19 data tests each time:
+#
+#   | mutation                                    | data tests | net revenue  |
+#   |---------------------------------------------|------------|--------------|
+#   | drop `upper()` from `stock_code`            | 19 pass    | +GBP 1,702   |
+#   | `AMAZONFEE` falls through to `product`      | 19 pass    | -GBP 260,764 |
+#   | `is_revenue_line` loses its adjustment term | 19 pass    | unchanged    |
+#   | `is_stock_write_off` loses `invoice_type`   | **1 fails**| unchanged    |
+#
+# Three of the four are invisible to everything the project had. The fourth is
+# not, and is kept because the overlap is the useful half of the result: it is
+# `stg_retail_write_offs_are_never_priced` that catches it, and only because
+# cancellations carry a price — a data test can see that mutation solely as a
+# side effect of a different assertion, one branch away from missing it too.
+#
+# The third row is the sharpest: dropping `invoice_type <> 'adjustment'` changes
+# nothing at all. Not one number in the warehouse moves, because no `A` invoice
+# has ever carried a product code, so the clause has never once been the deciding
+# one. It is the same situation as `dim_date`'s eleven unbuilt fiscal policies —
+# logic no data can reach, and a unit test is the only thing that can reach it.
+#
+# `format: dict`, inline, because this model is 1:1 on its input. `dim_date`
+# needed 366-row CSV fixtures because it generates its own rows; here the fixture
+# is the size of the truth table. `line_number` is in every `expect` so two rows
+# that classify identically stay distinguishable in the diff.
+
+unit_tests:
+  - name: stg_retail_lines_separates_returns_from_write_offs_and_bad_debt
+    model: stg_retail_lines
+    description: >
+      The truth table the three invoice prefixes produce. A negative quantity is
+      a return on a `C` invoice, a stock write-off on a plain one and neither on
+      an `A` — so `is_stock_write_off` cannot be `quantity < 0`, and dropping the
+      `invoice_type` term takes it from 3,457 rows to 22,950. Two rows here are
+      shapes the source has never sent, and they are the ones that earn the test:
+      a negative adjustment, and a product on an adjustment invoice.
+    given:
+      - input: source('raw', 'retail_invoice_lines')
+        rows:
+          # A plain sale of a product: the ordinary row, and the only one of the
+          # nine that everything downstream agrees is revenue.
+          - {invoice: "536365", line_number: 1, stock_code: "85123A", quantity: 6, unit_price: 2.55}
+          # A genuine return. Negative quantity, real price, `C` prefix — this is
+          # revenue, negatively signed, and must not be a write-off.
+          - {invoice: "C536379", line_number: 1, stock_code: "85123A", quantity: -6, unit_price: 2.55}
+          # A write-off: negative quantity on a *sale* invoice, zero-priced. All
+          # 3,457 of these in the source are zero-priced, which is what makes the
+          # reading safe; `stg_retail_write_offs_are_never_priced` guards that.
+          - {invoice: "536387", line_number: 1, stock_code: "85123A", quantity: -3, unit_price: 0.0}
+          # Bad debt. The six `A` lines in the source are all stock code `B`, all
+          # positive quantity, all negative price — GBP -147,614 between them.
+          - {invoice: "A563186", line_number: 1, stock_code: "B", quantity: 1, unit_price: -11062.06}
+          # A negative adjustment. Not in the source, and the point: this is the
+          # row that fails if `is_stock_write_off` loses its `invoice_type` term.
+          - {invoice: "A563187", line_number: 1, stock_code: "B", quantity: -1, unit_price: 11062.06}
+          # A product on an adjustment invoice — also not in the source, and the
+          # only row in the project that reaches `invoice_type <> 'adjustment'`.
+          - {invoice: "A563188", line_number: 1, stock_code: "85123A", quantity: 5, unit_price: 2.55}
+          # C496350, the one positive-quantity cancellation line in 1.07M rows: a
+          # GBP 373.57 manual adjustment. Cancellation, but not a return and not
+          # revenue, because `M` is not a product.
+          - {invoice: "C496350", line_number: 1, stock_code: "M", quantity: 1, unit_price: 373.57}
+          # Cancelled postage. A `C` invoice does not make a line revenue.
+          - {invoice: "C536391", line_number: 1, stock_code: "POST", quantity: -1, unit_price: 18.0}
+          # A stock code that begins with `C`, on an invoice that does not. The
+          # prefix test reads `invoice`, and this is the row that says so.
+          - {invoice: "536367", line_number: 1, stock_code: "C2", quantity: 1, unit_price: 50.0}
+    expect:
+      rows:
+        - {invoice: "536365",  line_number: 1, invoice_type: sale,         item_type: product,    is_stock_write_off: false, is_revenue_line: true}
+        - {invoice: "C536379", line_number: 1, invoice_type: cancellation, item_type: product,    is_stock_write_off: false, is_revenue_line: true}
+        - {invoice: "536387",  line_number: 1, invoice_type: sale,         item_type: product,    is_stock_write_off: true,  is_revenue_line: false}
+        - {invoice: "A563186", line_number: 1, invoice_type: adjustment,   item_type: adjustment, is_stock_write_off: false, is_revenue_line: false}
+        - {invoice: "A563187", line_number: 1, invoice_type: adjustment,   item_type: adjustment, is_stock_write_off: false, is_revenue_line: false}
+        - {invoice: "A563188", line_number: 1, invoice_type: adjustment,   item_type: product,    is_stock_write_off: false, is_revenue_line: false}
+        - {invoice: "C496350", line_number: 1, invoice_type: cancellation, item_type: adjustment, is_stock_write_off: false, is_revenue_line: false}
+        - {invoice: "C536391", line_number: 1, invoice_type: cancellation, item_type: shipping,   is_stock_write_off: false, is_revenue_line: false}
+        - {invoice: "536367",  line_number: 1, invoice_type: sale,         item_type: shipping,   is_stock_write_off: false, is_revenue_line: false}
+
+  - name: stg_retail_lines_maps_each_stock_code_family_to_its_item_type
+    model: stg_retail_lines
+    description: >
+      Every branch of the `item_type` case, one row each, with the real codes.
+      Seven of the eight families are a handful of codes that arrived in the same
+      column as the mugs, and getting one wrong is worth money the tests cannot
+      see — moving AMAZONFEE into `product` costs GBP 260,764 with all 19 data
+      tests green. The paired-case rows are here because `upper(trim(...))` turns
+      out to be load-bearing for a whole branch: every one of the 100 voucher
+      lines arrives lowercase (`gift_0001_20`), so without the fold the `voucher`
+      family is empty and 100% of it books as product. Lowercase `m` is 5 more
+      lines against `M`'s 1,421. The padded `POST` is the same failure with no
+      witness in the source yet — the workbook is read all-text, so a reader
+      change is all it would take. Bare `GIFT` is the near-miss the underscore in
+      `GIFT_` exists to exclude, and the source really does send one.
+    given:
+      - input: source('raw', 'retail_invoice_lines')
+        rows:
+          - {invoice: "536365", line_number: 1,  stock_code: "85123A"}
+          - {invoice: "536365", line_number: 2,  stock_code: "85123a"}
+          - {invoice: "536365", line_number: 3,  stock_code: "POST"}
+          - {invoice: "536365", line_number: 4,  stock_code: " POST "}
+          - {invoice: "536365", line_number: 5,  stock_code: "DOT"}
+          - {invoice: "536365", line_number: 6,  stock_code: "C2"}
+          - {invoice: "536365", line_number: 7,  stock_code: "AMAZONFEE"}
+          - {invoice: "536365", line_number: 8,  stock_code: "BANK CHARGES"}
+          - {invoice: "536365", line_number: 9,  stock_code: "CRUK"}
+          - {invoice: "536365", line_number: 10, stock_code: "D"}
+          - {invoice: "536365", line_number: 11, stock_code: "S"}
+          - {invoice: "536365", line_number: 12, stock_code: "M"}
+          - {invoice: "536365", line_number: 13, stock_code: "m"}
+          - {invoice: "536365", line_number: 14, stock_code: "B"}
+          - {invoice: "536365", line_number: 15, stock_code: "ADJUST"}
+          - {invoice: "536365", line_number: 16, stock_code: "GIFT_0001_20"}
+          - {invoice: "536365", line_number: 17, stock_code: "gift_0001_20"}
+          - {invoice: "536365", line_number: 18, stock_code: "GIFT"}
+          - {invoice: "536365", line_number: 19, stock_code: "TEST001"}
+    expect:
+      rows:
+        - {line_number: 1,  stock_code: "85123A",       item_type: product}
+        - {line_number: 2,  stock_code: "85123A",       item_type: product}
+        - {line_number: 3,  stock_code: "POST",         item_type: shipping}
+        - {line_number: 4,  stock_code: "POST",         item_type: shipping}
+        - {line_number: 5,  stock_code: "DOT",          item_type: shipping}
+        - {line_number: 6,  stock_code: "C2",           item_type: shipping}
+        - {line_number: 7,  stock_code: "AMAZONFEE",    item_type: fee}
+        - {line_number: 8,  stock_code: "BANK CHARGES", item_type: fee}
+        - {line_number: 9,  stock_code: "CRUK",         item_type: fee}
+        - {line_number: 10, stock_code: "D",            item_type: discount}
+        - {line_number: 11, stock_code: "S",            item_type: sample}
+        - {line_number: 12, stock_code: "M",            item_type: adjustment}
+        - {line_number: 13, stock_code: "M",            item_type: adjustment}
+        - {line_number: 14, stock_code: "B",            item_type: adjustment}
+        - {line_number: 15, stock_code: "ADJUST",       item_type: adjustment}
+        - {line_number: 16, stock_code: "GIFT_0001_20", item_type: voucher}
+        - {line_number: 17, stock_code: "GIFT_0001_20", item_type: voucher}
+        - {line_number: 18, stock_code: "GIFT",         item_type: product}
+        - {line_number: 19, stock_code: "TEST001",      item_type: test}
+
+  - name: stg_retail_lines_nulls_the_absent_customer_rather_than_blanking_it
+    model: stg_retail_lines
+    description: >
+      `customer_id` is the warehouse's one direct identifier and 243,007 lines
+      (22.8%) do not have one. The `nullif(trim(...), '')` is what makes that an
+      absence rather than an empty-string customer who bought 22.8% of the shop —
+      and `customer_id` is deliberately untested for nullity in `_staging.yml`,
+      so no data test on this model can see it either way. It is defensive today:
+      the workbook read returns NULL for an empty cell, so the source currently
+      holds no blank string at all. It is one cast away from holding one, which
+      is why the shape is pinned here rather than left to the reader.
+    given:
+      - input: source('raw', 'retail_invoice_lines')
+        rows:
+          - {invoice: "536365", line_number: 1, customer_id: "17850",   description: "WHITE HANGING HEART",     country: "United Kingdom"}
+          - {invoice: "536365", line_number: 2, customer_id: "",        description: "WHITE HANGING HEART",     country: "United Kingdom"}
+          - {invoice: "536365", line_number: 3, customer_id: "   ",     description: "WHITE HANGING HEART",     country: "United Kingdom"}
+          - {invoice: "536365", line_number: 4, customer_id: null,      description: "WHITE HANGING HEART",     country: "United Kingdom"}
+          - {invoice: "536365", line_number: 5, customer_id: " 17850 ", description: "  WHITE HANGING HEART  ", country: "  United Kingdom  "}
+          - {invoice: "536365", line_number: 6, customer_id: "17850",   description: "",                        country: "United Kingdom"}
+          - {invoice: "536365", line_number: 7, customer_id: "17850",   description: "   ",                     country: "United Kingdom"}
+    expect:
+      rows:
+        - {line_number: 1, customer_id: "17850", description: "WHITE HANGING HEART", country: "United Kingdom"}
+        - {line_number: 2, customer_id: null,    description: "WHITE HANGING HEART", country: "United Kingdom"}
+        - {line_number: 3, customer_id: null,    description: "WHITE HANGING HEART", country: "United Kingdom"}
+        - {line_number: 4, customer_id: null,    description: "WHITE HANGING HEART", country: "United Kingdom"}
+        - {line_number: 5, customer_id: "17850", description: "WHITE HANGING HEART", country: "United Kingdom"}
+        - {line_number: 6, customer_id: "17850", description: null,                  country: "United Kingdom"}
+        - {line_number: 7, customer_id: "17850", description: null,                  country: "United Kingdom"}

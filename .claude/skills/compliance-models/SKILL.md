@@ -223,6 +223,79 @@ time series.
   tonnage columns beside the euro columns and states the price per row, so the
   page draws its EUR 60-120 sensitivity from one build and a release consumer can
   re-price without rebuilding.
+### What the unit tests hold
+
+Four of them, in `dbt/models/marts/_unit_tests.yml`. This model's 20 data tests
+are `not_null` and generous `accepted_range`s bar one, and they cannot be much
+else:
+the numbers are transcribed from a legal instrument, so there is no independent
+quantity to check them against. What is testable is the *rules*, and mutation
+against a warehouse copy says how much they were worth:
+
+| mutation | data tests at the time (19) | effect |
+|---|---|---|
+| fallback resolved per column, not per row | **all pass** | **nothing moves at all** |
+| mark-up hardcoded at 10/20/30% | **all pass** | fertiliser avg EUR 105.76 -> 115.18 /t |
+| `excess_over_cleanest_source` partitioned by product group | **all pass** | 18,989 t -> 30,599 t |
+| `count(*)` for `count(<total>)` in `priced_goods` | 7 fail | +875 unpriced heading rows |
+
+- **The one the data tests catch is the one with no near-miss, and that is what
+  the table is really measuring.** `having count(*) > 0` is a tautology over a
+  `group by` — 283 goods out where the real clause gives 260 — so the mutation
+  deletes the filter rather than weakening it. `priced_goods` is a binary rule:
+  a good has a total somewhere or it has not, and there is no subtly-wrong
+  version to write. The other three rules all have a plausible wrong answer, and
+  all three are invisible to those 19 data tests. Keep the unit test anyway: the seven
+  `not_null`s report 875 nulls across three columns, the unit test reports the
+  two heading rows by `good_key`, and a failing unit test stops the model
+  materialising instead of finding it afterwards.
+
+- **The fallback rule is now unreachable by data, which is the argument for
+  testing it.** Zero of the 12,540 seed rows have a null total beside a non-null
+  direct or indirect — the Chile line pipe that proved the rule was corrected out
+  of the annex in July 2026. The mutation is therefore *completely* invisible:
+  not one figure in the warehouse changes. Same category as `dim_date`'s eleven
+  unbuilt fiscal policies.
+- **`markup_2026_pct` cannot be asserted at all.** It is a ratio of two doubles
+  and the warehouse holds three distinct values that all print as `10.0`
+  (9.99999999999998578915, 10.00000000000000888178, 10.00000000000003197442).
+  A column with no exact value can carry a range test and nothing else — which is
+  the real cost of the correction forcing the schedule from measured to asserted.
+  The fixtures therefore use totals that *are* float-exact under the mark-up:
+  2.5, 5, 10, 20, 40 and 80 for the 10/20/30% groups, and **50 and almost nothing
+  else** for the fertilisers' 1%. Mali's hydrogen total is `0.0`, which is the one
+  row where `nullif(total, 0)` makes the column null — the guard on real data.
+- **`production_route_code` broke the row-level rule until 2026-08-24, and
+  "consistent by luck" was the wrong reading.** It was read off the country's row
+  while the tonnages came from the fallback. The *output* was null on all 755
+  fallen-back rows, which is what made it look harmless; the *input* was not —
+  **202 of them took their tonnages from a fallback row that carries a route**,
+  and the mart threw it away. Six rows of grey hydraulic cement state it best:
+  identical 1.28 / 0.09 / 1.37, the fallback row showing route `A` and the five
+  countries using that very number showing blank. Annex I publishes no such row.
+  The route is a property of the *value* — `_route`'s own docstring says the code
+  is what separates a 0,13 tCO2e/t semi-finished steel from an 8,21 — so it comes
+  off the row the tonnages came from.
+  - **Not one euro moved.** 202 rows gained a route; row count held at 11,665 and
+    the euro total at EUR 2,462,927.40 to the cent. That is why it survived: every
+    range and null test here is over a numeric column, and the defect lived in a
+    VARCHAR that `_marts.yml` gave a `data_type` and no description or test.
+  - **The mutation table above could not have found it.** A mutation breaks a rule
+    that is written down; this rule was stated in the model's prose comment and
+    never implemented. Treat those comments as claims to verify.
+  - Held now by `dbt_utils.expression_is_true` on the column — 202 rows red when
+    reverted, and `store_failures` names them. Two things about how it is written:
+    `is not distinct from` rather than `=`, because 553 of the 755 correctly
+    resolve to null and `=` is unknown on a null, which `where not(...)` discards
+    so the test would pass by not looking; and the `or is_country_specific` scope
+    is in the *expression* rather than a `config: where:`, because `where` makes
+    dbt_utils wrap the model as `dbt_subquery` and the correlated subquery then
+    has to name that alias instead of the relation.
+- **The fallback row is `is_country_specific = true`.** All 260 of them, because
+  the flag keys on "this row has a total of its own" and the fallback does.
+  `is_fallback_table` is the column that identifies it. Reads oddly, so it is
+  pinned rather than left to be rediscovered.
+
 ### Licence and scope limits
 
 - **Annexes II and III are deliberately not ingested.** They are the country

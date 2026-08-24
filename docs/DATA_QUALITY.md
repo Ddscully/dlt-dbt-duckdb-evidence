@@ -1,8 +1,8 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 368 dbt tests alongside the models, and Dagster surfaces
-each one as an asset check on the model it guards. For the pytest side, see
-[`tests/README.md`](../tests/README.md).
+`just dbt-build` runs 379 tests alongside the models — 369 data tests and 10 unit
+tests. Dagster surfaces the data tests as asset checks on the models they guard.
+For the pytest side, see [`tests/README.md`](../tests/README.md).
 
 ## The gates
 
@@ -24,6 +24,61 @@ Bank classification, and `co2_per_capita` has a floor but no ceiling because
 small petrostates legitimately reach 780 t/person. Before tightening a bound,
 check the actual distribution: CI builds a 17-country fixture slice, which will
 happily pass a threshold the full 200+ would break.
+
+## Unit tests
+
+Ten of those tests are dbt *unit* tests, over `dim_date`, `stg_retail_lines` and
+`fct_cbam_exposure`. They run a model against fixed input rows and compare the
+entire output, rather than asserting a property of whatever the warehouse happens
+to hold — which is what lets them reach two things a data test structurally
+cannot.
+
+**A legal answer that is the wrong one.** `dim_date`'s `fiscal_quarter` is bounded
+1–4, so a quarter of 5 is caught and a quarter of 2 where 3 was right is not:
+January scoring Q2 under a July year start passes every test in the project.
+`stg_retail_lines` is the same problem in a different shape — it is two `case`
+expressions and two boolean flags built off them, and `accepted_values` proves an answer is in the list,
+never that it is the right member of it. Misclassifying `AMAZONFEE` as a product
+moves net revenue by £260,764 with all 19 of that model's data tests green;
+dropping the `upper()` from `stock_code` sends all 100 voucher lines, which
+arrive lowercase, into product with the same 19 green.
+
+`fct_cbam_exposure` is the hardest of the three. Its numbers are transcribed from
+a legal instrument, so there is nothing independent to check them against and its
+20 data tests are almost all `not_null` and generous ranges — 19 of them when
+the mutations below were run, the twentieth being the route test that came out
+of them. What a unit test reaches
+instead is the rules: hardcoding the phase-in mark-up at 10/20/30% moves the
+fertiliser average from €105.76 to €115.18 a tonne — fertilisers carry a flat 1%
+food-security carve-out — with all 19 green, and measuring
+`excess_over_cleanest_source` against the product group instead of the good takes
+the total from 18,989 to 30,599 tonnes, also with all 19 green.
+
+**Logic no data reaches.** `fiscal_year_start_month` is a project var and the
+warehouse only ever builds `4`, so eleven of the twelve fiscal policies the model
+supports are untested by construction; `overrides.vars` is the only way in, and
+the tests pin April, January and July. In `stg_retail_lines`, no `A` invoice has
+ever carried a product code, so `is_revenue_line`'s `invoice_type <> 'adjustment'`
+term has never once been the deciding one — removing it changes nothing in the
+warehouse at all. In `fct_cbam_exposure` the fallback rule is the same story: the
+regulation sends a listed country with no value for a good to the "other
+countries" row *as a whole line*, and resolving it column by column instead
+produces a figure that exists nowhere in the regulation — but the row that once
+proved it was corrected out of the annex in July 2026, so today the mutation
+changes not one number in the warehouse.
+
+Fixtures live in `dbt/tests/fixtures/` (dbt's `test-paths`, not the pytest
+fixtures). `dim_date` needs CSV files there because it generates its own rows —
+one input year expands to a whole calendar year, and `expect` is full-set
+equality over all 366. The other two are 1:1 on their inputs, so their cases are
+inline. `fct_cbam_exposure`'s fixtures also pick totals that are float-exact
+under the mark-up, because `markup_2026_pct` is a ratio of two doubles and the
+warehouse holds three distinct values of it that all print as `10.0`.
+
+They run inside `dbt build` rather than being excluded from it. dbt Labs
+recommends keeping unit tests out of production runs to save warehouse spend;
+that argument is about a cloud warehouse, and this is a local DuckDB build where
+all ten cost about three seconds. `just dbt-unit-test` is the inner loop.
 
 ## Who it's for
 
