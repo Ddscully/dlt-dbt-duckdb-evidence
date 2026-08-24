@@ -22,13 +22,20 @@ gitignored and disposable: delete `data/course/` and run it again.
 
 You should see it finish on `PASS=402 WARN=0 ERROR=0 SKIP=0`.
 
-### The three recipes
+### The four recipes
 
 | | |
 |---|---|
 | `just course-sandbox` | build (or rebuild from scratch) the sandbox |
 | `just course-rebuild` | re-run `dbt build` against it — **the drill inner loop**, ~15s |
+| `just course-transform` | re-run the Polars layer, which `course-rebuild` does not touch |
 | `just course-query 'select 1'` | one read-only query against it |
+
+`course-transform` exists because the two Polars tables (`analytics.co2_intensity`
+and `analytics.retail_rfm`) are written *after* dbt by a separate process, so a
+drill on a derived metric — module 04's denominator — is not rebuilt by
+`course-rebuild` at all. Knowing which recipe owns which table is itself the
+lesson: a warehouse is rarely built by one tool.
 
 > ⚠️ **`just dbt-build` is not `just course-rebuild`.** The plain recipe targets
 > `data/warehouse.duckdb` — your real warehouse, the one with 43,138 mart rows

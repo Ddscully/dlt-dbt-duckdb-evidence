@@ -62,7 +62,7 @@ just course-query 'select count(*) from marts.dim_country_year'
 | 01 | [Grain is the contract](./01-grain.md) | what one row means, and what a fact hangs off |
 | 02 | [Loading twice](./02-loading-twice.md) | replace vs merge, watermarks, lookback windows, what makes a re-run safe |
 | 03 | [Tests that fail on bugs, not on reality](./03-tests.md) | calibrating a bound against a distribution instead of a hope |
-| 04 | Denominators, units and coverage | current vs constant, per-column latest year, spot vs average |
+| 04 | [Denominators, units and coverage](./04-denominators.md) | current vs constant, per-column latest year, spot vs average |
 | 05 | State vs build artifacts | which tables a rebuild cannot reproduce, and what that costs |
 | 06 | Contracts, access and versions | changing a column under a consumer you cannot page |
 | 07 | The orchestration graph | asset keys as the join between layers, and how a graph splits in silence |
@@ -70,7 +70,7 @@ just course-query 'select count(*) from marts.dim_country_year'
 | 09 | Reproducibility | fixtures, cache keys, float non-determinism, offline CI |
 | 10 | Publishing, and what breaks at 1000× | releases, attribution, and the honest limits of this design |
 
-Modules 04–10 are outlined but not yet written; 00 through 03 are complete and
+Modules 05–10 are outlined but not yet written; 00 through 04 are complete and
 set the format.
 
 ## The rest of the documentation

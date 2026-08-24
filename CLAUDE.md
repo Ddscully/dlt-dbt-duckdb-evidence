@@ -1315,13 +1315,26 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
 - **Divide by `gdp_constant_usd`, never `gdp_usd`, for anything measured over
   time.** `gdp_usd` (`NY.GDP.MKTP.CD`) is *current* US$, so it moves with
   inflation and the exchange rate: on that basis Japan cut emissions 21% from
-  2010–2024 and still scored 10% *worse* on carbon intensity, purely because the
-  yen fell 28% against the dollar. `gdp_constant_usd` (`NY.GDP.MKTP.KD`, constant
-  2015 US$) is the real-terms series. Current US$ is fine for single-year
-  cross-sections, wrong for trends. **The same failure is now measurable rather
-  than narrated** — see the Currency section: the EU household electricity price
-  rose 35% or 13.5% between 2021-S1 and 2022-S2 depending only on whether you
-  counted in euros or dollars.
+  2010–2024 and still scored 10% *worse* on carbon intensity.
+  `gdp_constant_usd` (`NY.GDP.MKTP.KD`, constant 2015 US$) is the real-terms
+  series. **The same failure is now measurable rather than narrated** — see the
+  Currency section: the EU household electricity price rose 35% or 13.5% between
+  2021-S1 and 2022-S2 depending only on whether you counted in euros or dollars.
+  - **The yen figure was wrong here and in `transform/co2_intensity.py` until
+    2026-08-24, and it was wrong in the way a plausible number is.** It said the
+    yen "fell 28% against the dollar"; 28% is Japan's *current-dollar GDP* fall
+    (5.812 → 4.190 tn), i.e. the effect written down as the cause. The yen went
+    **87.7 → 151.4 JPY/USD** on ECB annual averages — it lost **42%** of its
+    dollar value. The full decomposition, which is worth keeping because it shows
+    the currency term dominating: current-$ GDP ×0.721 = real growth ×1.104 ×
+    dollar value of the yen ×0.579 × a ×1.128 residual (domestic prices).
+  - **"Current US$ is fine for single-year cross-sections" is the shorthand, and
+    it means *internally consistent*, not *the same answer*.** Ranking countries
+    within income group for 2024 on each basis moves **166 of 194 — 86% — to a
+    different rank**, worst move 26 places. Over time it is worse than a ranking
+    change: of the 193 countries with both series in 2010 and 2024, **30 flip the
+    sign of their decarbonisation trend**, five from improving to worsening
+    (Nigeria −13.5% → +76.3%, then Brazil, Japan, Lesotho, Namibia).
 - **World Bank WDI** is fetched long (one row per indicator/country/year) and
   pivoted to wide columns in `stg_wdi.sql`. Add indicators in two places:
   `WB_WDI_INDICATORS` in `ingest/pipeline.py` and a `max(case …)` in `stg_wdi.sql`.
@@ -1579,7 +1592,7 @@ Gotchas:
 
 Ten modules teaching this warehouse as training material for analytics
 engineers, built around the failures that stay green rather than the happy path.
-Modules 00-03 are written and set the format; 04-10 are outlined in
+Modules 00-04 are written and set the format; 05-10 are outlined in
 `docs/course/README.md`. Three exercise types, marked in the text: break-and-fix
 drills, investigate-the-data questions, design defences.
 
@@ -1668,6 +1681,65 @@ drills, investigate-the-data questions, design defences.
   deliberately does *not* require is the marker alone on its line — `01-grain.md`
   writes "**Verification.** When you think it is fixed:" with the block below,
   which is good prose and a bad thing to forbid.
+- **Module 04 needed a fourth course recipe, and the reason is a real seam in
+  the stack rather than a convenience.** `just course-rebuild` runs `dbt build`
+  and nothing else, so the two Polars tables (`analytics.co2_intensity`,
+  `analytics.retail_rfm`) are untouched by it — a drill on a *derived metric*
+  rebuilds nothing and the learner reads a stale number as a result. The raw
+  form is `WAREHOUSE_PATH=... uv run python -m transform.co2_intensity`, which
+  is exactly the shape module 00 warns about: forget the variable and it
+  rewrites `analytics` in the **real** warehouse. Hence `just course-transform`.
+- **A drill whose fix is `git checkout <file>` silently reverts uncommitted work
+  in that file.** Module 04's denominator drill restores
+  `transform/co2_intensity.py` that way, and running it while the yen-figure
+  correction was still unstaged threw the correction away. Harmless for a
+  learner with a clean tree, and worth knowing when *authoring* a drill against
+  a file you are also editing: stage first, or verify the drill last.
+- **A 1000x units error passes every test on `fct_example_scope2_emissions`.**
+  `scope2_t_co2e` carries `{min_value: 0}` and no ceiling, and
+  `share_of_group_pct` is a ratio of two numbers that both moved — so using
+  `emission_factor_g_co2_per_kwh` where `emission_factor_t_co2_per_mwh` belongs
+  turns 232,456 tCO2e into 232.5 **Mt** (more than Spain's 215.5 Mt in 2023) with
+  `PASS=402 ERROR=0`. **A scaling error is invisible to one-sided bounds and to
+  every ratio downstream of it**, which is module 03's ceiling argument arriving
+  as a live gap rather than a hypothetical.
+- **The spot-vs-average drill is the one where the error cancels out of the
+  level and doubles in the difference.** Converting the Eurostat price at
+  `period_end_units_per_eur` instead of `avg_units_per_eur` moves the mean
+  *signed* price by **+0.14%** (the closing rate is above the average about as
+  often as below) while the mean *absolute* move is 2.77% and the worst row
+  7.5% — so a spot-check of levels finds nothing. Measured on the differences
+  instead, **282 of 1,330 half-over-half changes (21.2%) disagree about whether
+  the price went up or down**, worst pair 42 points apart. France 2022-S2 is the
+  quotable case: +5.4% in euros, −2.3% in dollars at the average rate, +8.2% at
+  the closing rate. **An error common to a period is invisible in a cross-section
+  and maximal in a time series**, which is the opposite of where people look.
+- **`usd_per_eur_period_avg` being on the row is what catches that drill**, and
+  it is the argument for shipping a parameter beside its result generally: the
+  one-line check `electricity_price_usd_kwh <> electricity_price_eur_kwh *
+  usd_per_eur_period_avg` goes 0 → 1,373 rows, with no access to the model. It is
+  also shippable as a dbt test — **0 of 1,373 rows fail on float residue**, which
+  is the boundary against `first_order_gbp <= net_revenue_gbp` (272 rows, and
+  rejected for it): that pair compares two independent `sum()`s, this one
+  reproduces a single scalar multiplication of two stored doubles and is
+  bit-exact. **"Never compare floats for equality" is really "floats are
+  order-dependent under aggregation".**
+- **An empty cross-section is safe and a plausible one is dangerous, and the
+  warehouse has one of each.** `where year = (select max(year) …)` on
+  `fct_emissions_energy` returns 214 rows with `co2_mt` null in every one — a
+  chart with axes and no bars, which gets investigated within the hour.
+  `dim_grid_emission_factors` at `year = 2025` returns **90 of 207 rows, fully
+  populated** — a real cross-section of a real year, missing 117 countries
+  including Ukraine's 111 TWh grid, and nothing about it looks wrong. That
+  asymmetry is why the vintage model ships `is_latest_available` as a boolean:
+  the correct query *cannot* be written as a year literal.
+- **A coverage floor is calibrated against the column's own ceiling.**
+  `latest_years.sql`'s `n_consumption >= 100` looks slack beside the others and
+  is the only honest choice — `consumption_co2` covers 120 countries at its best,
+  so any floor above that makes the column permanently unavailable. Asking all
+  five columns for "the latest year with 150 countries" returns
+  `2024, 2023, 2024, 2025, NULL`, and the NULL is the point: as a `filter` it is
+  an honest absence, as a `where` clause it would have looked like a broken query.
 - **Absence is the blind spot the whole course is organised around.** Every test
   in this project asserts something about rows that are *present* — `not_null`,
   `accepted_range`, `unique_combination_of_columns`, `relationships` — and

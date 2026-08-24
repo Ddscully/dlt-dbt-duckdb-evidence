@@ -225,6 +225,21 @@ course-rebuild:
     test -f "$WAREHOUSE_PATH" || { echo "no sandbox yet — run: just course-sandbox" >&2; exit 1; }
     cd dbt && uv run dbt build
 
+# The Polars layer runs *after* dbt and is not part of `just course-rebuild`, so
+# a drill on a derived metric (module 04's denominator) needs this instead. It is
+# a recipe rather than a line in the material for one reason: the raw form is
+# `WAREHOUSE_PATH=... uv run python -m transform.co2_intensity`, and a learner who
+# forgets the variable rewrites `analytics` in the *real* warehouse.
+#
+# Re-run the Polars derived metrics against the course sandbox
+course-transform:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"
+    test -f "$WAREHOUSE_PATH" || { echo "no sandbox yet — run: just course-sandbox" >&2; exit 1; }
+    uv run python -m transform.co2_intensity
+    uv run python -m transform.retail_rfm
+
 # Read-only on purpose: DuckDB takes one writer at a time, so a REPL left open is
 # what makes the next `just course-rebuild` fail on a lock.
 #   just course-query 'select count(*) from marts.dim_country_year'

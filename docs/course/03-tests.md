@@ -1,6 +1,6 @@
 # 03 — Tests that fail on bugs, not on reality
 
-← [02 — Loading twice](./02-loading-twice.md) · [Course index](./README.md) · next: 04 — Denominators, units and coverage
+← [02 — Loading twice](./02-loading-twice.md) · [Course index](./README.md) · next: [04 — Denominators, units and coverage](./04-denominators.md)
 
 **Objectives.** Calibrate a bound against a measured distribution instead of an
 intuition. Say, for any test in this repo, exactly which rows it examines and
@@ -667,4 +667,4 @@ owes the reader a note saying what is now unchecked. The failure mode is not the
 - Store your failures, then remember that a table of rejected rows is a table of
   data, with every obligation the source has.
 
-← [02 — Loading twice](./02-loading-twice.md) · [Course index](./README.md) · next: 04 — Denominators, units and coverage
+← [02 — Loading twice](./02-loading-twice.md) · [Course index](./README.md) · next: [04 — Denominators, units and coverage](./04-denominators.md)
