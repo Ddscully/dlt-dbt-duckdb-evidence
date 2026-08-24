@@ -70,7 +70,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 10 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 12 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -497,7 +497,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are ten unit tests, over three models, and they exist because a data
+- **There are twelve unit tests, over four models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -598,6 +598,34 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
       `is not distinct from`, not `=`: 553 of the 755 correctly resolve to a
       null route, and `=` is unknown on a null, which `where not(...)` discards
       — the test would pass by not looking.
+- **`fct_fx_rates_daily` is the fourth, and it is the one where the data tests
+  look adequate and are not.** Fifteen of them: the grain, `rate_source_date <=
+  date_day` (no backfill from the future), `rate_source_date = date_day` on
+  published rows, positive rates, a non-negative age. **Five mutations, all
+  fifteen green on every one.** Widening the cap from 7 days to 30 prices 46
+  stale rows; removing the cap prices all 3,359 and leaves the model
+  contradicting itself, `is_rate_stale` true beside a usable rate; `<=` to `<`
+  costs 2 rows their rate; `is_rate_stale` on `>=` instead of `>` flags 2 rows
+  stale *and* priced. Worst is dropping `partition by currency_code` from the
+  carry window: **113,479 rows, 29.7% of the table, then quote another
+  currency's fixing** — GBP's 0.7094 becomes 0.3718 — and the grain is still
+  unique and every date still moves forward, so nothing sees it. Two unit tests
+  catch all five.
+  - **The existing tests guard direction and provenance, never identity.**
+    `rate_source_date <= date_day` is a real test that stops a real bug (a
+    default window frame reaching forward), and mixing currencies moves no date
+    backwards, so it cannot help. Two independent properties, one asserted.
+  - **A fixture for a partitioning bug has to make the partitions disagree.**
+    The obvious symmetric setup — both currencies publishing on day 1 — returns
+    the right answer with no partition at all, and the test is green forever.
+    `fx_daily_never_carries_one_currency_rate_into_another` has BBB publishing
+    *later* than AAA on every day AAA must carry, so an unpartitioned window
+    hands AAA the wrong number three times out of three.
+  - **What the cap refuses is worth a number.** The ISK's last fixing before the
+    2008 collapse is 290.00 and the first after the nine-year gap is 125.01; the
+    ARS goes 0.89130 to 1.76373 across its 26-day gap. Carrying either forward
+    converts at a rate 132% and 98% from the next real quote. That is the
+    argument for the cap being 7 rather than generous.
 - **`expect` is full-set equality, so a model that generates its own rows needs a
   fixture file.** `dim_date` expands its bounds to whole calendar years, so any
   mocked `stg_fx_rates` inside one year yields 366 rows and all 366 must be

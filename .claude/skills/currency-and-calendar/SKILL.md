@@ -31,6 +31,33 @@ follows from that rather than from the numbers.
   2002 breaking of the dollar peg. Those 3,359 rows keep their place with a null
   rate and `is_rate_stale` set. An uncapped fill would have put a pre-collapse
   krona on nine years of charts.
+- **Nothing in the 15 data tests on `fct_fx_rates_daily` can see the cap, and
+  five mutations prove it.** They guard the grain, the direction of the carry
+  (`rate_source_date <= date_day`) and positivity — all real, none sufficient,
+  because a rate carried 8 days or 3,341 days is a well-formed positive number
+  with a source date in the past. All five mutations below pass all 15:
+
+  | mutation | effect on the warehouse |
+  |---|---|
+  | cap 7 -> 30 days | 46 stale rows gain a rate |
+  | cap removed | all 3,359 priced; `is_rate_stale` true beside a usable rate |
+  | `<=` becomes `<` | 2 rows at exactly the cap lose their rate |
+  | `is_rate_stale` on `>=` | 2 rows stale *and* priced |
+  | window loses `partition by currency_code` | **113,479 rows (29.7%) quote another currency** |
+
+  - The last is the one to remember: GBP's 0.7094 becomes 0.3718 and the grain
+    is still unique, every date still moves forward, every rate is still
+    positive. **Direction and identity are independent properties and only
+    direction was asserted.**
+  - **A fixture for a partitioning bug has to make the partitions disagree.**
+    Two currencies publishing on the same day return the right answer with no
+    partition at all. The test has BBB publishing *later* than AAA on every day
+    AAA must carry.
+  - The cap's value is defensible in numbers: ISK 290.00 before the 2008
+    collapse against 125.01 after the nine-year gap, ARS 0.89130 against
+    1.76373 across its 26-day one — 132% and 98% from the next real quote.
+  - Held by two unit tests in `dbt/models/marts/_unit_tests.yml`, which catch
+    all five.
 - **The currency panel is not fixed, which is why `dim_currency` exists.** 46
   codes have been quoted and 29 still are. Ten stop on the last business day
   before their country adopted the euro (GRD 2000 through BGN 2025), two at a

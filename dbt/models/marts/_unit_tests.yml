@@ -310,3 +310,134 @@ unit_tests:
         # a group-wide minimum of 11.0 would make it 33.0.
         - {country_or_territory: "Norway", good_key: "2523290000-portland-cement", certificates_2026_t_co2e_per_t: 44.0, excess_over_cleanest_source_t_co2e_per_t: 0.0}
         - {country_or_territory: "Chile",  good_key: "2523290000-portland-cement", certificates_2026_t_co2e_per_t: 88.0, excess_over_cleanest_source_t_co2e_per_t: 44.0}
+
+  # ---------------------------------------------------------------------------
+  # fct_fx_rates_daily — the carry-forward.
+  #
+  # Five mutations against a warehouse copy, every one of them passing all 15 of
+  # the model's data tests:
+  #
+  # | mutation                              | 15 data tests | effect                                    |
+  # |---------------------------------------|---------------|-------------------------------------------|
+  # | cap 7 -> 30 days                      | all pass      | 46 stale rows gain a rate                 |
+  # | cap removed entirely                  | all pass      | all 3,359 stale rows priced, self-contradictory |
+  # | `<=` cap becomes `<`                  | all pass      | 2 rows at exactly the cap lose their rate |
+  # | `is_rate_stale` uses `>=` not `>`     | all pass      | 2 rows stale *and* priced                 |
+  # | window loses `partition by currency`  | all pass      | 113,479 rows (29.7%) carry another currency's rate |
+  #
+  # The tests that exist guard direction (`rate_source_date <= date_day`, so no
+  # backfill from the future) and the grain. Nothing guards the *cap*, because a
+  # rate carried 8 days or 3,341 days is still a positive number with a source
+  # date in the past. What the cap refuses is worth a number: the ISK's last
+  # fixing before the 2008 collapse is 290.00 and the first after the nine-year
+  # gap is 125.01, and the ARS goes 0.89130 to 1.76373 across its 26-day gap.
+  # Carrying either one forward converts at a rate that is 132% and 98% away
+  # from the next real quote.
+
+  - name: fx_daily_never_carries_one_currency_rate_into_another
+    model: fct_fx_rates_daily
+    description: >
+      The carry window is partitioned by currency, and dropping that partition
+      is the worst of the five mutations: `last_value(... ignore nulls)` then
+      reaches across currencies and 29.7% of the table quotes somebody else's
+      fixing — GBP's 0.7094 becomes 0.3718 — with all 15 data tests green,
+      because the dates still move forward and the grain is still unique. The
+      fixture is built so a missing partition is unmissable: BBB publishes
+      *later* than AAA on every day AAA has to carry, so an unpartitioned window
+      hands AAA the wrong number on all three of its carried days. BBB's
+      lifetime also starts a day after AAA's, which pins the spine clipping to
+      each currency's own quoted life rather than to the calendar.
+    given:
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-01-01", date_key: 20240101, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-02", date_key: 20240102, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-03", date_key: 20240103, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-04", date_key: 20240104, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+      - input: ref('dim_currency')
+        rows:
+          - {currency_code: "AAA", is_quoted: true, first_published_date: "2024-01-01", last_published_date: "2024-01-04"}
+          # Quoted from the 2nd, so it must have no row on the 1st.
+          - {currency_code: "BBB", is_quoted: true, first_published_date: "2024-01-02", last_published_date: "2024-01-04"}
+      - input: ref('fct_fx_rates_published')
+        rows:
+          - {rate_date: "2024-01-01", quote_currency: "AAA", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
+          - {rate_date: "2024-01-02", quote_currency: "BBB", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
+          - {rate_date: "2024-01-04", quote_currency: "BBB", base_currency: "EUR", units_per_eur: 40.0, eur_per_unit: 0.025}
+    expect:
+      rows:
+        # AAA carries its own 10.0 for three days. Unpartitioned it would read
+        # 20.0, 20.0 and 40.0 off BBB.
+        - {currency_code: "AAA", date_day: "2024-01-01", units_per_eur: 10.0, rate_source_date: "2024-01-01", days_since_published_rate: 0, is_published_rate: true,  is_carried_forward: false, is_rate_stale: false}
+        - {currency_code: "AAA", date_day: "2024-01-02", units_per_eur: 10.0, rate_source_date: "2024-01-01", days_since_published_rate: 1, is_published_rate: false, is_carried_forward: true,  is_rate_stale: false}
+        - {currency_code: "AAA", date_day: "2024-01-03", units_per_eur: 10.0, rate_source_date: "2024-01-01", days_since_published_rate: 2, is_published_rate: false, is_carried_forward: true,  is_rate_stale: false}
+        - {currency_code: "AAA", date_day: "2024-01-04", units_per_eur: 10.0, rate_source_date: "2024-01-01", days_since_published_rate: 3, is_published_rate: false, is_carried_forward: true,  is_rate_stale: false}
+        # BBB has no 2024-01-01 row at all: outside its quoted lifetime.
+        - {currency_code: "BBB", date_day: "2024-01-02", units_per_eur: 20.0, rate_source_date: "2024-01-02", days_since_published_rate: 0, is_published_rate: true,  is_carried_forward: false, is_rate_stale: false}
+        - {currency_code: "BBB", date_day: "2024-01-03", units_per_eur: 20.0, rate_source_date: "2024-01-02", days_since_published_rate: 1, is_published_rate: false, is_carried_forward: true,  is_rate_stale: false}
+        - {currency_code: "BBB", date_day: "2024-01-04", units_per_eur: 40.0, rate_source_date: "2024-01-04", days_since_published_rate: 0, is_published_rate: true,  is_carried_forward: false, is_rate_stale: false}
+
+  - name: fx_daily_stops_carrying_a_rate_once_it_passes_the_cap
+    model: fct_fx_rates_daily
+    description: >
+      `fx_max_carry_forward_days` is 7, and no data test can see it: a rate
+      carried 8 days is as well-formed as one carried 2. Removing the cap
+      altogether prices all 3,359 stale rows and leaves the model contradicting
+      itself — `is_rate_stale` true beside a usable rate — with every data test
+      green. One currency, one gap that runs past the cap, then a second fixing
+      that resets the age: the last row proves the carry restarts rather than
+      staying stale for the rest of the series. The calendar deliberately runs
+      wider than the currency's quoted life at both ends, so the 1st and the
+      17th must not appear.
+    given:
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-01-01", date_key: 20240101, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-02", date_key: 20240102, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-03", date_key: 20240103, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-04", date_key: 20240104, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-05", date_key: 20240105, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-06", date_key: 20240106, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-07", date_key: 20240107, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-08", date_key: 20240108, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-09", date_key: 20240109, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-10", date_key: 20240110, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-11", date_key: 20240111, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-12", date_key: 20240112, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-13", date_key: 20240113, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-14", date_key: 20240114, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-15", date_key: 20240115, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-16", date_key: 20240116, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+          - {date_day: "2024-01-17", date_key: 20240117, year: 2024, quarter: 1, month: 1, half: 1, is_weekday: true}
+      - input: ref('dim_currency')
+        rows:
+          - {currency_code: "TST", is_quoted: true, first_published_date: "2024-01-02", last_published_date: "2024-01-16"}
+      - input: ref('fct_fx_rates_published')
+        rows:
+          - {rate_date: "2024-01-02", quote_currency: "TST", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
+          # The gap runs 01-03 to 01-10, then a fresh fixing lands.
+          - {rate_date: "2024-01-11", quote_currency: "TST", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
+    expect:
+      rows:
+        # The fixing itself, then the first carried day. Pattern for the rest.
+        - {date_day: "2024-01-02", units_per_eur: 10.0, days_since_published_rate: 0, is_rate_stale: false}
+        - {date_day: "2024-01-03", units_per_eur: 10.0, days_since_published_rate: 1, is_rate_stale: false}
+        - {date_day: "2024-01-04", units_per_eur: 10.0, days_since_published_rate: 2, is_rate_stale: false}
+        - {date_day: "2024-01-05", units_per_eur: 10.0, days_since_published_rate: 3, is_rate_stale: false}
+        - {date_day: "2024-01-06", units_per_eur: 10.0, days_since_published_rate: 4, is_rate_stale: false}
+        - {date_day: "2024-01-07", units_per_eur: 10.0, days_since_published_rate: 5, is_rate_stale: false}
+        - {date_day: "2024-01-08", units_per_eur: 10.0, days_since_published_rate: 6, is_rate_stale: false}
+        # Age 7 is the last day inside the cap: `<= 7` keeps the rate and
+        # `> 7` leaves the flag false. Both mutations of that boundary land here.
+        - {date_day: "2024-01-09", units_per_eur: 10.0, days_since_published_rate: 7, is_rate_stale: false}
+        # Age 8. The rate goes null the moment the row is stale — the two are
+        # one decision, which is what an `is_rate_stale` of `>=` would break.
+        - {date_day: "2024-01-10", units_per_eur: null, days_since_published_rate: 8, is_rate_stale: true}
+        # A fresh fixing resets the age; the carry restarts rather than staying
+        # stale for the rest of the currency's life.
+        - {date_day: "2024-01-11", units_per_eur: 20.0, days_since_published_rate: 0, is_rate_stale: false}
+        - {date_day: "2024-01-12", units_per_eur: 20.0, days_since_published_rate: 1, is_rate_stale: false}
+        - {date_day: "2024-01-13", units_per_eur: 20.0, days_since_published_rate: 2, is_rate_stale: false}
+        - {date_day: "2024-01-14", units_per_eur: 20.0, days_since_published_rate: 3, is_rate_stale: false}
+        - {date_day: "2024-01-15", units_per_eur: 20.0, days_since_published_rate: 4, is_rate_stale: false}
+        - {date_day: "2024-01-16", units_per_eur: 20.0, days_since_published_rate: 5, is_rate_stale: false}
