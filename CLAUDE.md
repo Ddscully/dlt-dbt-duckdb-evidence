@@ -1200,6 +1200,35 @@ Two tiers, and the split is the point — see [`tests/README.md`](tests/README.m
 
 Gotchas:
 
+- **A count cited in prose is an untested assertion, and three of them went
+  stale at once.** `tests/test_documented_counts.py` scans tracked markdown and
+  the two `_unit_tests.yml` headers for any integer in front of a test-noun and
+  requires it to be one the manifest actually produces. It exists because
+  adding a single data test moved 368 to 369 in two files and left it wrong in
+  fourteen — including `README.md` labelling `docs/DATA_QUALITY.md` with a
+  count of 368 while linking to a file that already said 369 — and because a
+  figure of 22 for `stg_retail_lines`' data tests was wrong in thirteen places
+  (it has 19; the 22 was `dbt build`'s node total, which counts the model
+  itself).
+
+    The guard forbids quoting a superseded count directly in front of a
+    test-noun, which is why this bullet phrases the old figures the long way
+    round. That is the intended cost — an exemption comment would be a hole
+    someone eventually parks a real staleness in.
+  `lint`, `pytest` and `dbt build` were green through all of it.
+  - **Scan whole-file, never line by line.** These docs are hard wrapped at ~80
+    characters and the claims straddle the wraps — `docs/DATA_QUALITY.md` ends a
+    line on "10 unit" and starts the next with "tests.". A per-line scan missed
+    3 of 31 claims and passed a mutated unit-test count; it was a mutation that
+    found that, not review.
+  - **The allowed set is derived from the manifest and deliberately global**, so
+    a per-model count could satisfy a project-wide sentence. Anchoring each
+    citation to its own site would catch that and would drift on every reflow.
+    Only per-model counts that are genuinely cited belong in the set: each one
+    added widens it for every other check.
+  - `seen > 25` is the vacuity guard. A scanner whose patterns stop matching
+    passes by not looking — the same failure `_ROUTES` reachability exists for.
+
 - **`WAREHOUSE_PATH` overrides the DuckDB file** for `ingest`, `transform`, `lake`
   *and* dbt's profile. It must be **absolute**: dbt resolves its path from `dbt/`,
   the Python layers from the repo root. `just test-pipeline` sets it to a temp file
