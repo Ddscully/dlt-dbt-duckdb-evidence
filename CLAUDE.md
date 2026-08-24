@@ -1555,6 +1555,29 @@ Gotchas:
   the network — otherwise "offline CI" quietly becomes "CI that's online
   sometimes". `tests/test_fixtures.py` asserts every URL the pipeline can build
   resolves to a file that exists.
+- **`_ROUTES` is an ordered dispatch table, so a route can be shadowed in
+  silence.** `_fixtures.resolve` returns at the *first* pattern that matches, and
+  a route added after one that already covers its URLs is never reached — the
+  fixture it names is recorded, committed and never served. "Every URL resolves
+  to a file that exists" stays green throughout, because the URL does resolve,
+  just not to the intended route. Four checks close the loop over the three
+  hand-maintained collections (`_ROUTES`, `ALL_URLS`, the files on disk), with
+  the dlt source as the outer authority: no two routes claim one URL, every route
+  is reachable, no recorded fixture is orphaned, every resource has a route.
+  - **Reachability is the one that earns its place, and both existing tests were
+    blind to it by construction.** They iterate `ALL_URLS`, so a source missing
+    from that list is missing from them too — `ecb_fx_rates` was therefore
+    outside every fixture test for the whole life of the FX source, its route
+    never once exercised, with nothing red. `ALL_URLS` now carries **both**
+    branches of `fx_start_date` (whole series on a first load, lookback window
+    after), since they build different URLs onto the same route.
+  - **A fixture is named after the resource it feeds, and the one exception is
+    declared** (`FIXTURE_NAME_EXCEPTIONS`): the retail fixture is a real zip
+    standing in for a real download, so it keeps the upstream archive's name. A
+    full resource-to-fixture map would just be a fourth collection to drift.
+  - **Nothing checks the recorder against the routes, on purpose.**
+    `scripts/record_fixtures.py` writes through `path_for()` itself, so the two
+    cannot disagree; a test there would assert what the code makes impossible.
 - **dlt wraps anything a resource generator raises** in `ResourceExtractionError`,
   so tests asserting on ingest errors match that, not the underlying exception.
 - **The retail workbook cache is keyed on the archive's content, and had to be.**

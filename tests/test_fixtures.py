@@ -14,7 +14,7 @@ import tempfile
 
 import pytest
 
-from ingest import fixtures
+from ingest import fixtures, pipeline
 from ingest.pipeline import (
     EU_ELEC_PRICES_API,
     OWID_CO2,
@@ -22,14 +22,22 @@ from ingest.pipeline import (
     RETAIL_ARCHIVE,
     WB_COUNTRY_API,
     WB_WDI_INDICATORS,
+    fx_start_date,
+    fx_url,
     retail_sql,
     wdi_url,
 )
 from modern_data_stack import fixtures as _fixtures, workbook
 
-ALL_URLS = [OWID_CO2, OWID_ENERGY, WB_COUNTRY_API, EU_ELEC_PRICES_API, RETAIL_ARCHIVE] + [
-    wdi_url(code) for code in WB_WDI_INDICATORS
-]
+ALL_URLS = (
+    [OWID_CO2, OWID_ENERGY, WB_COUNTRY_API, EU_ELEC_PRICES_API, RETAIL_ARCHIVE]
+    + [wdi_url(code) for code in WB_WDI_INDICATORS]
+    # Both branches of `fx_start_date`, because the FX resource builds a different
+    # URL on a first load (the whole series) than on every later one (a lookback
+    # window off the watermark). One entry would leave the other shape untested,
+    # and the end date is today's, so neither is a constant.
+    + [fx_url(fx_start_date(None)), fx_url(fx_start_date("2026-01-15"))]
+)
 
 
 @pytest.mark.parametrize("url", ALL_URLS)
@@ -138,3 +146,90 @@ def test_retail_fixture_holds_every_shape_the_models_handle():
     assert row.null_descriptions > 0
     assert row.non_product_codes > 20, "POST, DOT, M, AMAZONFEE, TEST001…"
     assert row.customers > 150, "cohort retention needs customers with real histories"
+
+
+def _routes_matching(url: str) -> list[_fixtures.Route]:
+    """Every route whose pattern claims `url`, in the order `resolve` walks them."""
+    return [route for route in fixtures._ROUTES if route[0].search(url)]
+
+
+def test_no_two_routes_claim_the_same_url():
+    """A route the pipeline can never reach is dead weight that looks alive.
+
+    `_fixtures.resolve` returns at the *first* pattern that matches, so a route
+    added after one that already covers its URLs is silently shadowed — the
+    fixture it names is recorded, committed, and never once served. The existing
+    URL guard cannot see it: the URL still resolves, and still resolves to a file
+    that exists, just not the intended one.
+
+    Checked over `ALL_URLS` rather than by comparing patterns to each other,
+    because regex containment is undecidable in general and the URLs the pipeline
+    actually builds are the only ones that matter.
+    """
+    clashes = []
+    for url in ALL_URLS:
+        hits = [f"{pattern.pattern} -> {template}" for pattern, template in _routes_matching(url)]
+        if len(hits) > 1:
+            clashes.append(f"{url}\n      " + "\n      ".join(hits))
+
+    assert not clashes, "a URL is claimed by more than one route:\n    " + "\n    ".join(clashes)
+
+
+def test_every_route_is_reachable_from_some_pipeline_url():
+    """`_ROUTES` and `ALL_URLS` are both maintained by hand; this is what makes
+    them agree.
+
+    It is the only check here that can see a *missing* `ALL_URLS` entry. The
+    other two iterate URLs, so a source absent from the list is absent from them
+    as well — which is how `ecb_fx_rates` sat outside every fixture test for the
+    whole life of the FX source, with its route never once exercised.
+    """
+    reached = {template for url in ALL_URLS for _, template in _routes_matching(url)}
+    unreachable = [template for _, template in fixtures._ROUTES if template not in reached]
+
+    assert not unreachable, (
+        f"routes no URL in ALL_URLS reaches: {unreachable} — either the pipeline stopped "
+        f"building that URL, or ALL_URLS is missing it"
+    )
+
+
+def test_no_recorded_fixture_is_orphaned():
+    """The reverse direction: a file in `tests/fixtures/ingest/` nothing serves.
+
+    `record_fixtures.py` writes files and never deletes them, so dropping a
+    source or renaming a WDI indicator leaves its payload behind. An orphan is
+    harmless at runtime, which is exactly why it needs a test — it is committed
+    data that nothing reads and that looks like coverage.
+    """
+    served = {fixtures.path_for(url).name for url in ALL_URLS}
+    orphaned = {p.name for p in fixtures.FIXTURE_DIR.iterdir() if p.is_file()} - served
+
+    assert not orphaned, (
+        f"recorded fixtures nothing serves: {sorted(orphaned)} — delete them, or add "
+        f"the URL that reads them to ALL_URLS"
+    )
+
+
+# A fixture is named after the resource it feeds. The exception is declared here
+# rather than excused: the retail fixture is a real zip standing in for a real
+# download, so it keeps the upstream archive's name instead of the resource's.
+FIXTURE_NAME_EXCEPTIONS = {"retail_invoice_lines": "retail_online_retail_ii.zip"}
+
+
+def test_every_resource_in_the_source_has_a_fixture_route():
+    """A resource added without a route fails only in `just test-pipeline`, and
+    reports `no fixture mapped for <url>` — the right message a tier too late,
+    naming the URL rather than the resource that started building it.
+
+    Enumerated off `public_indicators()` for the same reason
+    `test_load_groups_covers_every_resource_in_the_source_exactly_once` is: the
+    source is the thing that decides what gets fetched.
+    """
+    templates = [template for _, template in fixtures._ROUTES]
+
+    for name in sorted(r.name for r in pipeline.public_indicators().resources.values()):
+        declared = FIXTURE_NAME_EXCEPTIONS.get(name)
+        if declared is not None:
+            assert declared in templates, f"{name} declares fixture {declared!r}, which is no route"
+        else:
+            assert any(t.startswith(name) for t in templates), f"no fixture route for {name!r}"
