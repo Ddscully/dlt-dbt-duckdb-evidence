@@ -11,7 +11,7 @@ own CI history — none of it is estimated.
 |------|-----|
 | [`reports/pages/findings.md`](../reports/pages/findings.md) | the analysis, and the "So what" box under each finding |
 | [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including the partitioned WDI load |
-| [`dbt/models/marts/fct_emissions_energy.sql`](../dbt/models/marts/fct_emissions_energy.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest |
+| [`dbt/models/marts/fct_emissions_energy_v2.sql`](../dbt/models/marts/fct_emissions_energy_v2.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest — and the repo's one versioned model, aliased back to the bare relation name so the rename is invisible to its consumers ([`_v1`](../dbt/models/marts/fct_emissions_energy_v1.sql) is a compatibility view over it, not a second copy) |
 | [`ingest/pipeline.py`](../ingest/pipeline.py) | seven sources, two write dispositions, and why that has to be two `run()` calls |
 | [`CLAUDE.md`](../CLAUDE.md) | every gotcha that cost more than an hour, written down at the point it was learned |
 

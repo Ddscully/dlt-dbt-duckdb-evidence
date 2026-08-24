@@ -29,6 +29,17 @@ dev = [
     "pre-commit>=4.0",     # git hooks
     "harlequin>=2.1",      # terminal SQL IDE for DuckDB
     "pytest>=8.3",         # unit tests over the ingest/transform logic (see tests/)
+    # Type checker. Astral's, so it reads `requires-python` for the target
+    # version exactly as ruff does — 3.13 stays declared in one place. It lives
+    # in this group (unlike ruff) because there is no second copy to drift from:
+    # nothing in .pre-commit-config.yaml or CI runs it, and the editor/LSP entry
+    # in .claude/marketplace/ty-lsp shells out to `uv run ty`, so uv.lock is the
+    # only pin.
+    # A `>=` bound rather than sqlfluff's `==` for the same reason — no CI gate
+    # can go red from a version move. Promote it to an exact pin *before*
+    # putting it in pre-commit or a workflow: it is 0.0.x and pre-1.0, and its
+    # diagnostics change between patch releases.
+    "ty>=0.0.74",           # `just typecheck`; agent/editor LSP via `ty server`
 ]
 notebook = [
     "marimo>=0.10",        # reactive notebooks for the Polars exploration layer
@@ -104,6 +115,20 @@ pythonpath = ["."]
 # The unit tests mock every HTTP call; `just test-pipeline` is the integration
 # path and runs the real modules against checked-in fixtures instead.
 addopts = "-q"
+
+[tool.ty]
+# Deliberately no `rules` overrides: like ruff above, this runs the checker's own
+# defaults, and uv.lock is what holds them still. Suppressions are inline
+# `# ty: ignore[rule]` at the point of the decision instead, so the reason sits
+# next to the code rather than in a list nobody reads.
+
+[tool.ty.environment]
+# Explicit, though ty finds it unaided. The LSP server is launched by the editor
+# from a cwd this project does not choose, and a type checker that cannot see
+# the venv does not fail — it reports every third-party import as missing and
+# buries the real diagnostics. (Measured: pyright did exactly that here, 54
+# phantom `reportMissingImports` until it was pointed at the same path.)
+python = "./.venv"
 
 [tool.dagster]
 # Lets `uv run dagster dev` find the code location with no extra flags.

@@ -1,0 +1,7 @@
+{
+  "name": "ty-lsp",
+  "version": "1.0.0",
+  "description": "Python language server for this project, backed by ty from the dev group.",
+  "author": { "name": "Daniel Scully" },
+  "category": "development"
+}
