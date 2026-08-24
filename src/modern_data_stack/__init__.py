@@ -11,6 +11,7 @@ out of them:
 * `observability` — dlt/dbt/DuckDB metadata as queryable tables
 * `export`        — packaging a warehouse as a publishable artifact
 * `history`       — carrying a dbt snapshot forward between builds
+* `db`            — single-row and scalar reads, without the Optional
 
 Each takes its configuration as arguments; the project modules that call them
 hold the constants and stay the entry points, so `python -m lake.archive` and

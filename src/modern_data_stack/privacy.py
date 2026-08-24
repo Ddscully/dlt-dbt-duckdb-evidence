@@ -44,6 +44,8 @@ from collections.abc import Iterable
 
 import duckdb
 
+from .db import row, scalar
+
 # 64 bits of the digest, hex-encoded. Long enough that a collision over any
 # plausible number of subjects is not a thing that happens (5,881 values give a
 # birthday probability around 1e-12), short enough that it is not 64 characters
@@ -170,10 +172,11 @@ def apply_pseudonymisation(
         # fact — the check has to happen before the write. Running this against a
         # warehouse rather than a copy is the same mistake wearing a different
         # hat, and it is unrecoverable: the clear values are gone.
-        (already,) = con.execute(
+        already = scalar(
+            con,
             f'select count(*) from "{schema}"."{table}" where {quoted} is not null'
-            f"   and regexp_matches({quoted}, '{PSEUDONYM_PATTERN}')"
-        ).fetchone()
+            f"   and regexp_matches({quoted}, '{PSEUDONYM_PATTERN}')",
+        )
         if already:
             raise PolicyError(
                 f"{schema}.{table}.{column} already holds {already:,} pseudonymised values — "
@@ -202,11 +205,12 @@ def verify(con: duckdb.DuckDBPyConnection, columns: Iterable[Column]) -> None:
     # refuses it there rather than letting this function decide for every caller.
     offenders = []
     for schema, table, column in sorted(set(columns)):
-        (bad,) = con.execute(
+        bad = scalar(
+            con,
             f'select count(*) from "{schema}"."{table}" '
             f'where "{column}" is not null '
-            f"  and not regexp_matches(\"{column}\", '{PSEUDONYM_PATTERN}')"
-        ).fetchone()
+            f"  and not regexp_matches(\"{column}\", '{PSEUDONYM_PATTERN}')",
+        )
         if bad:
             offenders.append(f"{schema}.{table}.{column} ({bad:,} rows)")
     if offenders:
@@ -223,7 +227,8 @@ def k_anonymity(
     a group of one — and `rows` is what it is out of.
     """
     quasi = ", ".join(f'"{c}"' for c in columns)
-    singletons, rows, largest = con.execute(
+    singletons, rows, largest = row(
+        con,
         f"""
         with g as (select {quasi}, count(*) as k from {relation} group by all)
         select
@@ -231,6 +236,6 @@ def k_anonymity(
             coalesce(sum(k), 0),
             coalesce(max(k), 0)
         from g
-        """
-    ).fetchone()
+        """,
+    )
     return {"singletons": singletons, "rows": rows, "largest_group": largest}

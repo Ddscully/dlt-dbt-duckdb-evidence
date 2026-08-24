@@ -49,7 +49,11 @@ def _release_the_dlt_pipeline():
     yield
     ctx = Container()[PipelineContext]
     if ctx.is_active():
-        ctx.pipeline().deactivate()
+        # `PipelineContext.pipeline()` is typed as the `SupportsPipeline`
+        # protocol, which does not declare `deactivate` — but the object is a
+        # `Pipeline`, which does. A stub gap, not a missing method: the teardown
+        # this whole fixture exists for is what proves it at runtime.
+        ctx.pipeline().deactivate()  # ty: ignore[unresolved-attribute]
 
 
 def _defined_in_assets_module():

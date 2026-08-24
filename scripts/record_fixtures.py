@@ -50,6 +50,7 @@ from ingest.pipeline import (
     wdi_url,
 )
 from modern_data_stack import workbook
+from modern_data_stack.db import scalar
 
 # A slice wide enough that the modelled layers have something to do:
 #   - every World Bank region and all four income groups;
@@ -213,10 +214,11 @@ def record_retail() -> None:
             archive.write(book, RETAIL_WORKBOOK_NAME)
         _write(path_for(RETAIL_ARCHIVE), buffer.getvalue())
 
-    kept = con.sql(
-        'select count(*) from sheets where "Invoice" in (select invoice from kept_invoices)'
-    ).fetchone()[0]
-    total = con.sql("select count(*) from sheets").fetchone()[0]
+    kept = scalar(
+        con,
+        'select count(*) from sheets where "Invoice" in (select invoice from kept_invoices)',
+    )
+    total = scalar(con, "select count(*) from sheets")
     print(f"  {'':<28} {kept:>9,} of {total:,} rows ({100 * kept / total:.1f}%)")
 
 

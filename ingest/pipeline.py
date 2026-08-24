@@ -32,6 +32,7 @@ from pathlib import Path
 import dlt
 import polars as pl
 import requests
+from dlt.common.schema.typing import TColumnSchema
 
 from ingest import fixtures
 from modern_data_stack import workbook
@@ -114,7 +115,7 @@ WDI_WATERMARK_KEY = "max_year_by_indicator"
 # into a `value__v_double` variant column. The key columns are non-nullable so a
 # null key fails the load rather than silently escaping the merge predicate
 # (`null = null` is never true, so those rows would duplicate on every run).
-WDI_COLUMNS = {
+WDI_COLUMNS: dict[str, TColumnSchema] = {
     "indicator": {"data_type": "text", "nullable": False},
     "country_code": {"data_type": "text", "nullable": False},
     "country_iso3": {"data_type": "text"},
@@ -156,7 +157,7 @@ FX_PRIMARY_KEY = ("rate_date", "quote_currency")
 # series spans 0.85765 (GBP) to 1,725,000 (the pre-2005 Turkish lira), and a
 # lookback window that happened to hold only the majors would still infer double,
 # but a first load restricted to one currency would not necessarily.
-FX_COLUMNS = {
+FX_COLUMNS: dict[str, TColumnSchema] = {
     "rate_date": {"data_type": "date", "nullable": False},
     "base_currency": {"data_type": "text", "nullable": False},
     "quote_currency": {"data_type": "text", "nullable": False},
@@ -229,7 +230,7 @@ RETAIL_BATCH_ROWS = 100_000
 # harmless: dlt's hint wins and the column lands NOT NULL. They are left out
 # because they would be redundant, and the assertion is worth more in dbt
 # regardless — `not_null` there stores the offending rows rather than logging.
-RETAIL_COLUMNS = {
+RETAIL_COLUMNS: dict[str, TColumnSchema] = {
     "invoice": {"data_type": "text"},
     "line_number": {"data_type": "bigint"},
     "stock_code": {"data_type": "text"},
@@ -284,6 +285,30 @@ def _get_json(url: str, *, timeout: int = 120, retries: int = 3) -> dict | list:
             if attempt < retries - 1:
                 time.sleep(1.5 * (attempt + 1))
     raise RuntimeError(f"failed to fetch JSON from {url}: {last}")
+
+
+def _get_json_object(url: str, *, timeout: int = 120, retries: int = 3) -> dict:
+    """`_get_json` for an endpoint that documents a JSON *object*.
+
+    The union `_get_json` returns is honest — the World Bank really does send
+    `[metadata, [records…]]` — and both World Bank callers already narrow it by
+    hand, because an error object served with a 200 is a real thing those APIs
+    do. This is the same check for the other branch: Eurostat's JSON-stat and
+    the ECB's `{"rates": …}` are objects, and a caller that subscripts one by
+    name should say so once rather than at every key.
+    """
+    payload = _get_json(url, timeout=timeout, retries=retries)
+    if not isinstance(payload, dict):
+        # `RuntimeError` rather than the `TypeError` TRY004 asks for, and
+        # deliberately: nothing here passed a wrong argument — the URL was fine
+        # and the *server* sent the wrong shape. That is the same fault the two
+        # World Bank checks below raise `RuntimeError` for; they escape the rule
+        # only because their condition is compound. Matching them is worth the
+        # one suppression.
+        raise RuntimeError(  # noqa: TRY004
+            f"expected a JSON object from {url}, got {payload!r:.300}"
+        )
+    return payload
 
 
 # infer_schema_length=None scans the whole file so sparse numeric columns
@@ -467,7 +492,7 @@ def eu_elec_prices():
     # Eurostat returns JSON-stat: a flat `value` dict keyed by the row-major
     # index over all dimensions. We filtered every dimension but geo & time to a
     # single category, so we walk geo × time and compute each flat index.
-    j = _get_json(EU_ELEC_PRICES_API)
+    j = _get_json_object(EU_ELEC_PRICES_API)
     dim_ids: list[str] = j["id"]
     sizes: list[int] = j["size"]
     values: dict[str, float] = j["value"]
@@ -547,7 +572,7 @@ def ecb_fx_rates():
     replaces it rather than duplicating it.
     """
     state = dlt.current.resource_state()
-    payload = _get_json(fx_url(fx_start_date(state.get(FX_WATERMARK_KEY))))
+    payload = _get_json_object(fx_url(fx_start_date(state.get(FX_WATERMARK_KEY))))
     rates: dict[str, dict[str, float]] = payload.get("rates") or {}
 
     # ISO dates sort lexicographically, so `max` over the keys is the newest day.

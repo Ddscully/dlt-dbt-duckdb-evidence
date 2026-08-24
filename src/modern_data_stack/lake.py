@@ -19,6 +19,8 @@ from pathlib import Path
 
 import duckdb
 
+from .db import row
+
 
 def table_dir(lake_dir: str | Path, table: str) -> Path:
     """`raw.owid_co2` → `<lake>/raw_owid_co2`. Flat, because a dot in a path
@@ -31,12 +33,13 @@ def summarise(con: duckdb.DuckDBPyConnection, target: Path, partition_column: st
     through `read_parquet` — so the summary is evidence the files are readable,
     not just that `COPY` returned."""
     glob = f"{target}/**/*.parquet"
-    rows, partitions = con.sql(
+    rows, partitions = row(
+        con,
         f"""
         select count(*), count(distinct {partition_column})
         from read_parquet('{glob}', hive_partitioning = 1)
-        """
-    ).fetchone()
+        """,
+    )
     files = sorted(target.glob(f"{partition_column}=*/*.parquet"))
     return {
         "rows": rows,

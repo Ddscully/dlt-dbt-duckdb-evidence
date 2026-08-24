@@ -23,6 +23,8 @@ from pathlib import Path
 import duckdb
 import polars as pl
 
+from .db import row, scalar
+
 DEFAULT_AUDIT_SCHEMA = "dbt_test__audit"
 
 # dbt's own default: a test fails on the number of rows it returned. Tests are
@@ -44,11 +46,18 @@ def _has_column(con: duckdb.DuckDBPyConnection, schema: str, table: str, column:
 
 def _period_span(
     con: duckdb.DuckDBPyConnection, schema: str, table: str, column: str
-) -> tuple[int, int]:
-    """(min, max) of a table's period column, or (None, None) if it has none."""
+) -> tuple[int | None, int | None]:
+    """(min, max) of a table's period column, or (None, None) if it has none.
+
+    The return type says `| None` twice because both branches can produce it —
+    the early return for a table with no period column, and `min()`/`max()` over
+    a table that has one and no rows. It read `tuple[int, int]` until ty pointed
+    at the line directly below the docstring that already said otherwise.
+    """
     if not _has_column(con, schema, table, column):
         return (None, None)
-    return con.sql(f'select min({column}), max({column}) from "{schema}"."{table}"').fetchone()
+    lo, hi = row(con, f'select min({column}), max({column}) from "{schema}"."{table}"')
+    return (lo, hi)
 
 
 def build_sources(
@@ -69,14 +78,15 @@ def build_sources(
     for table in source_tables:
         if not _has_column(con, raw_schema, table, "_dlt_load_id"):
             continue
-        n, loaded_at = con.sql(
+        n, loaded_at = row(
+            con,
             f"""
             select
                 count(*),
                 to_timestamp(max(cast(_dlt_load_id as double)))
             from {raw_schema}."{table}"
-            """
-        ).fetchone()
+            """,
+        )
         period_min, period_max = _period_span(con, raw_schema, table, period_column)
         rows.append(
             {
@@ -127,7 +137,7 @@ def build_tables(
 
     rows = []
     for schema, table in listed:
-        n = con.sql(f'select count(*) from "{schema}"."{table}"').fetchone()[0]
+        n = scalar(con, f'select count(*) from "{schema}"."{table}"')
         period_min, period_max = _period_span(con, schema, table, period_column)
         rows.append(
             {
@@ -252,9 +262,7 @@ def build_tests(
         fail_calc = meta.get("fail_calc") or DEFAULT_FAIL_CALC
         severity = meta.get("severity") or "error"
         # `sum(...)` over an empty table is null, where `count(*)` would be 0.
-        failing = con.sql(
-            f'select coalesce({fail_calc}, 0) from {audit_schema}."{table}"'
-        ).fetchone()[0]
+        failing = scalar(con, f'select coalesce({fail_calc}, 0) from {audit_schema}."{table}"')
         rows.append(
             {
                 "test_name": meta.get("test_name") or table,

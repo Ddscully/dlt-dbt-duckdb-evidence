@@ -14,6 +14,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from modern_data_stack.db import scalar
 from scripts.restore_history import run
 
 # One country-year at version 1, shaped the way dbt writes a `check`-strategy
@@ -47,8 +48,7 @@ def previous(tmp_path: Path) -> Path:
 def _history_rows(path: Path) -> int:
     con = duckdb.connect(str(path), read_only=True)
     try:
-        (rows,) = con.execute("select count(*) from history.snap_co2_estimates").fetchone()
-        return rows
+        return scalar(con, "select count(*) from history.snap_co2_estimates")
     finally:
         con.close()
 
@@ -75,7 +75,7 @@ def test_leaves_the_rest_of_the_destination_alone(previous: Path, tmp_path: Path
 
     con = duckdb.connect(str(dest), read_only=True)
     try:
-        assert con.execute("select count(*) from raw.t").fetchone()[0] == 1
+        assert scalar(con, "select count(*) from raw.t") == 1
     finally:
         con.close()
 

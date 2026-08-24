@@ -18,6 +18,7 @@ import duckdb
 import pytest
 
 from modern_data_stack import export as _export
+from modern_data_stack.db import scalar
 from scripts.export_warehouse import default_tag, release_notes, run
 
 # `raw` and `main` must not ship as Parquet; `staging`/`marts`/`analytics` must.
@@ -89,11 +90,12 @@ def test_only_the_modelled_layers_ship_as_parquet(export: dict):
 def test_manifest_describes_the_files_on_disk(export: dict):
     """Row counts, sizes and checksums are the artifact's only documentation, so
     a manifest that disagrees with the bytes is worse than none."""
-    for table in export["tables"]:
-        path = export["out"] / table["file"]
-        assert table["bytes"] == path.stat().st_size
-        assert table["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
-        assert table["rows"] == duckdb.sql(f"select count(*) from '{path}'").fetchone()[0]
+    with duckdb.connect() as con:
+        for table in export["tables"]:
+            path = export["out"] / table["file"]
+            assert table["bytes"] == path.stat().st_size
+            assert table["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+            assert table["rows"] == scalar(con, f"select count(*) from '{path}'")
 
     # What run() returned is what it wrote (the `out` key is the test's own).
     written = json.loads((export["out"] / "manifest.json").read_text())

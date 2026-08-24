@@ -30,6 +30,8 @@ from pathlib import Path
 
 import duckdb
 
+from .db import row, scalar
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -142,7 +144,7 @@ def export_table(
     con.execute(f"copy (select * from {qualified}) to '{path}' (format parquet, compression zstd)")
 
     columns = [c[0] for c in con.execute(f"describe {qualified}").fetchall()]
-    (rows,) = con.execute(f"select count(*) from {qualified}").fetchone()
+    rows = scalar(con, f"select count(*) from {qualified}")
     entry = {
         "table": f"{schema}.{table}",
         "file": path.name,
@@ -153,9 +155,7 @@ def export_table(
     }
     # Dimensions have no period column, so coverage is reported where it applies.
     if period_column in columns:
-        bounds = con.execute(
-            f"select min({period_column}), max({period_column}) from {qualified}"
-        ).fetchone()
+        bounds = row(con, f"select min({period_column}), max({period_column}) from {qualified}")
         entry["years"] = list(bounds) if bounds[0] is not None else None
     return entry
 
