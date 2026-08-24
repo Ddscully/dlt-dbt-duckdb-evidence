@@ -75,6 +75,18 @@ assumes they are the one who is wrong. `data/` is deliberately outside the
 citable roots — it is gitignored and built, so a path under it is correct on a
 fresh clone where it does not exist.
 
+**A cited path that git ignores is skipped, and that rule had to be
+generalised.** `data/` was kept out of `CITABLE_ROOTS` because it is gitignored
+and built, so a path under it is correct on a fresh clone where it does not
+exist. `reports/` cannot be excluded the same way — `reports/pages/` and
+`reports/sources/` are source while `reports/build/`, `reports/node_modules/`
+and `reports/.evidence/` are output of `just report`. So the check asks
+`git check-ignore` instead of carrying a second prefix list. Until it did, the
+guard **passed on a developer's machine and would have failed CI**: those three
+directories exist once you have built the site, and `building-evidence-reports`
+cites all three. Found by merging the branch into a clean worktree, not by
+running the tests in place — which is the only way this class of bug shows up.
+
 **It scans for `just <recipe>` inside code only.** "just" is an English word and
 this documentation is full of it ("exactly what the publisher just served"), so
 the search is restricted to fenced blocks and inline spans, with `#` comments

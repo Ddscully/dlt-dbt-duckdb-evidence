@@ -17,6 +17,7 @@ below reads markdown and the justfile as text.
 from __future__ import annotations
 
 import re
+import subprocess
 
 import pytest
 
@@ -116,17 +117,39 @@ def test_the_course_has_an_index_and_at_least_one_module():
     assert modules(), "docs/course/ has an index but no numbered modules"
 
 
+def ignored(paths: set[str]) -> set[str]:
+    """Which of `paths` git ignores.
+
+    A gitignored path is a build artifact: correct to cite, and absent on a fresh
+    clone. This is the general form of the rule that keeps `data/` out of
+    `CITABLE_ROOTS`, and `reports/` is why the general form is needed —
+    `reports/pages/` and `reports/sources/` are source, while `reports/build/`,
+    `reports/node_modules/` and `reports/.evidence/` are output of
+    `just report`. Splitting that by prefix would be a second list to drift;
+    asking git is the same question the .gitignore already answers.
+
+    Without this the guard passes on a developer's machine, where the site has
+    been built, and fails in CI — the exact shape of rot it exists to catch.
+    """
+    if not paths:
+        return set()
+    done = subprocess.run(
+        ["git", "check-ignore", "--stdin"],
+        cwd=project_root(),
+        input="\n".join(sorted(paths)),
+        capture_output=True,
+        text=True,
+        check=False,  # exit 1 simply means nothing matched
+    )
+    return {line.strip() for line in done.stdout.splitlines() if line.strip()}
+
+
 @pytest.mark.parametrize("doc", cited_files(), ids=_ids(cited_files()))
 def test_every_path_a_module_cites_exists(doc):
     """A renamed model must not leave the course pointing at a dead path."""
-    missing = sorted(
-        {
-            cited
-            for cited in _CITED_PATH.findall(doc.read_text())
-            # A glob is a description of a set, not a path to open.
-            if "*" not in cited and not (project_root() / cited).exists()
-        }
-    )
+    # A glob is a description of a set, not a path to open.
+    cited = {c for c in _CITED_PATH.findall(doc.read_text()) if "*" not in c}
+    missing = sorted(c for c in cited - ignored(cited) if not (project_root() / c).exists())
     assert not missing, f"{_label(doc)} cites paths that no longer exist: {missing}"
 
 
