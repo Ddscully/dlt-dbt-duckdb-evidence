@@ -37,6 +37,16 @@ one; the page is `retail.md`.
     is only written down in one of the two models that use it isn't one.
   - **`item_type` is not decoration.** A bare revenue sum carries £463,931 of
     postage and −£338,803 of bank fees as if they were sales.
+  - **`upper(trim(stock_code))` is load-bearing for a whole family of it.** All
+    100 voucher lines arrive lowercase (`gift_0001_20`, never `GIFT_`), so the
+    `voucher` branch is reachable *only* through the case fold — drop it and
+    every one of them books as product. Lowercase `m` is 5 more lines against
+    `M`'s 1,421, and the source sends one bare `GIFT` that really is a product,
+    which is why the pattern carries the underscore. None of this is visible to a
+    data test: `accepted_values` on `item_type` sees `product` and is satisfied.
+    Mutated, all 22 of the model's data tests stay green while net revenue moves
+    £1,702 — and sending `AMAZONFEE` to `product` moves it £260,764 with the same
+    22 green. `dbt/models/staging/_unit_tests.yml` is what catches both now.
 ### Returns, customers and cohorts
 
 - **Returns have no foreign key**, so `fct_retail_returns` infers the link with

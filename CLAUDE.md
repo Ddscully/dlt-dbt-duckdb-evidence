@@ -70,7 +70,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 368 tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 368 data tests + 6 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -492,19 +492,46 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are three unit tests, all on `dim_date`, and they exist because a range
-  test cannot see a wrong answer that is in range.** `fiscal_quarter` carries
-  `accepted_range 1-4`, which is what caught the `/3 + 1` float-division bug at
-  quarter *5*. Change the same expression to `/ 4` and every fiscal quarter in
-  the warehouse is wrong while **all 20 data tests on the model pass** — measured,
-  not argued. The three unit tests fail on it. `fiscal_year_start_date` and
-  `fiscal_year_end_date` had no test of any kind before this.
+- **There are six unit tests, over two models, and they exist because a data
+  test cannot see a wrong answer that is a legal one.** `dim_date`'s
+  `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
+  `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
+  and every fiscal quarter in the warehouse is wrong while **all 20 data tests on
+  the model pass** — measured, not argued. Its three unit tests fail on it.
+  `fiscal_year_start_date` and `fiscal_year_end_date` had no test of any kind
+  before this.
 - **`overrides.vars` is the real reason to unit test this model.**
   `fiscal_year_start_month` is configurable and the warehouse only ever builds
   `4`, so eleven of the twelve policies the model claims to support were untested
   *by construction*. The tests pin April, January (where `fiscal_year` must
   collapse onto `year`) and July (where the boundary falls mid-calendar-year).
   No data test can reach a value the project never builds.
+- **`stg_retail_lines` is the other model, and there the blind spot is
+  `accepted_values`.** It is four `case` expressions — `invoice_type`,
+  `item_type`, `is_stock_write_off`, `is_revenue_line` — and `accepted_values`
+  proves an answer is *in* the list, never that it is the right member of it. A
+  misclassification moves money between buckets without changing any total, so no
+  row-level constraint can see it. Mutated against a warehouse copy, running the
+  model's 22 data tests each time: dropping `upper()` from `stock_code` moves net
+  revenue by **+GBP 1,702** and all 22 pass; sending `AMAZONFEE` to `product`
+  moves it by **-GBP 260,764** and all 22 pass; removing
+  `invoice_type <> 'adjustment'` from `is_revenue_line` changes **nothing at all**
+  and all 22 pass. Only the fourth mutation goes red — `is_stock_write_off`
+  losing its `invoice_type` term takes the flag from 3,457 rows to 22,950 — and
+  only as a side effect of `stg_retail_write_offs_are_never_priced`, which
+  notices because cancellations carry a price.
+  - **The `upper()` number is the one to remember, because its scale is
+    invisible.** Five lowercase `m` lines is what the model's comment warns
+    about; the cost is actually the vouchers, because **all 100 of them arrive
+    lowercase** (`gift_0001_20`, never `GIFT_`). The `voucher` branch is
+    reachable *only* through the case fold, so dropping it books the entire
+    family as product. The source also sends one bare `GIFT`, which is a product
+    — the underscore in the pattern is doing work.
+  - **The adjustment clause is the retail equivalent of the eleven unbuilt
+    fiscal policies.** No `A` invoice has ever carried a product code, so
+    `invoice_type <> 'adjustment'` has never once been the deciding term and
+    nothing in the data can reach it. The unit test poses the row the source has
+    not sent.
 - **`expect` is full-set equality, so a model that generates its own rows needs a
   fixture file.** `dim_date` expands its bounds to whole calendar years, so any
   mocked `stg_fx_rates` inside one year yields 366 rows and all 366 must be
@@ -512,7 +539,10 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   Python `tests/fixtures/ingest/`) — and `.gitignore` needed
   `!dbt/tests/fixtures/*.csv`, because the blanket `*.csv` there had exactly one
   exception for the seeds. Without it `dbt test` passes locally against files git
-  never took and CI fails on a missing fixture. `format: csv` and `dict` allow a subset of
+  never took and CI fails on a missing fixture. `stg_retail_lines` is 1:1 on its
+  input, so its cases are inline `dict` rows and the truth table *is* the
+  fixture — the CSV files are the price of a model that generates rows, not of
+  unit testing. `format: csv` and `dict` allow a subset of
   *columns*; `format: sql` does not — it fails with `Binder Error: Referenced
   column "date_key" not found`, which is how that was established.
 - **The expected values are generated by a different formulation than the one
