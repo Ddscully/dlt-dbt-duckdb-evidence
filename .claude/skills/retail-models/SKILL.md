@@ -57,6 +57,26 @@ one; the page is `retail.md`.
   the data being absent. Reported per row instead of tuned into one headline; the
   median return comes back in 10 days, which is the evidence the rule isn't
   latching onto arbitrary sales.
+- **`fct_retail_returns` is not reproducible between builds.** Three
+  consecutive runs against byte-identical sources: `matched` 16,031 / 16,032 /
+  16,030, `sum(original_quantity)` 637,411 / 636,410 / 636,208. **604 returns
+  (3.68%) have two or more purchases of the same product by the same customer at
+  the identical `invoice_ts`** — up to 20 — and the `asof join` picks one
+  arbitrarily. This is the bug `dim_retail_customer` already fixed one model
+  over, by ranking on `min(invoice_ts)` then `invoice`; the same tie-break would
+  fix it here. It matters more here, because the table ships as Parquet in the
+  public release and feeds the retail page, so figures move between releases
+  with no upstream change. Unrelated to the float-aggregation instability on
+  `net_revenue_gbp` — that is `sum()` over doubles, this is row selection.
+- **Eleven data tests, six mutations, none caught** (`dbt/models/marts/_unit_tests.yml`
+  holds the two that do). The `accepted_values` on `match_status` is the same
+  trap as `item_type`: reordering the `case` so "no prior purchase" is tested
+  before "no customer id" relabels 352 rows and stays green. `>=` for "quantity
+  exceeds purchase" moves 5,633 rows; `<` for `quantity_is_consistent` moves
+  5,613, which is **34% of all matches**, because a complete return is ordinary.
+  Dropping `item_type = 'product'` from the `returns` CTE adds 1,207 cancelled
+  postage and fee lines. Dropping `quantity > 0` from `purchases` does nothing —
+  every write-off is anonymous, so the customer filter already excludes them.
 - **`dim_retail_customer` covers a subset of the business and says so.** 22.8%
   of lines have no customer id — £2.67M, 13.8% of revenue. The two shares differ
   because an order nobody signed in for is a smaller order, and quoting the line

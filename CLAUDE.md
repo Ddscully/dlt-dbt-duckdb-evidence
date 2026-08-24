@@ -70,7 +70,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 15 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 17 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
@@ -497,7 +497,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are fifteen unit tests, over five models, and they exist because a data
+- **There are seventeen unit tests, over six models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -657,6 +657,34 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
     a month, quarter, half or year end. `dim_date`'s eleven unbuilt fiscal
     policies and the retail `<> 'adjustment'` clause are the same category, and
     that is now three of the five models.
+- **`fct_retail_returns` is the sixth, and unit-testing it turned up that the
+  model is not deterministic.** Six mutations, all eleven data tests green on
+  every one: checking "no prior purchase" before "no customer id" relabels the
+  352 unmatchable rows; `>=` for "quantity exceeds purchase" takes matched from
+  16,031 to 10,398; `<` for `quantity_is_consistent` takes consistent to 10,404;
+  dropping `item_type = 'product'` from `returns` adds **1,207 rows** of
+  cancelled postage and fees; the asof `>` costs 2 rows; and dropping
+  `quantity > 0` from `purchases` does **nothing at all**, because every stock
+  write-off is anonymous and `customer_id is not null` already excludes them.
+  - **`accepted_values` on `match_status` is the trap, and it is the same one
+    `stg_retail_lines` has.** All four strings stay legal while tens of
+    thousands of rows move between them, and no total changes.
+  - **`quantity_is_consistent`'s `<=` is worth 5,613 rows — 34% of all
+    matches** — because a complete return is the ordinary case, not an edge one.
+  - **The model is not reproducible between builds, and it is a different
+    mechanism from the float one.** Three consecutive `dbt run` against
+    byte-identical sources gave `matched` = 16,031 / 16,032 / 16,030 and
+    `sum(original_quantity)` = 637,411 / 636,410 / 636,208. The cause is ties in
+    the `asof join`: **604 returns (3.68%) have more than one purchase of the
+    same product by the same customer at the identical `invoice_ts`**, up to 20
+    of them, and DuckDB picks one arbitrarily. `dim_retail_customer` already
+    solved exactly this — it ranks on `min(invoice_ts)` *then* `invoice`
+    "because a non-deterministic tie-break is a column that changes between
+    builds" — and the same argument applies here, unfixed. It matters more here
+    than there: this table ships as Parquet in the public release and feeds
+    `reports/pages/retail.md`, so the numbers move between releases with no
+    upstream change. **Unit-test fixtures for this model must not contain a
+    tie**, or the test is flaky.
 - **`expect` is full-set equality, so a model that generates its own rows needs a
   fixture file.** `dim_date` expands its bounds to whole calendar years, so any
   mocked `stg_fx_rates` inside one year yields 366 rows and all 366 must be

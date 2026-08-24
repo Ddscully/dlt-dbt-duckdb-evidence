@@ -557,3 +557,93 @@ unit_tests:
         - {period_type: "quarter", period_end_date: "2024-03-31", period_is_complete: false}
         - {period_type: "half",    period_end_date: "2024-06-30", period_is_complete: false}
         - {period_type: "year",    period_end_date: "2024-12-31", period_is_complete: false}
+
+  # ---------------------------------------------------------------------------
+  # fct_retail_returns — the inferred join.
+  #
+  # Six mutations against a warehouse copy, all eleven data tests green on every
+  # one:
+  #
+  # | mutation                                      | effect                                          |
+  # |-----------------------------------------------|-------------------------------------------------|
+  # | `match_status` checks "no prior purchase" first | 352 unmatchable rows change bucket            |
+  # | "quantity exceeds" uses `>=`                  | matched 16,031 -> 10,398, excess 367 -> 6,000   |
+  # | `quantity_is_consistent` uses `<`             | consistent 16,031 -> 10,404                     |
+  # | `returns` drops `item_type = 'product'`       | +1,207 rows: postage and fee cancellations      |
+  # | `purchases` drops `quantity > 0`              | **nothing** — every write-off is anonymous, so  |
+  # |                                               | `customer_id is not null` already excludes them |
+  # | asof `>=` becomes `>`                         | 2 rows                                          |
+  #
+  # `accepted_values` on `match_status` is the trap the retail skill already
+  # names: it proves the answer is in the list, never that it is the right
+  # member, and the first three mutations move tens of thousands of rows between
+  # legal buckets without touching a total.
+  #
+  # **The fixtures must not contain a tie**, because the model is not
+  # deterministic where one exists — see the note in CLAUDE.md. No purchase here
+  # shares a customer, product and instant with another.
+
+  - name: retail_returns_names_each_miss_by_the_reason_it_missed
+    model: fct_retail_returns
+    description: >
+      Four outcomes and the order they are tested in. A return with no customer
+      id is structurally unmatchable and a return whose purchase predates the
+      extract is left-censored; both come out of the asof join with a null
+      original, so only the order of the `case` separates them. Swapping the
+      first two branches relabels all 352 no-customer rows as "no prior purchase
+      in window" and every data test stays green, because both strings are in
+      `accepted_values`. The POST cancellation is here to stay out: without
+      `item_type = 'product'` the warehouse gains 1,207 rows and reports
+      returning things nobody buys. The last pair is bought and returned in the
+      same instant, which the asof condition admits because it is `>=`.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          # The one purchase everything matches against.
+          - {invoice: "500", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 5, unit_price: 2.0, line_amount_gbp: 10.0, invoice_ts: "2024-01-05 10:00:00", invoice_date: "2024-01-05"}
+          # Within the purchase: a clean match.
+          - {invoice: "C601", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -3, unit_price: 2.0, line_amount_gbp: -6.0, invoice_ts: "2024-01-10 10:00:00", invoice_date: "2024-01-10"}
+          # More than was bought: the rule found a sale, but the wrong one.
+          - {invoice: "C602", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -8, unit_price: 2.0, line_amount_gbp: -16.0, invoice_ts: "2024-01-12 10:00:00", invoice_date: "2024-01-12"}
+          # No customer id: nothing to match *on*. Kept, not dropped.
+          - {invoice: "C603", line_number: 1, customer_id: null, stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -1, unit_price: 2.0, line_amount_gbp: -2.0, invoice_ts: "2024-01-11 10:00:00", invoice_date: "2024-01-11"}
+          # A customer who never bought this in the window: left-censored.
+          - {invoice: "C604", line_number: 1, customer_id: "C2", stock_code: "SKU9", invoice_type: "cancellation", item_type: "product", quantity: -2, unit_price: 2.0, line_amount_gbp: -4.0, invoice_ts: "2024-01-11 11:00:00", invoice_date: "2024-01-11"}
+          # A cancelled postage line. A correction, not a return: must not appear.
+          - {invoice: "C605", line_number: 1, customer_id: "C1", stock_code: "POST", invoice_type: "cancellation", item_type: "shipping", quantity: -1, unit_price: 18.0, line_amount_gbp: -18.0, invoice_ts: "2024-01-13 10:00:00", invoice_date: "2024-01-13"}
+          # Bought and sent back in the same instant. The asof condition is `>=`
+          # rather than `>` so this matches — only 2 rows in the warehouse, but
+          # the alternative silently calls a same-batch reversal unmatchable.
+          - {invoice: "503", line_number: 1, customer_id: "C3", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 4, unit_price: 3.0, line_amount_gbp: 12.0, invoice_ts: "2024-01-06 12:00:00", invoice_date: "2024-01-06"}
+          - {invoice: "C606", line_number: 1, customer_id: "C3", stock_code: "SKU3", invoice_type: "cancellation", item_type: "product", quantity: -2, unit_price: 3.0, line_amount_gbp: -6.0, invoice_ts: "2024-01-06 12:00:00", invoice_date: "2024-01-06"}
+    expect:
+      rows:
+        - {invoice: "C601", quantity_returned: 3, match_status: "matched",                            is_matched: true,  original_quantity: 5,    quantity_is_consistent: true}
+        - {invoice: "C602", quantity_returned: 8, match_status: "matched, quantity exceeds purchase", is_matched: true,  original_quantity: 5,    quantity_is_consistent: false}
+        - {invoice: "C603", quantity_returned: 1, match_status: "no customer id",                     is_matched: false, original_quantity: null, quantity_is_consistent: null}
+        - {invoice: "C604", quantity_returned: 2, match_status: "no prior purchase in window",        is_matched: false, original_quantity: null, quantity_is_consistent: null}
+        - {invoice: "C606", quantity_returned: 2, match_status: "matched",                            is_matched: true,  original_quantity: 4,    quantity_is_consistent: true}
+
+  - name: retail_returns_takes_the_latest_purchase_before_the_return_and_no_other
+    model: fct_retail_returns
+    description: >
+      The asof join is "most recent prior", and all three words carry weight.
+      Three purchases of the same product by the same customer: an earlier one,
+      the one that should win, and one *after* the return that must never be
+      reachable. `original_quantity` is the tell — 10 would mean the join took
+      the first, 99 would mean it looked forward. Returning exactly what was
+      bought is a complete return and therefore consistent: `<=`, not `<`, which
+      the data tests cannot see and which moves 5,613 rows (34% of all matches)
+      when it flips.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          - {invoice: "500", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 10, unit_price: 2.0, line_amount_gbp: 20.0, invoice_ts: "2024-01-01 09:00:00", invoice_date: "2024-01-01"}
+          - {invoice: "501", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 5,  unit_price: 2.0, line_amount_gbp: 10.0, invoice_ts: "2024-01-05 09:00:00", invoice_date: "2024-01-05"}
+          # After the return. Reachable only by a join that looks forward.
+          - {invoice: "502", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 99, unit_price: 2.0, line_amount_gbp: 198.0, invoice_ts: "2024-01-20 09:00:00", invoice_date: "2024-01-20"}
+          # Exactly what invoice 501 sold: a complete return, five days later.
+          - {invoice: "C601", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -5, unit_price: 2.0, line_amount_gbp: -10.0, invoice_ts: "2024-01-10 09:00:00", invoice_date: "2024-01-10"}
+    expect:
+      rows:
+        - {invoice: "C601", original_invoice: "501", original_quantity: 5, original_invoice_date: "2024-01-05", days_to_return: 5, match_status: "matched", quantity_is_consistent: true, price_differs_from_original: false}
