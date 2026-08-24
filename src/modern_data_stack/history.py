@@ -33,6 +33,8 @@ from pathlib import Path
 
 import duckdb
 
+from .db import scalar
+
 DEFAULT_HISTORY_SCHEMA = "history"
 
 # dbt's SCD2 bookkeeping. Without these the relation is not a snapshot dbt can
@@ -59,8 +61,7 @@ def _columns(con: duckdb.DuckDBPyConnection, qualified: str) -> set[str]:
 
 
 def _rows(con: duckdb.DuckDBPyConnection, qualified: str) -> int:
-    (count,) = con.execute(f"select count(*) from {qualified}").fetchone()
-    return count
+    return scalar(con, f"select count(*) from {qualified}")
 
 
 def restore(
@@ -109,7 +110,7 @@ def _restore_tables(con: duckdb.DuckDBPyConnection, force: bool, history_schema:
     if not names:
         return []
 
-    current = con.execute("select current_database()").fetchone()[0]
+    current = scalar(con, "select current_database()")
     existing = set(_tables(con, current, history_schema))
     con.execute(f"create schema if not exists {history_schema}")
 

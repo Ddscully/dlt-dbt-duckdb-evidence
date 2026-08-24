@@ -34,7 +34,7 @@ in `docs/` **and** here.
 ## The package (`src/modern_data_stack/`)
 
 The domain-neutral mechanisms live here — `paths`, `fixtures`, `lake`,
-`observability`, `export`, `history` — and take their configuration as
+`observability`, `export`, `history`, `db` — and take their configuration as
 arguments. The project modules that call them (`ingest/fixtures.py`,
 `lake/archive.py`, `transform/pipeline_status.py`, `scripts/export_warehouse.py`,
 `scripts/restore_history.py`) hold this project's constants and stay the entry
@@ -88,6 +88,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
 | `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
 | `just lint` | `sqlfluff lint dbt/models dbt/snapshots` |
+| `just typecheck` | `ty check` — Python type diagnostics; reports, gates nothing |
 | `just sql` | open the warehouse in Harlequin |
 | `just notebook` | marimo exploration notebook |
 
@@ -143,12 +144,75 @@ pre-commit (`ruff-check` with `--fix`, then `ruff-format`).
   last line is how it renders — `df` at the end of a cell *is* the chart. The rule
   is right about the syntax and wrong about the file; taking its fix blanks the
   notebook.
+- **A comment that starts `# noqa` gets deleted, even in prose.** Explaining a
+  suppression on the line above it with `# noqa TRY004: RuntimeError, not
+  TypeError, because …` reads as an unused blanket `# noqa` to ruff, and
+  `--fix` removes the whole line without a word — the explanation vanished and
+  the remaining comment began mid-sentence. Put the rule *after* the prose
+  (`# TRY004 asks for TypeError, but …`) and keep the real directive on the code
+  line, where `# noqa: TRY004` with the colon is what actually suppresses.
 - **The hook id is `ruff-check`.** Plain `ruff` still works but is the legacy
   alias as of 0.12.
 - **0.16 formats Python code blocks inside Markdown by default.** The hook is
   scoped to `types_or: [python, pyi, jupyter]` so it never sees `.md` and CI is
   unaffected — but a manual `ruff format .` will rewrite python blocks in `docs/`
   and `README.md`. Evidence pages use `` ```sql `` blocks and are untouched.
+
+Types are ty (`just typecheck`), added 2026-08-24. It is **not** in pre-commit and
+**not** in any workflow, which is the whole shape of the decision.
+
+- **It was chosen over pyright on the install line, not the feature list.**
+  Measured head to head at introduction: ty 38 diagnostics in 0.32s against
+  pyright's 45 errors in 4.83s — close enough that neither wins on output. What
+  decided it is that ty installs with `uv add --group dev` and lands in
+  `uv.lock`, while pyright wants `npm install -g pyright`, an unpinned global
+  Node binary no lockfile here can see. That is the sqlfluff 3.3.0/4.2.2 shape
+  exactly, and this repo has already paid for it once.
+- **pyright could not find `.venv` unaided and did not say so.** It reported 54
+  `reportMissingImports` until pointed at `--pythonpath .venv/bin/python`. A type
+  checker that cannot see the environment doesn't fail — it buries the real
+  diagnostics under phantom ones. `[tool.ty.environment].python` is set
+  explicitly for that reason even though ty found it on its own.
+- **It is pre-1.0 (0.0.74) and that governs where it may run.** Diagnostics move
+  between patch releases, so a `>=` bound is right *because* nothing gates on it.
+  Putting it in pre-commit or a workflow means pinning it exactly first — the
+  sqlfluff treatment, for the sqlfluff reason.
+- **Suppressions are inline `# ty: ignore[rule]`, never a rules list.**
+  `[tool.ty]` deliberately overrides nothing. The one suppression in the tree is
+  `scripts/build_cbam_seeds.py`'s `openpyxl` import, which is genuinely optional
+  and already carries a `ModuleNotFoundError` branch saying so — the ignore sits
+  on that line, next to the reason.
+- **The first run found no bug, and the breakdown was the useful part.** 23 of
+  the 38 it opened with were one idiom: DuckDB types `fetchone()` as
+  `Optional[tuple]`, and this repo wrote `.fetchone()[0]` in 40 places against
+  ungrouped aggregates that return exactly one row by construction. That ratio
+  was the actual problem — 23 false alarms in a 36-line report is how a checker
+  stops being read, and the thirteenth real one then lands in noise nobody
+  scans. `modern_data_stack.db` states the invariant once instead; the count is
+  **38 → 11**.
+- **Stating it bought a real check and found a real annotation defect.**
+  `.fetchone()[0]` against a query that unexpectedly returns nothing raises
+  `TypeError: 'NoneType' object is not subscriptable` from whichever line
+  touched it; `db.scalar` raises naming the query. And
+  `observability._period_span` was declared `-> tuple[int, int]` while the
+  docstring directly below said "or (None, None) if it has none" — ty pointed at
+  the line between them. A checker's value here is regressions and navigation,
+  not a backlog.
+- **The tree is clean, and getting there took two helpers and two
+  suppressions.** The second helper is `_get_json_object` in
+  `ingest/pipeline.py`: `_get_json` returns `dict | list` and that union is
+  *honest*, because the World Bank really does send `[metadata, [records…]]` and
+  both World Bank callers already narrow it by hand — an error object served
+  with a 200 is a thing those APIs do. Eurostat's JSON-stat and the ECB's
+  `{"rates": …}` are objects, so they say so once instead of at every key. The
+  three `columns=` constants are annotated `dict[str, TColumnSchema]`, which is
+  dlt's own type for what they already were. The suppressions are
+  `SupportsPipeline.deactivate` (declared on `Pipeline`, not on the protocol
+  `PipelineContext.pipeline()` is typed to return) and the `openpyxl` import.
+- **Zero is the point, not a vanity metric.** A checker nobody runs is worth
+  nothing, and one that always prints the same 11 lines is a checker nobody
+  runs. It only earns its place in the inner loop if a non-empty report means
+  something changed.
 
 ## Dependency and action versions
 
@@ -225,6 +289,7 @@ knowledge.
 | `dagster-expert@dagster` | [Dagster's skills](https://github.com/dagster-io/skills) — assets, automation, CLI |
 | `polars@polars` | [Polars' skill](https://github.com/polars-inc/skills) — idiomatic lazy-API Polars |
 | `duckdb-skills@duckdb-skills` | [DuckDB's skills](https://github.com/duckdb/duckdb-skills) — querying, file formats, docs search |
+| `astral@astral-sh` | [Astral's skills](https://github.com/astral-sh/claude-code-plugins) — uv, ruff and ty, the three tools this repo's Python half is built on |
 
 Not enabled, but worth knowing about: `dbt-migration@dbt-agent-marketplace`
 (one-off dbt Core → Fusion work), `dignified-python@dagster`, and dltHub's
@@ -232,6 +297,44 @@ Not enabled, but worth knowing about: `dbt-migration@dbt-agent-marketplace`
 (`/plugin marketplace add dlt-hub/dlthub-ai-workbench`) — the workbench assumes
 its own scaffolding, so prefer the `adding-a-data-source` skill below for the
 pipeline that already exists here.
+
+`.claude/marketplace/` is a repo-local marketplace, declared in `settings.json`
+beside the five vendor ones. It holds `ty-lsp`, which runs the dev group's ty as
+a language server — there is no published ty plugin, and an LSP server is a
+ten-line `.lsp.json`. Its command is `uv run ty server` rather than a bare `ty`
+for the pinning reason above, which means it has to be launched with the project
+root as its working directory. A directory marketplace resolves from a
+**relative** path (`./.claude/marketplace`) and is read live out of the repo
+rather than copied into the plugin cache, so editing the plugin needs no
+reinstall. `claude plugin marketplace add` writes an *absolute* path into user
+settings, so declare it in `.claude/settings.json` by hand instead.
+
+**The two marketplace kinds behave differently on removal, and the github one
+bites.** Removing a `directory` marketplace from user settings is safe — the
+project declaration re-registers it on the next session, because the source is
+right there in the tree. Removing a `github` one (`astral-sh`) *uninstalls its
+plugins*, and the project declaration does **not** silently bring it back: a
+re-register needs a clone, which a non-interactive session will not do. The
+cache directory survives, so the only symptom is `Total LSP servers loaded: 1`
+in the debug log and three skills quietly missing. The user-level entry for a
+github marketplace is therefore not duplication of the project one — leave it.
+
+**`ty-lsp` must stay above `astral` in `enabledPlugins`, and the reason is
+invisible.** Both declare a language server for `.py`, and the first one loaded
+wins — the loser is a `[WARN]` in `~/.claude/debug/latest` that nothing surfaces.
+Astral's runs `uvx ty@latest server`, the newest published ty on every launch,
+against a `just typecheck` that runs the version in `uv.lock`; ty is 0.0.x and
+its diagnostics move between patch releases, so letting theirs win means the
+editor showing findings the recipe cannot reproduce. Order in a JSON object is
+not a thing anyone expects to matter and `astral` sorts first, so alphabetising
+that block — the obvious tidy-up — silently hands `.py` to the unpinned server.
+`tests/test_plugin_settings.py` holds it, because JSON has nowhere to put a
+comment. Check by hand with `claude --debug -p ok` then
+`grep 'already handled by' ~/.claude/debug/latest`.
+
+Their ty skill also says to add an ignore comment only when the user asks for
+one. This repo carries two, both with the reason written next to them (see the
+ty bullets under *Style guide*); that is a considered disagreement, not drift.
 
 Project skills in `.claude/skills/` cover the seams the vendor skills can't know:
 
