@@ -4,22 +4,36 @@
 
 ### 📊 [**See the live dashboard →**](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-A data pipeline that turns seven public feeds into figures organisations are
-required to act on: **the grid carbon intensity that sits behind every company's
-Scope 2 disclosure** (30 g/kWh in Norway against 717 in South Africa, a 24×
-spread on the same kilowatt-hour), **what a tonne of imported steel will cost at
-the EU border from 2026**, and **what electricity actually costs in each EU
-market**.
+A data pipeline over seven public feeds, built at **two grains that are usually
+two different projects** — and deliberately kept in one warehouse, because the
+modelling problems they pose are opposite.
 
-Underneath that it answers the question the data was assembled for: how does a
-country's energy mix relate to its emissions and its people's wellbeing? It pulls
-CO₂, energy and development figures for ~200 countries from
-[Our World in Data](https://github.com/owid/co2-data), the
+**Country-year: figures organisations are required to act on.** The grid carbon
+intensity that sits behind every company's Scope 2 disclosure (30 g/kWh in Norway
+against 717 in South Africa, a 24× spread on the same kilowatt-hour), what a
+tonne of imported steel will cost at the EU border from 2026, and what
+electricity actually costs in each EU market. Underneath those is the question
+the data was assembled for: how does a country's energy mix relate to its
+emissions and its people's wellbeing? CO₂, energy and development figures for
+~200 countries from [Our World in Data](https://github.com/owid/co2-data), the
 [World Bank](https://databank.worldbank.org/source/world-development-indicators),
 [Eurostat](https://ec.europa.eu/eurostat) and the
-[ECB](https://frankfurter.dev), cleans and joins them, derives a few metrics, and
-publishes the charts. Every finding on the site names the decision it feeds, who
-makes that decision, and what it costs to get wrong.
+[ECB](https://frankfurter.dev), cleaned, joined on ISO code and year, and
+charted. Here the hard part is coverage: which country is missing from which
+series, and what a join quietly drops.
+
+**Transaction grain: the questions annual averages cannot ask.** One UK
+wholesaler's complete 1.07M-line invoice log
+([UCI Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)),
+the finest grain in the warehouse and the only source below a country. Revenue
+depends on telling a stock write-off from a customer return when both are a
+negative quantity; retention is a cohort triangle; returns are matched to the
+sale that produced them by inference, because nothing in the data links them. It
+is also the only source with a person in it, which is why
+[`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) exists.
+
+Every finding on the site names the decision it feeds, who makes that decision,
+and what it costs to get wrong.
 
 No numbers are exported by hand. The whole thing rebuilds itself from the live
 sources on every push, so the site is never more than a week behind what those
@@ -145,7 +159,7 @@ jobs and the partitioned WDI backfill.
 ├── tests/             # pytest + the recorded API fixtures CI runs against
 ├── scripts/           # record_fixtures.py, export_warehouse.py (the release)
 ├── reports/           # Evidence dashboard (BI as code)
-├── docs/              # the five topic docs above, plus the style guide
+├── docs/              # the topic docs above, plus the style guide
 ├── data/              # warehouse.duckdb lives here (gitignored)
 ├── justfile           # orchestration recipes
 ├── CLAUDE.md          # guidance for Claude Code / contributors
@@ -158,13 +172,28 @@ jobs and the partitioned WDI backfill.
 `.claude/settings.json` declares the official agent-skill plugins for the stack,
 [dbt](https://github.com/dbt-labs/dbt-agent-skills),
 [Dagster](https://github.com/dagster-io/skills),
-[Polars](https://github.com/polars-inc/skills) and
-[DuckDB](https://github.com/duckdb/duckdb-skills), so Claude Code offers to
-install them the first time you trust the repo. `.claude/skills/` adds three
-project-specific skills covering the seams between layers. See
-[CLAUDE.md](./CLAUDE.md#agent-skills) for the full picture.
+[Polars](https://github.com/polars-inc/skills),
+[DuckDB](https://github.com/duckdb/duckdb-skills) and
+[Astral](https://github.com/astral-sh/claude-code-plugins) (uv, ruff and ty), so
+Claude Code offers to install them the first time you trust the repo.
+`.claude/skills/` adds project-specific skills covering the seams the vendor
+ones can't know about — adding a source across five layers, the retail and
+compliance domains, and the Evidence layer, which has no vendor skill at all.
+See [CLAUDE.md](./CLAUDE.md#agent-skills) for the full picture.
 
 ## Quickstart
+
+Two things to install first. [uv](https://docs.astral.sh/uv/) manages Python and
+every dependency here; `just` runs the recipes, and uv is the tidiest way to get
+it — no system package manager, and it lands in the same place as your other uv
+tools:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # or `brew install uv`
+uv tool install rust-just                         # the `just` command runner
+```
+
+Then:
 
 ```bash
 just setup      # uv sync runtime + dev + orchestration groups
@@ -173,6 +202,22 @@ just dagster    # ...or the same pipeline as an asset graph, UI on :3000
 just sql        # poke around the warehouse in the DuckDB CLI
 just report     # build the Evidence dashboard
 ```
+
+No credentials at any point — every source is a public endpoint. For scale: the
+whole asset graph *including* the Evidence site took **3 minutes** here from a
+cold cache, most of it the one-off 45 MB retail workbook download.
+
+Two optional extras, each wanted by exactly one recipe, so install them when you
+reach for it rather than up front:
+
+| | Needed by | Install |
+|---|---|---|
+| [Node](https://nodejs.org/) ≥ 18 | `just report`, `just materialize-site` | your package manager |
+| [DuckDB CLI](https://duckdb.org/docs/installation/) | `just sql` | `curl https://install.duckdb.org \| sh` |
+
+The `duckdb` package on PyPI is the Python library and ships no `duckdb`
+command, so the CLI is a separate install even though the warehouse is already
+readable from Python.
 
 No `just`? The recipes map to plain commands; see the [`justfile`](./justfile).
 
