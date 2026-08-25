@@ -141,6 +141,12 @@ materialize-site:
     uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
     uv run --group orchestration dagster job execute -m orchestration.definitions -j publish_site
 
+# A bare prefix is NOT a glob: `marts/*` reads as "everything downstream of the
+# key `marts/`", so it matches nothing and exits 0. Glob a key prefix with
+# `key:"marts/*"`; `group:`, `kind:`, `sinks(...)` and `roots(...)` work too.
+# See what a selection resolves to before materializing it, with
+# `dagster asset list -m orchestration.definitions --select '<sel>'`.
+# (`just --list` shows only the line below, so keep the summary last.)
 # Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi*'` (* = all downstream, + = one layer)
 materialize-select selection:
     mkdir -p "$DAGSTER_HOME"
