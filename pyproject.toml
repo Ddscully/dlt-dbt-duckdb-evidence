@@ -1,7 +1,7 @@
 [project]
 name = "modern-data-stack"
 version = "0.1.0"
-description = "Emissions, energy and development across ~200 countries: a self-updating demo pipeline — dlt → DuckDB → dbt → Polars → Evidence, orchestrated by Dagster."
+description = "A public-data warehouse built end to end: dlt → DuckDB → dbt → Polars → Evidence, orchestrated by Dagster, rebuilt from live sources on every push."
 readme = "README.md"
 authors = [{ name = "Daniel Scully", email = "danieldscully@gmail.com" }]
 requires-python = ">=3.13"

@@ -1,0 +1,63 @@
+name: Something broke
+description: A recipe, a build or the setup failed on your machine
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks — a step that fails on someone else's machine is the failure this
+        repo cannot see from the inside.
+
+        If you have not run `just setup` yet, note that `uv` and `just` both
+        have to be installed first; the
+        [quickstart](https://github.com/Ddscully/dlt-dbt-duckdb-evidence#quickstart)
+        has the two commands.
+
+  - type: input
+    id: command
+    attributes:
+      label: What did you run?
+      description: The exact command, e.g. `just run` or `just materialize-select 'raw/wb_wdi*'`
+      placeholder: just run
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Full output
+      description: >
+        Paste everything, including the traceback. It will be formatted as a
+        code block automatically, so no backticks needed.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Please paste the output of:
+        ```bash
+        uv --version && just --version && uv run python -V && uname -sr
+        ```
+      render: shell
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Worth ruling out first
+      options:
+        - label: This is a fresh clone, or I have run `just setup` since pulling.
+        - label: "`just test` passes (it is offline and takes about a second)."
+        - label: If the failure is a dbt or Dagster command, I ran it through `just` rather than directly — the recipes install `dbt_utils` and write the manifest that the asset graph needs.
