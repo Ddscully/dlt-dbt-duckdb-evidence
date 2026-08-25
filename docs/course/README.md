@@ -28,13 +28,13 @@ break in a sandbox and rebuild in under a minute.
 Each one is: what the layer does here → the decision inside it that has a wrong
 answer → exercises. Three kinds, and they are marked:
 
-- 🔧 **Break-and-fix.** You are given a symptom — a number that is wrong and a
+- 🔧 **Break-and-fix.** You are given a symptom: a number that is wrong and a
   build that is green. You seed the bug into the sandbox yourself, find it from
   the evidence, and fix it. Every drill ends with a **verification query**,
   because "it looks right now" is the failure mode the course exists to break.
 - 🔍 **Investigate.** A question the warehouse answers and intuition does not
   ("did European electricity rise 35% or 13.5%?"). Run against the **real**
-  warehouse, not the sandbox — coverage is usually the point, and the sandbox
+  warehouse, not the sandbox: coverage is usually the point, and the sandbox
   has 17 countries.
 - 💬 **Design defence.** No code. "Why is the snapshot the only table here that
   a rebuild cannot reproduce?" Answer it out loud or in writing before opening
@@ -45,7 +45,7 @@ something down is the only way to waste this material.
 
 ## Setup
 
-**[`00-setup.md`](./00-setup.md) first** — it builds the sandbox and explains the
+**[`00-setup.md`](./00-setup.md) first**: it builds the sandbox and explains the
 two data modes the exercises switch between. Roughly:
 
 ```bash
@@ -77,4 +77,4 @@ set the format.
 
 The course teaches; [`docs/`](../) explains and [`CLAUDE.md`](../../CLAUDE.md)
 records what each lesson cost to learn. When a module wants the full reference
-it links there rather than restating it — a fact in two places drifts in one.
+it links there rather than restating it: a fact in two places drifts in one.

@@ -45,7 +45,7 @@ interchangeable in levels. France, 2023:
 
 France's nuclear fleet is not renewable and is very much low-carbon, and the
 denominator changes from all energy to electricity alone. Across every
-country-year where both exist since 2015 they average **14.5% and 40.1%** — a
+country-year where both exist since 2015 they average **14.5% and 40.1%**: a
 Pearson *r* of 0.80, which is high enough to look like the same column on a
 scatter and is nowhere near high enough to substitute one for the other.
 
@@ -57,8 +57,8 @@ scatter and is nowhere near high enough to substitute one for the other.
 
 ## 2. Current or constant, and what it costs to get wrong
 
-`gdp_usd` is `NY.GDP.MKTP.CD` — current US dollars, i.e. this year's prices at
-this year's exchange rate. `gdp_constant_usd` is `NY.GDP.MKTP.KD` — constant
+`gdp_usd` is `NY.GDP.MKTP.CD`: current US dollars, i.e. this year's prices at
+this year's exchange rate. `gdp_constant_usd` is `NY.GDP.MKTP.KD`: constant
 2015 US dollars. For a single-year cross-section either is defensible. Divide by
 the first in anything measured **over time** and you are reporting inflation and
 the currency market as if they were the thing you set out to measure.
@@ -84,7 +84,7 @@ current-$    real growth     dollar value of       residual
 GDP                          the yen               (domestic prices)
 ```
 
-The yen averaged **87.7 per dollar in 2010 and 151.4 in 2024** — it lost 42% of
+The yen averaged **87.7 per dollar in 2010 and 151.4 in 2024**: it lost 42% of
 its dollar value, and that alone is bigger than every real thing Japan did.
 
 This is not one country's oddity. Take the 193 countries with both GDP series in
@@ -106,8 +106,8 @@ Nigeria is the naira, Japan is the yen, and none of it is a fact about carbon.
 
 And the cross-section is not immune either, which is worth knowing because
 "current dollars are fine for one year" is the usual shorthand. Rank the
-countries within their income group for 2024 on each basis: **166 of 194 —
-86% — land on a different rank**, the worst moving 26 places. The shorthand
+countries within their income group for 2024 on each basis: **166 of 194
+(86%) land on a different rank**, the worst moving 26 places. The shorthand
 means *internally consistent*, not *the same answer*.
 
 ## 3. "The latest year" is a property of a column
@@ -144,13 +144,13 @@ ways:
   "the latest year with energy data" keeps 38% of its countries and reports the
   survivors as if they were the world.
 - **A cross-section that is empty.** `where year = (select max(year) …)` returns
-  214 rows with `co2_mt` null in every one of them. Not an error, not zero rows
-  — a full-height table of nulls.
+  214 rows with `co2_mt` null in every one of them. Not an error, not zero rows:
+  a full-height table of nulls.
 - **A column that stops entirely.** `consumption_co2` is one year behind, always.
 
 `marts.dim_grid_emission_factors` is the same problem where the number has a
 legal consequence. "The most recent published factor" is 2025 for 90 countries,
-2024 for 105, 2023 for 10 and 2022 for 2 — so `where year = 2025` returns **90
+2024 for 105, 2023 for 10 and 2022 for 2, so `where year = 2025` returns **90
 of 207** and silently drops 117 countries, Ukraine's 111 TWh grid among them. The
 model ships `is_latest_available` as a **boolean filter, not a year**, precisely
 so the correct query cannot be written as a year literal.
@@ -209,7 +209,7 @@ stated currency is reporting the exchange rate as if it were an energy market.
 
 ## 5. Units, and the error no test in this repo can see
 
-`dim_grid_emission_factors` ships the same factor twice —
+`dim_grid_emission_factors` ships the same factor twice:
 `emission_factor_g_co2_per_kwh` as published, `emission_factor_t_co2_per_mwh`
 because that is the unit meter data arrives in. They differ by exactly 1000
 (1306.3 and 1.306 at the maximum), which is the entire reason both columns
@@ -221,7 +221,7 @@ multiplies twelve sites' MWh by the factor, and its yml gives `scope2_t_co2e`
 `{min_value: 0}` and `share_of_group_pct` `{min_value: 0, max_value: 100}`.
 Use the g/kWh column where the t/MWh one belongs and:
 
-- every tonnage is 1000× too large — 232,456 tCO2e becomes 232.5 **Mt**, which
+- every tonnage is 1000× too large: 232,456 tCO2e becomes 232.5 **Mt**, which
   is more than Spain emitted in 2023 (215.5 Mt), from twelve offices and
   factories;
 - `min_value: 0` still passes, because the error is a scaling and the sign is
@@ -244,7 +244,7 @@ denominator to recover them. More countries ranked, same column name, same row
 count.
 
 **Seed the bug.** In `transform/co2_intensity.py`, `build_co2_intensity` divides
-by `gdp_constant_usd` twice — once in the `when` guard and once in the `then`.
+by `gdp_constant_usd` twice: once in the `when` guard and once in the `then`.
 Change both to `gdp_usd`:
 
 ```bash
@@ -252,7 +252,7 @@ sed -i 's/gdp_constant_usd/gdp_usd/g' transform/co2_intensity.py
 just course-transform
 ```
 
-**Observe.** No error, and the shape is untouched — 560 rows, 16 countries, same
+**Observe.** No error, and the shape is untouched: 560 rows, 16 countries, same
 as healthy. The column is still called `co2_per_gdp_const_usd`.
 
 ```bash
@@ -294,7 +294,7 @@ identical and the maximum is `6.8689`.
 <summary>Reveal</summary>
 
 **1. The healthy one, and the sandbox can tell you why.** Under the bug Japan's
-intensity *rises* from 0.2084 to 0.2296 while its emissions fall 20.6% — so the
+intensity *rises* from 0.2084 to 0.2296 while its emissions fall 20.6%, so the
 denominator shrank faster than the numerator did, and the only thing that can
 shrink a country's GDP by 28% over fourteen years while its economy grows is the
 exchange rate. The check that separates them needs no extra data:
@@ -309,7 +309,7 @@ from marts.fct_emissions_energy where country_iso3 = 'JPN' and year in (2010, 20
 Real GDP `4.266 → 4.708`; current-dollar GDP `5.812 → 4.190`. One of those is a
 description of Japan and the other is a description of the yen. **When a ratio
 moves against its numerator, look at the denominator before you believe the
-story** — that is the whole diagnostic, and it fits in one query.
+story**: that is the whole diagnostic, and it fits in one query.
 
 **2. Thirty of 193 flip sign.**
 
@@ -339,13 +339,13 @@ from w where c10 is not null and c24 is not null;
 
 `193, 127, 147, 5, 25`. Five countries that decarbonised are reported as having
 got dirtier (Nigeria, Brazil, Japan, Lesotho, Namibia) and twenty-five that did
-not are reported as having improved. **The bug is not "some numbers moved" — it
+not are reported as having improved. **The bug is not "some numbers moved": it
 is that the answer to the question the table was built to ask reverses for one
 country in six, and stays plausible for all of them.**
 
 **3. The column is called `co2_per_gdp_const_usd` and no longer is.** Nothing in
 the warehouse compares a column's name against the expression that produced it,
-and nothing ever will — a name is a comment that ships. Every consumer
+and nothing ever will: a name is a comment that ships. Every consumer
 downstream (the Evidence page, the ranking, the release Parquet) now reads a
 label that states a basis the data does not have, and the description in the
 model's docstring says "constant 2015 US$" while the code says otherwise. This
@@ -355,7 +355,7 @@ meaning is not, and structural checks are blind by construction.
 **4. Left join the gap, do not swap the basis.** `gdp_constant_usd` being null
 where `gdp_usd` is populated is a real coverage fact about the World Bank series,
 and the honest responses are: rank the countries you can rank and let the rest be
-null (which is what the model does — it filters nulls out and says so), or add
+null (which is what the model does: it filters nulls out and says so), or add
 the missing country-years as a documented absence. Substituting a *different
 measurement* to fill a gap in this one is the fallback-row mistake from the CBAM
 seed in another costume: a value that exists nowhere in the source, arrived at by
@@ -380,7 +380,7 @@ sed -i 's/\* f\.avg_units_per_eur as electricity_price_usd_kwh/* f.period_end_un
 just course-rebuild
 ```
 
-**Observe.** `PASS=402 WARN=0 ERROR=0 SKIP=0` — byte-identical to healthy, and
+**Observe.** `PASS=402 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy, and
 every price is still a plausible price. Across all 1,373 rows the mean *signed*
 change is **+0.14%** — the errors very nearly cancel, because the closing rate is
 above the average about as often as below — while the mean *absolute* change is
@@ -390,7 +390,7 @@ above the average about as often as below — while the mean *absolute* change i
 
 1. The model already ships the evidence needed to catch this, on every row.
    Find the one-line query that proves the conversion is not the one the column's
-   description claims — without consulting the source SQL.
+   description claims: without consulting the source SQL.
 2. Levels barely move. Compute the half-over-half **change** in the dollar price
    instead, under both conventions. On the real warehouse, how many of the 1,330
    half-over-half changes disagree about whether the price went *up or down*?
@@ -428,13 +428,13 @@ from marts.fct_eu_electricity_prices_semiannual;
 ```
 
 `1373, 1373` under the bug and `1373, 0` when healthy. This is what
-`usd_per_eur_period_avg` is *for* — the model's own comment says "a converted
+`usd_per_eur_period_avg` is *for*: the model's own comment says "a converted
 figure whose rate is not visible is a figure nobody downstream can check", and
 this is the check. **Ship the parameter beside the result and the result becomes
 auditable from within the row**, with no access to the model, the source, or
 anyone who remembers what was intended.
 
-**2. 282 of 1,330 — 21.2% — disagree about the direction**, and the worst pair
+**2. 282 of 1,330 (21.2%) disagree about the direction**, and the worst pair
 disagree by 42 percentage points.
 
 ```sql
@@ -457,8 +457,8 @@ select count(*) as changes,
 from ch where ok and d_avg is not null;
 ```
 
-The distortion is nearly constant *within* a period — every country in a half
-shares one exchange rate — so it cancels almost perfectly out of a level and not
+The distortion is nearly constant *within* a period (every country in a half
+shares one exchange rate) so it cancels almost perfectly out of a level and not
 at all out of a difference. **An error that is common to a period is invisible in
 a cross-section and maximal in a time series**, which is exactly backwards from
 where people look for it.
@@ -473,7 +473,7 @@ where people look for it.
 
 The euro figure is the one to chart, because the question is about French
 electricity and French households pay in euros. The dollar-at-average column
-exists for the one job the euro column cannot do — sitting beside dollar GDP —
+exists for the one job the euro column cannot do (sitting beside dollar GDP)
 and the closing-rate figure is an artefact of a rate that moved 5.2% inside the
 period being asked to describe six months of purchases. The general form: **the
 currency a chart is denominated in is part of its title, not part of its
@@ -495,14 +495,14 @@ equality" is a rule that would have talked you out of a good test.
 `first_order_gbp` and `net_revenue_gbp` are two independent `sum()`s over the
 same doubles in different orders. Floating-point addition is not associative and
 DuckDB's parallel aggregation fixes no order, so the two disagree in the last
-bits on 272 rows — a float-equality test wearing an inequality
+bits on 272 rows: a float-equality test wearing an inequality
 (`docs/DATA_PROTECTION.md` measures the same instability at 5,781 vs 5,785
 distinct values between builds).
 
 Here there is no aggregation. The test recomputes one IEEE-754 multiplication of
 two stored doubles, and a multiplication of the same two operands is bit-exact
 every time. **The rule is not "floats are inexact", it is "floats are
-order-dependent under aggregation"** — reproduce a scalar expression and you get
+order-dependent under aggregation"**: reproduce a scalar expression and you get
 the identical bits; re-sum a column and you do not.
 
 The honest caveat: the test pins the *arithmetic*, not the *choice*. Rewrite the
@@ -558,7 +558,7 @@ from (
 ```
 
 `2024, 2023, 2024, 2025, NULL`. Three distinct years from four columns, and the
-fifth answer is **NULL** — `consumption_co2` never reaches 150 countries in any
+fifth answer is **NULL**: `consumption_co2` never reaches 150 countries in any
 year of the series, because it covers 120 at its very best. That is the answer to
 the question: a floor is not a threshold you set once and reuse, and one of these
 columns cannot meet a floor the others clear without noticing it is there. A
@@ -578,7 +578,7 @@ newest *defensible* year and rejects the newest year.
 honest choice: consumption-based emissions cover 120 countries at their maximum,
 so any floor above 120 makes the column permanently unavailable. **A coverage
 floor is calibrated against the column's own ceiling, not against a house
-standard** — the same lesson as module 03's bounds, one level up.
+standard**: the same lesson as module 03's bounds, one level up.
 
 **3. 29 country-years across 28 countries, from 2007 to 2025.** It is emphatically
 not a latest-year edge case: 23 of them are countries entering the series at its
@@ -590,8 +590,8 @@ filter written as `year < 2025` would catch one of the twenty-nine.
 
 `fct_emissions_energy` at `max(year)` = 2025 returns **214 rows in which `co2_mt`
 is null in every one**. The chart renders: axes, legend, correct country list,
-no bars. It looks like a rendering bug, someone reloads, and the actual cause —
-that the year is one no CO2 publisher has reached — is nowhere in the picture.
+no bars. It looks like a rendering bug, someone reloads, and the actual cause
+(that the year is one no CO2 publisher has reached) is nowhere in the picture.
 
 `dim_grid_emission_factors` at `year = 2025` returns **90 of 207 rows, fully
 populated**. The chart renders perfectly. It is a real cross-section of a real
@@ -600,7 +600,7 @@ about it looks wrong.
 
 **The empty one is safe and the populated one is dangerous.** A query that
 returns nothing gets investigated within the hour; a query that returns a
-plausible subset gets published. This is why the vintage model ships a boolean —
+plausible subset gets published. This is why the vintage model ships a boolean:
 `is_latest_available` cannot be typed as a year literal, so the wrong query is
 harder to write than the right one.
 </details>
@@ -629,8 +629,8 @@ extra `double` per row is the cheapest insurance in the warehouse.
 
 Where it stops is where the second column stops being a *restatement* and starts
 being a *second measurement*. `avg_eur_per_unit` looks like the reciprocal of
-`avg_units_per_eur` and is not — the mean of reciprocals differs from the
-reciprocal of the mean by 11.9% for the krona in 2008 — so shipping both is
+`avg_units_per_eur` and is not (the mean of reciprocals differs from the
+reciprocal of the mean by 11.9% for the krona in 2008) so shipping both is
 mandatory rather than convenient, and each has to be computed from its own
 series. The opposite case is `renewables_share_pct` and
 `low_carbon_share_elec_pct`: two columns, near-identical names, genuinely
@@ -639,7 +639,7 @@ means every consumer now has to choose, and most will choose by name.
 
 The rule that separates them: duplicate when the second form is the same fact in
 a different unit and the conversion is lossy to get wrong. Do not duplicate when
-the second form answers a different question — model that, name it fully, and
+the second form answers a different question: model that, name it fully, and
 make the difference the first thing the description says.
 </details>
 
@@ -650,14 +650,14 @@ and never uses it. Argue for deleting the column. Then argue against.
 <summary>Reveal</summary>
 
 **For deletion:** it is dead weight in a contracted mart with 15 columns, it
-ships in the public release, and it is a loaded gun — drill 2 is literally the
+ships in the public release, and it is a loaded gun: drill 2 is literally the
 bug where someone reaches for it. A column that exists only to be not used is an
 invitation, and if the model has made the decision then the decision should not
 be re-offered on every row.
 
 **Against, and this is the stronger case:** the column is what makes the decision
 *visible* rather than *buried*. With only the average rate shipped, a reader who
-wants to know whether spot or average was used has to open the SQL — and a reader
+wants to know whether spot or average was used has to open the SQL, and a reader
 who wants to convert a balance rather than a flow (a receivable in euros, an
 inventory at half-end) has no rate at all and will find one somewhere else, at
 some other date, with no record of which. Carrying both turns "we chose the
@@ -672,7 +672,7 @@ people read**, which for a published dataset is the yml, not the SQL comment
 above it.
 </details>
 
-**(c)** The warehouse models EU electricity prices at *two* grains — the
+**(c)** The warehouse models EU electricity prices at *two* grains: the
 half-yearly fact and an annual average that joins the country-year spine. The
 annual figure is, in the Dutch 2022 case, "a price nobody paid". Defend keeping
 it, and name the guard that makes it honest.
@@ -689,8 +689,8 @@ needs it.
 The cost is real and is stated in the yml rather than discovered: the mean
 absolute half-over-half change was **19% across countries in 2022** and 13% in
 2023, against 3–4% through the 2010s, and the Netherlands went €0.034/kWh in
-2022-S1 to €0.142 in S2 as that year's energy-tax cuts landed in the first half
-— an annual average of €0.088 that no Dutch household was ever billed.
+2022-S1 to €0.142 in S2 as that year's energy-tax cuts landed in the first half:
+an annual average of €0.088 that no Dutch household was ever billed.
 
 The guard is `price_is_partial_year` / `n_half_years`, and it guards a *different*
 failure: an average over one half presented as an average over two. That is 29
@@ -710,7 +710,7 @@ choice was ever made. Averaging is not the problem; averaging silently is.
 ## What to carry forward
 
 - A ratio is two decisions. The numerator gets reviewed and the denominator gets
-  a column name — so put the basis, the unit and the base year *in* the name.
+  a column name, so put the basis, the unit and the base year *in* the name.
 - Current dollars measure the currency market. Over time, 30 of 193 countries
   reverse the sign of their carbon-intensity trend depending on nothing but the
   denominator, and 86% of a single-year ranking moves too.
@@ -727,7 +727,7 @@ choice was ever made. Averaging is not the problem; averaging silently is.
 - Ship the parameter beside the result. A rate on the row makes the conversion
   auditable from within the row, by someone who has never seen the model.
 - An error that is common to a period cancels out of a level and doubles in a
-  difference — which is the opposite of where people look.
+  difference, which is the opposite of where people look.
 - Units errors are invisible to one-sided bounds and to every ratio downstream.
   Twelve invented offices can out-emit Spain with `PASS=402 ERROR=0`.
 - "Never compare floats for equality" is really "floats are order-dependent under

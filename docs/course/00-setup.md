@@ -33,12 +33,12 @@ You should see it finish on `PASS=402 WARN=0 ERROR=0 SKIP=0`.
 
 `course-transform` exists because the two Polars tables (`analytics.co2_intensity`
 and `analytics.retail_rfm`) are written *after* dbt by a separate process, so a
-drill on a derived metric — module 04's denominator — is not rebuilt by
+drill on a derived metric (module 04's denominator) is not rebuilt by
 `course-rebuild` at all. Knowing which recipe owns which table is itself the
 lesson: a warehouse is rarely built by one tool.
 
 > ⚠️ **`just dbt-build` is not `just course-rebuild`.** The plain recipe targets
-> `data/warehouse.duckdb` — your real warehouse, the one with 43,138 mart rows
+> `data/warehouse.duckdb`: your real warehouse, the one with 43,138 mart rows
 > and months of snapshot history in it. A drill that breaks a model and then runs
 > the wrong recipe writes the broken model into the warehouse you care about.
 > The course recipes set `WAREHOUSE_PATH` for you; nothing else does.
@@ -83,7 +83,7 @@ stg_wdi          16
 ```
 
 Three different numbers, and none of them is 17. The country dimension is 228
-because `wb_country` is one of three fixtures deliberately **not trimmed** — it
+because `wb_country` is one of three fixtures deliberately **not trimmed**: it
 *is* the dimension the `country_overrides` seed is diffed against, so trimming it
 would destroy the thing it exists to check. Eurostat is 41 because a JSON-stat
 grid is a flat array indexed row-major over every dimension: you cannot subset it
@@ -92,7 +92,7 @@ no World Bank series at all.
 
 A threshold those 17 countries pass, the full 200+ will break. `co2_per_capita`
 has a floor and no ceiling because small petrostates legitimately reach
-780 t/person — a ceiling calibrated on the sandbox would have looked reasonable
+780 t/person: a ceiling calibrated on the sandbox would have looked reasonable
 and failed in production. Module 03 is about exactly this.
 
 ---
@@ -116,7 +116,7 @@ git checkout dbt/models/marts/fct_emissions_energy_v2.sql
 just course-rebuild
 ```
 
-Step 4 is `git checkout`, always. The sandbox holds no state you cannot rebuild —
+Step 4 is `git checkout`, always. The sandbox holds no state you cannot rebuild,
 which is a property of *this* warehouse and not of warehouses generally. Exactly
 two tables here cannot be recomputed from their sources, and module 05 is about
 what that changes.
@@ -130,7 +130,7 @@ IO Error: Could not set lock on file … Conflicting lock is held
 DuckDB takes **one writer at a time**. Close the `just sql write` session or
 the Python REPL you left connected. `just course-query` opens
 `read_only=True` for this reason, and a read-only connection can coexist with
-others — it is the writer that is exclusive.
+others: it is the writer that is exclusive.
 
 ---
 

@@ -36,7 +36,7 @@ select test_type, count(*) as n from analytics.pipeline_tests
 group by 1 order by 2 desc"
 ```
 
-Read the shape of that table rather than the total. **291 of the 369 — 79% — are
+Read the shape of that table rather than the total. **291 of the 369 (79%) are
 `not_null` and `accepted_range`**, both of which are per-column statements about
 rows that are *present*. That is module 01's punchline restated as a census: the
 test suite is overwhelmingly made of assertions that a deletion makes *more*
@@ -47,7 +47,7 @@ are the only ones that compare a relation against something outside itself.
 
 ## 2. A bound is a claim about a distribution
 
-`{min_value: 0}` on a tonnage column is free — no physical quantity of CO2 is
+`{min_value: 0}` on a tonnage column is free: no physical quantity of CO2 is
 negative, and the bound is a statement about the unit rather than about the data.
 A *ceiling* is never free. It is a claim that you know the shape of the tail.
 
@@ -65,7 +65,7 @@ loud:
 ```
 
 Two things make that a calibrated bound rather than a hopeful one. The maximum
-was **measured**, and the ceiling is set at a multiple of it — far enough above
+was **measured**, and the ceiling is set at a multiple of it: far enough above
 reality that no real grid reaches it, close enough that a factor-of-1000 unit
 error (g/kWh read as mg/kWh) cannot hide underneath it. The number a test should
 catch is not "slightly too big"; it is "wrong by an order of magnitude", because
@@ -84,8 +84,8 @@ And here is the same file **refusing** to bound a column:
 ```
 
 Measured: 4,063 non-null rows, **1,268 of them negative and 268 above 100%**,
-topping out at Malta in 2016 on 1,023%. A `0–100` bound — the reflex for anything
-named `_share` or `_pct` — would fail on 1,536 rows, every one of them correct.
+topping out at Malta in 2016 on 1,023%. A `0–100` bound (the reflex for anything
+named `_share` or `_pct`) would fail on 1,536 rows, every one of them correct.
 A test that fires on real data does not get fixed. It gets muted, and it takes
 the credibility of the other 367 with it.
 
@@ -109,7 +109,7 @@ where 1 = 2
 ```
 
 `not (null >= 0)` is `null`, not `true`, so the row is not selected and the test
-passes. Every `accepted_range` in this repo silently skips its nulls — which is
+passes. Every `accepted_range` in this repo silently skips its nulls, which is
 correct behaviour (a missing value is not an out-of-range one) and is also why a
 range test alone says nothing about coverage. Pair it with `not_null` when the
 column really is mandatory; leave it unpaired, deliberately, when the column is
@@ -135,8 +135,8 @@ total with nothing whatsoever checking them.** The test is right, and "the annex
 is checked against itself" is a sentence that would badly overstate it.
 
 **(c) The rows are not there.** Covered in module 01 and unfixable by any test in
-the table above. Worth one line here: of the eight test types, exactly one —
-`equal_rowcount` — can fail because rows are *missing*, and it works only because
+the table above. Worth one line here: of the eight test types, exactly one
+(`equal_rowcount`) can fail because rows are *missing*, and it works only because
 it compares against another relation.
 
 Measure (a) for yourself on the wide fact, where it is starkest:
@@ -167,7 +167,7 @@ Two consequences that are not obvious:
   A test's real verdict is its `fail_calc`, which defaults to `count(*)` but does
   not have to be. `dbt_utils.equal_rowcount` overrides it with
   `sum(coalesce(diff_count, 0))` and writes a one-row *summary* whether it passed
-  or failed — `(1, 1, 265035, 265035, 0)`. Counting rows scores that as one
+  or failed: `(1, 1, 265035, 265035, 0)`. Counting rows scores that as one
   failure against a build that finished `ERROR=0`, which is how the pipeline
   health page came to contradict the build it was reporting on.
   `src/modern_data_stack/observability.py` reads `fail_calc` out of the manifest
@@ -175,7 +175,7 @@ Two consequences that are not obvious:
 - **dbt writes that schema every build and never cleans it.** An audit table
   whose test has been renamed or deleted stays, is empty, and therefore scores as
   passing. The real warehouse currently holds **391 audit tables against 369
-  tests** — 22 orphans. `transform/pipeline_status.py` filters them against the
+  tests**: 22 orphans. `transform/pipeline_status.py` filters them against the
   manifest for that reason.
 
 ---
@@ -184,7 +184,7 @@ Two consequences that are not obvious:
 
 **Symptom.** A reviewer notices that `co2_per_capita` has a floor and no ceiling,
 and that this looks like an oversight next to the other 122 range tests. They
-check the data — the highest value anywhere is 22.2 t/person — and set a ceiling
+check the data (the highest value anywhere is 22.2 t/person) and set a ceiling
 of 50, which is more than double the observed maximum. The build is green.
 
 **Seed the bug.**
@@ -195,7 +195,7 @@ sed -i '/name: co2_per_capita/,+3 s/{min_value: 0}/{min_value: 0, max_value: 50}
 just course-rebuild
 ```
 
-**Observe.** `PASS=402 WARN=0 ERROR=0 SKIP=0` — byte-identical to healthy. And
+**Observe.** `PASS=402 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
 the reviewer's evidence checks out:
 
 ```bash
@@ -260,13 +260,13 @@ Qatar and the UAE are pre-diversification petrostates. The denominator is what
 makes the number look impossible, and the number is right.
 
 The sandbox's own maximum is the other half of the lesson: **22.22, the United
-States in 1973** — peak American per-capita emissions, the year of the oil
+States in 1973**: peak American per-capita emissions, the year of the oil
 shock. It is a real and satisfying maximum, and it is 35× too small.
 
 **3. The second dimension is time.** 117 of the 124 rows are before 2000, **7
 are after it, and none at all since 2020.** So a reviewer who did the right
-thing — pulled the full 213-country warehouse and checked the recent
-cross-section — would have found a maximum around 40 and shipped the same
+thing (pulled the full 213-country warehouse and checked the recent
+cross-section) would have found a maximum around 40 and shipped the same
 ceiling. It would then have passed every build until the first person ran
 `just ingest-wdi-full`, restated an old year, or simply looked at 1954.
 
@@ -316,7 +316,7 @@ just course-rebuild
 
 **Your task.**
 
-1. `ERROR=1`. Which test failed — and, more importantly, which test *did not*?
+1. `ERROR=1`. Which test failed, and, more importantly, which test *did not*?
 2. Evaluate the seed's own expression for `XYZ` by hand. It is not returning
    `false`. What is it returning, and why does that let the row through?
 3. Now do it in the other direction: restore the seed, delete a currency the ECB
@@ -346,7 +346,7 @@ Failure in test dbt_utils_expression_is_true_dim_currency_currency_code_EUR_
   Got 1 result, configured to fail if != 0
 ```
 
-All **seven** of the seed's own tests pass — including the `retired_on` test that
+All **seven** of the seed's own tests pass: including the `retired_on` test that
 appears to be about precisely this, and including the `relationships` test
 between `stg_fx_rates` and `currencies`.
 
@@ -370,13 +370,13 @@ from main.currencies cur where currency_code in ('XYZ', 'GRD', 'USD');
 `XYZ` has no rates, so `max(rate_date)` is null, so `retired_on > null` is null.
 `expression_is_true` selects rows `where not (expression)`, and `not null` is
 null, so the row is not selected and the test passes. USD's expression is null
-too, but the `retired_on is null or …` short-circuits it to `true` — which is
+too, but the `retired_on is null or …` short-circuits it to `true`, which is
 why the bug hides: the guard clause that makes the test correct for current
 currencies is also what stops anyone noticing that the comparison itself is
 null-blind.
 
 **This is the single most transferable fact in the module.** A SQL test does not
-ask "is this row true?", it asks "can I prove this row false?" — and three-valued
+ask "is this row true?", it asks "can I prove this row false?", and three-valued
 logic means *unknown* is scored as innocent. Anywhere a test expression touches a
 correlated subquery, an outer join, or a nullable column, ask what it returns
 when the thing on the other side is absent. Absence is the case the test was
@@ -463,7 +463,7 @@ just pipeline-status   # only if analytics.pipeline_tests is stale
 <details>
 <summary>Reveal</summary>
 
-**1. 367 columns in `marts`, of which 162 carry a test** — 44%.
+**1. 367 columns in `marts`, of which 162 carry a test**: 44%.
 
 ```sql
 with mart_cols as (
@@ -500,7 +500,7 @@ which one you have.
 | `year` | **43,138** | **100%** |
 
 `year` is examined on every row because it is the only one of the fourteen that
-is never null — it is half the grain. Everything else is a column on a fact built
+is never null: it is half the grain. Everything else is a column on a fact built
 off the country-year spine (module 01), where a null means "this source does not
 cover this country-year", and a null is invisible to `accepted_range`.
 
@@ -512,7 +512,7 @@ anybody.
 
 **3. 391 audit tables against 369 tests: 22 orphans.** dbt writes the audit
 schema on every build and never removes a table whose test has gone, and the
-alias hash is computed over the test's arguments — so renaming a model orphans
+alias hash is computed over the test's arguments, so renaming a model orphans
 every audit table attached to it. Being empty, an orphan scores as *passing*, so
 counting audit tables inflates the suite with tests that no longer exist and
 cannot fail. `transform/pipeline_status.py` filters against the manifest, keyed
@@ -523,10 +523,10 @@ degrades to bare names instead of emptying the table.
 
 *Under-built:* 44% column coverage and a median range test seeing a third of the
 rows means most of this warehouse is unasserted. The columns with the *worst*
-coverage are the sparse ones, which is backwards — sparse columns are where a
+coverage are the sparse ones, which is backwards: sparse columns are where a
 join went wrong.
 
-*Correctly built:* tests are not free, and their cost is not runtime — it is that
+*Correctly built:* tests are not free, and their cost is not runtime: it is that
 every test which can fail on reality trains people to ignore failures. 369 tests
 that have never had a false positive are worth more than 900 with a standing
 amber. The uncovered columns are largely OWID pass-throughs whose values this
@@ -536,7 +536,7 @@ The synthesis, and the actual answer: **coverage is the wrong metric.** The righ
 question is per column, "what is the wrong value I could plausibly get here, and
 would anything notice?" That produces very few tests on pass-through columns,
 several on anything this repo *derives* (a ratio, a conversion, a gap-fill), and
-one on every join that could drop rows — which is the assertion the 369 are
+one on every join that could drop rows, which is the assertion the 369 are
 thinnest on and which no `accepted_range` can ever be.
 </details>
 
@@ -546,14 +546,14 @@ thinnest on and which no `accepted_range` can ever be.
 
 **(a)** `store_failures` is on for the whole project. It costs 389 tables in the
 warehouse, they ship inside the published DuckDB file, and 21 of them are stale.
-Defend the setting — and then say what it cost that has nothing to do with disk.
+Defend the setting, and then say what it cost that has nothing to do with disk.
 
 <details>
 <summary>Reveal</summary>
 
 The defence is about *where the failure is observed*. A test failure in CI or in
 the Dagster daemon is a log line on a machine you are not sitting at, describing
-rows you now have to reproduce locally — which means rebuilding the warehouse
+rows you now have to reproduce locally, which means rebuilding the warehouse
 from live sources that may have moved since. `store_failures` turns that into
 `select * from dbt_test__audit.<test>`, on the artefact that actually failed.
 For a monthly release built by a workflow, that is the difference between
@@ -561,7 +561,7 @@ diagnosing a failure and re-enacting it.
 
 The cost that is not disk: **those tables held clear personal data.** 44
 `dbt_test__audit` tables carry a `customer_id`, and they are empty only while
-the tests pass — so the one release built on a failing retail test would have
+the tests pass, so the one release built on a failing retail test would have
 shipped identifiers in a schema nobody had thought to classify. The export's
 pseudonymisation expands the declared column set by *name* across every schema
 for exactly that reason ([`docs/DATA_PROTECTION.md`](../DATA_PROTECTION.md), and
@@ -582,7 +582,7 @@ had passed. Explain the bug, then state the principle it violates.
 The health page counted rows in each audit table. That is dbt's *default*
 verdict, not its definition of one. A test's result is `fail_calc` applied to its
 result set, and `equal_rowcount` overrides the default with
-`sum(coalesce(diff_count, 0))` — it emits a one-row summary whether it passed or
+`sum(coalesce(diff_count, 0))`: it emits a one-row summary whether it passed or
 failed:
 
 | id_a | id_b | count_a | count_b | diff_count |
@@ -604,7 +604,7 @@ matters.
 </details>
 
 **(c)** The grain contract on `dim_grid_emission_factors` is scoped
-`where: is_latest_available` and therefore examines 207 of 5,561 rows — under 4%.
+`where: is_latest_available` and therefore examines 207 of 5,561 rows: under 4%.
 Is that a weakened test or a correct one? Give the rule that decides, and apply
 it to the CBAM `direct + indirect = total` check, which sees 2,781 of 12,540.
 
@@ -627,12 +627,12 @@ grain, and unscoped it would fail on correct data. It is also load-bearing:
 The CBAM check is the harder call, and it is correct for a different reason: the
 filter is *not a choice*. `indirect` is published only for cement, fertilisers
 and 34 iron-and-steel rows, so on the other 8,129 rows there is no third number
-and no equation to check — the test is not declining to look, there is nothing
+and no equation to check: the test is not declining to look, there is nothing
 there. The unscoped version would fail on every row the regulation left blank.
 
 But notice what the two cases do *not* share. The grid-factor test, scoped, still
 covers every claim the model makes. The CBAM test, scoped, leaves 8,129 rows with
-a direct and a total and **no internal consistency check of any kind** — and that
+a direct and a total and **no internal consistency check of any kind**, and that
 is a real, permanent gap, not a solved problem. The right response is to write it
 down where a reader will find it, which
 [`dbt/seeds/_seeds.yml`](../../dbt/seeds/_seeds.yml) does at length, rather than
@@ -653,8 +653,8 @@ owes the reader a note saying what is now unchecked. The failure mode is not the
 - Calibrate against every row the model will ever hold. A fixture slice gets you
   on countries; "current data looks fine" gets you on history.
 - A test that fires on reality gets muted, and takes the credibility of every
-  other test with it. Refusing to bound a column is a legitimate design decision
-  — `trade_co2_share` is −98% to +1023% and correct.
+  other test with it. Refusing to bound a column is a legitimate design decision:
+  `trade_co2_share` is −98% to +1023% and correct.
 - SQL tests ask "can I prove this false?", so **unknown scores as innocent**.
   Anywhere an expression touches a correlated subquery or a nullable column, work
   out what it returns when the other side is absent.
