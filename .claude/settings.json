@@ -27,5 +27,11 @@
     "ty-lsp@modern-data-stack": true,
     "astral@astral-sh": true,
     "skill-creator@claude-plugins-official": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(just test)",
+      "Bash(just test-pipeline)"
+    ]
   }
 }

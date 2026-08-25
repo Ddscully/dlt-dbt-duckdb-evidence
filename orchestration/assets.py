@@ -372,9 +372,12 @@ class FolderGroupDbtTranslator(DagsterDbtTranslator):
         # *versioned* one on `[alias]` alone, so adding `versions:` to that model
         # renamed its asset to `fct_emissions_energy` and gave v1 the sibling key
         # `fct_emissions_energy_v1`. Both still run; what breaks is everything
-        # that spells the key out. `just materialize-select 'marts/*'` stops
-        # matching it, and Dagster's materialization history is keyed on the
-        # asset key, so the model appears to have never been built.
+        # that spells the key out. `just materialize-select 'key:"marts/*"'`
+        # stops matching either of them, and Dagster's materialization history
+        # is keyed on the asset key, so the model appears to have never been
+        # built. (Write that selection `marts/*` and it matches *nothing* — a
+        # bare prefix is not a glob, so the parser reads `marts/` as a key,
+        # finds none, and `*` takes everything downstream of the empty set.)
         #
         # Putting the schema back is a two-line override and keeps the key the
         # same on both sides of the migration, which is the only reason the

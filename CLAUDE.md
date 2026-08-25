@@ -1021,11 +1021,23 @@ the point of the layer is that none of it is a comment.
     (`marts/fct_emissions_energy`) but a versioned one on `[alias]` alone — so
     adding `versions:` renamed the asset to `fct_emissions_energy` and gave v1
     the sibling key `fct_emissions_energy_v1`. Both still run. What breaks is
-    everything that spells the key out: `just materialize-select 'marts/*'` stops
-    matching, and Dagster's materialisation history is keyed on the asset key, so
-    the model looks like it has never been built. `FolderGroupDbtTranslator.get_asset_key`
-    puts the schema back for versioned nodes, which is what keeps the version
-    invisible to the rest of the graph.
+    everything that spells the key out: `just materialize-select 'key:"marts/*"'`
+    stops matching either of them, and Dagster's materialisation history is keyed
+    on the asset key, so the model looks like it has never been built.
+    `FolderGroupDbtTranslator.get_asset_key` puts the schema back for versioned
+    nodes, which is what keeps the version invisible to the rest of the graph.
+    Measured against the manifest rather than argued: the default translator
+    keys the two nodes `fct_emissions_energy` and `fct_emissions_energy_v1`,
+    with no `marts/` on the front; the override keys both under `marts/`.
+  - **That selection has to be written `key:"marts/*"`, and it was written
+    `marts/*` here from 2026-08-09, which matches nothing at all.** A bare
+    prefix is not a glob: the parser reads `marts/` as an asset key, finds none,
+    and `*` then takes everything downstream of the empty set — so the recipe
+    materialises zero assets and **exits 0**. `key:`, `group:`, `kind:`,
+    `sinks(…)` and `roots(…)` all work through the plain `dagster` CLI (the
+    selection grammar lives in `dagster` core, not in the `dg` CLI, which this
+    project does not install). `dagster asset list --select '<sel>'` is the
+    read-only way to see what a selection resolves to before materialising it.
 
 ## Pipeline observability (`transform/pipeline_status.py`)
 
