@@ -69,6 +69,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just setup` | `uv sync --group dev --group orchestration` |
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
+| `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
 | `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 18 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
@@ -82,6 +83,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just materialize` | same pipeline, ordered by the asset graph (`load_retail` then `full_refresh`, no Evidence) |
 | `just materialize-site` | the same two jobs + the Evidence site (`publish_site`; needs Node) |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
+| `just materialize-preview '<sel>'` | print what a selection resolves to, materializing nothing — a selection matching zero assets exits 0 |
 | `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — the partitioned `raw/wb_wdi` asset |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
 | `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
