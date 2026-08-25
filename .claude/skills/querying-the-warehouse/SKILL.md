@@ -19,16 +19,18 @@ One DuckDB file, `data/warehouse.duckdb`. Four schemas:
 ```bash
 uv run python -c "import duckdb; \
   print(duckdb.connect('data/warehouse.duckdb', read_only=True).sql(\
-  'select * from marts.fct_emissions_energy limit 5').df())"
+  'select * from marts.fct_emissions_energy limit 5'))"
 ```
 
 **DuckDB allows one writer at a time.** A read-write connection left open — a
-stray Python REPL, Harlequin, a Dagster run — makes the next `just run` fail with
+stray Python REPL, a `just sql write` session, a Dagster run — makes the next
+`just run` fail with
 a lock error. `read_only=True` costs nothing and avoids the whole class of
 problem. This is also why the Dagster graph uses `in_process_executor` and puts
 all five dlt resources in one op: parallel steps would just fight over the lock.
 
-For interactive poking, `just sql` opens Harlequin. Close it before running the
+For interactive poking, `just sql` opens the DuckDB CLI read-only, so it can sit
+alongside a build. `just sql write` takes the writer lock — close it before running the
 pipeline.
 
 ## Schema names have no prefix
@@ -46,9 +48,9 @@ dlt snake_cases and flattens the source payload. The World Bank's `iso2Code`,
 
 ```bash
 uv run python -c "import duckdb; \
-  print(duckdb.connect('data/warehouse.duckdb', read_only=True).sql(\
+  duckdb.connect('data/warehouse.duckdb', read_only=True).sql(\
   \"select table_name, column_name, data_type from information_schema.columns \
-    where table_schema='raw' order by table_name, ordinal_position\").df().to_string())"
+    where table_schema='raw' order by table_name, ordinal_position\").show(max_rows=500)"
 ```
 
 Staging and marts columns follow [`docs/STYLE_GUIDE.md`](../../../docs/STYLE_GUIDE.md)
@@ -94,7 +96,7 @@ holds the writer lock:
 uv run python -c "import duckdb; \
   print(duckdb.sql(\"select sum(co2) from \
     read_parquet('data/lake/raw_owid_co2/**/*.parquet', hive_partitioning=1) \
-    where year = 2020\").df())"
+    where year = 2020\"))"
 ```
 
 Directory names are the table names with the dot flattened (`raw.owid_co2` →

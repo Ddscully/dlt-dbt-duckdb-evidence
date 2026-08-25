@@ -36,7 +36,6 @@ def main() -> None:
     print(
         "modern-data-stack\n"
         "  just run        # ingest -> dbt build -> polars transform\n"
-        "  just sql        # explore the DuckDB warehouse in Harlequin\n"
-        "  just notebook   # marimo exploration\n"
+        "  just sql        # explore the DuckDB warehouse (DuckDB CLI)\n"
         "See README.md for the full pipeline."
     )

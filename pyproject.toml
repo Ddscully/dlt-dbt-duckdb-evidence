@@ -11,6 +11,13 @@ dependencies = [
     "dlt[duckdb]>=1.5",   # EL: API/file ingestion into DuckDB with schema inference
     "duckdb>=1.1",        # in-process analytical warehouse
     "polars>=1.17",       # heavy/columnar transforms in Python
+    # Required at runtime, not a convenience: DuckDB reaches pyarrow for both
+    # `to_arrow_reader()` (the retail ingest) and `.pl()` (both Polars
+    # transforms), so an install without it raises ModuleNotFoundError from
+    # three places. It used to arrive only as harlequin's grand-transitive,
+    # which meant the runtime set was incomplete for as long as it was
+    # undeclared and nothing said so. See CLAUDE.md.
+    "pyarrow>=17",        # DuckDB's Arrow bridge — needed by the ingest and both transforms
     "dbt-duckdb>=1.9",    # T: dbt adapter targeting the DuckDB file
 ]
 
@@ -27,7 +34,6 @@ dev = [
     "sqlfluff==4.2.2",     # SQL linter/formatter (dbt templater)
     "sqlfluff-templater-dbt==4.2.2",  # .sqlfluff sets templater = dbt; useless without this
     "pre-commit>=4.0",     # git hooks
-    "harlequin>=2.1",      # terminal SQL IDE for DuckDB
     "pytest>=8.3",         # unit tests over the ingest/transform logic (see tests/)
     # Type checker. Astral's, so it reads `requires-python` for the target
     # version exactly as ruff does — 3.13 stays declared in one place. It lives
@@ -40,9 +46,6 @@ dev = [
     # putting it in pre-commit or a workflow: it is 0.0.x and pre-1.0, and its
     # diagnostics change between patch releases.
     "ty>=0.0.74",           # `just typecheck`; agent/editor LSP via `ty server`
-]
-notebook = [
-    "marimo>=0.10",        # reactive notebooks for the Polars exploration layer
 ]
 # `uv sync --group orchestration` — the Dagster asset graph in orchestration/.
 # The pipeline still runs without these (`just run`).
@@ -90,13 +93,6 @@ extend-select = [
     "F403", "F405", "F406",                           # star imports
     "F722",                                           # syntax error in forward annotation
 ]
-
-[tool.ruff.lint.per-file-ignores]
-# marimo stores a notebook as a Python file where each cell is a function, and a
-# bare expression on the last line is how a cell renders its output — `df` at the
-# end of a cell *is* the chart. B018 ("useless expression") is right about the
-# syntax and wrong about the file: deleting it blanks the notebook.
-"notebooks/*.py" = ["B018"]
 
 [tool.ruff.lint.isort]
 # Keep `from x import a, run as b` on one statement. ruff's default splits the

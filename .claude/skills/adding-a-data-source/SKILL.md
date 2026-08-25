@@ -52,7 +52,7 @@ Run `just ingest` and look at the real column names before writing any SQL:
 uv run python -c "import duckdb; \
   print(duckdb.connect('data/warehouse.duckdb', read_only=True).sql(\
   \"select column_name, data_type from information_schema.columns \
-    where table_schema='raw' and table_name='<resource>'\").df())"
+    where table_schema='raw' and table_name='<resource>'\"))"
 ```
 
 dlt snake_cases and flattens nested JSON: `iso2Code` → `iso2_code`,
@@ -136,7 +136,7 @@ coverage in the column's YAML description either way — that's the convention.
 just run   # ingest -> dbt build -> transform, against the real APIs
 uv run python -c "import duckdb; \
   print(duckdb.connect('data/warehouse.duckdb', read_only=True).sql(\
-  'select * from marts.fct_emissions_energy limit 5').df())"
+  'select * from marts.fct_emissions_energy limit 5'))"
 ```
 
 Check the row count didn't drop and the new column isn't all-null. Don't assume.

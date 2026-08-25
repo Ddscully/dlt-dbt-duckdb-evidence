@@ -56,9 +56,6 @@ reports/.evidence/
 reports/build/
 node_modules/
 
-# marimo
-__marimo__/
-
 # Claude Code session transcripts and scratch notes. They're kept locally as a
 # working record but not committed — a `git add -A` would otherwise sweep in
 # whatever the last session left here. The three files tracked before this rule

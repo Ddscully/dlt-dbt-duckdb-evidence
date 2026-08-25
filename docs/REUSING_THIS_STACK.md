@@ -88,7 +88,7 @@ justfile recipes and the asset graph all still call the same names.
 `REFRESH` constant; everything else is six sources), all of `dbt/models`,
 `dbt/seeds` and `dbt/snapshots`, `transform/co2_intensity.py`, all of
 `reports/pages` and `reports/sources/warehouse/*.sql`, `tests/fixtures/`,
-`notebooks/explore.py`, and roughly half of `CLAUDE.md`.
+and roughly half of `CLAUDE.md`.
 
 ## 2. The names that join the layers
 
