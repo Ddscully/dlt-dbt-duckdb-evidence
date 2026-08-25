@@ -11,7 +11,7 @@ default:
 
 # One-time: install runtime + dev deps into the uv-managed venv
 setup:
-    uv sync --group dev --group notebook --group orchestration
+    uv sync --group dev --group orchestration
 
 # EL: pull public sources into DuckDB
 ingest:
@@ -162,13 +162,30 @@ backfill-wdi start end='':
         -m orchestration.definitions --select 'raw/wb_wdi' \
         --partition-range "{{ start }}...${end:-{{ start }}}"
 
-# Open the warehouse in Harlequin (terminal SQL IDE)
-sql:
-    uv run harlequin data/warehouse.duckdb
-
-# Reactive exploration notebook
-notebook:
-    uv run --group notebook marimo edit notebooks/explore.py
+# Read-only is the default because DuckDB takes a single writer: a session
+# holding the write lock makes `just run` fail with a lock error two terminals
+# away. Pass `just sql write` when you actually mean to write.
+#
+# The CLI is a separate install from the Python package — `duckdb` on PyPI
+# ships no console script — so this checks for it rather than failing with a
+# bare 'command not found'. Note that `just --list` shows only the LAST
+# comment line above a recipe, so that line has to be the summary.
+#
+# Open the warehouse in the DuckDB CLI (`just sql write` for a writer)
+sql mode="read":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v duckdb >/dev/null 2>&1; then
+      echo "The DuckDB CLI isn't installed. Get it with:" >&2
+      echo "  curl https://install.duckdb.org | sh" >&2
+      echo "(the 'duckdb' PyPI package is the Python library only)" >&2
+      exit 1
+    fi
+    if [ "{{ mode }}" = "write" ]; then
+      duckdb data/warehouse.duckdb
+    else
+      duckdb -readonly data/warehouse.duckdb
+    fi
 
 # Lint SQL — from dbt/, because the dbt templater opens the warehouse via the
 # profile's relative path (`../data/…`) without chdir'ing into the project first
@@ -265,3 +282,107 @@ course-query sql:
     @uv run python -c "import duckdb,sys; \
         print(duckdb.connect('{{ justfile_directory() }}/data/course/warehouse.duckdb', read_only=True).sql(sys.argv[1]))" \
         {{ quote(sql) }}
+
+# Reclaim gitignored build output. Every target below is produced by a recipe in
+# this file, so deleting it costs rebuild time and nothing else — with exactly
+# one exception, which is why this recipe takes a scope instead of just running.
+#
+# The exception is `data/warehouse.duckdb`. It holds the `history` schema: two
+# dbt snapshots that accumulate one row per revision and that NO rebuild can
+# reproduce, because they are a record of what the sources said on the days we
+# asked. Delete the file and those versions are gone for good — `just
+# restore-history` can only recover what a published release happened to carry.
+#
+# `just clean` reclaims the safe tier; `just clean deep` also takes
+# reports/node_modules (931 MB, restored by `just report`, needs Node).
+#
+# Reclaim gitignored build output (`deep` adds node_modules; `warehouse` needs --force)
+clean scope="safe" force="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ justfile_directory() }}"
+
+    # `just clean warehouse [--force]` — the one target that is not derived.
+    #
+    # The gate runs BEFORE anything is deleted. A refused `just clean warehouse`
+    # used to still take the whole safe tier with it on the way to saying no,
+    # which is a poor thing for a command that refused to do.
+    #
+    # Mirrors `scripts/restore_history.py`: the gate is not "is this scary", it
+    # is "is there history here to lose". An empty `history` schema (a fresh
+    # clone, a warehouse built but never snapshotted) has nothing a rebuild
+    # cannot reproduce, so it goes without ceremony. Rows there stop it until
+    # `--force`, and the message names the count — the same shape, and the same
+    # sentence, as the refusal in `modern_data_stack.history`.
+    #
+    # Summed over every table in the schema, not over a named snapshot: there
+    # are two of them and anything naming one has to name both.
+    if [ "{{ scope }}" = "warehouse" ]; then
+      if [ ! -e data/warehouse.duckdb ]; then
+        echo "  data/warehouse.duckdb is already gone"
+      else
+        history_rows='import duckdb; from modern_data_stack.db import scalar; con = duckdb.connect("data/warehouse.duckdb", read_only=True); q = "select table_name from information_schema.tables where table_schema = ?"; tables = [r[0] for r in con.execute(q, ["history"]).fetchall()]; print(sum(scalar(con, f"select count(*) from history.{t}") for t in tables))'
+        held=$(uv run python -c "$history_rows") || held=""
+        # An unreadable count must refuse, not fall through. `[ "" -gt 0 ]` is an
+        # error, but inside an `if` that reads as *false* and `set -e` does not
+        # fire — so a warehouse whose history could not be counted would have
+        # been deleted by the safe-looking branch. Fail closed instead.
+        #
+        # `--force` deliberately does not override this one. The check cannot
+        # tell a corrupt file from one a running Dagster job holds the lock on,
+        # and deleting the second is the worse mistake. `rm` by hand is the
+        # escape hatch, and it is the right amount of friction.
+        case "$held" in
+          ''|*[!0-9]*)
+            echo "could not read the history row count from data/warehouse.duckdb" >&2
+            echo "(locked by another process?) — refusing to delete it" >&2
+            exit 1
+            ;;
+        esac
+        if [ "$held" -gt 0 ] && [ "{{ force }}" != "--force" ]; then
+          echo "data/warehouse.duckdb holds $held rows of snapshot history — refusing" >&2
+          echo "to delete history that a rebuild cannot reproduce. Pass --force if" >&2
+          echo "that is really what you want:" >&2
+          echo "  just clean warehouse --force" >&2
+          echo "A published release can restore some of it: just restore-history <file>" >&2
+          exit 1
+        fi
+      fi
+    fi
+
+    freed=0
+    drop() {
+      for target in "$@"; do
+        [ -e "$target" ] || continue
+        size=$(du -sm "$target" 2>/dev/null | cut -f1)
+        rm -rf "$target"
+        freed=$((freed + size))
+        printf '  removed %-28s %5s MB\n' "$target" "$size"
+      done
+    }
+
+    # Regenerable with no state in them at all.
+    #   dbt/target        `dbt parse` / `just dbt-build`   (the manifest)
+    #   dbt/dbt_packages  `just dbt-deps`
+    #   data/lake         `just lake`
+    #   data/export       `just export-data`
+    #   data/course       `just course-sandbox`
+    #   data/cache        re-downloaded on the next ingest
+    #   reports/build     `just report`
+    #   reports/.evidence `just report-clean`
+    drop dbt/target dbt/dbt_packages dbt/logs \
+         data/lake data/export data/course data/cache \
+         reports/build reports/.evidence
+
+    # Dagster run/event storage. `.dagster/dagster.yaml` is checked in and stays.
+    find .dagster -mindepth 1 -maxdepth 1 ! -name dagster.yaml -exec rm -rf {} + 2>/dev/null || true
+
+    if [ "{{ scope }}" = "deep" ]; then
+      drop reports/node_modules
+    fi
+
+    if [ "{{ scope }}" = "warehouse" ] && [ -e data/warehouse.duckdb ]; then
+      drop data/warehouse.duckdb data/warehouse.duckdb.wal
+    fi
+
+    printf 'freed %s MB\n' "$freed"

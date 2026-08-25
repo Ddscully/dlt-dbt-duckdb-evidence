@@ -66,7 +66,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 
 | Command | What it does |
 |---------|--------------|
-| `just setup` | `uv sync --group dev --group notebook --group orchestration` |
+| `just setup` | `uv sync --group dev --group orchestration` |
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
@@ -89,8 +89,8 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
 | `just lint` | `sqlfluff lint dbt/models dbt/snapshots` |
 | `just typecheck` | `ty check` — Python type diagnostics; reports, gates nothing |
-| `just sql` | open the warehouse in Harlequin |
-| `just notebook` | marimo exploration notebook |
+| `just sql` | open the warehouse in the DuckDB CLI, read-only (`just sql write` to write) |
+| `just clean` | delete the gitignored build output (`deep` also drops `reports/node_modules`) |
 
 Always run tools through `uv run` so they use the project venv. dbt commands
 must run from the `dbt/` directory (that's where `profiles.yml` lives).
@@ -139,11 +139,6 @@ pre-commit (`ruff-check` with `--fix`, then `ruff-format`).
   each export a `run()`, so `orchestration/assets.py` aliases every one of them —
   the default turns its eight-line import block into twelve and separates
   `run as write_lake` from its module.
-- **`B018` is ignored for `notebooks/*.py` on purpose.** marimo stores a notebook
-  as Python where each cell is a function, and the bare expression on a cell's
-  last line is how it renders — `df` at the end of a cell *is* the chart. The rule
-  is right about the syntax and wrong about the file; taking its fix blanks the
-  notebook.
 - **A comment that starts `# noqa` gets deleted, even in prose.** Explaining a
   suppression on the line above it with `# noqa TRY004: RuntimeError, not
   TypeError, because …` reads as an unused blanket `# noqa` to ruff, and
@@ -272,9 +267,78 @@ Types are ty (`just typecheck`), added 2026-08-24. It is **not** in pre-commit a
   before, which is why nothing 3.13-only could have been written in the gap
   even by accident.
 - **3.14 is blocked on dbt, not on us.** `uv lock --python 3.14` resolves, but
-  that only proves the solver is happy — dbt-core 1.10 ships no 3.14 classifier,
+  that only proves the solver is happy — dbt-core ships no 3.14 classifier,
   and dbt Labs certifies a Python roughly a year behind. `dagster<3.15` is the
   only hard upper bound in the tree.
+- **`pyarrow` is a runtime dependency and was undeclared until 2026-08-25.**
+  DuckDB reaches it for `to_arrow_reader()` (the retail ingest,
+  `ingest/pipeline.py`) *and* for `.pl()` — so a tree without it raises
+  `ModuleNotFoundError: pyarrow` from the ingest and from **both** Polars
+  transforms. `.pl()` is the surprising half: polars itself doesn't need
+  pyarrow, DuckDB's bridge to it does.
+  - **It was invisible because uv installs the `dev` group by default.**
+    `[tool.uv] default-groups` is commented out, so uv's own default (`dev`)
+    applies and every `uv sync` in the justfile and all four workflows pulled
+    harlequin — whose `textual-fastdatatable` dragged pyarrow in. The declared
+    runtime set was incomplete for as long as it was undeclared and nothing
+    could say so. `uv sync --no-default-groups` is what reproduces it.
+  - The lesson generalises past this package: a dependency that arrives as some
+    dev tool's grand-transitive is indistinguishable from a declared one until
+    the dev tool leaves.
+- **Dropping harlequin is what unblocked dbt 1.11, and the mechanism is an exact
+  pin.** harlequin pins `click==8.1.8`; dbt-core 1.11 requires `click>=8.3.0`,
+  so the SQL IDE in the dev group was holding the transformation engine a minor
+  version back. Bundled with harlequin still in, reaching dbt 1.11 also forced
+  `textual` across two majors; with it gone, textual leaves the tree entirely.
+  Read a stuck resolution as "who pins this", not "the solver is being careful"
+  — `uv tree --invert --package <name>` names the culprit, and an exact `==` in
+  a *transitive* is the shape to look for.
+- **dbt 1.11 was a no-op for this project, and the parse log is the evidence.**
+  `dbt parse` emits zero deprecation warnings on it. That is the
+  `data_tests:`/`arguments:` discipline paying out: 1.11 defaults
+  `require_generic_test_arguments_property` to True, which is the spelling this
+  project already used. Its other deprecations — `--models`/`-m`, source
+  `overrides:`, `{{ modules.itertools }}` — appear nowhere here, and its new
+  jsonschema warnings are gated to Snowflake/Databricks/BigQuery/Redshift, so
+  DuckDB never sees them.
+  - **The manifest stays schema v12**, so `dagster-dbt`, `transform/pipeline_status.py`
+    and `tests/test_documented_counts.py` all read it unchanged. Worth checking
+    rather than assuming on any dbt minor: three consumers here parse it.
+  - **1.12 is blocked on dagster-dbt, not on us** — it requires `dbt-core<1.12`.
+    Same shape as the 3.14 bullet above, one layer over.
+  - **`sqlfluff-templater-dbt` is pinned exactly at 4.2.2 and compiled 1.11
+    fine**, but it is the thing to check first on any dbt bump: it is the one
+    consumer that cannot move independently, by deliberate design.
+- **"Lightweight" is a measured claim, and the dev tooling was most of the
+  weight.** Removing harlequin and marimo on 2026-08-25 took the tree from 198
+  packages to 153 and the venv from 1.1 GB to 736 MB — a third of it — for two
+  tools that duplicated capability the stack already had: the DuckDB CLI
+  replaces harlequin (`just sql`, read-only by default), and marimo cost 122 MB
+  plus jedi/loro/pyzmq to render one `select *`. What is left *is* the stack:
+  polars 206 MB, pyarrow 137 MB, duckdb 58 MB, dagster 62 MB.
+  - **The venv is not where this repo's disk goes**, which is worth knowing
+    before optimising it again. `reports/node_modules` alone is 931 MB and the
+    regenerable build output under `data/`, `dbt/target` and `reports/` is
+    ~1.2 GB more. `just clean` reclaims those; `just clean deep` also drops
+    `node_modules`.
+  - **`data/warehouse.duckdb` is the one target `just clean` must not treat as
+    derived.** It holds the `history` schema — see *Snapshot history* — which no
+    rebuild reproduces. `just clean warehouse` mirrors
+    `scripts/restore_history.py`: it gates on *whether there is history to
+    lose*, not on how alarming the file looks, so an empty `history` schema
+    goes without ceremony and a populated one needs `--force`.
+  - **A refusal has to be a no-op, and this one was not.** The gate started out
+    after the safe-tier deletion, so a refused `just clean warehouse` still took
+    1,028 MB with it on the way to saying no. The check now runs before anything
+    is removed. Worth generalising: a guard placed after the cheap work is a
+    guard on only half the command.
+  - **`[ "$held" -gt 0 ]` on an empty `$held` fails *open*, which is the
+    dangerous direction.** It is an error, but inside an `if` an error reads as
+    false and `set -e` does not fire — so a warehouse whose history could not be
+    counted (locked by a Dagster run, file corrupt) would have fallen through to
+    the delete. It fails closed now, and `--force` deliberately does not
+    override that case: the check cannot tell a corrupt file from a locked one,
+    and deleting the locked one is the worse mistake.
 
 ## Agent skills
 
@@ -1566,7 +1630,7 @@ inspect the warehouse — don't assume. Quick check:
 ```bash
 uv run python -c "import duckdb; \
   print(duckdb.connect('data/warehouse.duckdb', read_only=True).sql(\
-  'select * from marts.fct_emissions_energy limit 5').df())"
+  'select * from marts.fct_emissions_energy limit 5'))"
 ```
 
 ## Branches and PRs

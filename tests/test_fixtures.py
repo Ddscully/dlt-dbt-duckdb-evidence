@@ -11,6 +11,7 @@ import gzip
 import json
 import re
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -131,9 +132,14 @@ def test_retail_fixture_holds_every_shape_the_models_handle():
                         then upper(stock_code) end) as non_product_codes
                 from ({retail_sql()})"""
             )
-            .df()
-            .iloc[0]
+            .pl()
+            .row(0, named=True)
         )
+        # `.pl()`, not `.df()`: pandas is not a dependency of this project. It
+        # used to arrive as harlequin's grand-transitive, so this line worked
+        # without anything declaring it. `.row(named=True)` gives a dict; the
+        # namespace is what keeps the assertions below reading as `row.n_rows`.
+        row = SimpleNamespace(**row)
 
     assert row.n_rows > 20_000, "too thin for the cohort and RFM models to say anything"
     assert row.months == 25, "every month must be present or a Dagster partition loads nothing"

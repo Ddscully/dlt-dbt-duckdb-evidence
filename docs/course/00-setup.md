@@ -127,8 +127,8 @@ what that changes.
 IO Error: Could not set lock on file … Conflicting lock is held
 ```
 
-DuckDB takes **one writer at a time**. Close the Harlequin session, the marimo
-notebook or the Python REPL you left connected. `just course-query` opens
+DuckDB takes **one writer at a time**. Close the `just sql write` session or
+the Python REPL you left connected. `just course-query` opens
 `read_only=True` for this reason, and a read-only connection can coexist with
 others — it is the writer that is exclusive.
 

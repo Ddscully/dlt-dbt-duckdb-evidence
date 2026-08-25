@@ -56,8 +56,6 @@ dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 | [**Polars**](https://pola.rs/) | heavy columnar transforms / window logic in Python |
 | **Parquet** | hive-partitioned archive of the warehouse in `data/lake/`: pruning, portability, a diffable raw layer |
 | [**Evidence**](https://evidence.dev/) | BI-as-code dashboard, deployable to GitHub Pages |
-| [**marimo**](https://marimo.io/) | reactive notebook for exploration |
-| [**Harlequin**](https://harlequin.sh/) | terminal SQL IDE for DuckDB |
 | [**sqlfluff**](https://sqlfluff.com/) + pre-commit | SQL linting / CI rigor |
 | [**pytest**](https://docs.pytest.org/) | unit tests over the ingest/transform logic |
 | **GitHub Actions** | fixture-backed pipeline run on every PR, live run nightly |
@@ -146,7 +144,6 @@ jobs and the partitioned WDI backfill.
 ├── lake/              # DuckDB -> hive-partitioned Parquet in data/lake/
 ├── tests/             # pytest + the recorded API fixtures CI runs against
 ├── scripts/           # record_fixtures.py, export_warehouse.py (the release)
-├── notebooks/         # marimo reactive notebooks
 ├── reports/           # Evidence dashboard (BI as code)
 ├── docs/              # the five topic docs above, plus the style guide
 ├── data/              # warehouse.duckdb lives here (gitignored)
@@ -170,11 +167,10 @@ project-specific skills covering the seams between layers. See
 ## Quickstart
 
 ```bash
-just setup      # uv sync runtime + dev + notebook + orchestration groups
+just setup      # uv sync runtime + dev + orchestration groups
 just run        # ingest -> dbt build -> polars transform
 just dagster    # ...or the same pipeline as an asset graph, UI on :3000
-just sql        # poke around the warehouse in Harlequin
-just notebook   # marimo exploration
+just sql        # poke around the warehouse in the DuckDB CLI
 just report     # build the Evidence dashboard
 ```
 

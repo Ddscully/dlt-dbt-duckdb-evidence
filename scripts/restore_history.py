@@ -24,9 +24,11 @@ restore never touches `raw`, `staging`, `marts` or `analytics`.
 
 ## What it refuses to do
 
-Overwrite history that is already there. `rm data/warehouse.duckdb` is the only
-destructive act in this repo and this script would be the second one; a
-destination table with rows in it stops the restore unless `--force`. It also
+Overwrite history that is already there. Deleting `data/warehouse.duckdb` is the
+only act in this repo that destroys something a rebuild cannot make again, and
+this script would be the second one; a destination table with rows in it stops
+the restore unless `--force`. `just clean warehouse` gates the deletion itself on
+the same question, with the same answer — see the justfile. It also
 checks the source table carries dbt's SCD2 bookkeeping columns, because restoring
 something snapshot-shaped-but-not-a-snapshot fails later, inside dbt, with a much
 worse error message.
