@@ -1593,8 +1593,10 @@ Gotchas:
   no execution harness is needed — point the module's `DUCKDB_PATH` (or
   `LAKE_DIR`, or `page_routes`) at a throwaway, call the check, read the
   `AssetCheckResult`. **Anything under `tests/` importing the orchestration layer
-  has to carry the dlt teardown fixture**, and this file sorts ahead of
-  `test_definitions.py`, so it is now the one that imports it first.
+  needs the dlt teardown fixture**, and `test_asset_checks.py` shipped an
+  identical copy of it alongside `test_definitions.py`'s rather than sharing
+  one — a code review caught the duplication and it now lives once, in
+  `tests/conftest.py`.
   - **Ten mutations, nine caught, and the one survivor is the finding** — it is
     dead code, and provably so. Both of the first round's survivors were worth
     chasing rather than papering over: one was a redundant clause, the other a

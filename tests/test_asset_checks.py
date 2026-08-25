@@ -23,9 +23,8 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from dlt.common.configuration.container import Container
-from dlt.common.pipeline import PipelineContext
 
+from modern_data_stack.lake import table_dir
 from orchestration.resources import dbt_project
 
 # Same guard as `tests/test_definitions.py`: `just test` runs before
@@ -36,25 +35,9 @@ pytestmark = pytest.mark.skipif(
     reason="needs dbt/target/manifest.json — run `just dbt-deps` and `dbt parse` first",
 )
 
-
-@pytest.fixture(autouse=True, scope="module")
-def _release_the_dlt_pipeline():
-    """Hand the ambient dlt pipeline back the way we found it.
-
-    Importing `orchestration.assets` leaves a dlt pipeline *active*
-    process-wide: the `@dlt_assets` decorators call `build_pipeline()` at import
-    time and dlt records the result as the ambient pipeline, so a later test
-    calling a resource generator directly reads the real `~/.dlt` state instead
-    of none. `tests/test_definitions.py` carries the same fixture and says why
-    at length; this file sorts ahead of it, so it is this one that imports the
-    orchestration layer first.
-    """
-    yield
-    ctx = Container()[PipelineContext]
-    if ctx.is_active():
-        # Typed as `SupportsPipeline`, which does not declare `deactivate` —
-        # the object is a `Pipeline`, which does. See test_definitions.py.
-        ctx.pipeline().deactivate()  # ty: ignore[unresolved-attribute]
+# The dlt-pipeline-deactivation fixture this file needs (importing the
+# orchestration layer leaves a dlt pipeline active process-wide) lives in
+# `tests/conftest.py`, shared with `test_definitions.py`.
 
 
 @pytest.fixture(scope="module")
@@ -81,6 +64,18 @@ def _meta(result, key):
     """The plain Python value behind a `MetadataValue` on an `AssetCheckResult`."""
     value = result.metadata[key]
     return getattr(value, "value", value)
+
+
+def _sql_literal(v) -> str:
+    if v is None:
+        return "null"
+    if isinstance(v, str):
+        return f"'{v}'"
+    return str(v)
+
+
+def _values_clause(rows: list[tuple]) -> str:
+    return ", ".join("(" + ", ".join(_sql_literal(v) for v in r) + ")" for r in rows)
 
 
 # --------------------------------------------------------------------------- #
@@ -141,14 +136,11 @@ create table marts.fct_emissions_energy (
 
 
 def _mart(tmp_path: Path, rows: list[tuple]) -> str:
-    values = ", ".join(
-        "(" + ", ".join("null" if v is None else str(v) for v in r) + ")" for r in rows
-    )
     return _warehouse(
         tmp_path,
         "create schema marts",
         MART_DDL,
-        f"insert into marts.fct_emissions_energy values {values}",
+        f"insert into marts.fct_emissions_energy values {_values_clause(rows)}",
     )
 
 
@@ -181,6 +173,47 @@ def test_mart_check_fails_a_source_with_no_rows_at_all(tmp_path, monkeypatch, as
     assert not result.passed
     assert _meta(result, "years_behind")["eu_elec_prices"] is None
     assert _meta(result, "max_year_by_source")["eu_elec_prices"] is None
+
+
+def test_mart_check_passes_a_source_exactly_two_years_behind(tmp_path, monkeypatch, assets):
+    """The check's own docstring promises "within two years", so `lag == 2` is
+    the boundary case neither test above reaches: one has every source current
+    (`lag == 0`), the other has a source entirely absent (`lag is None`).
+    Mutating `lag <= 2` to `lag < 2` would pass both existing tests and fail
+    only this one.
+    """
+    year = datetime.now(UTC).year
+    path = _mart(
+        tmp_path,
+        [
+            (year, 1.0, 2.0, 3.0, None),
+            (year - 2, None, None, None, 0.25),
+        ],
+    )
+    monkeypatch.setattr(assets, "DUCKDB_PATH", path)
+
+    result = assets.mart_covers_recent_years()
+
+    assert result.passed
+    assert _meta(result, "years_behind")["eu_elec_prices"] == 2
+
+
+def test_mart_check_fails_a_source_three_years_behind(tmp_path, monkeypatch, assets):
+    """One year past the boundary above, the same source must fail."""
+    year = datetime.now(UTC).year
+    path = _mart(
+        tmp_path,
+        [
+            (year, 1.0, 2.0, 3.0, None),
+            (year - 3, None, None, None, 0.25),
+        ],
+    )
+    monkeypatch.setattr(assets, "DUCKDB_PATH", path)
+
+    result = assets.mart_covers_recent_years()
+
+    assert not result.passed
+    assert _meta(result, "years_behind")["eu_elec_prices"] == 3
 
 
 # --------------------------------------------------------------------------- #
@@ -298,19 +331,11 @@ create table analytics.retail_rfm (
 
 
 def _rfm(tmp_path: Path, rows: list[tuple]) -> str:
-    values = ", ".join(
-        "("
-        + ", ".join(
-            "null" if v is None else (f"'{v}'" if isinstance(v, str) else str(v)) for v in r
-        )
-        + ")"
-        for r in rows
-    )
     return _warehouse(
         tmp_path,
         "create schema analytics",
         RFM_DDL,
-        f"insert into analytics.retail_rfm values {values}",
+        f"insert into analytics.retail_rfm values {_values_clause(rows)}",
     )
 
 
@@ -372,28 +397,22 @@ def test_rfm_check_fails_an_unsegmented_customer(tmp_path, monkeypatch, assets):
 
 def _lake(tmp_path: Path, warehouse_years: list[int], archived_years: list[int]):
     """A one-table warehouse plus a hive-partitioned archive that may disagree."""
+    lake_dir = tmp_path / "lake"
+    # `COPY … PARTITION_BY` writes the `year=` directories but not the parent.
+    lake_dir.mkdir(parents=True, exist_ok=True)
+    target = lake_dir / "marts_fct_emissions_energy"
+    years = ", ".join(str(y) for y in archived_years)
     path = _warehouse(
         tmp_path,
         "create schema marts",
         "create table marts.fct_emissions_energy (year integer, co2_mt double)",
         "insert into marts.fct_emissions_energy values "
         + ", ".join(f"({y}, 1.0)" for y in warehouse_years),
+        f"""
+        copy (select * from marts.fct_emissions_energy where year in ({years}))
+        to '{target}' (format parquet, partition_by (year), overwrite true)
+        """,
     )
-    lake_dir = tmp_path / "lake"
-    # `COPY … PARTITION_BY` writes the `year=` directories but not the parent.
-    lake_dir.mkdir(parents=True, exist_ok=True)
-    target = lake_dir / "marts_fct_emissions_energy"
-    con = duckdb.connect(path)
-    try:
-        years = ", ".join(str(y) for y in archived_years)
-        con.execute(
-            f"""
-            copy (select * from marts.fct_emissions_energy where year in ({years}))
-            to '{target}' (format parquet, partition_by (year), overwrite true)
-            """
-        )
-    finally:
-        con.close()
     return path, lake_dir
 
 
@@ -437,7 +456,7 @@ def _extra_partition(lake_dir: Path, warehouse: str, year: int, rows: int = 1) -
     `hive_partitioning = 1` reads it back, so a file carrying its own `year`
     would not be the thing being simulated.
     """
-    target = lake_dir / "marts_fct_emissions_energy" / f"year={year}"
+    target = table_dir(lake_dir, warehouse) / f"year={year}"
     target.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(":memory:")
     try:
