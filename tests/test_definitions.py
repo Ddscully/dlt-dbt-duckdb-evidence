@@ -43,8 +43,9 @@ def _release_the_dlt_pipeline():
     `wdi_start_year` returns a lookback window and the URL grows a `&date=` the
     test never asked for. It fails only when the whole suite runs, only on a
     machine that has loaded WDI at least once, and names pagination as the
-    culprit; alphabetical collection puts this file first, so it is this file's
-    job to hand the process back the way it found it.
+    culprit. Every file that imports the orchestration layer carries this
+    fixture — `tests/test_asset_checks.py` does too, and sorts ahead of this
+    one, so which file imports first is not something either may assume.
     """
     yield
     ctx = Container()[PipelineContext]
