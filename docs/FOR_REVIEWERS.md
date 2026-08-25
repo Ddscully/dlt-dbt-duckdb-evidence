@@ -144,6 +144,21 @@ warehouse that bills by the second, that table is where the invoice comes from.
    the DuckDB connector — `npm install --force @evidence-dev/snowflake` and a
    line in `evidence.config.yaml`'s `datasources`, which is the trade the size
    saving makes.
+
+   **That's one way out. There's now a second.** The lock is embedded mode, not
+   the engine. DuckDB has had MVCC and multi-connection transactions since day
+   one, and what takes a single writer is one *process* holding the file. Open
+   `data/warehouse.duckdb` from a second process and you get `Could not set
+   lock on file … Conflict`; a second connection inside the same process has
+   always been fine. The `quack` extension removes the process half: one DuckDB
+   serves the file and the others `ATTACH 'quack:…'` over its native protocol.
+   On the pinned 1.5.5, two separate processes pushed 200 rows each through
+   `quack_serve` with no failures and all 400 still in the file afterwards.
+
+   It isn't free. Writes centralise on one server process, DuckDB's own ceiling
+   is a few thousand a second and a few terabytes, there's no distributed query
+   processing, and it's beta until 2.0 this autumn. And I haven't put dbt's
+   build graph through it. That's the run that would settle it.
 3. **Full-refresh materialisation, for 25 of the 26 models.** Every mart is
    `+materialized: table` and rebuilt whole. That is deliberate rather than
    pending: each one re-derives a source that gets fully re-fetched, so
