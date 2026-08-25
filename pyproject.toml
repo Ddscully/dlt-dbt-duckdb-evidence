@@ -46,6 +46,13 @@ dev = [
     # putting it in pre-commit or a workflow: it is 0.0.x and pre-1.0, and its
     # diagnostics change between patch releases.
     "ty>=0.0.74",           # `just typecheck`; agent/editor LSP via `ty server`
+    # The CLI as a PyPI wheel, official (`duckdb` org), not the `duckdb` library
+    # already above — that ships no `duckdb` command. Pinning it here instead of
+    # `curl https://install.duckdb.org | sh` means `just sql` needs no separate
+    # install step and can't drift from the library version `uv.lock` already
+    # resolves: both landed on 1.5.5. A bare `uvx duckdb-cli` would dodge that
+    # lock the same way `uvx dg` does — see CLAUDE.md.
+    "duckdb-cli>=1.5.5",    # `just sql`; the CLI binary, via `uv run duckdb`
 ]
 # `uv sync --group orchestration` — the Dagster asset graph in orchestration/.
 # The pipeline still runs without these (`just run`).

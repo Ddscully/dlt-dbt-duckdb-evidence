@@ -626,6 +626,19 @@ wheels = [
 ]
 
 [[package]]
+name = "duckdb-cli"
+version = "1.5.5"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f0/28/a5dc2f31e168323d1dd440eed055dacdf3ee80ac9651cee12614d1752f59/duckdb_cli-1.5.5-py3-none-macosx_12_0_arm64.whl", hash = "sha256:f4f0810fab4ddf71dcf7f93cdbb9b84ee4ecb350a2592932412410f9f324aaba", size = 16994844, upload-time = "2026-07-23T06:10:38.431Z" },
+    { url = "https://files.pythonhosted.org/packages/16/74/1277dab3843794a4b8de2be46417587738348b816460ab7efc5b0c76ffaa/duckdb_cli-1.5.5-py3-none-macosx_12_0_x86_64.whl", hash = "sha256:8553fef18c443adbc73e4620328f650e4672b402719146c838523672e6ce9886", size = 18939708, upload-time = "2026-07-23T06:10:40.876Z" },
+    { url = "https://files.pythonhosted.org/packages/47/30/5991a456d83dcbc0fd6a2963921469d9f866a0eb1acea26d65420cfd88fe/duckdb_cli-1.5.5-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:3948b25f14b4f32a66dbed35259726e0cedbb204298e2b8a9ada5fc7b5a9982d", size = 19263943, upload-time = "2026-07-23T06:10:42.983Z" },
+    { url = "https://files.pythonhosted.org/packages/35/75/faac02a566505845cad4cf2f1d15ef6de01f7530f254bade17fb082e2ee5/duckdb_cli-1.5.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2dda43dbd9d112e5d7c6ffca4d226403696812a79fbb19342c2afa6312974f33", size = 21252664, upload-time = "2026-07-23T06:10:45.293Z" },
+    { url = "https://files.pythonhosted.org/packages/33/23/b44d6db880361e6aeaaa0504abefdbfbf488aa067b2608cfb5ed4ce2945a/duckdb_cli-1.5.5-py3-none-win_amd64.whl", hash = "sha256:62ca30e5e57823d5c7d2f60e1f3fdb6cfe4b3294e9a830a758a917f60ddd5ee3", size = 12925601, upload-time = "2026-07-23T06:10:47.692Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/cb/57227bea250783a66f159b3c712575ee8a76ef4be1763fef96541399592b/duckdb_cli-1.5.5-py3-none-win_arm64.whl", hash = "sha256:f65b5849ee9f1af92470e9895727e4a2020142f94ca92751b49dc261a5aa6ce5", size = 13858378, upload-time = "2026-07-23T06:10:49.865Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.32.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1117,6 +1130,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "duckdb-cli" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "sqlfluff" },
@@ -1141,6 +1155,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "duckdb-cli", specifier = ">=1.5.5" },
     { name = "pre-commit", specifier = ">=4.0" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "sqlfluff", specifier = "==4.2.2" },

@@ -216,25 +216,20 @@ backfill-wdi start end='':
 # holding the write lock makes `just run` fail with a lock error two terminals
 # away. Pass `just sql write` when you actually mean to write.
 #
-# The CLI is a separate install from the Python package — `duckdb` on PyPI
-# ships no console script — so this checks for it rather than failing with a
-# bare 'command not found'. Note that `just --list` shows only the LAST
-# comment line above a recipe, so that line has to be the summary.
+# The CLI comes from the `duckdb-cli` dev dependency (pyproject.toml), not a
+# separate `curl | sh` install — `just setup` is then all that's needed, and
+# the CLI version is the one `uv.lock` resolved rather than whatever a person's
+# machine happened to have. Note that `just --list` shows only the LAST comment
+# line above a recipe, so that line has to be the summary.
 #
 # Open the warehouse in the DuckDB CLI (`just sql write` for a writer)
 sql mode="read":
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v duckdb >/dev/null 2>&1; then
-      echo "The DuckDB CLI isn't installed. Get it with:" >&2
-      echo "  curl https://install.duckdb.org | sh" >&2
-      echo "(the 'duckdb' PyPI package is the Python library only)" >&2
-      exit 1
-    fi
     if [ "{{ mode }}" = "write" ]; then
-      duckdb data/warehouse.duckdb
+      uv run duckdb data/warehouse.duckdb
     else
-      duckdb -readonly data/warehouse.duckdb
+      uv run duckdb -readonly data/warehouse.duckdb
     fi
 
 # Lint SQL — from dbt/, because the dbt templater opens the warehouse via the

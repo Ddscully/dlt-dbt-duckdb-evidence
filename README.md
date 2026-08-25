@@ -207,17 +207,16 @@ No credentials at any point — every source is a public endpoint. For scale: th
 whole asset graph *including* the Evidence site took **3 minutes** here from a
 cold cache, most of it the one-off 45 MB retail workbook download.
 
-Two optional extras, each wanted by exactly one recipe, so install them when you
-reach for it rather than up front:
+One optional extra, wanted by exactly one recipe, so install it when you reach
+for it rather than up front:
 
 | | Needed by | Install |
 |---|---|---|
 | [Node](https://nodejs.org/) ≥ 18 | `just report`, `just materialize-site` | your package manager |
-| [DuckDB CLI](https://duckdb.org/docs/installation/) | `just sql` | `curl https://install.duckdb.org \| sh` |
 
-The `duckdb` package on PyPI is the Python library and ships no `duckdb`
-command, so the CLI is a separate install even though the warehouse is already
-readable from Python.
+`just sql` needs no separate install — the DuckDB CLI comes from the
+`duckdb-cli` dev dependency `just setup` already pulled in, pinned in
+`uv.lock` alongside the `duckdb` Python library.
 
 No `just`? The recipes map to plain commands; see the [`justfile`](./justfile).
 
