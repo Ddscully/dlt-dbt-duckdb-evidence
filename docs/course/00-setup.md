@@ -10,7 +10,7 @@ exercises run against two different ones. Know how to get back to green.
 ## Once per clone
 
 ```bash
-just setup             # uv sync: runtime + dev + notebook + orchestration
+just setup             # uv sync: runtime + dev + orchestration
 just course-sandbox    # ~50s, offline
 ```
 

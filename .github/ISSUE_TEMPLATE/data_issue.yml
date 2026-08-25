@@ -1,0 +1,52 @@
+name: A number looks wrong
+description: A figure on the dashboard, in a release, or in a model looks incorrect
+labels: ["data"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most useful issue you can file. Two things worth checking
+        first, because they explain most surprises:
+
+        - **[Coverage](https://ddscully.github.io/dlt-dbt-duckdb-evidence/coverage)**
+          — which countries and years each measure actually covers. A country
+          missing from a chart is usually missing from the source.
+        - Several figures are counter-intuitive on purpose. A country's carbon
+          intensity can improve or worsen depending only on whether GDP is
+          measured in current or constant dollars, and both numbers are correct.
+
+  - type: input
+    id: where
+    attributes:
+      label: Where is the number?
+      description: A dashboard page and chart, a model and column, or a released Parquet file.
+      placeholder: /retail — "Net revenue by month", or marts.fct_cbam_exposure.certificate_cost_eur
+    validations:
+      required: true
+
+  - type: textarea
+    id: figure
+    attributes:
+      label: What does it say, and what did you expect?
+      description: If you have an independent source for the expected value, please link it.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did you see it?
+      options:
+        - The live dashboard
+        - A published data release (DuckDB or Parquet)
+        - A warehouse I built myself
+    validations:
+      required: true
+
+  - type: textarea
+    id: query
+    attributes:
+      label: The query, if you ran one
+      render: sql
+    validations:
+      required: false

@@ -23,8 +23,10 @@ ingest:
 ingest-wdi-full:
     INGEST_WDI_FULL=1 uv run python -m ingest.pipeline
 
-# What the next incremental run will ask for. dlt keeps this in ~/.dlt/pipelines,
-# keyed on the pipeline *name* and not the destination, so it is not in this repo
+# What the next incremental run will ask for. dlt keeps this in its own data dir
+# (~/.dlt/pipelines if ~/.dlt exists, else $XDG_DATA_HOME/dlt/pipelines — see
+# build_pipeline()), keyed on the pipeline *name* and not the destination, so it
+# is not in this repo
 # and no query against the warehouse can show it: WDI's `max_year_by_indicator`
 # (one entry per indicator, so a newly added code still pulls its whole series)
 # and the ECB's `max_rate_date`. Neither is the fetch floor — `wdi_start_year()`
@@ -47,6 +49,18 @@ dbt-deps:
 # T: build + test dbt models
 dbt-build: dbt-deps
     cd dbt && uv run dbt build
+
+# Every headless `dagster` recipe below depends on this, because @dbt_assets
+# reads dbt/target/manifest.json at *import* time and dbt/target/ is gitignored —
+# so on a fresh clone the graph raises DagsterDbtManifestNotFoundError before a
+# single asset runs. `just dagster` gets it for free (dbt_project.prepare_if_dev()
+# fires under the dev CLI, which sets DAGSTER_IS_DEV_CLI); `dagster job execute`
+# and `dagster asset` do not, which is why all four workflows run this same pair
+# by hand.
+# (`just --list` renders only the line directly above a recipe.)
+# Write dbt/target/manifest.json — the Dagster graph won't load without it
+dbt-parse: dbt-deps
+    cd dbt && uv run dbt parse
 
 # Unit tests only — mocked inputs, asserted outputs, no warehouse read. The inner
 # loop when changing model *logic*: `dbt build` runs these too, but this is ~2s
@@ -160,14 +174,18 @@ dagster:
 # Two jobs, because an asset job takes a single partitions definition and the
 # retail ingest is monthly where wb_wdi is yearly (see orchestration/definitions.py).
 # `load_retail` has to come first: dbt reads raw.retail_invoice_lines.
-materialize:
+# (`just --list` renders only the line directly above a recipe.)
+# Full pipeline ordered by the asset graph, minus the Evidence site
+materialize: dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
     uv run --group orchestration dagster job execute -m orchestration.definitions -j full_refresh
 
 # The same graph plus the Evidence site on the end of it (requires Node).
 # This is what .github/workflows/pages.yml runs.
-materialize-site:
+# (`just --list` renders only the line directly above a recipe.)
+# The same graph with the Evidence site on the end of it (needs Node)
+materialize-site: dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
     uv run --group orchestration dagster job execute -m orchestration.definitions -j publish_site
@@ -179,7 +197,7 @@ materialize-site:
 # `dagster asset list -m orchestration.definitions --select '<sel>'`.
 # (`just --list` shows only the line below, so keep the summary last.)
 # Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi*'` (* = all downstream, + = one layer)
-materialize-select selection:
+materialize-select selection: dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster asset materialize \
         -m orchestration.definitions --select '{{ selection }}'
@@ -193,7 +211,7 @@ materialize-select selection:
 # and `roots(...)` work here and there alike.
 # (`just --list` renders only the line directly above a recipe.)
 # Print the assets a selection resolves to, without materializing any of them
-materialize-preview selection:
+materialize-preview selection: dbt-parse
     uv run --group orchestration dagster asset list \
         -m orchestration.definitions --select '{{ selection }}'
 
@@ -203,7 +221,7 @@ materialize-preview selection:
 # table. Only `raw/wb_wdi` is partitioned, so this can't pull the downstream
 # models along (the CLI rejects a range over unpartitioned assets); follow with
 # `just dbt-build` or `just materialize`.
-backfill-wdi start end='':
+backfill-wdi start end='': dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "$DAGSTER_HOME"
@@ -339,7 +357,7 @@ course-query sql:
 # restore-history` can only recover what a published release happened to carry.
 #
 # `just clean` reclaims the safe tier; `just clean deep` also takes
-# reports/node_modules (931 MB, restored by `just report`, needs Node).
+# reports/node_modules (694 MB, restored by `just report`, needs Node).
 #
 # Reclaim gitignored build output (`deep` adds node_modules; `warehouse` needs --force)
 clean scope="safe" force="":

@@ -66,4 +66,8 @@ not a fixed record.
 <a href="https://frankfurter.dev">ECB reference rates via Frankfurter</a>,
 <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621">Implementing Regulation (EU) 2025/2621</a>,
 <a href="https://archive.ics.uci.edu/dataset/502/online+retail+ii">UCI Online Retail II</a>.
-Built with dlt, dbt, DuckDB, Polars, Dagster &amp; Evidence.</small>
+Built with dlt, dbt, DuckDB, Polars, Dagster &amp; Evidence &mdash; every model,
+test and workflow behind these numbers is on
+<a href="https://github.com/Ddscully/dlt-dbt-duckdb-evidence">GitHub</a>, along
+with a <a href="https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest">monthly
+release</a> of the whole warehouse as DuckDB and Parquet.</small>

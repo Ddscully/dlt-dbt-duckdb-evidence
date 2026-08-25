@@ -857,12 +857,17 @@ def build_pipeline() -> dlt.Pipeline:
     """The one dlt pipeline definition, shared by the CLI and the Dagster assets.
 
     A fixture run gets its own pipeline name, which is what keeps its *state*
-    out of the real pipeline's. dlt keeps state in its own pipelines directory
-    (`~/.local/share/dlt/pipelines/<name>/`) keyed on the pipeline name alone —
-    not on the destination — so a fixture run leaving
-    a WDI watermark behind would hand it to the next real run, which would then
-    fetch a five-year window on the assumption that history it never loaded is
-    already there.
+    out of the real pipeline's. dlt keeps state in its own pipelines directory,
+    keyed on the pipeline name alone — not on the destination — so a fixture run
+    leaving a WDI watermark behind would hand it to the next real run, which
+    would then fetch a five-year window on the assumption that history it never
+    loaded is already there.
+
+    That directory is `~/.dlt/pipelines/<name>/` **if `~/.dlt` already exists**,
+    and `$XDG_DATA_HOME/dlt/pipelines/<name>/` otherwise — dlt prefers the legacy
+    location when it finds one and says so in a UserWarning. Both paths can exist
+    on one machine with only the first live, so read the warning rather than the
+    directory listing: `just dlt-state` asks dlt instead of guessing.
     """
     # **Arrow data does not get `_dlt_load_id` unless you ask for it.** dlt adds
     # that column when it normalises row objects, but the Arrow/Parquet path

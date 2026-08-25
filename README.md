@@ -1,8 +1,18 @@
-# Emissions, Energy & Development
+# A Public-Data Warehouse, Built End to End
 
+*dlt → DuckDB → dbt → Polars → Evidence, orchestrated by Dagster. Rebuilt from
+live sources on every push, and the warehouse itself is published, not just the
+dashboard.*
+
+[![ci](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/ci.yml/badge.svg)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/ci.yml)
+[![nightly](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/nightly.yml/badge.svg)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/nightly.yml)
+[![pages](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/pages.yml/badge.svg)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/pages.yml)
 [![data snapshot](https://img.shields.io/github/v/release/Ddscully/dlt-dbt-duckdb-evidence?sort=date&filter=data-*&label=data%20snapshot&color=1f6feb)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 ### 📊 [**See the live dashboard →**](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
+
+[![The Evidence dashboard: the Eight Findings page, with the site navigation, three headline figures and a scatter of the year each large emitter's CO₂ peaked](./docs/assets/dashboard.png)](https://ddscully.github.io/dlt-dbt-duckdb-evidence/findings)
 
 A data pipeline over seven public feeds, built at **two grains that are usually
 two different projects** — and deliberately kept in one warehouse, because the
@@ -47,9 +57,8 @@ differently.</sub>
 
 ---
 
-Under the hood it's an end-to-end demonstration of a **modern, lightweight
-data-engineering & BI stack**. Everything runs locally with `uv` against a single
-DuckDB file: no cloud warehouse, no credentials, no bill.
+The stack is deliberately **lightweight**. Everything runs locally with `uv`
+against a single DuckDB file: no cloud warehouse, no credentials, no bill.
 
 ```
 dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
@@ -87,16 +96,17 @@ The README is the tour. The detail lives in six files:
 |---|---|
 | [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the schemas they land in, and the Parquet lake beside them |
 | [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the Dagster asset graph, the three jobs, backfills and freshness policies |
-| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 369 dbt tests, the mart contracts, and the groups, exposures and model versions around them |
+| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 387 dbt tests, the mart contracts, and the groups, exposures and model versions around them |
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
 | [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | SLA, run cost, what breaks at 1000×, what I'd do differently |
 
-And [`docs/course/`](./docs/course/) teaches the same warehouse as material: ten
-modules for analytics engineers, built around the failures that stay green — a
-one-word join edit that drops two thirds of the countries with all 369 tests
-still passing, a cross-section that silently loses 115 of 205 countries. It has
-its own sandbox (`just course-sandbox`) so the exercises can break things.
+And [`docs/course/`](./docs/course/) teaches the same warehouse as material for
+analytics engineers, built around the failures that stay green — a one-word join
+edit that drops two thirds of the countries with all 369 tests still passing, a
+cross-section that silently loses 115 of 205 countries. Modules 00–04 are
+written; 05–10 are outlined in the course index. It has its own sandbox
+(`just course-sandbox`) so the exercises can break things.
 
 Plus [`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) for SQL and model
 conventions, [`tests/README.md`](./tests/README.md) for the two test tiers,
@@ -203,9 +213,23 @@ just sql        # poke around the warehouse in the DuckDB CLI
 just report     # build the Evidence dashboard
 ```
 
-No credentials at any point — every source is a public endpoint. For scale: the
-whole asset graph *including* the Evidence site took **3 minutes** here from a
-cold cache, most of it the one-off 45 MB retail workbook download.
+No credentials at any point — every source is a public endpoint, and nothing but
+uv and `just` has to exist on the machine first: uv reads `.python-version` and
+fetches CPython 3.13 itself if you haven't got it.
+
+For scale: the whole asset graph *including* the Evidence site took **3 minutes**
+here from a cold cache, most of it the one-off 45 MB retail workbook download,
+and `just run` on its own is ~95 s. Budget **~2.5 GB** on disk once everything is
+built — the venv is 807 MB and `reports/node_modules` another 694 MB, with the
+warehouse, the Parquet lake and the built site making up the rest. All of it is
+gitignored and all of it is regenerable: `just clean` reclaims the build output,
+`just clean deep` also drops `node_modules`.
+
+**On a plane, or don't want to hit seven public APIs?** `just test-pipeline`
+runs the entire pipeline offline in ~30 s against the fixtures in
+`tests/fixtures/ingest/`, into a throwaway warehouse — it is what CI runs.
+`just course-sandbox` does the same into a warehouse that persists, at
+`data/course/`, which is what the course exercises are built to break.
 
 One optional extra, wanted by exactly one recipe, so install it when you reach
 for it rather than up front:
@@ -239,9 +263,9 @@ the live endpoints and opens an issue when a source has moved, which is the cue
 to fix the pipeline and `just record-fixtures`. Details in
 [`tests/README.md`](./tests/README.md).
 
-Alongside them, `just dbt-build` runs 369 dbt tests and enforces a schema
-contract on all 17 marts. What each gate catches, and the groups, exposures and
-model versions built around them, are in
+Alongside them, `just dbt-build` runs 387 tests — 369 data tests and 18 unit
+tests — and enforces a schema contract on all 17 marts. What each gate catches,
+and the groups, exposures and model versions built around them, are in
 [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md).
 
 ## Published dashboard
@@ -294,11 +318,11 @@ Code is [MIT](./LICENSE). The data is not this project's to license: OWID's
 [CO₂](https://github.com/owid/co2-data) and
 [energy](https://github.com/owid/energy-data) datasets are CC BY 4.0, World Bank
 WDI is CC BY 4.0, Eurostat data carries its own
-[reuse policy](https://ec.europa.eu/eurostat/about-us/policies/copyright), the
+[reuse policy](https://ec.europa.eu/eurostat/help/copyright-notice), the
 CBAM default values are EU law, reusable under
 [Decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj), the
 euro reference rates are the ECB's, under its
-[reuse policy](https://www.ecb.europa.eu/services/using-our-site/copyright/html/index.en.html),
+[reuse policy](https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html),
 and [UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
 (Chen, D., 2019) is CC BY 4.0.
 

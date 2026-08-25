@@ -1,0 +1,17 @@
+blank_issues_enabled: true
+contact_links:
+  - name: The live dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/
+    about: Nothing to install — the numbers, rebuilt from the live sources on every push.
+
+  - name: Why a figure looks the way it does
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/coverage
+    about: Which countries and years each measure actually covers, and where two sources disagree. Worth reading before filing a wrong-number issue.
+
+  - name: Reusing this stack for your own project
+    url: https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/docs/REUSING_THIS_STACK.md
+    about: What carries over, what has to be rewritten, and the decisions that are expensive to change later.
+
+  - name: How the pipeline is put together
+    url: https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/docs/FOR_REVIEWERS.md
+    about: The 90-second tour — SLA, what a run costs, what breaks at 1000x.
