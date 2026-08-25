@@ -30,11 +30,8 @@
   },
   "permissions": {
     "allow": [
-      "Bash(just lint)",
       "Bash(just test)",
-      "Bash(just test-pipeline)",
-      "Bash(just report)",
-      "Bash(just course-query *)"
+      "Bash(just test-pipeline)"
     ]
   }
 }
