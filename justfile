@@ -23,6 +23,22 @@ ingest:
 ingest-wdi-full:
     INGEST_WDI_FULL=1 uv run python -m ingest.pipeline
 
+# What the next incremental run will ask for. dlt keeps this in ~/.dlt/pipelines,
+# keyed on the pipeline *name* and not the destination, so it is not in this repo
+# and no query against the warehouse can show it: WDI's `max_year_by_indicator`
+# (one entry per indicator, so a newly added code still pulls its whole series)
+# and the ECB's `max_rate_date`. Neither is the fetch floor — `wdi_start_year()`
+# subtracts WDI_LOOKBACK_YEARS from the watermark, because the World Bank revises
+# what it has already published.
+#
+# `just dlt-state modern_data_stack_fixtures` reads the fixture pipeline, which
+# carries the `_fixtures` suffix precisely so a fixture run cannot move the real
+# watermark. Needs at least one `just ingest` to have happened.
+# (`just --list` renders only the line directly above a recipe.)
+# Show dlt's incremental state — the WDI watermark and the ECB's last fixing
+dlt-state pipeline="modern_data_stack":
+    uv run dlt pipeline {{ pipeline }} info -v
+
 # Install dbt packages (dbt_utils) into dbt/dbt_packages/ — gitignored, so this
 # is needed once per clone and after any packages.yml change
 dbt-deps:
@@ -44,6 +60,21 @@ dbt-unit-test: dbt-deps
 # when the pipeline last ran, not when the publishers last updated.
 dbt-freshness: dbt-deps
     cd dbt && uv run dbt source freshness
+
+# The catalog is read out of the warehouse, so run `just dbt-build` first or the
+# columns come back with no types. ~7s. Output is gitignored; `just clean` drops
+# it with the rest of dbt/target. Nothing else here displays this layer — the
+# Dagster UI shows the asset graph and check results, Evidence shows the data.
+# (`just --list` renders only the line directly above a recipe, so the one-line
+# summary goes last, not first.)
+# Render the dbt metadata layer to dbt/target/ — columns, contracts, groups, exposures, versions, tests
+dbt-docs: dbt-deps
+    cd dbt && uv run dbt docs generate
+
+# Regenerates first, so what you are reading is never behind the models.
+# Serve the dbt docs site on :8080 (blocks; ctrl-c to stop)
+dbt-docs-serve: dbt-docs
+    cd dbt && uv run dbt docs serve
 
 # Write the year-partitioned Parquet archive to data/lake/ (gitignored)
 lake:
@@ -151,6 +182,19 @@ materialize-site:
 materialize-select selection:
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster asset materialize \
+        -m orchestration.definitions --select '{{ selection }}'
+
+# The read-only half of the recipe above: resolves a selection and prints the
+# asset keys it matches, running nothing. Worth reaching for first, because a
+# selection that matches *nothing* is not an error — `dagster asset materialize`
+# exits 0 having done nothing at all. A bare prefix is the way to get one:
+# `marts/*` reads as "downstream of the key `marts/`" and matches none, where
+# `key:"marts/*"` matches the seventeen marts. `group:`, `kind:`, `sinks(...)`
+# and `roots(...)` work here and there alike.
+# (`just --list` renders only the line directly above a recipe.)
+# Print the assets a selection resolves to, without materializing any of them
+materialize-preview selection:
+    uv run --group orchestration dagster asset list \
         -m orchestration.definitions --select '{{ selection }}'
 
 # Re-load WDI for one year or a range of years: `just backfill-wdi 1995` or

@@ -40,6 +40,10 @@ dbt/target/
 dbt/dbt_packages/
 dbt/logs/
 dbt/.user.yml
+# dbt takes this lock around package state and does not always remove it — an
+# empty file that `git status` then reports as untracked, which is one stray
+# `git add -A` away from being committed.
+dbt/package-lock.concurrent-update-lock
 
 # dlt
 .dlt/secrets.toml

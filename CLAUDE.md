@@ -69,9 +69,12 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just setup` | `uv sync --group dev --group orchestration` |
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
+| `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
 | `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 18 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
+| `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
+| `just dbt-docs-serve` | the same, then serve it on :8080 |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
 | `just lake` | year-partitioned Parquet archive of the warehouse → `data/lake/` |
@@ -80,6 +83,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just materialize` | same pipeline, ordered by the asset graph (`load_retail` then `full_refresh`, no Evidence) |
 | `just materialize-site` | the same two jobs + the Evidence site (`publish_site`; needs Node) |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
+| `just materialize-preview '<sel>'` | print what a selection resolves to, materializing nothing — a selection matching zero assets exits 0 |
 | `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — the partitioned `raw/wb_wdi` asset |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
 | `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
@@ -1504,6 +1508,63 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
   it doesn't try to build the site either.
 - Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile).
   Only `dagster.yaml` is checked in.
+- **This is deliberately not a `dg`-shaped project, and the two halves of that
+  decision are separable.** `create-dagster` scaffolds a `defs/` tree that
+  autoloads, a `[tool.dg.project]` block and YAML components; `dagster-expert`,
+  the vendor skill, is written around the `dg` CLI and assumes all of it. Costed
+  2026-08-25 rather than assumed:
+  - **The autoloading half is already here and free.** `dagster.components` and
+    `dagster.load_from_defs_folder` ship in `dagster` core — no extra package.
+    What it would buy is deleting `tests/test_definitions.py`, because an
+    unregistered asset becomes impossible rather than merely caught. That trade
+    is close to a wash: the test costs ~1s and *also* documents two traps that
+    the framework would silently absorb (`get_all_asset_keys()` is too wide;
+    `AssetChecksDefinition` subclasses `AssetsDefinition`, so an `isinstance`
+    chain in the wrong order measures nothing).
+  - **The CLI half is +20 packages on a 151-package tree** — `uv pip install
+    --dry-run dagster-dg-cli` installs 24 and removes 4, pulling
+    `dagster-cloud-cli`, `github3-py`, `cryptography`, `pyjwt`, `httpx`,
+    `questionary` and `yaspin` into a project with no Dagster Plus deployment,
+    and forcing dagster 1.13.15 → 1.13.19. That is the harlequin/marimo shape
+    exactly, one section up.
+  - **`uvx dg` is the trap, and this repo has already refused it twice.** It
+    dodges the lockfile — which is the argument that lost pyright to ty
+    ("an unpinned global binary no lockfile here can see") and the reason
+    `ty-lsp` runs `uv run ty server` rather than a bare `ty`.
+  - **Components would delete the explanation, which is the deliverable.** The
+    skill's own dbt page reserves the pythonic `@dbt_assets` path for "complex
+    customization" — `FolderGroupDbtTranslator` is exactly that, and its comment
+    is longer than its code on purpose.
+  - **Declarative automation is the adjacent question, and the answer is the
+    same for a different reason: nothing here runs a daemon.** All four
+    workflows are one-shot `dagster job execute`; the daemon exists only under
+    `just dagster`, locally, to serve the UI. An `AutomationCondition` is
+    evaluated by an automation sensor *in the daemon*, so DA here would never
+    fire at all — it would restate one legible eight-line `ScheduleDefinition`
+    across nine asset definitions and be strictly *less* functional than the
+    STOPPED schedule it replaced. Dagster's own decision tree routes "simple,
+    fixed time-based execution" to schedules and reserves DA for partition-aware
+    and graph-state-dependent triggering; `ScheduleDefinition` raises no
+    deprecation warning on 1.13, so this is not a legacy path being tolerated.
+    - **The partition angle is the near-miss.** Two assets here *are*
+      partitioned, which is DA's stated niche — but backfills are deliberately
+      manual (`just backfill-wdi`, "an explicit act with a key you can point
+      at"), so DA would automate precisely what this project chose to keep
+      explicit.
+    - **What would change it is circumstance, not taste**: a long-running daemon
+      *and* cadences that diverge — FX is daily, OWID annual, retail a closed
+      archive. Today everything moves together on one cron, so there is nothing
+      for a condition to express. Note the repo already runs the *observability*
+      half of that world: `FreshnessPolicy` on every asset. Heavy use of
+      Dagster's modelling with almost none of its runtime is a coherent position
+      here, not a half-finished adoption.
+  - **The skill's depth and this repo's content are close to disjoint**, which is
+    the part worth knowing before reaching for it. Grepping its 172 reference
+    files for what `assets.py` actually calls: `FreshnessPolicy` 1 (in a
+    components file, dead here), `BackfillPolicy` 0, `end_offset` 0,
+    `asset_check` 1 (in passing), against `AutomationCondition` 10 — which this
+    project uses nowhere. It is worth loading for **asset selection syntax** and
+    the **dagster-dbt/dlt integration pages**, and not for anything else here.
 
 ## Testing (`tests/`)
 
@@ -1533,6 +1594,49 @@ Gotchas:
   - **Restore from a copy, never `git checkout <file>`.** During this work the
     tree is dirty by definition; `git checkout` is a revert to HEAD, not an
     undo, and it destroyed a round of uncommitted edits to three files.
+- **The seven `@dg.asset_check` bodies are unit tested in
+  `tests/test_asset_checks.py`, and were not before 2026-08-25.**
+  `tests/test_definitions.py` proved each check was *registered* — that it would
+  run at all. Nothing proved any of them would *notice*: the bodies were only
+  ever executed by a full materialize, so `just test` could not tell a working
+  check from one whose logic had inverted, and the answer arrived minutes later
+  in `just test-pipeline` instead of in the ~1s loop.
+  `AssetChecksDefinition` is callable and none of the seven take a `context`, so
+  no execution harness is needed — point the module's `DUCKDB_PATH` (or
+  `LAKE_DIR`, or `page_routes`) at a throwaway, call the check, read the
+  `AssetCheckResult`. **Anything under `tests/` importing the orchestration layer
+  needs the dlt teardown fixture**, and `test_asset_checks.py` shipped an
+  identical copy of it alongside `test_definitions.py`'s rather than sharing
+  one — a code review caught the duplication and it now lives once, in
+  `tests/conftest.py`.
+  - **Ten mutations, nine caught, and the one survivor is the finding** — it is
+    dead code, and provably so. Both of the first round's survivors were worth
+    chasing rather than papering over: one was a redundant clause, the other a
+    fixture that could not isolate what it claimed to.
+  - **`co2_intensity_rank_is_dense` states a condition that cannot be reached.**
+    Deleting `min(co2_intensity_rank) <> 1` changes no outcome: if
+    `max == count(distinct) == k`, the k distinct values are positive integers
+    all <= k, so they are exactly {1..k} and the minimum is necessarily 1.
+    Brute-forced over every multiset drawn from 1..8 up to length 6 — nothing
+    reaches the term. It is the fourth unreachable branch recorded in this file,
+    after `dim_date`'s eleven unbuilt fiscal policies, the retail
+    `<> 'adjustment'` clause and `period_is_complete`'s boundary, and the only
+    one that is *provably* unreachable rather than merely unreached by the data.
+    The clause stays, because it states the intent; the docstring next to the
+    case says so, to save the next reader an afternoon on a fixture that cannot
+    exist.
+  - **`lake_matches_warehouse` compares three numbers, so it takes three cases,
+    and the first fixture only reached one.** Dropping a partition moves the row
+    count *and* the span together, so a mutation comparing only `count(*)` still
+    went red and the span half was never measured. Both drift cases keep the row
+    count equal — 2020-2022 is three rows either way — and move exactly one end,
+    via a stale `year=` directory an earlier run left behind, which is precisely
+    what `overwrite true` does *not* prevent. **One fixture moving both ends is
+    not enough**: it survives a mutation that drops either one, which is why
+    these are parametrised into `min-year-only` and `max-year-only` rather than
+    written as a single case. Same lesson as the FX partitioning fixture, where
+    the symmetric setup returns the right answer under the mutation too.
+
 - **A determinism fix invalidates the evidence gathered for it.** Everything
   measured while diagnosing `fct_retail_returns`' tied `asof` came from a model
   that gave a different answer every build, and those figures were then quoted
