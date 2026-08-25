@@ -140,6 +140,10 @@ warehouse that bills by the second, that table is where the invoice comes from.
    where the warehouse stops being one file. That's the migration the shape is
    designed for: dbt, the tests, the asset graph and Evidence all move to
    Snowflake/BigQuery/MotherDuck on a profile change; dlt swaps a destination.
+   Evidence needs one extra step now that `reports/package.json` carries only
+   the DuckDB connector — `npm install --force @evidence-dev/snowflake` and a
+   line in `evidence.config.yaml`'s `datasources`, which is the trade the size
+   saving makes.
 3. **Full-refresh materialisation, for 25 of the 26 models.** Every mart is
    `+materialized: table` and rebuilt whole. That is deliberate rather than
    pending: each one re-derives a source that gets fully re-fetched, so

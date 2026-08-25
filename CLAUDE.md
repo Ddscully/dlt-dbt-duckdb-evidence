@@ -227,6 +227,42 @@ Types are ty (`just typecheck`), added 2026-08-24. It is **not** in pre-commit a
 - **`npm` is deliberately left on the default.** Those are `^` ranges, so the
   major *is* the pin and an Evidence 40 → 41 bump is a real upgrade worth seeing
   as a PR. `lockfile-only` there would quietly cap the site at 40.x forever.
+- **`reports/package.json` cannot be resolved from scratch, and the committed
+  lockfile is what hides it.** A fresh `npm install` against the *unmodified*
+  file fails with `ERESOLVE` on a `typescript` peer conflict between
+  `svelte-preprocess` and `svelte2tsx` — on npm 9 **and** npm 11, so it is not
+  an old-npm artifact. `npm ci` works only because it never re-resolves, which
+  is why `scripts/build_report.py` prefers it on a cold checkout and why nothing
+  has ever noticed. Editing that file therefore needs `npm install --force`.
+  - **`--legacy-peer-deps` is the trap, because it fails later and elsewhere.**
+    It resolves, installs, and prints nothing alarming — then `evidence build`
+    dies with `Could not resolve peer dependency "@sveltejs/vite-plugin-svelte"`,
+    because the flag skips peer installation. `--force` keeps the peers and
+    tolerates the conflict, which is the one that produces a tree that builds.
+  - **Reconcile the existing lock; never delete it.** `npm install --force` with
+    the committed `package-lock.json` in place gave a purely subtractive diff —
+    460 packages removed, **0 added, 0 version-changed**, and ten metadata-only
+    edits (the root dependency list, plus nine packages gaining `"peer": true`
+    now that they are reachable only as peers). Deleting the lock and
+    re-resolving also works and costs 189 MB, but re-picks every transitive
+    version in the tree, which is an unreviewable diff for a size change.
+    **Check the parsed structure, not git's line count**: the textual diff reads
+    1,950 insertions against 7,903 deletions, which looks like a rewrite and is
+    not one — comparing the `packages` objects is what shows nothing moved.
+- **The site shipped 14 source connectors and used one.** `package.json` was the
+  stock Evidence template — bigquery, databricks, mssql, mysql, postgres,
+  snowflake, sqlite, trino, motherduck, csv and source-javascript, for a project
+  whose `evidence.config.yaml` registers `@evidence-dev/duckdb` and nothing else,
+  so the other eleven were never even loaded. The connector packages are ~1 MB
+  each; the cost is what they drag behind them — `mssql → tedious →
+  @azure/identity` is 72 MB and `snowflake → snowflake-sdk → @aws-sdk/client-s3`
+  another 24 MB with `@smithy`. Trimmed 2026-08-25: **931 MB → 694 MB**.
+  - Three of the four `overrides` (`sqlite3`, `jsonwebtoken`, `axios`) were
+    security pins on connector transitives and had nothing left to override.
+    Only `trim` still resolves to a package in the tree.
+  - **Evidence itself was already current** and is easy to mistake for the
+    problem: 40.1.8 *is* `latest`, with `core-components` 5.4.2 and `duckdb`
+    2.0.1 likewise. There is no 41. The weight was never the framework.
 - **Dependabot scans the moment the config lands**, not on the next scheduled
   date — expect PRs immediately after touching that file.
 - **A yanked release stays locked until something re-resolves.** `uv.lock` held
