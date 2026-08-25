@@ -72,6 +72,8 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
 | `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 18 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
+| `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
+| `just dbt-docs-serve` | the same, then serve it on :8080 |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
 | `just lake` | year-partitioned Parquet archive of the warehouse → `data/lake/` |

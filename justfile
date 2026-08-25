@@ -45,6 +45,21 @@ dbt-unit-test: dbt-deps
 dbt-freshness: dbt-deps
     cd dbt && uv run dbt source freshness
 
+# The catalog is read out of the warehouse, so run `just dbt-build` first or the
+# columns come back with no types. ~7s. Output is gitignored; `just clean` drops
+# it with the rest of dbt/target. Nothing else here displays this layer — the
+# Dagster UI shows the asset graph and check results, Evidence shows the data.
+# (`just --list` renders only the line directly above a recipe, so the one-line
+# summary goes last, not first.)
+# Render the dbt metadata layer to dbt/target/ — columns, contracts, groups, exposures, versions, tests
+dbt-docs: dbt-deps
+    cd dbt && uv run dbt docs generate
+
+# Regenerates first, so what you are reading is never behind the models.
+# Serve the dbt docs site on :8080 (blocks; ctrl-c to stop)
+dbt-docs-serve: dbt-docs
+    cd dbt && uv run dbt docs serve
+
 # Write the year-partitioned Parquet archive to data/lake/ (gitignored)
 lake:
     uv run python -m lake.archive

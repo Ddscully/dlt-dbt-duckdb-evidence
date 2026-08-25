@@ -38,6 +38,25 @@ just materialize-select 'raw/wb_wdi*'     # one source + everything downstream
 just backfill-wdi 1990 1995               # re-load WDI for a range of years
 ```
 
+The same runs are available from the UI — `just dagster`, then launch
+`load_retail` and `full_refresh` from the Jobs list, or materialize a selection
+straight off the asset graph. Three things the UI won't tell you:
+
+- **The ordering isn't enforced there either.** Launch `full_refresh` first and
+  it fails inside dbt with `Catalog Error: Table with name retail_invoice_lines
+  does not exist!` — one layer downstream of the actual mistake.
+- **Ad-hoc graph selections can do something the named jobs can't.** They run
+  through Dagster's implicit global job, which is the only one where
+  `allow_different_partitions_defs` is `True`, so a selection made in the UI may
+  span the yearly WDI partitions and the monthly retail ones together. That is
+  exactly what `define_asset_job` refuses, and it is why there are three jobs.
+- **It is the easiest cold start**, because `dbt_project.prepare_if_dev()` fires
+  only under `dagster dev`: the UI runs `dbt deps` and `dbt parse` for you, where
+  the headless recipes need the manifest to exist already.
+
+DuckDB takes one writer at a time, so don't leave `just sql write` open beside a
+run.
+
 ## Three jobs, and why
 
 The site is the one asset held out of `full_refresh`. It shells out to npm, and
