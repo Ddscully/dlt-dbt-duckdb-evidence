@@ -1519,6 +1519,29 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
     skill's own dbt page reserves the pythonic `@dbt_assets` path for "complex
     customization" — `FolderGroupDbtTranslator` is exactly that, and its comment
     is longer than its code on purpose.
+  - **Declarative automation is the adjacent question, and the answer is the
+    same for a different reason: nothing here runs a daemon.** All four
+    workflows are one-shot `dagster job execute`; the daemon exists only under
+    `just dagster`, locally, to serve the UI. An `AutomationCondition` is
+    evaluated by an automation sensor *in the daemon*, so DA here would never
+    fire at all — it would restate one legible eight-line `ScheduleDefinition`
+    across nine asset definitions and be strictly *less* functional than the
+    STOPPED schedule it replaced. Dagster's own decision tree routes "simple,
+    fixed time-based execution" to schedules and reserves DA for partition-aware
+    and graph-state-dependent triggering; `ScheduleDefinition` raises no
+    deprecation warning on 1.13, so this is not a legacy path being tolerated.
+    - **The partition angle is the near-miss.** Two assets here *are*
+      partitioned, which is DA's stated niche — but backfills are deliberately
+      manual (`just backfill-wdi`, "an explicit act with a key you can point
+      at"), so DA would automate precisely what this project chose to keep
+      explicit.
+    - **What would change it is circumstance, not taste**: a long-running daemon
+      *and* cadences that diverge — FX is daily, OWID annual, retail a closed
+      archive. Today everything moves together on one cron, so there is nothing
+      for a condition to express. Note the repo already runs the *observability*
+      half of that world: `FreshnessPolicy` on every asset. Heavy use of
+      Dagster's modelling with almost none of its runtime is a coherent position
+      here, not a half-finished adoption.
   - **The skill's depth and this repo's content are close to disjoint**, which is
     the part worth knowing before reaching for it. Grepping its 172 reference
     files for what `assets.py` actually calls: `FreshnessPolicy` 1 (in a
