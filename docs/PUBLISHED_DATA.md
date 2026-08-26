@@ -36,7 +36,7 @@ to the newest one, so the URLs above never go stale.
 files are the modelled layers only; anyone who wants dlt's landing tables or the
 snapshots downloads the database.
 
-## Four things to know if you're copying this setup
+## What to know if you're copying this setup
 
 **Alias it `warehouse`.** dbt writes the `staging` views with fully-qualified
 SQL, and DuckDB names a catalog after its file, so those views only resolve under
@@ -65,8 +65,20 @@ with no identifier at all. Treat the retail tables as personal data, because tha
 is what they are. [`DATA_PROTECTION.md`](./DATA_PROTECTION.md) has the
 classification, the measurement and the decisions.
 
-**The DuckDB file has a storage format.** It was written by whatever version the
-workflow resolved, recorded in `manifest.json`, and older clients may refuse it.
+**The DuckDB file has a storage format, and it is not the version that wrote
+it.** `manifest.json` records both, because they answer different questions:
+`duckdb_version` is the writer, `storage_version` is what a reader has to
+support. Every DuckDB from 1.x writes format **64** by default — the one
+`v0.10.0` through `v1.1.3` all read — so a file written by 1.5.5 opens on a
+client five years older, and the release notes say so rather than hedging.
+
+The export refuses to publish a format above that ceiling, and
+`tests/test_export.py` fails if the installed DuckDB stops writing it. That
+matters because DuckDB 2.0 ships a new default storage format: nothing here caps
+`duckdb>=1.1`, so the change would otherwise arrive as one line of a grouped
+monthly Dependabot PR, pass every test in the repo — they all write and read with
+the same binary — and first show up as a consumer unable to open a release.
+Raising the ceiling is a decision that strands old readers, not a lockfile edit.
 The Parquet files carry no such constraint, which is why both ship.
 
 **`history` is inherited, not rebuilt.** Everything else in the file is built

@@ -12,6 +12,16 @@ view raises `Catalog "warehouse" does not exist` while the tables keep working �
 a half-broken artifact. The same trap catches consumers, which is why the release
 notes have to tell them which alias to `ATTACH` as.
 
+**A published database file also has a storage format, and it is not the writer's
+version.** DuckDB 1.5.5 writes storage version 64 — the format `v0.10.0` through
+`v1.1.3` all read — because 1.x keeps the old default deliberately. So the
+manifest's `duckdb_version` says who wrote the file and answers a *different*
+question from "can I open it", which is the only one a consumer has. `export()`
+records the format itself and takes a ceiling it refuses to exceed, because the
+mechanism that would move it is a lockfile bump reviewed as routine drift, and
+every test in a repo passes such a bump: they all write and read with the same
+binary.
+
 Which schemas ship, who the data belongs to, and what the release notes say are
 all the project's to answer; see `scripts/export_warehouse.py`.
 """
@@ -39,6 +49,34 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def storage_version(path: Path) -> int:
+    """The storage format version recorded in a DuckDB file's header.
+
+    Read off the bytes rather than asked of a connection, because there is no SQL
+    that answers it: `duckdb_databases()` reports an empty `options` map, there is
+    no pragma, and the only surface DuckDB offers is `ATTACH … (STORAGE_VERSION
+    …)` on the *write* side. Reading the artifact is the right shape for a release
+    gate regardless — it describes the file that ships rather than the process
+    that produced it.
+
+    The header is an 8-byte checksum, the 4-byte magic `DUCK`, then the version as
+    a little-endian uint64. Measured against files written with an explicit
+    `STORAGE_VERSION` on DuckDB 1.5.5:
+
+        64  v0.10.0 … v1.1.3      67  v1.4.x
+        65  v1.2.x                68  v1.5.x
+        66  v1.3.x
+
+    so a *lower* number is the more widely readable file, and 64 is the floor
+    DuckDB still offers.
+    """
+    with path.open("rb") as fh:
+        head = fh.read(20)
+    if len(head) < 20 or head[8:12] != b"DUCK":
+        raise ValueError(f"not a DuckDB database file: {path}")
+    return int.from_bytes(head[12:20], "little")
 
 
 def git_sha() -> str | None:
@@ -172,6 +210,7 @@ def export(
     extra_manifest: Callable[[duckdb.DuckDBPyConnection], dict] | None = None,
     prepare_copy: Callable[[duckdb.DuckDBPyConnection], dict] | None = None,
     period_column: str = "year",
+    max_storage_version: int | None = None,
 ) -> dict:
     """Build `out_dir` from `duckdb_path`. Returns the manifest.
 
@@ -193,6 +232,13 @@ def export(
     rather than left to `export_table`'s default because a project whose period
     is `month` or `fiscal_year` would otherwise get a manifest silently missing
     coverage for every table.
+
+    `max_storage_version` is the format ceiling the published file may not exceed
+    (see `storage_version`). It has **no default**: a package that picked one
+    would be asserting a compatibility promise on behalf of a project whose
+    consumers it knows nothing about, and the number is only meaningful next to
+    the minimum reader version a project actually states. `None` records the
+    format in the manifest and refuses nothing.
     """
     src = Path(duckdb_path)
     if not src.exists():
@@ -235,6 +281,27 @@ def export(
         finally:
             shutil.rmtree(staging_dir, ignore_errors=True)
 
+    # Measured on the finished copy, after `prepare_copy`'s recompaction: that is
+    # the file that gets uploaded, and the recopy rewrites every block.
+    published_storage = storage_version(warehouse_copy)
+    # `>`, not `>=`: a *lower* storage version is the more widely readable file,
+    # so only an increase strands a reader, and publishing at the ceiling is the
+    # ordinary case rather than the edge one. Raised here rather than at the end
+    # because everything after it is the publishable part — the Parquet, the
+    # manifest, `SHA256SUMS`, the notes. The copied database is already on disk
+    # by now (it is what was measured) and is deliberately left there to be
+    # inspected; what a refusal guarantees is that no *release* was assembled
+    # around it, not that the directory is empty.
+    if max_storage_version is not None and published_storage > max_storage_version:
+        raise ValueError(
+            f"refusing to publish {warehouse_copy.name}: storage version "
+            f"{published_storage}, above the {max_storage_version} this project "
+            f"promises. DuckDB {duckdb.__version__} wrote it, and the writer's "
+            "version is not the constraint — the format is, and every client "
+            "older than it can no longer open the release. Raising the ceiling "
+            "is a decision about which readers to strand, not a lockfile edit."
+        )
+
     # Read the tables out of the snapshot, not the original: it's the copy that
     # gets published, so the manifest should describe what shipped.
     con = duckdb.connect(str(warehouse_copy), read_only=True)
@@ -247,6 +314,10 @@ def export(
             **(extra_manifest(con) if extra_manifest else {}),
             "git_sha": git_sha(),
             "duckdb_version": duckdb.__version__,
+            # Beside the writer's version, not instead of it: they answer
+            # different questions, and only this one is about whether a consumer
+            # can open the file.
+            "storage_version": published_storage,
             "grain": grain,
             "warehouse": {
                 "file": warehouse_copy.name,

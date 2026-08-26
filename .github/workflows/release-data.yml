@@ -167,16 +167,55 @@ jobs:
       # views are the part that can break — they store fully-qualified SQL
       # against a catalog named `warehouse`, so both the file name and the
       # ATTACH alias have to stay `warehouse`.
+      #
+      # "Unreadable" has a second meaning that this runner cannot test by
+      # reading the file — it opens everything it wrote. So the storage format
+      # is checked as a *number* against the ceiling the release notes promise,
+      # the way the history is checked against what was carried forward. The
+      # export already refuses to write one above it; this asserts the bytes
+      # that are about to be uploaded agree with the manifest that describes
+      # them, which is the pair a consumer actually receives.
       - name: Verify the artifact
         working-directory: data/export
         env:
           RESTORED_ROWS: ${{ steps.history.outputs.restored_rows }}
+          # `modern_data_stack` is a src-layout package and installs, so it
+          # imports from anywhere; `scripts/` is a plain top-level directory and
+          # does not, and this step runs from `data/export`. Without this the
+          # ceiling import fails with `ModuleNotFoundError: No module named
+          # 'scripts'` — after the release has already been built, and only on
+          # the monthly run.
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           sha256sum -c SHA256SUMS
           uv run --project "$GITHUB_WORKSPACE" python - <<'PY'
+          import json
           import os
+          from pathlib import Path
 
           import duckdb
+
+          from modern_data_stack.export import storage_version
+          from scripts.export_warehouse import (
+              MAX_PUBLISHED_STORAGE_VERSION,
+              MIN_READER_VERSION,
+          )
+
+          manifest = json.loads(Path("manifest.json").read_text())
+          on_disk = storage_version(Path("warehouse.duckdb"))
+          claimed = manifest["storage_version"]
+          assert on_disk == claimed, (
+              f"manifest claims storage version {claimed}, the file is {on_disk}"
+          )
+          assert on_disk <= MAX_PUBLISHED_STORAGE_VERSION, (
+              f"storage version {on_disk} is above the published ceiling "
+              f"{MAX_PUBLISHED_STORAGE_VERSION}; the notes promise DuckDB "
+              f"{MIN_READER_VERSION}+ can open this file"
+          )
+          print(
+              f"warehouse.duckdb: storage version {on_disk}, written by DuckDB "
+              f"{manifest['duckdb_version']}, readable by {MIN_READER_VERSION}+"
+          )
 
           con = duckdb.connect()
           con.execute("attach 'warehouse.duckdb' as warehouse (read_only)")

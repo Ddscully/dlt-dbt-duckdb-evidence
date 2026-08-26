@@ -60,6 +60,8 @@ __all__ = [
     "EXPORT_DIR",
     "EXTRA_CLASSIFICATIONS",
     "MASKED_LABELS",
+    "MAX_PUBLISHED_STORAGE_VERSION",
+    "MIN_READER_VERSION",
     "PUBLISHED_SCHEMAS",
     "SALT_ENV",
     "default_tag",
@@ -74,6 +76,27 @@ EXPORT_DIR = "data/export"
 # The consumable layers. `raw` and dbt's `main` (the seed) are deliberately not
 # here — see the module docstring.
 PUBLISHED_SCHEMAS = ("staging", "marts", "analytics")
+
+# The storage format the published `warehouse.duckdb` may not exceed, and the
+# oldest client that can therefore open it. 64 is what every DuckDB from 0.10.0
+# to 1.5.5 writes by default and the oldest format 1.5.5 still offers, so this
+# ceiling costs nothing today — it is a tripwire, not a constraint.
+#
+# What it is a tripwire for: DuckDB 2.0 ships "a new default storage format",
+# nothing in `pyproject.toml` caps `duckdb>=1.1`, and Dependabot's
+# `versioning-strategy: lockfile-only` means the bump arrives as one line of a
+# grouped monthly PR. Every test in this repo would pass it — they all write and
+# read with the same binary — and the first symptom would be a consumer on 1.x
+# unable to open next month's release. This is the repo's "green CI proves
+# nothing about versions" one turn further round: the thing that moves is the
+# *format of the artifact*, not the code.
+#
+# Raising it is a real decision with a date attached, not a lockfile edit: it
+# strands every reader older than the new floor. The Parquet half of the release
+# carries no such constraint, which is the argument for it having been there all
+# along.
+MAX_PUBLISHED_STORAGE_VERSION = 64
+MIN_READER_VERSION = "0.10.0"
 
 ATTRIBUTION = """\
 # Data attribution
@@ -410,8 +433,11 @@ it for `{base}/download/{tag}/…`.
   `marts.fct_example_scope2_emissions` prices twelve *hypothetical* sites against
   real grid emission factors, as a worked example of
   `marts.dim_grid_emission_factors`. Nothing else in this artifact is fabricated.
-- **Written by DuckDB {manifest["duckdb_version"]}.** Older clients may not read
-  the storage format; the Parquet files have no such constraint.
+- **Any DuckDB from {MIN_READER_VERSION} on can open this file.** DuckDB {manifest["duckdb_version"]} wrote it,
+  but the writer's version is not what decides whether you can read it — the storage
+  format is, and this file is format {manifest["storage_version"]}, the oldest DuckDB still writes. If that
+  ever rises the minimum reader version rises with it and this line will say so. The
+  Parquet files carry no such constraint either way.
 - **Data last landed:** {manifest.get("data_loaded_at") or "unknown"}.
 - **Revision history (CO₂ estimates):** {history_note}. OWID restates published
   years; `history.snap_co2_estimates` (in the DuckDB file, not the Parquet) keeps
@@ -459,6 +485,7 @@ def run(
         grain="(country_iso3, year)",
         extra_manifest=lambda con: {"history": _history(con)},
         prepare_copy=pseudonymise,
+        max_storage_version=MAX_PUBLISHED_STORAGE_VERSION,
     )
 
 
