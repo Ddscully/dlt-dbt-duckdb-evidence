@@ -322,6 +322,9 @@ PUBLISHER_FOR_FETCH_HOST = {
     "ec.europa.eu": "ec.europa.eu/eurostat",
     "api.frankfurter.dev": "frankfurter.dev",
     "archive.ics.uci.edu": "archive.ics.uci.edu/dataset/502",
+    # Fetched from the archive subdomain, credited at the bare one — the same
+    # host-is-not-publisher split as OWID and the World Bank above.
+    "archive-api.open-meteo.com": "open-meteo.com",
 }
 
 

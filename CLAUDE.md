@@ -82,7 +82,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 26 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (28 models, 2 snapshots, 6 seeds + 425 data tests + 26 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -96,6 +96,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
 | `just materialize-preview '<sel>'` | print what a selection resolves to, materializing nothing — a selection matching zero assets exits 0 |
 | `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — the partitioned `raw/wb_wdi` asset |
+| `just backfill-weather 1990 2006` | deepen the capital-city weather archive one year at a time — paced against Open-Meteo's budget, so a decade is hours, not minutes |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
 | `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
 | `just restore-history prev/warehouse.duckdb` | copy `history` out of a published release so `dbt build` appends to that snapshot |
@@ -541,10 +542,11 @@ the paths and recipes all four of them cite.
 ## Warehouse schemas (one DuckDB file: `data/warehouse.duckdb`)
 
 - `raw` — dlt landing tables: `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`,
-  `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`
+  `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`, `om_weather_daily`
 - `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain —
-  except `stg_fx_rates`, which is `(rate_date, quote_currency)`, and
-  `stg_retail_lines`, which is `(invoice, line_number)`
+  except `stg_fx_rates`, which is `(rate_date, quote_currency)`,
+  `stg_retail_lines`, which is `(invoice, line_number)`, and
+  `stg_weather_daily`, which is `(country_iso3, weather_date)`
 - `marts` — dbt tables: `dim_country_year` (the country-year spine),
   `fct_emissions_energy` (the wide join, built on the spine, and **the one
   versioned model** — `fct_emissions_energy_v1` is a compatibility view live
@@ -647,6 +649,130 @@ this is the only place a revision leaves a trace.
   `sources/warehouse/co2_estimate_versions.sql` selects every country-year and
   the page filters on `is_revised` itself, rather than the source pre-filtering
   to the revised ones.
+
+## Capital-city weather (`om_weather_daily`, `stg_weather_daily`)
+
+Daily ERA5 weather for the 41 EU/EEA capitals, from Open-Meteo. Added because
+`stg_country` had carried the World Bank's capital `latitude`/`longitude` since
+the first commit and **nothing read either column** — this file mentioned them
+once, as a `try_cast` ingest gotcha. It is the warehouse's first spatial join and
+its first source with a *finite budget*.
+
+- **The binding constraint is a rate limit, not disk.** The obvious cost model
+  prices rows, and on that basis the whole 1940- global archive is trivial: 211
+  capitals x 86 years x 6 variables is ~110 MB in DuckDB, nowhere near the 2 GiB
+  release-asset cap. The actual ceiling is Open-Meteo's published weighted
+  budget — **600 units a minute, 5,000 an hour, 10,000 a day** — where one
+  request costs `(variables / 10) * (days / 14) * locations`. That same global
+  archive is ~286,000 units: **28 days of allowance**. Scope here was chosen
+  against the budget and the storage question never came into it.
+- **The charge lands *after* the response, which is why the limit looks
+  inconsistent.** A single 86-year three-variable request costs ~673 units
+  against a 600-a-minute budget and is *served*; the next one is refused. So an
+  oversized request is not an error to prevent, and `WeightedWindowLimiter`
+  drains the window and lets it overshoot into debt rather than refusing it or
+  spinning forever waiting for it to "fit".
+- **Batching locations is the lever, and it is counter-intuitive.** Weight is
+  charged partly per *request*, so five locations in one call cost far less than
+  five calls — measured at the point where a one-location 86-year request was
+  being refused while a five-location one of the same span was served. This is
+  the opposite shape to `wb_wdi`, whose eight-thread pool is right precisely
+  because its only cost is latency. A thread pool here would be the one thing a
+  shared budget cannot absorb.
+- **The bulk archive is real, open, and the wrong trade.** `s3://openmeteo`
+  (us-west-2, anonymous, CC BY 4.0) publishes ERA5 back to 1940 — but
+  `temperature_2m` alone is **368 GB** across 164 files averaging 2.2 GB, global
+  gridded, in Open-Meteo's own `.om` format needing their Docker/Swift
+  toolchain. Their own tutorial syncs two years of ERA5-Land at ~8 GB, more than
+  this entire repo. Checked so nobody checks again.
+- **The data licence and the API terms are separate, and only one of them
+  travels.** The numbers are CC BY 4.0, so the release redistributes them like
+  every other source. The *free tier* is additionally non-commercial and capped
+  at 10,000 calls a day, which binds this pipeline and follows nobody who
+  downloads the result. Attribution names Copernicus/ECMWF as well as
+  Open-Meteo, because ERA5 is theirs.
+- **The response is matched to the request by *position*, and there is no other
+  key.** A multi-location response is a JSON array whose entries carry a
+  `location_id` — except the first, which has none at all (absent, 1, 2, ...).
+  So `weather_locations()` sorts, and **fails closed** when a capital has no
+  coordinates: dropping one country shortens the response and hands every
+  country after the gap its neighbour's weather, with nothing red anywhere. The
+  fixture is recorded for all 41 for the same reason; a subset cannot be
+  read back.
+- **Asking past the archive's end is a 400, not an empty response.** The
+  boundary sat at exactly *yesterday* when measured, so a bare `today - 1` fails
+  on whichever side of the server's rollover a run lands. `WEATHER_END_LAG_DAYS`
+  is the slack, and it is a correctness requirement rather than politeness —
+  unlike the FX resource, which can ask for a weekend and get nothing back.
+- **A 429 carries no `Retry-After`, only a sentence naming the window.** The
+  three windows want waits three orders of magnitude apart, so the reason string
+  is read (`weather_retry_after`). The daily one deliberately **raises** instead
+  of sleeping: waiting out 24 hours inside a run is not a backoff, it is
+  indistinguishable from a hang. `_get_json`'s 1.5s/3s escalation would burn all
+  three retries in 4.5 seconds against the shortest of them — which is exactly
+  how the first draft of `record_weather` failed, having spent the budget it
+  needed on the way.
+- **The watermark is read from the destination table, not from dlt state, and
+  everything else depends on that.** `wb_wdi` and `ecb_fx_rates` keep theirs in
+  `dlt.current.resource_state()`, i.e. in `~/.dlt` — a directory CI does not
+  have. Their state is therefore empty on every workflow run and they re-ask for
+  their whole series, which is free for them and would cost this one a fortnight
+  of allowance. Carrying rows forward between releases only saves anything if
+  the watermark travels *with the rows*, and the rows are all a published DuckDB
+  file can carry. Making the data its own watermark also removes the second
+  place it could be wrong.
+- **Carrying a raw table forward works, and it fails loudly if you get it
+  wrong.** Verified rather than assumed: planting `raw.om_weather_daily` without
+  dlt's own columns makes the next load die at the load step with DuckDB's
+  `Adding columns with constraints not yet supported` — dlt tries to
+  `alter table add column _dlt_load_id ... NOT NULL`. Carried *with*
+  `_dlt_load_id` and `_dlt_id`, a merge resource lands on it cleanly: the
+  carried row survives, the overlapping row is restated, the new row appends.
+  `history.restore` copies with `select *`, so it preserves them for free.
+- **This makes `raw.om_weather_daily` the second table a rebuild cannot
+  reproduce, for a new reason.** `history.snap_co2_estimates` is unreproducible
+  in *principle* — a snapshot is state. This one is unreproducible within a
+  *budget*, which is a weaker claim with the same consequence, and it reaches
+  everything that currently names one schema: `just clean warehouse`'s guard,
+  `release-data.yml`'s fatal restore step and its "did not shrink" verify.
+- **The 90-day merge lookback is sized to ERA5T, not to politeness.**
+  Open-Meteo serves preliminary ERA5T within a day or two of real time and
+  Copernicus supersedes it with final ERA5 two to three months later. FX's ten
+  days would freeze preliminary numbers *permanently* here, because rows outside
+  the window are carried forward rather than refetched.
+- **`wb_wdi` and `om_weather_daily` share one `@dlt_assets` block, and that is
+  required.** `full_refresh` is `AssetSelection.all()` minus two things, so it
+  contains both, and `define_asset_job` resolves a selection to a single
+  `partitions_def` or raises. Two yearly definitions differing only in start year
+  would break the job three workflows execute. The cost is that ERA5's 1940-1959
+  is not addressable as a partition, since 1960 is the World Bank's floor — the
+  right way round, because the alternative creates twenty WDI partitions that
+  load nothing. Giving the block a second resource is also what made
+  `raw_year_partitioned_assets` need `context.selected_asset_keys`; with one
+  resource in the tuple, ignoring the selection was a no-op.
+- **A capital is a coarse proxy and the model says so with a number.**
+  `grid_distance_km` is the great-circle distance from the capital to the ERA5
+  cell that answered — the API snaps to the nearest cell centre and reports where
+  it landed, so Berlin's 52.5235/13.4115 comes back 52.54833/13.407822.
+  Comparing a country with *itself* across years is what degree days are for
+  here; comparing countries with each other is much weaker, and a
+  population-weighted average over many cells is the honest version at many times
+  the budget.
+- **Degree days ship in two conventions on purpose.** `hdd_c` uses the daily
+  mean; `hdd_minmax_c` uses (max + min)/2, which is what a station series reports
+  because it is what a max/min thermometer records. Neither is more correct and
+  they disagree on asymmetric days. The base temperature is a `var` carried on
+  every row, for `dim_date.fiscal_year_start_month`'s reason exactly: it is a
+  policy, the warehouse builds one value of it, and every other value it claims
+  to support is untested by construction.
+- **The payoff is a negative result, which is the kind this warehouse could not
+  previously reach.** Heating degree days for six EU capitals, 2021 against 2022:
+  every one milder, inside a 6.5-point band (Germany -13.5%, Spain -10.2%,
+  France -16.5%, Italy -12.0%, Netherlands -13.8%, Poland -10.0%) while
+  electricity prices spread 81.8 points in both directions. Weather explains
+  essentially none of the divergence, which upgrades the existing Netherlands
+  finding — EUR 0.034 to EUR 0.142 across the 2022 halves, "a price nobody paid"
+  — from narrated to demonstrated.
 
 ## Domain models with their own skills
 
@@ -1204,7 +1330,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 367 of the 369 tests use the default. `severity` comes across
+  is what dbt does; 393 of the 425 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the
@@ -2024,7 +2150,7 @@ Gotchas:
     words. Both are handled; words only from ten up, because below that they are
     always local ("Two unit tests catch all five") and admitting them produced
     nine false positives against zero finds. Anything longer than that filler is
-    deliberately out — "367 of the 369 tests" has to capture 369, not 367. What
+    deliberately out — "423 of the 425 tests" has to capture 425, not 423. What
     still escapes is a number with no test-noun after it at all ("pass all 14:"),
     so phrase a count with its noun.
   - `seen > 35` is the vacuity guard. A scanner whose patterns stop matching

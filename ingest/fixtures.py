@@ -53,6 +53,14 @@ _ROUTES: list[_fixtures.Route] = [
     # discovery and the all-text read are all exercised in CI; a bare `.xlsx`
     # here would skip the first two, and a CSV would skip all three.
     (re.compile(r"archive\.ics\.uci\.edu/static/public/502/"), "retail_online_retail_ii.zip"),
+    # No capture for the coordinates or the date window, for the same reason the
+    # FX route captures no date range: the recorded payload is one window over
+    # every location, and the resource merges on `(country_iso3, weather_date)`,
+    # so re-landing a day replaces it. It matters more here than there — a live
+    # run asks for one window per calendar year, and all of them resolve to this
+    # one file, which is exactly what keeps a fixture run from making 19 requests
+    # against a rate limit that is not being enforced against it.
+    (re.compile(r"archive-api\.open-meteo\.com/v1/archive\?"), "om_weather_daily.json.gz"),
 ]
 
 

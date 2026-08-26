@@ -55,6 +55,7 @@ SOURCE_TABLES = (
     "eu_elec_prices",
     "ecb_fx_rates",
     "retail_invoice_lines",
+    "om_weather_daily",
 )
 
 

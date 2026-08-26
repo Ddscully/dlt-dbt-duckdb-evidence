@@ -238,6 +238,27 @@ backfill-wdi start end='': dbt-parse
         -m orchestration.definitions --select 'raw/wb_wdi' \
         --partition-range "{{ start }}...${end:-{{ start }}}"
 
+# Deepen the capital-city weather archive: `just backfill-weather 1990 2006`.
+# ERA5 starts in 1940 and the routine load only seeds from 2007, so this is how
+# the history gets there — and unlike `backfill-wdi` it is **slow on purpose**.
+# Open-Meteo's free tier allows 600 units a minute, 5,000 an hour and 10,000 a
+# day, one year of 41 capitals costs ~641, and the resource paces itself against
+# all three windows. So a decade is roughly two hours of mostly waiting, and
+# asking for more than about fifteen years in one go will exhaust the daily
+# budget and stop with a message saying so.
+#
+# The rows are carried forward into the next release, which is what makes this
+# worth doing once rather than every run — see `scripts/restore_history.py`.
+# Follow with `just dbt-build` or `just materialize`.
+backfill-weather start end='': dbt-parse
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$DAGSTER_HOME"
+    end="{{ end }}"
+    uv run --group orchestration dagster asset materialize \
+        -m orchestration.definitions --select 'raw/om_weather_daily' \
+        --partition-range "{{ start }}...${end:-{{ start }}}"
+
 # Read-only is the default because DuckDB takes a single writer: a session
 # holding the write lock makes `just run` fail with a lock error two terminals
 # away. Pass `just sql write` when you actually mean to write.

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -428,11 +428,19 @@ def test_partitioned_resources_is_a_subset_of_the_incremental_ones():
     """
     assert set(pipeline.PARTITIONED_RESOURCES) <= set(pipeline.INCREMENTAL_RESOURCES)
     # Named explicitly, because `orchestration/assets.py` splits this tuple again
-    # by partition *grain* — years for WDI, months for retail — into two
-    # `@dlt_assets` blocks, and Dagster forces one `partitions_def` per block. A
-    # resource added here without a matching block would land in neither and
-    # disappear from the graph, which no other assertion here would catch.
-    assert set(pipeline.PARTITIONED_RESOURCES) == {"wb_wdi", "retail_invoice_lines"}
+    # by partition *grain* — years for WDI and weather, months for retail — into
+    # two `@dlt_assets` blocks, and Dagster forces one `partitions_def` per
+    # block. A resource added here without a matching block would land in
+    # neither and disappear from the graph, which no other assertion here would
+    # catch. Two resources sharing the yearly grain is the case that makes the
+    # distinction between this tuple and the *blocks* worth keeping: they are
+    # one block, not two, and `full_refresh` would refuse to resolve if they
+    # carried separate partitions definitions.
+    assert set(pipeline.PARTITIONED_RESOURCES) == {
+        "wb_wdi",
+        "retail_invoice_lines",
+        "om_weather_daily",
+    }
     unpartitioned = [
         name
         for names, _ in pipeline.load_groups()
@@ -855,3 +863,313 @@ def test_retail_lands_the_source_verbatim(retail_con):
     assert negative_price > 0
     assert no_customer > 0
     assert lowercase > 0, "case collisions must reach staging, which is what upper() is for"
+
+
+# --------------------------------------------------------------------------- #
+# Open-Meteo capital-city weather
+# --------------------------------------------------------------------------- #
+
+
+def _wb_country_row(iso3: str, iso2: str, latitude: str, longitude: str) -> dict:
+    """One World Bank /country row, in the shape `weather_locations` reads."""
+    return {
+        "id": iso3,
+        "iso2Code": iso2,
+        "latitude": latitude,
+        "longitude": longitude,
+        "region": {"value": "Europe & Central Asia"},
+    }
+
+
+def _wb_country_payload(rows: list[dict]) -> list:
+    return [{"page": 1, "pages": 1, "per_page": len(rows), "total": len(rows)}, rows]
+
+
+def test_weather_call_units_matches_open_meteos_published_formula():
+    """`(variables / 10) * (days / 14) * locations`, which is the number every
+    pacing decision in this layer is made against.
+
+    The second assertion is the measured one: a single 86-year three-variable
+    request costs ~673 units against a 600-a-minute budget, which is why one of
+    them is served and the next is refused. If this arithmetic drifts, the
+    limiter is pacing against a fiction and the only symptom is a 429.
+    """
+    assert pipeline.weather_call_units(1, 14, variables=10) == pytest.approx(1.0)
+    assert pipeline.weather_call_units(1, 31_412, variables=3) == pytest.approx(673.1, abs=0.1)
+    # The default is the configured variable list, not a hardcoded count.
+    assert pipeline.weather_call_units(41, 365) == pytest.approx(
+        len(pipeline.WEATHER_DAILY_VARIABLES) / 10 * (365 / 14) * 41
+    )
+
+
+def test_weather_locations_are_sorted_and_scoped(monkeypatch):
+    """Sorted because the response is matched to the request **by position**, so
+    the order has to be a property of the code rather than of the API's row
+    order — which is alphabetical by name, not by ISO3."""
+    payload = _wb_country_payload(
+        [
+            _wb_country_row("POL", "PL", "52.26", "21.02"),
+            _wb_country_row("DEU", "DE", "52.5235", "13.4115"),
+            _wb_country_row("USA", "US", "38.8895", "-77.032"),  # out of scope
+        ]
+    )
+    monkeypatch.setattr(pipeline, "_get_json", lambda url, **kw: payload)
+    monkeypatch.setattr(pipeline, "WEATHER_COUNTRIES", ("DEU", "POL"))
+
+    assert pipeline.weather_locations() == [
+        ("DEU", 52.5235, 13.4115),
+        ("POL", 52.26, 21.02),
+    ]
+
+
+def test_weather_locations_fails_closed_when_a_capital_has_no_coordinates(monkeypatch):
+    """The dangerous direction is dropping the country and carrying on.
+
+    The World Bank sends `''` for territories with no capital, and a shorter
+    location list produces a shorter response — which is then zipped against the
+    full list, handing every country after the gap its neighbour's weather. No
+    key in the payload can repair that, so it has to raise here.
+    """
+    payload = _wb_country_payload(
+        [
+            _wb_country_row("DEU", "DE", "52.5235", "13.4115"),
+            _wb_country_row("XKX", "XK", "", ""),
+        ]
+    )
+    monkeypatch.setattr(pipeline, "_get_json", lambda url, **kw: payload)
+    monkeypatch.setattr(pipeline, "WEATHER_COUNTRIES", ("DEU", "XKX"))
+
+    with pytest.raises(RuntimeError, match="no capital coordinates for XKX"):
+        pipeline.weather_locations()
+
+
+def test_weather_url_carries_every_location_in_one_request():
+    locations = [("DEU", 52.5235, 13.4115), ("POL", 52.26, 21.02)]
+    url = pipeline.weather_url(locations, "2022-01-01", "2022-12-31")
+    assert "latitude=52.5235,52.2600" in url
+    assert "longitude=13.4115,21.0200" in url
+    assert "start_date=2022-01-01&end_date=2022-12-31" in url
+    for variable in pipeline.WEATHER_DAILY_VARIABLES:
+        assert variable in url
+    # Four decimals, so the URL is byte-stable for a location set and a recorded
+    # fixture stays reproducible. ERA5's grid is 0.25 degrees, so the precision
+    # cannot change which cell answers.
+    assert "52.523500" not in url
+
+
+def test_weather_end_date_stops_short_of_the_archives_edge():
+    """Asking past the archive's last day is a 400, not an empty response, so the
+    lag is a correctness requirement rather than politeness."""
+    end = pipeline.weather_end_date(today=date(2026, 8, 27))
+    assert end == "2026-08-24"
+    assert pipeline.WEATHER_END_LAG_DAYS >= 2, (
+        "the boundary was measured at exactly T-1, so T-1 itself fails on "
+        "whichever side of the server's rollover a run lands"
+    )
+
+
+def test_weather_start_date_uses_the_seed_floor_then_the_lookback():
+    assert pipeline.weather_start_date(None) == f"{pipeline.WEATHER_FIRST_YEAR}-01-01"
+    # 90-day lookback, inclusive of the watermark day itself.
+    assert pipeline.weather_start_date("2026-08-20") == "2026-05-23"
+    # Clamped: a watermark near the floor must not ask for years the seed skipped.
+    assert (
+        pipeline.weather_start_date(f"{pipeline.WEATHER_FIRST_YEAR}-01-05")
+        == f"{pipeline.WEATHER_FIRST_YEAR}-01-01"
+    )
+
+
+def test_weather_lookback_outlives_the_era5t_revision_window():
+    """ERA5T is preliminary and superseded by final ERA5 two to three months
+    later. Rows outside this window are never refetched — they are carried
+    forward between releases — so a short lookback freezes preliminary numbers
+    permanently rather than merely delaying a correction."""
+    assert pipeline.WEATHER_LOOKBACK_DAYS >= 60
+
+
+def test_weather_windows_are_calendar_years_clipped_at_both_ends():
+    windows = pipeline.weather_windows(years=(2020, 2022), watermark=None, today=date(2026, 8, 27))
+    assert windows == [
+        ("2020-01-01", "2020-12-31"),
+        ("2021-01-01", "2021-12-31"),
+        ("2022-01-01", "2022-12-31"),
+    ]
+
+
+def test_weather_windows_never_ask_past_the_archive():
+    """A backfill range reaching into the future is clipped, not refused — the
+    current year is a legitimate partition and it is simply not finished."""
+    windows = pipeline.weather_windows(years=(2026, 2030), watermark=None, today=date(2026, 8, 27))
+    assert windows == [("2026-01-01", "2026-08-24")]
+
+
+def test_weather_windows_start_from_the_watermarks_lookback():
+    windows = pipeline.weather_windows(watermark="2026-08-20", today=date(2026, 8, 27))
+    assert windows == [("2026-05-23", "2026-08-24")]
+
+
+def test_weather_windows_are_empty_when_the_range_is_entirely_in_the_future():
+    """Nothing to ask for is a normal outcome, and asking anyway is a 400 rather
+    than an empty response — so the empty list has to be produced here.
+
+    Note what does *not* reach this branch: a watermark ahead of the archive's
+    edge, which happens on any run made within `WEATHER_END_LAG_DAYS` of the last
+    one. That still yields a lookback window overlapping the archive, and
+    re-asking for days already held is free because the resource merges.
+    """
+    assert pipeline.weather_windows(years=(2030, 2031), today=date(2026, 8, 27)) == []
+    assert pipeline.weather_windows(watermark="2026-09-30", today=date(2026, 8, 27)) == [
+        ("2026-07-03", "2026-08-24")
+    ]
+
+
+def test_weather_windows_chunk_the_seed_into_affordable_requests():
+    """The structural assertion: no single window may cost more than the hourly
+    budget, or the seed cannot complete however patiently it is paced."""
+    windows = pipeline.weather_windows(watermark=None, today=date(2026, 8, 27))
+    hourly = {window: budget for window, budget in pipeline.WEATHER_RATE_LIMITS}[3600.0]
+    for start, end in windows:
+        days = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1
+        cost = pipeline.weather_call_units(len(pipeline.WEATHER_COUNTRIES), days)
+        assert cost <= hourly, f"{start}..{end} costs {cost:,.0f} units against {hourly:,.0f}/hour"
+
+
+def _weather_entry(days: list[str], mean: list[float], *, latitude=52.5, longitude=13.4) -> dict:
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
+        "elevation": 38.0,
+        "daily": {
+            "time": days,
+            "temperature_2m_mean": mean,
+            "temperature_2m_max": [v + 2 for v in mean],
+            "temperature_2m_min": [v - 2 for v in mean],
+            "precipitation_sum": [0.0] * len(days),
+            "wind_speed_10m_max": [10.0] * len(days),
+            "shortwave_radiation_sum": [1.0] * len(days),
+        },
+    }
+
+
+def test_weather_rows_match_the_response_to_the_request_by_position():
+    """The gotcha this whole resource is shaped around.
+
+    A multi-location response is a JSON array whose entries carry a
+    `location_id` — except the first, which has none at all. So index is the only
+    key, and a fixture or a live response arriving in a different order would
+    silently give every country its neighbour's weather with no error anywhere.
+    """
+    locations = [("DEU", 52.5235, 13.4115), ("POL", 52.26, 21.02)]
+    payload = [
+        _weather_entry(["2022-01-01"], [10.8]),
+        # As the API sends it: `location_id` present on the second, absent above.
+        {**_weather_entry(["2022-01-01"], [-1.5], latitude=52.3, longitude=21.0), "location_id": 1},
+    ]
+    rows = list(pipeline._weather_rows(payload, locations))
+    assert [(r["country_iso3"], r["temperature_2m_mean"]) for r in rows] == [
+        ("DEU", 10.8),
+        ("POL", -1.5),
+    ]
+    # The grid cell the API snapped to, not the capital's own coordinates.
+    assert rows[0]["grid_latitude"] == 52.5 and rows[0]["grid_longitude"] == 13.4
+
+
+def test_weather_rows_refuse_a_response_of_the_wrong_length():
+    """Positional matching means a short response is unrecoverable, so it must
+    stop the load rather than mislabel the rows it can see."""
+    with pytest.raises(RuntimeError, match="matched by position"):
+        list(
+            pipeline._weather_rows(
+                [_weather_entry(["2022-01-01"], [1.0])], [("DEU", 1.0, 2.0), ("POL", 3.0, 4.0)]
+            )
+        )
+
+
+def test_weather_rows_accept_the_single_location_object_shape():
+    """One location comes back as a bare object rather than a one-element array —
+    a shape the resource never asks for today, and would meet the moment the
+    scope was narrowed to one country."""
+    rows = list(pipeline._weather_rows(_weather_entry(["2022-01-01"], [3.0]), [("DEU", 1.0, 2.0)]))
+    assert len(rows) == 1 and rows[0]["country_iso3"] == "DEU"
+
+
+def test_weather_rows_cover_every_declared_column():
+    """The landing schema is declared, not inferred, so a variable added to
+    `WEATHER_DAILY_VARIABLES` and not to `WEATHER_COLUMNS` would be dropped by
+    dlt without a word."""
+    rows = list(pipeline._weather_rows(_weather_entry(["2022-01-01"], [3.0]), [("DEU", 1.0, 2.0)]))
+    assert set(rows[0]) == set(pipeline.WEATHER_COLUMNS)
+
+
+def test_weather_retry_reads_the_window_off_the_429_message():
+    """The response carries no `Retry-After`, only a sentence naming the window,
+    and the three windows want waits three orders of magnitude apart."""
+    assert pipeline.weather_retry_after("Minutely API request limit exceeded.") == 65.0
+    assert pipeline.weather_retry_after("Hourly API request limit exceeded.") == 660.0
+
+
+def test_a_spent_daily_budget_raises_rather_than_sleeping_through_a_day():
+    """Waiting out the daily window inside a run is not a backoff — it is a hang
+    that looks exactly like a crashed process for twenty-four hours."""
+    with pytest.raises(RuntimeError, match="daily budget is spent"):
+        pipeline.weather_retry_after("Daily API request limit exceeded.")
+
+
+# Eurostat's `geo` codes are ISO2 except for two, remapped in
+# `stg_eu_electricity_prices_semiannual.sql`. Restated here rather than parsed
+# out of the SQL because it is two entries and the model states the same pair in
+# a `case` expression the guard below would have to reimplement to read.
+EUROSTAT_GEO_TO_ISO2 = {"EL": "GR", "UK": "GB"}
+
+
+def _eurostat_price_countries() -> set[str]:
+    """The ISO3 codes Eurostat publishes an electricity price for.
+
+    Derived from the two recorded fixtures rather than from the warehouse, so
+    this runs in `just test` — which has no database and, in a fresh clone, no
+    `dbt/target/manifest.json` either. Same reasoning as the WDI pivot guard
+    parsing `stg_wdi.sql` instead of the manifest.
+    """
+    cube = json.loads(fixtures.path_for(pipeline.EU_ELEC_PRICES_API).read_text())
+    geos = {geo for geo in cube["dimension"]["geo"]["category"]["index"] if len(geo) == 2}
+    iso2 = {EUROSTAT_GEO_TO_ISO2.get(geo, geo) for geo in geos}
+
+    payload = json.loads(fixtures.path_for(pipeline.WB_COUNTRY_API).read_text())
+    by_iso2 = {
+        row["iso2Code"]: row["id"]
+        for row in payload[1]
+        if (row.get("region") or {}).get("value") != "Aggregates"
+    }
+    # The inner join is what drops `EA` — two letters, so `len(geo) == 2` keeps
+    # it, and no country carries that ISO2. Exactly as the staging model behaves.
+    return {by_iso2[code] for code in iso2 if code in by_iso2}
+
+
+def test_weather_countries_are_exactly_the_ones_eurostat_prices():
+    """`WEATHER_COUNTRIES` is the scope decision written down, and the only thing
+    that makes it defensible is that it matches the data it exists to join to.
+
+    Held to the source rather than to the comment beside it, for the same reason
+    `SOURCE_TABLES` and `RAW_DESCRIPTIONS` are: the list costs API budget to be
+    wrong in either direction. A country Eurostat starts publishing gets no
+    weather and the mart column is quietly null for it; a country dropped from
+    the price series keeps costing units forever for a join that no longer
+    happens. Neither shows up as a failure anywhere else.
+    """
+    priced = _eurostat_price_countries()
+    scoped = set(pipeline.WEATHER_COUNTRIES)
+
+    assert scoped - priced == set(), (
+        f"WEATHER_COUNTRIES fetches weather for {sorted(scoped - priced)}, which Eurostat "
+        "publishes no electricity price for — budget spent on a join that cannot happen"
+    )
+    assert priced - scoped == set(), (
+        f"Eurostat prices {sorted(priced - scoped)} and no weather is fetched for them — "
+        "the mart column will be null with nothing saying why"
+    )
+
+
+def test_weather_countries_carry_no_duplicates():
+    """A repeated code would send the same coordinates twice and shift every
+    location after it against the response, which is matched by position."""
+    assert len(pipeline.WEATHER_COUNTRIES) == len(set(pipeline.WEATHER_COUNTRIES))

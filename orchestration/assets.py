@@ -108,19 +108,33 @@ RAW_DESCRIPTIONS = {
         "and then partitioned by invoice month on the *load* rather than the "
         "fetch."
     ),
+    "om_weather_daily": (
+        "Open-Meteo ERA5 daily weather at each EU/EEA capital city, at "
+        "(country_iso3, weather_date) — the one source joined on a *coordinate*, "
+        "read off `stg_country`'s capital latitude/longitude. Loaded "
+        "incrementally: `merge` over a 90-day lookback (ERA5T is superseded by "
+        "final ERA5 months later), year-partitioned, and paced against a finite "
+        "API budget rather than fetched whole."
+    ),
 }
 
-# The blocks below split the seven resources by whether they are partitioned and
+# The blocks below split the eight resources by whether they are partitioned and
 # *at what grain*, not by how they load — `load_groups` still owns the
 # refresh/merge split, and each selection is passed through it.
 #
 # There are three blocks rather than two because **Dagster gives every asset in a
-# multi-asset the same `partitions_def`**, and the two partitioned resources are
-# not partitioned alike: WDI by year (the World Bank publishes annual series),
-# retail by month (a two-year transaction window, where a year would be one
-# partition and a day would be 740 of them for a shop that trades ~600). Putting
-# them in one block would force one grain onto both, and the only grain that fits
-# both is the finer one — 66 years of empty monthly WDI partitions.
+# multi-asset the same `partitions_def`**, and the three partitioned resources
+# are not all partitioned alike: WDI and capital weather by year (annual series,
+# and a yearly slice of an API budget), retail by month (a two-year transaction
+# window, where a year would be one partition and a day would be 740 of them for
+# a shop that trades ~600). Putting them in one block would force one grain onto
+# all three, and the only grain that fits every one is the finest — 66 years of
+# empty monthly WDI partitions.
+#
+# The corollary is that **the split is by grain, not one block per resource**:
+# `wb_wdi` and `om_weather_daily` share a block precisely because they share a
+# grain, and giving them a block each would give them a `partitions_def` each,
+# which is what `full_refresh` cannot resolve. See `YEARLY_PARTITIONS`.
 #
 # Three disjoint tuples covering the source, so an added resource lands in
 # exactly one block: a resource in two would be loaded twice per refresh, and one
@@ -129,7 +143,7 @@ RAW_DESCRIPTIONS = {
 # there rather than in a test of this module, because `just test` runs without
 # the optional `orchestration` dependency group and a Dagster import would make
 # the guard skip exactly when it is least likely to be noticed.
-YEAR_PARTITIONED_RESOURCES = ("wb_wdi",)
+YEAR_PARTITIONED_RESOURCES = ("wb_wdi", "om_weather_daily")
 MONTH_PARTITIONED_RESOURCES = ("retail_invoice_lines",)
 UNPARTITIONED_RESOURCES = (
     *FULL_REFRESH_RESOURCES,
@@ -162,11 +176,25 @@ class RawSchemaDltTranslator(DagsterDltTranslator):
         )
 
 
-# Yearly partitions, and only on `raw/wb_wdi` — see `raw_wdi_asset`. Dagster
-# requires every asset in a multi-asset to share one `partitions_def`, which is
-# why that resource sits in a second `@dlt_assets` block rather than beside the
-# other four.
-WDI_PARTITIONS = dg.TimeWindowPartitionsDefinition(
+# Yearly partitions, shared by the two resources that have them — see
+# `raw_year_partitioned_assets`. Dagster requires every asset in a multi-asset to
+# share one `partitions_def`, which is why these sit in their own block rather
+# than beside the unpartitioned five.
+#
+# **Sharing one definition is required, not merely tidy.** `full_refresh` is
+# `AssetSelection.all()` minus two things, so it contains both of these, and
+# `define_asset_job` resolves a selection to a *single* `partitions_def` or
+# raises — there is no opt-out for a named job. Two separate yearly definitions,
+# differing only in their start year, would therefore break the job that three
+# workflows execute, at definition time, for no behavioural gain.
+#
+# The cost of sharing is the start year: 1960 is the World Bank's floor, and
+# ERA5 reaches back to 1940. So weather's 1940-1959 is not addressable as a
+# partition. That is the right way round — the alternative starts both at 1940
+# and creates twenty WDI partitions that load nothing, which this repo already
+# treats as a defect rather than a curiosity (see `record_retail`'s monthly
+# top-up) — and it is 47 years below where the weather seed actually starts.
+YEARLY_PARTITIONS = dg.TimeWindowPartitionsDefinition(
     start=str(WDI_FIRST_YEAR),
     fmt="%Y",
     cron_schedule="0 0 1 1 *",
@@ -209,14 +237,17 @@ def raw_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
     dlt_source=public_indicators().with_resources(*YEAR_PARTITIONED_RESOURCES),
     dlt_pipeline=build_pipeline(),
     dagster_dlt_translator=RawSchemaDltTranslator(),
-    name="ingest_wdi",
-    partitions_def=WDI_PARTITIONS,
-    # One run per *range*, not per year: the World Bank takes `&date=lo:hi`, so a
-    # 30-year backfill is 11 requests (one per indicator) rather than 330.
+    name="ingest_year_partitioned",
+    partitions_def=YEARLY_PARTITIONS,
+    # One run per *range*, not per year: the World Bank takes `&date=lo:hi` and
+    # Open-Meteo takes `&start_date=…&end_date=…`, so a 30-year backfill is 11
+    # requests for WDI (one per indicator) rather than 330, and 30 for weather
+    # (one per year) rather than 30 — the same for weather either way, because
+    # there the chunking is a *budget* decision made inside the resource.
     backfill_policy=dg.BackfillPolicy.single_run(),
 )
-def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
-    """WDI, the one source with a per-year fetch to express.
+def raw_year_partitioned_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
+    """The two sources with a per-year fetch to express: WDI and capital weather.
 
     Partitioning the other five would be a fiction. Four are whole-file
     `replace` loads (two CSVs, a JSON-stat payload and a dimension table) with
@@ -224,19 +255,25 @@ def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     *does* take a date range — which is the interesting near-miss: merging is not
     what earns a partition. Its whole 27-year series is one three-second request,
     so partitioning it would trade a single call for thousands of Dagster
-    partitions and buy nothing. WDI's API takes a date range **and** its series
-    are large enough that a window is worth asking for, and its primary key
-    includes `year` — so a partition there is a real unit of work.
+    partitions and buy nothing.
+
+    The two here earn it for related but distinct reasons, and the second one
+    widens the rule. WDI's API takes a date range **and** its series are large
+    enough that a window is worth asking for. `om_weather_daily` takes a range
+    too, but what makes a year the right unit there is that the year is what the
+    *budget* is spent in: 41 capitals over 2007-2025 costs more of Open-Meteo's
+    daily allowance than a day contains, so unlike WDI the full history genuinely
+    cannot be fetched in one run however patient the caller is.
 
     Two paths into the same load, and the difference is only which window is
     asked for:
 
     * **partitioned** — an explicit year range, which is what a backfill from the
-      UI or `just backfill-wdi` sends. Loads exactly those years and leaves the
-      watermark alone.
+      UI or `just backfill-wdi` / `just backfill-weather` sends. Loads exactly
+      those years and leaves the watermark alone.
     * **unpartitioned** — the incremental lookback, i.e. what the daily schedule,
-      CI and the release workflow have always done. `full_refresh` contains this
-      asset and runs with no partition key, and *that has to keep working*:
+      CI and the release workflow have always done. `full_refresh` contains these
+      assets and runs with no partition key, and *that has to keep working*:
       three workflows execute that job on a bare checkout.
 
     A partitioned asset in an unpartitioned run doesn't fail at plan time — it
@@ -253,17 +290,25 @@ def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     if context.has_partition_key or context.has_partition_key_range:
         key_range = context.partition_key_range
         years = (int(key_range.start), int(key_range.end))
-        context.log.info("loading wb_wdi for %s-%s (partition backfill)", *years)
-    else:
-        context.log.info("loading wb_wdi over its incremental lookback window")
+
+    # Scoped to what was actually selected, which matters now that the block
+    # holds two resources: materialising `raw/om_weather_daily` alone must not
+    # also re-ask the World Bank for eleven indicators. `raw_assets` has always
+    # done this; here it was a no-op with one resource in the tuple and stopped
+    # being one the moment a second arrived.
+    selected = {key.path[-1] for key in context.selected_asset_keys}
+    window = f"{years[0]}-{years[1]} (partition backfill)" if years else "incremental lookback"
 
     # `load_groups` again rather than a bare `dlt.run(...)`: it is what asserts
-    # this resource loads *without* `refresh`, which would drop the table and the
-    # watermark with it.
-    for names, kwargs in load_groups(YEAR_PARTITIONED_RESOURCES):
+    # these resources load *without* `refresh`, which would drop their tables and
+    # their watermarks with them.
+    for names, kwargs in load_groups(selected):
+        context.log.info("loading %s over %s", ", ".join(names), window)
         yield from dlt.run(
             context=context,
-            dlt_source=public_indicators(wdi_years=years).with_resources(*names),
+            dlt_source=public_indicators(wdi_years=years, weather_years=years).with_resources(
+                *names
+            ),
             **kwargs,
         )
 
@@ -836,6 +881,6 @@ __all__ = [
     "pipeline_status",
     "raw_assets",
     "raw_retail_asset",
-    "raw_wdi_asset",
+    "raw_year_partitioned_assets",
     "retail_rfm",
 ]

@@ -347,6 +347,139 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 2}
 
+  - name: stg_weather_daily
+    config:
+      group: country_stats
+    description: >
+      Daily capital-city weather from Open-Meteo's ERA5 archive, one row per
+      (country_iso3, weather_date), for the 41 countries Eurostat publishes an
+      electricity price for. The warehouse's second daily grain and its first
+      model built on a *spatial* join — the capital coordinates in `stg_country`,
+      which nothing read until this landed.
+
+      Degree days are shipped two ways on purpose. `hdd_c` uses the day's mean
+      temperature and `hdd_minmax_c` uses (max + min)/2, which is the convention
+      a station series reports because it is what a max/min thermometer records.
+      Neither is more correct; they disagree on asymmetric days, and shipping
+      both is what lets a downstream model state which one it used.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, weather_date]
+      # The scope is defined as "the countries Eurostat prices", and the ingest
+      # layer is where that list lives. This is the dbt-side half of the same
+      # assertion `tests/test_ingest.py` makes against the Eurostat payload: if
+      # weather arrives for a country with no price, one of the two drifted.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "country_iso3 in (select country_iso3 from {{ ref('stg_eu_electricity_prices_semiannual') }})"
+      # A capital must resolve to a grid cell next to it. ERA5's grid is 0.25
+      # degrees, so ~20 km is the worst honest case; 100 km means the request
+      # sent coordinates that are not the capital's, which no range test on a
+      # temperature could ever notice.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "grid_distance_km < 100"
+      # min <= mean <= max, which is the one relationship between the three
+      # temperatures that cannot be true by accident. It is also the check that
+      # would catch the columns being transposed in the flattening step, where
+      # every individual range test would still pass.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "temp_min_c <= temp_mean_c and temp_mean_c <= temp_max_c"
+    columns:
+      - name: country_iso3
+        description: ISO3, carried from the request rather than joined back on.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_country')
+                field: country_iso3
+      - name: weather_date
+        description: >
+          The ERA5 day, UTC. Dense — unlike `stg_fx_rates`, every calendar day in
+          range has a row, because a reanalysis has no business calendar.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: "'1940-01-01'", max_value: "current_date"}
+      - name: temp_mean_c
+        description: >
+          Daily mean 2 m air temperature, degrees Celsius. Bounded well outside
+          any capital's real range on purpose: the point is to catch a unit
+          change (Kelvin would land at ~290) or a column transposition, not to
+          adjudicate a hot day in Nicosia.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -70, max_value: 60}
+      - name: temp_max_c
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -70, max_value: 60}
+      - name: temp_min_c
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -70, max_value: 60}
+      - name: hdd_c
+        description: >
+          Heating degree days from the daily mean, clamped at zero. Summed over a
+          year this is the standard weather-normalisation denominator; the base
+          it was computed against travels beside it in `heating_base_c`.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 90}
+      - name: hdd_minmax_c
+        description: The (max + min)/2 convention, for comparison with `hdd_c`.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 90}
+      - name: cdd_c
+        description: Cooling degree days from the daily mean, clamped at zero.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 40}
+      - name: heating_base_c
+        description: >
+          The `heating_degree_day_base_c` var this row was built with. Carried
+          per row for `dim_date.fiscal_year_start_month`'s reason: a degree-day
+          total is uninterpretable without its base, and the alternative to
+          carrying it is trusting the reader to go and look.
+        data_tests:
+          - not_null
+      - name: cooling_base_c
+        data_tests:
+          - not_null
+      - name: precipitation_mm
+        description: Daily total precipitation, millimetres.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: wind_speed_max_kmh
+        description: Maximum 10 m wind speed, km/h.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: solar_radiation_mj_m2
+        description: Daily shortwave radiation sum, MJ/m2.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: grid_distance_km
+        description: >
+          Great-circle distance from the capital to the ERA5 cell centre that
+          answered for it. The number that makes "a capital stands in for a
+          country" an approximation you can see rather than one you have to
+          remember.
+        data_tests:
+          - not_null
+
   - name: stg_fx_rates
     config:
       group: reference
