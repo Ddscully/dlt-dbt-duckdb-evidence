@@ -840,12 +840,37 @@ WEATHER_EXPECTED_UNITS = {
     "shortwave_radiation_sum": "MJ/m²",
 }
 
-# Where an unpartitioned first load starts. ERA5 itself goes back to 1940 and
-# `raw/om_weather_daily` is year-partitioned, so this is a *seed floor*, not a
-# limit: `just backfill-weather 1990 2006` reaches further whenever someone
-# decides to spend the budget. 2007 is the first year Eurostat publishes a price,
-# so the default seed covers the whole span the payoff joins to.
+# The earliest year worth asking for: 2007 is the first year Eurostat publishes
+# an electricity price, so it is the floor of the span the payoff joins to. ERA5
+# itself reaches back to 1940 and `raw/om_weather_daily` is year-partitioned, so
+# this is not a limit either — `just backfill-weather 1990 2006` goes deeper
+# whenever someone decides to spend the budget.
+#
+# **It is deliberately not where a cold start begins.** See
+# `WEATHER_COLD_START_YEARS`.
 WEATHER_FIRST_YEAR = 2007
+
+# How much history an *unpartitioned* load fetches when the destination is empty.
+#
+# This is the constant that keeps a fresh clone usable, and it exists because the
+# obvious alternative is a trap. Starting a cold load at `WEATHER_FIRST_YEAR`
+# reads as the generous choice — 2007 onwards, the whole useful span — and costs
+# ~12,600 units against a 10,000-a-day allowance. The limiter honours that
+# allowance by *waiting*, so the load does not fail: it paces for two hours, then
+# sleeps for twenty-two more. Simulated end to end at **24.1 hours with a single
+# 22-hour sleep**, which is a hang wearing a progress bar, and it would have hit
+# `pages.yml`, `nightly.yml` and `release-data.yml` — all three run against the
+# live APIs from an empty warehouse.
+#
+# Three years is ~1,700 units: inside the hourly budget, so a cold start is a
+# couple of minutes, and it still gives two *complete* calendar years, which is
+# the minimum for the year-over-year comparison the mart exists for. Depth beyond
+# that arrives the way the design always intended — carried forward from the
+# previous release, or asked for explicitly with a partition key.
+#
+# `tests/test_ingest.py` holds the cold start to the hourly budget, so the
+# generous-looking edit fails a test rather than a workflow.
+WEATHER_COLD_START_YEARS = 3
 
 # How far back an incremental run re-asks for, and it is deliberately much longer
 # than FX's ten days. ECB fixings are never restated; ERA5 *is*. Open-Meteo
@@ -1016,16 +1041,27 @@ def weather_end_date(today: date | None = None) -> str:
     return (day - timedelta(days=WEATHER_END_LAG_DAYS)).isoformat()
 
 
-def weather_start_date(last_loaded_date: str | None) -> str:
-    """The first day the next incremental load should ask for.
+def weather_start_date(last_loaded_date: str | None, today: date | None = None) -> str:
+    """The first day the next unpartitioned load should ask for.
 
-    `WEATHER_FIRST_YEAR` until something has been loaded, then
-    `WEATHER_LOOKBACK_DAYS` back from the watermark — clamped, so a watermark
-    near the seed floor cannot ask for years the seed deliberately skipped.
+    Two branches, and the empty one is the load-bearing half:
+
+    * **Nothing loaded yet** — `WEATHER_COLD_START_YEARS` of history, *not*
+      `WEATHER_FIRST_YEAR`. An empty destination is the normal state of a fresh
+      clone and of all three live workflows, so this branch runs far more often
+      than the other one, and reaching back to 2007 here costs more than a day's
+      allowance. See the constant for the simulated cost of getting this wrong.
+    * **A watermark exists** — `WEATHER_LOOKBACK_DAYS` back from it, clamped at
+      `WEATHER_FIRST_YEAR` so a watermark near the floor cannot ask for years
+      before the series is worth having.
+
+    Deep history is deliberately not reachable from either branch: it is carried
+    forward from the previous release, or asked for with a partition key.
     """
     floor = date(WEATHER_FIRST_YEAR, 1, 1)
     if last_loaded_date is None:
-        return floor.isoformat()
+        day = today or datetime.now(UTC).date()
+        return max(date(day.year - WEATHER_COLD_START_YEARS + 1, 1, 1), floor).isoformat()
     start = date.fromisoformat(str(last_loaded_date)) - timedelta(days=WEATHER_LOOKBACK_DAYS - 1)
     return max(start, floor).isoformat()
 
@@ -1087,7 +1123,7 @@ def weather_windows(
     """
     last = weather_end_date(today)
     if years is None:
-        first = weather_start_date(watermark)
+        first = weather_start_date(watermark, today)
     else:
         first = date(years[0], 1, 1).isoformat()
         last = min(last, date(years[1], 12, 31).isoformat())
@@ -1226,7 +1262,12 @@ def om_weather_daily(years: tuple[int, int] | None = None):
       leaves the watermark alone, because a run over one window cannot claim
       everything up to its end is present.
     * **unpartitioned** — from the watermark's lookback window to the archive's
-      end, which is what the schedule, CI and the release workflow run.
+      end, which is what the schedule, CI and the release workflow run. On an
+      *empty* destination that window is `WEATHER_COLD_START_YEARS`, not the
+      whole series: an empty warehouse is the normal state of a fresh clone and
+      of all three live workflows, so this is the common path rather than the
+      rare one, and asking it for twenty years costs more than a day's
+      allowance.
     """
     locations = weather_locations()
     limiter = WeightedWindowLimiter(WEATHER_RATE_LIMITS)

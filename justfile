@@ -238,9 +238,10 @@ backfill-wdi start end='': dbt-parse
         -m orchestration.definitions --select 'raw/wb_wdi' \
         --partition-range "{{ start }}...${end:-{{ start }}}"
 
-# Deepen the capital-city weather archive: `just backfill-weather 1990 2006`.
-# ERA5 starts in 1940 and the routine load only seeds from 2007, so this is how
-# the history gets there — and unlike `backfill-wdi` it is **slow on purpose**.
+# Deepen the capital-city weather archive: `just backfill-weather 2007 2023`.
+# A routine load only fetches the last few years (WEATHER_COLD_START_YEARS), and
+# ERA5 reaches back to 1940, so this is how the history gets there — and unlike
+# `backfill-wdi` it is **slow on purpose**.
 # Open-Meteo's free tier allows 600 units a minute, 5,000 an hour and 10,000 a
 # day, one year of 41 capitals costs ~641, and the resource paces itself against
 # all three windows. So a decade is roughly two hours of mostly waiting, and

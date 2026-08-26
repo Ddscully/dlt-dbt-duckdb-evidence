@@ -735,6 +735,30 @@ its first source with a *finite budget*.
   *budget*, which is a weaker claim with the same consequence, and it reaches
   everything that currently names one schema: `just clean warehouse`'s guard,
   `release-data.yml`'s fatal restore step and its "did not shrink" verify.
+- **A cold start fetches three years, not the whole series, and getting that
+  wrong is a *hang* rather than a failure.** `WEATHER_FIRST_YEAR` (2007) is the
+  backfill floor; `WEATHER_COLD_START_YEARS` is what an unpartitioned load asks
+  for when the destination is empty — which is the normal state of a fresh clone
+  and of `pages.yml`, `nightly.yml` and `release-data.yml`, all three of which
+  build from nothing against the live APIs. Starting a cold load at 2007 is the
+  intuitive choice and costs ~12,600 units against a 10,000-a-day allowance; the
+  limiter honours that allowance by **waiting**, so nothing errors. Simulated end
+  to end with the injected clock: **24.1 hours, including one 22-hour sleep**.
+  Three years is ~1,700 units and two minutes, and still yields two *complete*
+  calendar years, which is the floor for the year-over-year comparison the mart
+  exists for.
+  - **Every per-window assertion passed throughout.** Each of the twenty
+    requests was individually affordable and
+    `weather_windows_chunk_the_seed_into_affordable_requests` was green — the
+    bound that was missing is over the *total*. A per-item check cannot see a
+    budget that only twenty items together exceed, which generalises past this
+    source.
+  - **The limiter is what converted the failure into a hang, and that is the
+    worse direction.** Without pacing, the sixteenth request would have 429'd
+    naming the daily window and `weather_retry_after` would have raised. Correct
+    pacing turned a loud stop into a silent one; the guard has to be the test,
+    because the runtime has no way left to complain.
+
 - **The 90-day merge lookback is sized to ERA5T, not to politeness.**
   Open-Meteo serves preliminary ERA5T within a day or two of real time and
   Copernicus supersedes it with final ERA5 two to three months later. FX's ten

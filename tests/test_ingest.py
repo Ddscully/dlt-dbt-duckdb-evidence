@@ -968,15 +968,66 @@ def test_weather_end_date_stops_short_of_the_archives_edge():
     )
 
 
-def test_weather_start_date_uses_the_seed_floor_then_the_lookback():
-    assert pipeline.weather_start_date(None) == f"{pipeline.WEATHER_FIRST_YEAR}-01-01"
+def test_weather_start_date_cold_starts_recently_not_at_the_series_floor():
+    """The branch that runs on every fresh clone and all three live workflows.
+
+    Reaching back to `WEATHER_FIRST_YEAR` here is the intuitive choice and the
+    expensive one: it is ~12,600 units against a 10,000-a-day allowance, which
+    the limiter honours by *waiting* rather than failing. Simulated, that is 24.1
+    hours with a single 22-hour sleep — a hang, not an error.
+    """
+    assert pipeline.weather_start_date(None, today=date(2026, 8, 27)) == "2024-01-01"
+    # Clamped at the series floor, so a cold start in 2008 cannot ask for 2006.
+    assert (
+        pipeline.weather_start_date(None, today=date(2008, 5, 1))
+        == f"{pipeline.WEATHER_FIRST_YEAR}-01-01"
+    )
+
+
+def test_weather_start_date_follows_the_lookback_once_there_is_a_watermark():
     # 90-day lookback, inclusive of the watermark day itself.
     assert pipeline.weather_start_date("2026-08-20") == "2026-05-23"
-    # Clamped: a watermark near the floor must not ask for years the seed skipped.
+    # Clamped: a watermark near the floor must not ask for years before the
+    # series is worth having.
     assert (
         pipeline.weather_start_date(f"{pipeline.WEATHER_FIRST_YEAR}-01-05")
         == f"{pipeline.WEATHER_FIRST_YEAR}-01-01"
     )
+
+
+def test_a_cold_start_fits_inside_the_hourly_budget():
+    """The structural guard, and the one that would have caught the 24-hour hang.
+
+    Every per-window assertion passed while the *whole* cold start cost more than
+    a day's allowance — each request was affordable and there were twenty of
+    them. So the bound that matters is over the total, not over any window, and
+    it is the hourly one: a load that cannot finish inside an hour is a load that
+    stalls a workflow rather than failing it.
+    """
+    windows = pipeline.weather_windows(watermark=None, today=date(2026, 8, 27))
+    hourly = {window: budget for window, budget in pipeline.WEATHER_RATE_LIMITS}[3600.0]
+    total = sum(
+        pipeline.weather_call_units(
+            len(pipeline.WEATHER_COUNTRIES),
+            (date.fromisoformat(end) - date.fromisoformat(start)).days + 1,
+        )
+        for start, end in windows
+    )
+    assert total <= hourly, (
+        f"a cold start costs {total:,.0f} units against {hourly:,.0f}/hour — the limiter "
+        "will pace it by sleeping, so this stalls a fresh clone rather than failing it"
+    )
+
+
+def test_a_cold_start_still_yields_two_complete_calendar_years():
+    """The floor under `WEATHER_COLD_START_YEARS`, since the budget only pushes
+    it down. Two complete years is the minimum for the year-over-year comparison
+    `fct_country_weather_year` exists for — one year, or a rolling 365 days
+    straddling two partial ones, would leave a fresh clone unable to reproduce
+    the finding the source was added for."""
+    windows = pipeline.weather_windows(watermark=None, today=date(2026, 8, 27))
+    complete = [(s, e) for s, e in windows if s.endswith("-01-01") and e.endswith("-12-31")]
+    assert len(complete) >= 2
 
 
 def test_weather_lookback_outlives_the_era5t_revision_window():
