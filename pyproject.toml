@@ -23,8 +23,8 @@ dev = [
     # Exact, and the *only* place it is pinned — the upstream pre-commit hook
     # carried a second `rev` and the two drifted. Don't reintroduce one. (ruff is
     # the mirror image: pinned only in .pre-commit-config.yaml.) See CLAUDE.md.
-    "sqlfluff==4.2.2",     # SQL linter/formatter (dbt templater)
-    "sqlfluff-templater-dbt==4.2.2",  # .sqlfluff sets templater = dbt; useless without this
+    "sqlfluff==4.3.0",     # SQL linter/formatter (dbt templater)
+    "sqlfluff-templater-dbt==4.3.0",  # .sqlfluff sets templater = dbt; useless without this
     "pre-commit>=4.0",     # git hooks
     "pytest>=8.3",         # unit tests over the ingest/transform logic (see tests/)
     # Driven as `coverage run -m pytest`, not via pytest-cov: that wrapper
