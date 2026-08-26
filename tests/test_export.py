@@ -11,22 +11,28 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import duckdb
 import pytest
+from test_fixtures import ALL_URLS
 
 from modern_data_stack import export as _export
 from modern_data_stack.db import scalar
 from modern_data_stack.export import storage_version
 from scripts.export_warehouse import (
+    ATTRIBUTION,
     MAX_PUBLISHED_STORAGE_VERSION,
     MIN_READER_VERSION,
     default_tag,
     release_notes,
     run,
 )
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # `raw` and `main` must not ship as Parquet; `staging`/`marts`/`analytics` must.
 # The view is written fully qualified the way dbt-duckdb writes it — that's what
@@ -296,3 +302,156 @@ def test_the_release_notes_state_a_minimum_reader_version(export: dict):
     notes = release_notes(export, "acme/demo", export["tag"])
     assert f"DuckDB from {MIN_READER_VERSION} on" in notes
     assert str(export["storage_version"]) in notes
+
+
+# --------------------------------------------------------------------------- #
+# Attribution — the licence obligation the release actually carries
+# --------------------------------------------------------------------------- #
+
+# Which publisher each *fetch* host's data belongs to. Neither string is
+# derivable from the other, which is the whole reason this map exists rather
+# than a hostname comparison: attribution names the publisher, not the CDN or
+# the API gateway in front of them. OWID is fetched from
+# `raw.githubusercontent.com` and credited at `github.com/owid`; the World Bank
+# from `api.worldbank.org` and credited at `data.worldbank.org`; the euro rates
+# arrive via `api.frankfurter.dev`, a third-party mirror ATTRIBUTION names
+# *beside* the ECB rather than instead of it.
+PUBLISHER_FOR_FETCH_HOST = {
+    "raw.githubusercontent.com": "github.com/owid",
+    "api.worldbank.org": "data.worldbank.org",
+    "ec.europa.eu": "ec.europa.eu/eurostat",
+    "api.frankfurter.dev": "frankfurter.dev",
+    "archive.ics.uci.edu": "archive.ics.uci.edu/dataset/502",
+}
+
+
+def _readme_licence_section() -> str:
+    """README's `## License` section, bounded at the next heading.
+
+    Bounded rather than read to end-of-file even though it is currently last:
+    a section appended after it would otherwise widen this test silently, and
+    every URL in the new one would start counting as an attribution link.
+    """
+    after = (REPO_ROOT / "README.md").read_text().split("## License", 1)[1]
+    return after.split("\n## ", 1)[0]
+
+
+ATTRIBUTION_HEADER = ("Source", "Publisher", "Licence")
+
+
+def _attribution_rows() -> list[tuple[str, ...]]:
+    """The table's data rows, as `(source, publisher, licence)` cells.
+
+    The header is matched by content and asserted rather than skipped by
+    position. `rows[1:]` looks equivalent and is not: edit or delete the header
+    line and the slice silently drops the first *source* instead, which is
+    exactly the row nothing else in this file would mention. Found by mutation —
+    removing the header left this test green.
+
+    The column order is what separates publisher from licence, so asserting the
+    header is also asserting that the two are still where the callers below
+    think they are.
+    """
+    lines = [ln for ln in ATTRIBUTION.splitlines() if ln.startswith("|") and "---" not in ln]
+    cells: list[tuple[str, ...]] = [
+        tuple(c.strip() for c in ln.strip("|").split("|")) for ln in lines
+    ]
+    assert cells[:1] == [ATTRIBUTION_HEADER], (
+        f"the attribution table's header is {cells[:1]}, expected {[ATTRIBUTION_HEADER]} — "
+        "the column order is what tells a publisher from a licence"
+    )
+    return cells[1:]
+
+
+def test_every_source_the_pipeline_fetches_is_attributed():
+    """Adding a source without crediting its publisher is a licence breach.
+
+    The releases redistribute other people's data — all of it CC BY 4.0, a
+    Eurostat/ECB reuse policy or an EU reuse decision — and every one of those
+    permits redistribution *on condition of attribution*. `ATTRIBUTION` is the
+    single source of truth for both the shipped `ATTRIBUTION.md` and the release
+    notes, and CLAUDE.md carries the instruction "keep it in step with the
+    README's licence section when a source is added" with nothing enforcing it.
+
+    Tied to `ALL_URLS` because that is already the authority for what the
+    pipeline fetches, and it has its own guards (every URL resolves to a
+    fixture, every route is reachable). Restating the source list here would be
+    a third copy to drift.
+
+    The CBAM seeds are the one credited row this cannot reach: they are
+    transcribed from a regulation by `scripts/build_cbam_seeds.py` rather than
+    fetched, so no URL represents them. That is a gap in coverage, not an
+    exemption — the row is in the table and is checked by the licence test
+    below.
+    """
+    fetched = {urlparse(url).netloc for url in ALL_URLS}
+
+    unattributed = sorted(fetched - set(PUBLISHER_FOR_FETCH_HOST))
+    assert not unattributed, (
+        f"the pipeline fetches from {unattributed} and nothing says who publishes it — "
+        "add the host to PUBLISHER_FOR_FETCH_HOST and the publisher to ATTRIBUTION"
+    )
+    # Its own assertion: swapping one host for another produces a gap *and* a
+    # stale entry, the assert above wins, and the stale half is never measured.
+    # Same finding as the `RAW_DESCRIPTIONS` and WDI-pivot guards.
+    stale = sorted(set(PUBLISHER_FOR_FETCH_HOST) - fetched)
+    assert not stale, (
+        f"PUBLISHER_FOR_FETCH_HOST names hosts the pipeline no longer fetches: {stale}"
+    )
+    # Searched in the **Publisher column**, not across the whole document.
+    # Substring-matching the lot passes on a licence link that happens to
+    # contain the publisher's path: `ec.europa.eu/eurostat` sits inside the
+    # Eurostat copyright-notice URL, so deleting Eurostat as a *source* left
+    # this green. Found by mutation, not by review.
+    publishers = " ".join(row[1] for row in _attribution_rows())
+    uncredited = sorted(
+        publisher for publisher in PUBLISHER_FOR_FETCH_HOST.values() if publisher not in publishers
+    )
+    assert not uncredited, (
+        f"fetched from, but named in no Publisher cell of the attribution table: {uncredited}"
+    )
+
+
+def test_the_release_attribution_and_the_readme_agree_on_the_licences():
+    """Two documents state the same licences and neither is generated.
+
+    They are shaped differently on purpose — ATTRIBUTION is a table a
+    downloader reads beside the data, README's `## License` is prose a visitor
+    reads — so this compares what they *say*, not how they say it.
+
+    Matching on the markdown **label or** the URL is what makes that possible
+    without a vocabulary of known licences, which would itself go stale the
+    first time a source arrived under a licence nobody had listed. It is also
+    load-bearing rather than defensive: ATTRIBUTION writes
+    `[CC BY 4.0](https://creativecommons.org/...)` and README writes the bare
+    words "CC BY 4.0" with no link, so a URL-only comparison fails today on a
+    difference that is entirely legitimate.
+    """
+    rows = _attribution_rows()
+    links = [
+        pair for row in rows for pair in re.findall(r"\[([^\]]+)\]\((https?://[^)]+)\)", row[2])
+    ]
+    section = _readme_licence_section()
+
+    # Vacuity guards. Both extractions parse hand-written markdown, and a
+    # pattern that stops matching passes by not looking.
+    assert len(rows) >= 6, f"only {len(rows)} source rows found in the ATTRIBUTION table"
+    assert len(links) >= 6, f"only {len(links)} licence links found in the ATTRIBUTION table"
+    assert "MIT" in section and len(section) > 500, "README's License section did not parse"
+
+    unstated = sorted(
+        {label for label, url in links if label not in section and url not in section}
+    )
+    assert not unstated, (
+        f"licences in the release attribution that README's License section never mentions, "
+        f"by name or by link: {unstated}"
+    )
+    # The other direction, so deleting a source from the table alone is caught.
+    # No allowlist is needed and that is worth knowing before someone adds one:
+    # every http link in that section is currently also an attribution link.
+    orphaned = sorted(
+        url for url in set(re.findall(r"https?://[^\s)]+", section)) if url not in ATTRIBUTION
+    )
+    assert not orphaned, (
+        f"README's License section links sources the release attribution does not: {orphaned}"
+    )
