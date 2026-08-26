@@ -1,6 +1,6 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 391 tests alongside the models — 369 data tests and 22 unit
+`just dbt-build` runs 395 tests alongside the models — 369 data tests and 26 unit
 tests. Dagster surfaces the data tests as asset checks on the models they guard.
 For the pytest side, see [`tests/README.md`](../tests/README.md).
 
@@ -27,10 +27,10 @@ happily pass a threshold the full 200+ would break.
 
 ## Unit tests
 
-Twenty-two of those tests are dbt *unit* tests, over seven models — `dim_date`,
+Twenty-six of those tests are dbt *unit* tests, over eight models — `dim_date`,
 `stg_retail_lines`, `fct_cbam_exposure`, `fct_fx_rates_daily`,
-`fct_fx_rates_periods`, `fct_retail_returns` and
-`fct_retail_customer_cohorts`. They run a model against fixed input rows and compare the
+`fct_fx_rates_periods`, `fct_retail_returns`, `fct_retail_customer_cohorts` and
+`dim_retail_customer`. They run a model against fixed input rows and compare the
 entire output, rather than asserting a property of whatever the warehouse happens
 to hold — which is what lets them reach two things a data test structurally
 cannot.
@@ -72,7 +72,7 @@ changes not one number in the warehouse.
 Fixtures live in `dbt/tests/fixtures/` (dbt's `test-paths`, not the pytest
 fixtures). `dim_date` needs CSV files there because it generates its own rows —
 one input year expands to a whole calendar year, and `expect` is full-set
-equality over all 366. The other five are 1:1 on their inputs, or close enough
+equality over all 366. The other seven are 1:1 on their inputs, or close enough
 that posing the rows directly is clearer, so their cases are inline. `fct_cbam_exposure`'s fixtures also pick totals that are float-exact
 under the mark-up, because `markup_2026_pct` is a ratio of two doubles and the
 warehouse holds three distinct values of it that all print as `10.0`.
@@ -80,7 +80,7 @@ warehouse holds three distinct values of it that all print as `10.0`.
 They run inside `dbt build` rather than being excluded from it. dbt Labs
 recommends keeping unit tests out of production runs to save warehouse spend;
 that argument is about a cloud warehouse, and this is a local DuckDB build where
-all eighteen cost 3.4 seconds. `just dbt-unit-test` is the inner loop.
+all twenty-six cost 4.0 seconds. `just dbt-unit-test` is the inner loop.
 
 ## Who it's for
 

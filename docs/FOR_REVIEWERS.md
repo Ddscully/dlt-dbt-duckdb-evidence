@@ -91,7 +91,7 @@ Measured on this machine against the live APIs, per stage:
 | Stage | Time | Notes |
 |-------|------|-------|
 | `just ingest` | **61.0 s** | seven sources; 55.2 s of it with the retail workbook already cached |
-| `just dbt-build` | **26.4 s** | 425 built nodes — 26 models, 2 snapshots, 6 seeds, 369 data tests and 22 unit tests (dbt's own total of 434 adds the 9 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
+| `just dbt-build` | **26.4 s** | 429 built nodes — 26 models, 2 snapshots, 6 seeds, 369 data tests and 26 unit tests (dbt's own total of 438 adds the 9 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
 | `just transform` | **2.1 s** | two Polars models |
 | `just pipeline-status` | **1.4 s** | observability tables |
 | `just lake` | **3.2 s** | 793 Parquet files, ~60 MB |

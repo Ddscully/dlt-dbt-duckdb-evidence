@@ -75,7 +75,7 @@ one; the page is `retail.md`.
     rule and was deliberately kept out of the determinism fix.
   - The tie-break is stable, not meaningful: `invoice` is a string so the order
     is lexicographic, and nothing claims the chosen line is the better match.
-- **Ten data tests, six mutations, none caught** (`dbt/models/marts/_unit_tests.yml`
+- **`fct_retail_returns` has ten data tests; six mutations, none caught** (`dbt/models/marts/_unit_tests.yml`
   holds the three that do). The `accepted_values` on `match_status` is the same
   trap as `item_type`: reordering the `case` so "no prior purchase" is tested
   before "no customer id" relabels 352 rows and stays green. `>=` for "quantity

@@ -96,7 +96,7 @@ The README is the tour. The detail lives in six files:
 |---|---|
 | [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the schemas they land in, and the Parquet lake beside them |
 | [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the Dagster asset graph, the three jobs, backfills and freshness policies |
-| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 391 dbt tests, the mart contracts, and the groups, exposures and model versions around them |
+| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 395 dbt tests, the mart contracts, and the groups, exposures and model versions around them |
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
 | [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | SLA, run cost, what breaks at 1000×, what I'd do differently |
@@ -264,7 +264,7 @@ the live endpoints and opens an issue when a source has moved, which is the cue
 to fix the pipeline and `just record-fixtures`. Details in
 [`tests/README.md`](./tests/README.md).
 
-Alongside them, `just dbt-build` runs 391 tests — 369 data tests and 22 unit
+Alongside them, `just dbt-build` runs 395 tests — 369 data tests and 26 unit
 tests — and enforces a schema contract on all 17 marts. What each gate catches,
 and the groups, exposures and model versions built around them, are in
 [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md).

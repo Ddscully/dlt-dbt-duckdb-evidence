@@ -82,7 +82,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 22 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 26 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -750,7 +750,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are twenty-two unit tests, over seven models, and they exist because a data
+- **There are twenty-six unit tests, over eight models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -952,6 +952,59 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
       lowest line number, so `order by line_number, invoice` passed it too. It
       now puts the lowest line number on the highest invoice, and all three
       permutations fail.
+- **`fct_retail_customer_cohorts` is the seventh, and the two things that define
+  the triangle's *edge* were both untested.** Six mutations against its 11 data
+  tests: `<=` to `<` on the ragged bound deletes the newest diagonal of every
+  cohort (325 rows to 300, taking 615 active customers and GBP 342k with it),
+  and `is_complete_period` inverted relabels every still-open period as
+  finished — both green. Only two go red, both on
+  `fct_retail_cohorts_month_zero_is_full_retention`, which is the shape worth
+  copying: it pins a *structural* property (a cohort is defined by its first
+  purchase, so month zero is 100% by construction) rather than a value.
+  - **The two filters either side of a ratio are separately correct and jointly
+    unanchored.** `active_customers` counts on `invoice_type = 'sale' and
+    quantity > 0` because it must agree with `dim_retail_customer`; the money
+    sums on `is_revenue_line`. So a customer whose only purchase that month was
+    postage is active and worth nothing, and
+    `revenue_per_active_customer_gbp` is a ratio across two populations — 88 of
+    25,598 active customer-months, 0.34%. The structural test anchors one end
+    only, which is why the mutation is invisible.
+- **`dim_retail_customer` is the eighth, and it is the model the returns fix
+  *learned its rule from*.** 11 data tests over 21 columns, every one of them on
+  a date, a count or an identifier — not one on money. Eight mutations, **none
+  caught**: `min(country)` for `max` relabels 13 customers, the repeat flag on
+  `>= 1` makes all 5,881 repeat customers, `n_orders` over every invoice type
+  moves it 36,975 to 44,811, and dropping the sign flip takes the mean return
+  rate from +5.89% to -5.89%.
+  - **Dropping `, invoice` from `first_order_line`'s window makes the model
+    non-reproducible**, exactly as `fct_retail_returns`' tied `asof` did. Four
+    builds against byte-identical sources gave four different
+    `sum(first_order_gbp)`, spread GBP 4,219, against a baseline stable to the
+    penny over three runs. 10 customers have two invoices tied on their earliest
+    timestamp; worst single swing GBP 1,182.10. CLAUDE.md already cited this
+    model as the *precedent* for that fix — the rule was learned here, applied
+    there, unit tested there, and left unpinned here for the whole time.
+  - **A test for a non-determinism bug can itself be flaky, and the first
+    version was.** With the tie-break deleted DuckDB returns the first-listed
+    row 92.5% of the time and the *correct* one by luck 5% (40 trials), so a
+    fixture with one tied customer passes a broken model about one run in
+    twenty — observed, on the third verification run. The fix is three tied
+    customers with the winner listed last, first and in the middle, so no
+    positional rule satisfies all three and luck has to strike three times.
+    Verified 8/8 red afterwards. **Re-run a mutation several times whenever the
+    bug it encodes is itself non-deterministic**; one green is not a survival.
+  - **A mutation whose effect another line cancels is not evidence either way.**
+    Turning the join to `first_purchase` into a `left join` changed nothing,
+    because the inner join to `first_order_value` is fed from the same
+    `purchases` CTE and still drops the same 61 customers. It reads as a
+    survivor and is not one — it never reached the rule. Score it separately or
+    it inflates the "nothing went red" count.
+  - **Asserting a column is not pinning it.** The first fixture asserted
+    `first_order_date` while every customer in it bought on exactly one day, so
+    `min(invoice_date)` and `max` returned the same answer and the mutation
+    swapping them passed. A column needs an input where the candidate
+    implementations *disagree*, which is the same lesson as the FX partitioning
+    fixture and `lake_matches_warehouse`' two drift cases.
 - **`expect` is full-set equality, so a model that generates its own rows needs a
   fixture file.** `dim_date` expands its bounds to whole calendar years, so any
   mocked `stg_fx_rates` inside one year yields 366 rows and all 366 must be
@@ -972,8 +1025,8 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  eighteen cost 3.4s. A broken fiscal calendar should stop `release-data.yml`,
-  not ride along in it. `just dbt-unit-test` is the ~3s inner loop.
+  twenty-six cost 4.0s. A broken fiscal calendar should stop `release-data.yml`,
+  not ride along in it. `just dbt-unit-test` is the ~4s inner loop.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.
   It is tautologically green in CI (which loads and then checks), which is why
@@ -1711,10 +1764,10 @@ Gotchas:
   traps.** Break the model in a plausible way against a *copy* of the warehouse
   (`WAREHOUSE_PATH` at an absolute path — `just dbt-build` targets the real
   one), run its full data-test suite, and record the number that moves. "Nothing
-  went red" is the finding, not the all-clear: across the five models mutated
+  went red" is the finding, not the all-clear: across the seven models mutated
   this way — `stg_retail_lines`, `fct_cbam_exposure`, `fct_fx_rates_daily`,
-  `fct_fx_rates_periods`, `fct_retail_returns` — 24 mutations were run and the
-  data tests caught 3.
+  `fct_fx_rates_periods`, `fct_retail_returns`, `fct_retail_customer_cohorts`,
+  `dim_retail_customer` — 38 mutations were run and the data tests caught 5.
   - **Run the unmutated baseline inside every batch.** A mutation that fails to
     *apply* is indistinguishable from a test that caught it, and both happened
     here — a `sed` pattern that spanned a hard wrap matched nothing, and a `cd`

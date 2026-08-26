@@ -130,6 +130,7 @@ CITED_MODELS = (
     "fct_fx_rates_periods",
     "fct_retail_returns",
     "fct_retail_customer_cohorts",
+    "dim_retail_customer",
 )
 
 

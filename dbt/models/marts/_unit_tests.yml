@@ -851,3 +851,198 @@ unit_tests:
       rows:
         - {months_since_first_order: 0, activity_month: "2024-01"}
         - {months_since_first_order: 1, activity_month: "2024-02"}
+
+  # --- dim_retail_customer --------------------------------------------------
+  #
+  # `dim_retail_customer` carries 11 data tests over 21 columns, and every one
+  # of them lands on a date, a count or an identifier. Not one touches money.
+  # The two structural tests are `unique(customer_id)` and
+  # `last_order_date >= first_order_date`; neither can see a wrong number.
+  #
+  # Eight mutations against a warehouse copy, running the full data suite each
+  # time. **None went red.**
+  #
+  # | mutation                                | effect                                            |
+  # |-----------------------------------------|---------------------------------------------------|
+  # | drop `, invoice` from the tie-break     | **not reproducible between builds** — see below   |
+  # | `cohort_month` off `lines`, not         | left-censored 955 -> 1,030; tenure +14,914 days   |
+  # | `purchases`                             |                                                   |
+  # | `first_order_gbp` over every line       | its 47 nulls become values; total +GBP 53,664     |
+  # | `min(country)` for `max(country)`       | 13 customers relabelled, silently                 |
+  # | drop the sign flip on `return_rate_pct` | mean +5.89% -> -5.89%                             |
+  # | `n_orders >= 1` for repeat customers    | 4,255 -> 5,881, i.e. everyone                     |
+  # | `n_orders` counts every invoice type    | 36,975 -> 44,811 (+21%)                           |
+  # | `left join` to `first_purchase`         | nothing — see the caveat                          |
+  #
+  # The last one is a **mutation that proved nothing**, recorded because it
+  # looks like a survivor and is not: the join changed, but the inner join to
+  # `first_order_value` is fed from the same `purchases` CTE and still drops the
+  # same 61 customers. It never reached the rule it aimed at. A mutation whose
+  # effect another line cancels is not evidence either way, and the honest score
+  # is seven informative mutations, none caught.
+  #
+  # **The tie-break is the one that matters, and it is the `fct_retail_returns`
+  # failure again.** Removing `, invoice` from `first_order_line`'s window makes
+  # the model non-deterministic: four builds against byte-identical sources gave
+  # `sum(first_order_gbp)` of 2,389,787.55 / 2,392,164.88 / 2,392,755.43 /
+  # 2,392,698.88 against a baseline of 2,394,006.56 that held to the penny over
+  # three runs. 10 customers have two invoices tied on their earliest timestamp
+  # and the tie-break decides all ten; the worst single swing is GBP 1,182.10,
+  # and customer 12709's two tied invoices differ by whether `first_order_gbp`
+  # is a value or a null at all. `accepted_range` cannot see any of it, because
+  # both candidates are legal money.
+  #
+  # This is the model CLAUDE.md cites as the *precedent* for the returns fix —
+  # the rule was learned here, applied there, unit tested there, and left
+  # unpinned here.
+  #
+  # **Four of the eight are covered below. `min(country)`, the repeat-customer
+  # boundary and `n_orders`' invoice filter are still unguarded** — they are
+  # wrong-but-stable, where the four here are the ones that either move a
+  # published number or make the model disagree with itself between builds.
+  #
+  # **Two fixtures, not one, and the reason is measured.** The tie-break and the
+  # revenue filter both surface in the *same column* — `first_order_gbp` is the
+  # only thing this model exposes about which invoice won, because there is no
+  # invoice column on it. A first draft shared one fixture across all four
+  # tests, and both mutations then reddened two tests apiece: a failure said
+  # "something about the first order" instead of naming the rule. Separating the
+  # tie into its own fixture is what makes each mutation light exactly one test,
+  # verified by re-running each with the unit tests in scope.
+  #
+  # So the first fixture is nothing but ties, and the second carries the rest:
+  # C2 has an earlier non-purchase row, postage inside its first order and a
+  # later return; C3's only line is postage; C4 is the ordinary customer, two
+  # clean invoices, present so the normal path is asserted alongside the edges.
+
+  - name: customer_first_order_breaks_a_tied_invoice_the_same_way_every_build
+    model: dim_retail_customer
+    description: >
+      `first_order_line` ranks on `min(invoice_ts)` then `invoice`, and the
+      second term is load-bearing: 10 customers in the extract open two invoices
+      at the same minute, so without it `row_number()` picks arbitrarily and
+      `first_order_gbp` changes between builds for no change in the data.
+      `dim_retail_customer` exposes no invoice column, so the value is the only
+      observable, and none of these three customers has a non-revenue line —
+      nothing but the tie-break can move the numbers this test asserts.
+      **Three tied customers, and the count is not decoration.** A single one is
+      a flaky test: with the tie-break deleted DuckDB returns the first-listed
+      row 92.5% of the time and the correct one by luck 5% (40 trials), so one
+      customer passes a broken model about one run in twenty — measured, after
+      a first version of this test did exactly that on its third run. The
+      correct answer sits **last** for C1, **first** for C1B and **in the
+      middle** for C1C, so no positional rule can satisfy all three, and
+      `expect` is full-set equality, so one wrong row is a failure.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          # C1 — the lowest invoice carries the lowest amount and is listed last.
+          - {invoice: "802", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 5, unit_price: 100.0, line_amount_gbp: 500.0, invoice_ts: "2024-01-10 09:00:00", invoice_date: "2024-01-10", invoice_month: "2024-01", country: "United Kingdom", is_revenue_line: true}
+          - {invoice: "801", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 3, unit_price: 100.0, line_amount_gbp: 300.0, invoice_ts: "2024-01-10 09:00:00", invoice_date: "2024-01-10", invoice_month: "2024-01", country: "United Kingdom", is_revenue_line: true}
+          - {invoice: "800", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 1, unit_price: 100.0, line_amount_gbp: 100.0, invoice_ts: "2024-01-10 09:00:00", invoice_date: "2024-01-10", invoice_month: "2024-01", country: "United Kingdom", is_revenue_line: true}
+          # C1B — winner listed first, so "take the last row" cannot pass either.
+          - {invoice: "810", line_number: 1, customer_id: "C1B", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 3, unit_price: 50.0, line_amount_gbp: 150.0, invoice_ts: "2024-01-11 09:00:00", invoice_date: "2024-01-11", invoice_month: "2024-01", country: "United Kingdom", is_revenue_line: true}
+          - {invoice: "812", line_number: 1, customer_id: "C1B", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 14, unit_price: 50.0, line_amount_gbp: 700.0, invoice_ts: "2024-01-11 09:00:00", invoice_date: "2024-01-11", invoice_month: "2024-01", country: "United Kingdom", is_revenue_line: true}
+          - {invoice: "811", line_number: 1, customer_id: "C1B", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 8, unit_price: 50.0, line_amount_gbp: 400.0, invoice_ts: "2024-01-11 09:00:00", invoice_date: "2024-01-11", invoice_month: "2024-01", country: "United Kingdom", is_revenue_line: true}
+          # C1C — winner in the middle, which no edge rule reaches at all.
+          - {invoice: "822", line_number: 1, customer_id: "C1C", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 60, unit_price: 10.0, line_amount_gbp: 600.0, invoice_ts: "2024-01-12 09:00:00", invoice_date: "2024-01-12", invoice_month: "2024-01", country: "United Kingdom", is_revenue_line: true}
+          - {invoice: "820", line_number: 1, customer_id: "C1C", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 12, unit_price: 10.0, line_amount_gbp: 120.0, invoice_ts: "2024-01-12 09:00:00", invoice_date: "2024-01-12", invoice_month: "2024-01", country: "United Kingdom", is_revenue_line: true}
+          - {invoice: "821", line_number: 1, customer_id: "C1C", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 35, unit_price: 10.0, line_amount_gbp: 350.0, invoice_ts: "2024-01-12 09:00:00", invoice_date: "2024-01-12", invoice_month: "2024-01", country: "United Kingdom", is_revenue_line: true}
+    expect:
+      rows:
+        # The lowest invoice wins each tie, whatever order it was listed in.
+        - {customer_id: "C1", first_order_gbp: 100.0}
+        - {customer_id: "C1B", first_order_gbp: 150.0}
+        - {customer_id: "C1C", first_order_gbp: 120.0}
+
+  - name: customer_cohort_is_the_first_purchase_not_the_first_appearance
+    model: dim_retail_customer
+    description: >
+      `first_purchase` reads `purchases`, not `lines`, so a customer who shows
+      up on a cancellation before they ever buy anything is dated from the
+      purchase. 140 customers in the extract have an earlier non-purchase row,
+      and dating them from it puts them in a cohort they bought nothing in —
+      which also drags the extract's first cohort month backwards and
+      relabels 75 more cohorts as left-censored (955 -> 1,030). Every data test
+      stays green: `cohort_month` is `not_null` and nothing else, and a wrong
+      month is as non-null as a right one. C2 carries the December cancellation
+      that makes the two readings differ. `first_order_date` is asserted beside
+      it, and C4's two purchase dates are what hold it to `min` rather than
+      `max` — both aggregates return the same answer for a customer who bought
+      on one day, which is every other customer here.
+    given: &customer_fixture
+      - input: ref('stg_retail_lines')
+        rows:
+          # C2 — an earlier non-purchase row, then the first real order, then a
+          # return. The December cancellation is what separates "first
+          # appearance" from "first purchase"; the postage line on invoice 900
+          # is what separates the first order's *value* from its *total*; the
+          # February cancellation is the only return in the fixture.
+          - {invoice: "C900", line_number: 1, customer_id: "C2", stock_code: "POST", invoice_type: "cancellation", item_type: "postage", quantity: -1, unit_price: 12.0, line_amount_gbp: -12.0, invoice_ts: "2023-12-20 10:00:00", invoice_date: "2023-12-20", invoice_month: "2023-12", country: "France", is_revenue_line: false}
+          - {invoice: "900", line_number: 1, customer_id: "C2", stock_code: "SKU2", invoice_type: "sale", item_type: "product", quantity: 4, unit_price: 50.0, line_amount_gbp: 200.0, invoice_ts: "2024-01-15 10:00:00", invoice_date: "2024-01-15", invoice_month: "2024-01", country: "France", is_revenue_line: true}
+          - {invoice: "900", line_number: 2, customer_id: "C2", stock_code: "POST", invoice_type: "sale", item_type: "postage", quantity: 1, unit_price: 15.0, line_amount_gbp: 15.0, invoice_ts: "2024-01-15 10:00:00", invoice_date: "2024-01-15", invoice_month: "2024-01", country: "France", is_revenue_line: false}
+          - {invoice: "C901", line_number: 1, customer_id: "C2", stock_code: "SKU2", invoice_type: "cancellation", item_type: "product", quantity: -1, unit_price: 50.0, line_amount_gbp: -50.0, invoice_ts: "2024-02-15 10:00:00", invoice_date: "2024-02-15", invoice_month: "2024-02", country: "France", is_revenue_line: true}
+          # C3 — a purchase that earns nothing. `sale` with a positive quantity,
+          # so it is a real first order, and no revenue line anywhere in it.
+          - {invoice: "950", line_number: 1, customer_id: "C3", stock_code: "POST", invoice_type: "sale", item_type: "postage", quantity: 1, unit_price: 18.0, line_amount_gbp: 18.0, invoice_ts: "2024-03-01 11:00:00", invoice_date: "2024-03-01", invoice_month: "2024-03", country: "Germany", is_revenue_line: false}
+          # C4 — the ordinary customer. All product, nothing sent back, and
+          # **two purchases on different dates**, which is the only thing in
+          # either fixture that separates `min(invoice_date)` from `max`. Its
+          # absence was a real hole: an earlier draft asserted
+          # `first_order_date` while every customer bought on exactly one day,
+          # so swapping the aggregate changed nothing and the column was
+          # asserted without being pinned.
+          - {invoice: "960", line_number: 1, customer_id: "C4", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 2, unit_price: 40.0, line_amount_gbp: 80.0, invoice_ts: "2024-01-20 12:00:00", invoice_date: "2024-01-20", invoice_month: "2024-01", country: "Spain", is_revenue_line: true}
+          - {invoice: "961", line_number: 1, customer_id: "C4", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 3, unit_price: 40.0, line_amount_gbp: 120.0, invoice_ts: "2024-02-20 12:00:00", invoice_date: "2024-02-20", invoice_month: "2024-02", country: "Spain", is_revenue_line: true}
+    expect:
+      rows:
+        # December is when C2 first appears. January is when they first buy.
+        - {customer_id: "C2", first_order_date: "2024-01-15", cohort_month: "2024-01"}
+        - {customer_id: "C3", first_order_date: "2024-03-01", cohort_month: "2024-03"}
+        - {customer_id: "C4", first_order_date: "2024-01-20", cohort_month: "2024-01"}
+
+  - name: customer_first_order_value_is_revenue_only_and_null_when_there_is_none
+    model: dim_retail_customer
+    description: >
+      `first_order_gbp` sums `line_amount_gbp` filtered on `is_revenue_line`,
+      exactly as `net_revenue_gbp` does, so the two are the same measurement
+      over different windows and the ratio between them means something. Two
+      consequences, and the second is the one no data test can reach: postage
+      and vouchers on the first invoice are excluded from its value, and a first
+      order carrying no revenue line at all is **null, not zero** — 47 customers
+      in the extract, whose orders are a Manual adjustment or the test SKU. Zero
+      would say they bought nothing; null says this order has no revenue
+      reading. Dropping the filter takes all 47 nulls to values and the total up
+      by GBP 53,664, under an `accepted_range` that never sees a null either way.
+    given: *customer_fixture
+    expect:
+      rows:
+        # GBP 200 of product, and the GBP 15 of postage on the same invoice is
+        # not part of what the customer arrived with.
+        - {customer_id: "C2", first_order_gbp: 200.0, gross_revenue_gbp: 200.0, net_revenue_gbp: 150.0}
+        # A real first order with no revenue in it. Null all the way down.
+        - {customer_id: "C3", first_order_gbp: null, gross_revenue_gbp: null, net_revenue_gbp: null}
+        # Two orders, GBP 200 in total, of which GBP 80 is what they arrived
+        # with — the pair of columns the whole first-order analysis rests on.
+        - {customer_id: "C4", first_order_gbp: 80.0, gross_revenue_gbp: 200.0, net_revenue_gbp: 200.0}
+
+  - name: customer_return_rate_is_a_positive_share_of_what_they_bought
+    model: dim_retail_customer
+    description: >
+      `returned_gbp` is negative — a return is a negative line amount — so
+      `return_rate_pct` carries a `-100.0` to come out positive, and "a 25%
+      return rate" reads the way anyone would expect. The column has **no data
+      test at all**: dropping the sign flip turns the warehouse mean from +5.89%
+      to -5.89% and nothing anywhere goes red. It is also measured by value and
+      not by order count, deliberately — a customer who returns one item from
+      each of ten orders is not the same risk as one who sends back a pallet.
+      Null, not zero, where there is nothing to divide — and C3 and C4 are blank
+      for different reasons: C3 has no revenue to measure against, C4 simply
+      never sent anything back.
+    given: *customer_fixture
+    expect:
+      rows:
+        # GBP 50 back out of GBP 200 in: a quarter, stated positive.
+        - {customer_id: "C2", returned_gbp: -50.0, return_rate_pct: 25.0}
+        - {customer_id: "C3", returned_gbp: null, return_rate_pct: null}
+        - {customer_id: "C4", returned_gbp: null, return_rate_pct: null}
