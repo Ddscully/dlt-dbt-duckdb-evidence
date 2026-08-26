@@ -1193,6 +1193,47 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
 - **`raw` and `history` ship in the DuckDB file but not as Parquet.** The flat
   files are the modelled layers only (`PUBLISHED_SCHEMAS`); anyone who wants
   dlt's landing tables or the snapshot downloads the database.
+- **The published file's storage format is not its writer's version, and the
+  manifest carries both.** `duckdb_version` answers "who wrote this";
+  `storage_version` answers "can I open it", which is the only question a
+  consumer has. They differ: DuckDB 1.x writes format **64** by default — the
+  one `v0.10.0` through `v1.1.3` all read — so a file written by 1.5.5 opens on
+  a client five years older. The release notes said "Written by DuckDB 1.5.5.
+  Older clients may not read the storage format" for the whole life of the
+  release, which was unmeasured and, it turns out, *pessimistic*.
+  - **There is no SQL that answers it.** `duckdb_databases()` returns an empty
+    `options` map, there is no pragma, and the only surface DuckDB exposes is
+    `ATTACH … (STORAGE_VERSION …)` on the write side.
+    `modern_data_stack.export.storage_version` reads the header instead — 8-byte
+    checksum, `DUCK` magic, little-endian uint64 — which is the right shape for
+    a release gate anyway: it describes the artifact, not the process. The
+    mapping, measured by writing a file per version on 1.5.5: **64** =
+    v0.10.0–v1.1.3, **65** = v1.2.x, **66** = v1.3.x, **67** = v1.4.x, **68** =
+    v1.5.x. A *lower* number is the more widely readable file.
+  - **The guard is split across two moments because one of them cannot see the
+    thing that moves.** DuckDB 2.0 ships a new default storage format, nothing
+    caps `duckdb>=1.1`, and `lockfile-only` means the bump arrives as one line
+    of a grouped monthly Dependabot PR. Every *artifact* check would pass it —
+    they read a file the same binary just wrote. So
+    `test_the_installed_duckdb_still_writes_the_format_the_release_promises`
+    checks the **toolchain** (a bare `duckdb.connect()`, no `STORAGE_VERSION`)
+    and is the only one that fires on the bump, on the PR, before it merges. The
+    artifact checks — `export()`'s ceiling and `release-data.yml`'s verify step
+    — catch a file that should not be uploaded. This is "green CI proves nothing
+    about versions" one turn further round: what moves is the *format of the
+    artifact* rather than the code.
+  - **`max_storage_version` has no default in the package**, matching `schema`
+    on `db.write_frames`. A ceiling is a compatibility promise to consumers the
+    package knows nothing about, and it is only meaningful beside the minimum
+    reader version a project states — `MAX_PUBLISHED_STORAGE_VERSION` and
+    `MIN_READER_VERSION` live in `scripts/export_warehouse.py` together.
+  - **The ceiling is tested from both sides**, because `>` against `>=` is the
+    slip and a one-sided test passes under either — the same lesson as
+    `lake_matches_warehouse`' two drift cases and the FX partitioning fixture.
+  - **Not an upper bound on `duckdb`, deliberately.** Pinning would block every
+    unrelated fix in 2.x to guard one property; the tripwire lets the bump land
+    and makes a person decide the format question with a red test naming it.
+    `dagster<3.15` therefore remains the only hard upper bound in the tree.
 - **Each release carries the previous one's `history` forward**
   (`scripts/restore_history.py`), which is what makes the published snapshot
   accumulate a real revision log instead of holding one version per row forever.

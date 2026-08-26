@@ -19,7 +19,14 @@ import pytest
 
 from modern_data_stack import export as _export
 from modern_data_stack.db import scalar
-from scripts.export_warehouse import default_tag, release_notes, run
+from modern_data_stack.export import storage_version
+from scripts.export_warehouse import (
+    MAX_PUBLISHED_STORAGE_VERSION,
+    MIN_READER_VERSION,
+    default_tag,
+    release_notes,
+    run,
+)
 
 # `raw` and `main` must not ship as Parquet; `staging`/`marts`/`analytics` must.
 # The view is written fully qualified the way dbt-duckdb writes it — that's what
@@ -182,3 +189,110 @@ def test_exporting_into_the_warehouse_directory_is_refused(warehouse: Path):
 
 def test_tags_are_dated():
     assert default_tag(datetime(2026, 7, 30, tzinfo=UTC)) == "data-2026-07-30"
+
+
+# --- the storage format of the published file -------------------------------
+#
+# DuckDB 2.0 ships a new default storage format. Nothing in `pyproject.toml`
+# caps `duckdb>=1.1`, and `versioning-strategy: lockfile-only` means the bump
+# arrives as one line of a grouped monthly Dependabot PR. What follows splits
+# the guard across the two moments that matter: the *toolchain* test runs on
+# every PR and catches the bump before it merges; the *artifact* tests catch a
+# file that should not be uploaded.
+
+
+def test_the_installed_duckdb_still_writes_the_format_the_release_promises(tmp_path: Path):
+    """The tripwire, and the only one of these that fires on a dependency bump.
+
+    A plain `duckdb.connect()` — no `STORAGE_VERSION` — is what the exporter
+    does, so what it writes by default *is* the published format. Everything
+    else here reads a file this same binary produced, which is exactly why none
+    of them can notice the default moving: a repo's tests all write and read
+    with one version of the library.
+
+    `<=` rather than `==` because a lower number is the more compatible file;
+    only an increase strands a reader.
+    """
+    path = tmp_path / "default.duckdb"
+    con = duckdb.connect(str(path))
+    con.execute("create table t as select 1 as a")
+    con.close()
+
+    written = storage_version(path)
+    assert written <= MAX_PUBLISHED_STORAGE_VERSION, (
+        f"DuckDB {duckdb.__version__} now writes storage version {written} by default, "
+        f"above the {MAX_PUBLISHED_STORAGE_VERSION} the release notes promise "
+        f"(readable by DuckDB {MIN_READER_VERSION}+). Raising the ceiling strands "
+        f"every client older than the new format — decide it, don't merge it."
+    )
+
+
+def test_the_manifest_records_the_format_and_not_only_the_writer(export: dict):
+    """`duckdb_version` answers "who wrote this"; a consumer is asking "can I
+    open it", which is a different question with a different answer — 1.5.5
+    writes the format 0.10.0 reads. Both ship, and the format is measured off
+    the bytes that were uploaded rather than off the connection that made them.
+    """
+    published = export["out"] / "warehouse.duckdb"
+    assert export["storage_version"] == storage_version(published)
+    assert export["storage_version"] <= MAX_PUBLISHED_STORAGE_VERSION
+    assert export["duckdb_version"] == duckdb.__version__
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [False, True],
+    ids=["publishes-at-the-ceiling", "refuses-one-above-it"],
+)
+def test_the_ceiling_is_inclusive(warehouse: Path, tmp_path: Path, refused: bool):
+    """Both sides of the boundary, because `>` and `>=` are the slip here and a
+    one-sided test passes under either. The fixture warehouse is written by the
+    installed DuckDB, so its format is the ceiling itself: exporting *at* that
+    number must succeed and one below it must refuse.
+    """
+    on_disk = storage_version(warehouse)
+    limit = on_disk - 1 if refused else on_disk
+    out = tmp_path / f"out-{limit}"
+
+    def do_export() -> dict:
+        return _export.export(
+            str(warehouse),
+            str(out),
+            schemas=("marts",),
+            attribution="none",
+            release_notes=lambda *_: "",
+            max_storage_version=limit,
+        )
+
+    if refused:
+        with pytest.raises(ValueError, match="storage"):
+            do_export()
+        # The guard fires after the database has been copied — that copy is what
+        # it measured — so the directory is not empty. What it does guarantee is
+        # that no *release* was assembled around the file: a caller that ignored
+        # the exception would find nothing publishable to upload.
+        assert not (out / "manifest.json").exists()
+        assert not (out / "SHA256SUMS").exists()
+        assert not list(out.glob("*.parquet"))
+    else:
+        assert do_export()["storage_version"] == on_disk
+
+
+def test_a_file_that_is_not_a_duckdb_database_is_named_as_such(tmp_path: Path):
+    """The header read is positional, so a short or foreign file would otherwise
+    come back as a plausible integer rather than an error."""
+    path = tmp_path / "not-a-database.parquet"
+    path.write_bytes(b"PAR1" + b"\0" * 32)
+    with pytest.raises(ValueError, match="not a DuckDB database file"):
+        storage_version(path)
+
+
+def test_the_release_notes_state_a_minimum_reader_version(export: dict):
+    """The old line named the writer and said "older clients may not read the
+    storage format", which is unmeasured and — as it turns out — pessimistic:
+    the file is readable by every DuckDB back to 0.10.0. A consumer cannot check
+    this for themselves without downloading the file first.
+    """
+    notes = release_notes(export, "acme/demo", export["tag"])
+    assert f"DuckDB from {MIN_READER_VERSION} on" in notes
+    assert str(export["storage_version"]) in notes
