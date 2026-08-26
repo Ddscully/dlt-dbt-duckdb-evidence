@@ -693,3 +693,161 @@ unit_tests:
         # would be plain matches if tied lines were summed instead of chosen
         # between. That is a separate decision and this test pins today's.
         - {invoice: "C700", original_invoice: "700", original_line_number: 3, original_quantity: 2, quantity_returned: 4, match_status: "matched, quantity exceeds purchase", quantity_is_consistent: false}
+
+  # --- fct_retail_customer_cohorts -----------------------------------------
+  #
+  # Eleven data tests, and neither of the two things that define the triangle's
+  # *edge* is among them. Mutated against a warehouse copy, running the model's
+  # full data suite each time:
+  #
+  # | mutation                                    | effect                                          |
+  # |---------------------------------------------|-------------------------------------------------|
+  # | `<=` to `<` on the ragged bound             | the last diagonal vanishes: 325 rows -> 300,    |
+  # |                                             | 615 active customers and GBP 342k with it       |
+  # | `is_complete_period` `<` to `<=`            | 300 complete -> 325. Every still-open period    |
+  # |                                             | is relabelled finished; no other column moves   |
+  # | revenue uses activity's filter              | +GBP 949,283 and +12.4% on                      |
+  # |                                             | `revenue_per_active_customer_gbp`               |
+  # | drop `quantity > 0` from `activity`         | nothing at all                                  |
+  #
+  # All four stay green. Only two mutations go red, both on
+  # `fct_retail_cohorts_month_zero_is_full_retention`: pointing `activity` at
+  # `is_revenue_line`, and adding a month to the offset arithmetic.
+  #
+  # That test is the shape worth copying — it pins a *structural* property (a
+  # cohort is defined by its first purchase, so month zero is 100% by
+  # construction) rather than a value, and it is why `activity`'s filter is not
+  # free to change: it has to agree with `dim_retail_customer`'s `purchases`,
+  # which is the identical `invoice_type = 'sale' and quantity > 0`. What it
+  # cannot see is anything about `monthly_revenue`, filtered on
+  # `is_revenue_line` instead. Both filters are right — "active" means bought,
+  # "revenue" means net product revenue — but only one end of the ratio is
+  # anchored, which is why the third mutation is invisible. 88 of 25,598 active
+  # customer-months (0.34%) sit in that gap: in the denominator of
+  # `revenue_per_active_customer_gbp` and not its numerator.
+  #
+  # `quantity > 0` is dead here for the reason it is dead in
+  # `fct_retail_returns`' `purchases`: every stock write-off is anonymous, so
+  # `customer_id is not null` has already excluded them. It stays because it
+  # states the intent.
+  #
+  # **One fixture, four tests, each asserting a different column set**, so a
+  # failure names which edge moved. Its shape is doing three jobs at once: the
+  # cohort has a gap month with no activity (a hole that must survive as a zero
+  # row), one customer returning in the last month, and — the part a first
+  # draft of these tests missed — a **postage line that is a purchase but not
+  # revenue**. Without that last row every line is `is_revenue_line: true`, the
+  # two filters select identically, and the asymmetry this whole section is
+  # about cannot be reached by any mutation.
+
+  - name: cohorts_triangle_stops_at_the_last_month_of_data
+    model: fct_retail_customer_cohorts
+    description: >
+      The ragged edge. Offsets run `0..date_diff(cohort_month, last_month)`
+      inclusive, so a cohort first seen in January with data through March gets
+      three rows and not two. `<` in place of `<=` deletes the newest diagonal
+      of every cohort — 25 of 325 rows in the warehouse — and leaves a table
+      that is still unique on its grain, still has month zero at 100%, and is
+      simply missing the most recent month anyone would look at. February is
+      the other half: a month nobody bought in is a zero row, not an absent
+      one, or a retention curve closes silently over its own holes.
+    overrides:
+      vars:
+        # Pinned rather than inherited: the project builds 36 and the widest
+        # cohort in the extract is 24 months, so the cap has never bound.
+        # `cohorts_offsets_stop_at_the_configured_cap` is the only place it is
+        # reachable at all.
+        retail_max_cohort_age_months: 36
+    given: &cohort_fixture
+      - input: ref('dim_retail_customer')
+        rows:
+          - {customer_id: "C1", cohort_month: "2024-01", is_left_censored_cohort: false}
+          - {customer_id: "C2", cohort_month: "2024-01", is_left_censored_cohort: false}
+      - input: ref('stg_retail_lines')
+        rows:
+          # Both arrive in January: month zero is the whole cohort.
+          - {customer_id: "C1", invoice_month: "2024-01", invoice_type: "sale", quantity: 1, line_amount_gbp: 100.0, is_revenue_line: true}
+          - {customer_id: "C2", invoice_month: "2024-01", invoice_type: "sale", quantity: 1, line_amount_gbp: 50.0, is_revenue_line: true}
+          # Nobody buys in February. March is the last month in the data and so
+          # the edge under test.
+          - {customer_id: "C1", invoice_month: "2024-03", invoice_type: "sale", quantity: 1, line_amount_gbp: 200.0, is_revenue_line: true}
+          # Postage: a sale line with a positive quantity, so `activity` counts
+          # C2 present in March — and not `is_revenue_line`, so it contributes
+          # nothing to the money. This single row is what makes the two filters
+          # distinguishable in the fixture.
+          - {customer_id: "C2", invoice_month: "2024-03", invoice_type: "sale", quantity: 1, line_amount_gbp: 18.0, is_revenue_line: false}
+    expect:
+      rows:
+        - {months_since_first_order: 0, activity_month: "2024-01", active_customers: 2, retention_pct: 100.0}
+        - {months_since_first_order: 1, activity_month: "2024-02", active_customers: 0, retention_pct: 0.0}
+        - {months_since_first_order: 2, activity_month: "2024-03", active_customers: 2, retention_pct: 100.0}
+
+  - name: cohorts_mark_only_the_still_open_period_incomplete
+    model: fct_retail_customer_cohorts
+    description: >
+      `is_complete_period` exists to say "this month is still being lived in,
+      do not read a retention drop into it". It is `activity_month <
+      last_month`, and `<=` makes it uniformly true — the warehouse goes from
+      300 complete periods to all 325, so the one row a reader is meant to
+      discount becomes the one claiming to be finished. No number moves with it
+      and no data test covers the column, which is the blind spot
+      `fct_fx_rates_periods.period_is_complete` has too, except that boundary is
+      unreachable and this one is every cohort's newest row.
+    overrides:
+      vars:
+        retail_max_cohort_age_months: 36
+    given: *cohort_fixture
+    expect:
+      rows:
+        - {activity_month: "2024-01", is_complete_period: true}
+        - {activity_month: "2024-02", is_complete_period: true}
+        # March *is* `last_month`, so it is the period still open.
+        - {activity_month: "2024-03", is_complete_period: false}
+
+  - name: cohorts_count_a_buyer_active_even_when_the_purchase_earns_no_revenue
+    model: fct_retail_customer_cohorts
+    description: >
+      The asymmetry, stated as behaviour rather than left implicit. `active` is
+      `invoice_type = 'sale' and quantity > 0`, because it has to agree with the
+      cohort definition in `dim_retail_customer`; the money is `is_revenue_line`,
+      because that is what net revenue means everywhere else in the warehouse.
+      So a customer whose only March purchase is postage is **active and worth
+      nothing**, and `revenue_per_active_customer_gbp` is a ratio across two
+      populations — 88 of 25,598 active customer-months in the warehouse.
+      Pointing the money at activity's filter instead moves GBP 949,283 and
+      12.4% of that ratio with every data test green. Whether the two should be
+      reconciled is a modelling decision; this pins which one is in force.
+    overrides:
+      vars:
+        retail_max_cohort_age_months: 36
+    given: *cohort_fixture
+    expect:
+      rows:
+        # 150 over two buyers.
+        - {activity_month: "2024-01", active_customers: 2, net_revenue_gbp: 150.0, revenue_per_active_customer_gbp: 75.0}
+        # A hole: no buyers, no money, and no division.
+        - {activity_month: "2024-02", active_customers: 0, net_revenue_gbp: 0.0, revenue_per_active_customer_gbp: null}
+        # Two active, one of them earning nothing: the GBP 18 of postage is
+        # absent from the numerator while C2 is present in the denominator, so
+        # the ratio is 200/2 and not 218/2 or 200/1.
+        - {activity_month: "2024-03", active_customers: 2, net_revenue_gbp: 200.0, revenue_per_active_customer_gbp: 100.0}
+
+  - name: cohorts_offsets_stop_at_the_configured_cap
+    model: fct_retail_customer_cohorts
+    description: >
+      `retail_max_cohort_age_months` is configurable and has never bound: the
+      project sets 36 and the widest cohort in the extract is 24 months, so the
+      `generate_series` ceiling is unreachable by construction the way
+      `dim_date`'s eleven unbuilt fiscal policies are. Overriding it is the only
+      way to reach it. With a cap of 1 the same three months of data must yield
+      two diagonals, not three — the cap binds before the ragged bound does, so
+      a reader who lowers this var to shorten the triangle gets what they asked
+      for rather than a table that ignores them.
+    overrides:
+      vars:
+        retail_max_cohort_age_months: 1
+    given: *cohort_fixture
+    expect:
+      rows:
+        - {months_since_first_order: 0, activity_month: "2024-01"}
+        - {months_since_first_order: 1, activity_month: "2024-02"}

@@ -82,7 +82,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 18 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (26 models, 2 snapshots, 6 seeds + 369 data tests + 22 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -750,7 +750,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are eighteen unit tests, over six models, and they exist because a data
+- **There are twenty-two unit tests, over seven models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -1870,7 +1870,8 @@ Gotchas:
     cheap — but a model whose count is cited and *not* listed is unguarded
     rather than wrong, which is the failure mode to watch.
   - **The number is not always adjacent to the noun.** `of those` / `of the` may
-    sit between them ("Eighteen of those tests"), and CLAUDE.md writes counts as
+    sit between them (a spelled-out number, then "of those tests"), and
+    CLAUDE.md writes counts as
     words. Both are handled; words only from ten up, because below that they are
     always local ("Two unit tests catch all five") and admitting them produced
     nine false positives against zero finds. Anything longer than that filler is

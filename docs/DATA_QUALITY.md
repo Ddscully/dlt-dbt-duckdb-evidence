@@ -1,6 +1,6 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 387 tests alongside the models — 369 data tests and 18 unit
+`just dbt-build` runs 391 tests alongside the models — 369 data tests and 22 unit
 tests. Dagster surfaces the data tests as asset checks on the models they guard.
 For the pytest side, see [`tests/README.md`](../tests/README.md).
 
@@ -27,9 +27,10 @@ happily pass a threshold the full 200+ would break.
 
 ## Unit tests
 
-Eighteen of those tests are dbt *unit* tests, over six models — `dim_date`,
+Twenty-two of those tests are dbt *unit* tests, over seven models — `dim_date`,
 `stg_retail_lines`, `fct_cbam_exposure`, `fct_fx_rates_daily`,
-`fct_fx_rates_periods` and `fct_retail_returns`. They run a model against fixed input rows and compare the
+`fct_fx_rates_periods`, `fct_retail_returns` and
+`fct_retail_customer_cohorts`. They run a model against fixed input rows and compare the
 entire output, rather than asserting a property of whatever the warehouse happens
 to hold — which is what lets them reach two things a data test structurally
 cannot.
