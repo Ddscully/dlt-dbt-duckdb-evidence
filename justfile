@@ -111,6 +111,14 @@ run: ingest dbt-build transform pipeline-status lake
 test:
     uv run pytest
 
+# Line + branch coverage of `just test` — reports, gates nothing. Config and the
+# two caveats on reading the total are in [tool.coverage.*] / tests/README.md.
+# Two commands on purpose: a failing suite stops here rather than printing a
+# percentage measured over a red run.
+coverage:
+    uv run coverage run -m pytest
+    uv run coverage report
+
 # The whole pipeline against checked-in fixtures, into a throwaway warehouse.
 # This is what CI runs on a pull request: deterministic, offline, ~30s.
 test-pipeline:

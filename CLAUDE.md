@@ -100,6 +100,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
 | `just restore-history prev/warehouse.duckdb` | copy `history` out of a published release so `dbt build` appends to that snapshot |
 | `just test` | `pytest` — mocked-payload unit tests, no network |
+| `just coverage` | the same with line + branch coverage; reports, gates nothing |
 | `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
 | `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
 | `just lint` | `sqlfluff lint dbt/models dbt/snapshots` |
@@ -1656,7 +1657,50 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 Two tiers, and the split is the point — see [`tests/README.md`](tests/README.md).
 
 - `just test` — mocked-payload unit tests over the ingest/transform logic. No
-  network, no warehouse, ~1s.
+  network, no warehouse, ~14s for the whole suite. **It said ~1s from the
+  initial commit to 2026-08-26**, which was true of a much smaller suite and
+  drifted by a factor of fourteen with nothing to notice:
+  `tests/test_documented_counts.py` guards counts in front of test-nouns, and a
+  *timing* claim has no such guard. Re-measure before quoting one.
+  - **Writing that bullet tripped the counts guard, which is worth recording.**
+    The first draft said "over 242 &lt;test-noun&gt;" — a *pytest* figure, in a
+    document where that noun almost always means a dbt test, so the scanner read
+    it as a project-wide dbt claim and failed naming `fct_fx_rates_daily`. The
+    guard was right twice over: the number was not one dbt builds, and the
+    phrase was genuinely ambiguous to a human reader too. Phrase a pytest count
+    as "the whole suite" or "pytest cases", never as a bare number in front of
+    that noun.
+- `just coverage` — line and branch coverage of that tier, ~18s, at 70% branch /
+  73% statement today. Reports and gates nothing (no `fail_under`, not in CI,
+  no plugin loaded into `addopts`) for ty's reason. Read it with the two caveats
+  in `[tool.coverage.report]`: it measures the mocked tier only, so the
+  transform and lake layers read low while `just test-pipeline` exercises them
+  end to end, and some of what is uncovered is uncovered deliberately.
+  - **It is `coverage run -m pytest`, not `pytest --cov`, and that was
+    measured.** `pytest-cov` was added first and dropped the same day: identical
+    total, identical runtime to within 0.02s, one more package. Everything under
+    `[tool.coverage.*]` is coverage.py's own config and is what *both* read, so
+    the wrapper bought the `--cov` flag and nothing else — and a justfile recipe
+    hides the two-step regardless. The harlequin/marimo rule applied to a
+    package this repo had just added.
+  - **`COVERAGE_CORE=sysmon` is the standard advice for cutting the tax on 3.12+
+    and does nothing here** — 18.53s against 18.57s. The cost is coverage's
+    startup and reporting, not tracing, because this suite is dominated by
+    imports and DuckDB/dlt work rather than by Python line execution. Worth
+    knowing before someone reaches for it a second time.
+  - **`branch = true` because this repo argues about unreachable branches in
+    prose.** Four are documented as deliberately unreachable — `dim_date`'s
+    eleven unbuilt fiscal policies, the retail `<> 'adjustment'` clause,
+    `period_is_complete`'s boundary and the provably-dead term in
+    `co2_intensity_rank_is_dense`. Branch coverage makes them a number.
+  - **The first run confirmed a hand-built survey and corrected one item of
+    it.** `scripts/build_cbam_seeds.py` and `scripts/measure_disclosure_risk.py`
+    are both at 0%; `modern_data_stack/history.py` reads 100%, where a grep for
+    test imports had called it uncovered — it is exercised through the
+    `scripts/` wrapper. Grep finds importers, not coverage.
+  - **`.coverage` needed a `.gitignore` entry.** It is a *required intermediate*
+    between `coverage run` and `coverage report`, not an incidental artifact, so
+    it is always present after the recipe and `git add -A` would have taken it.
 - `just test-pipeline` — the real modules end to end with `INGEST_FIXTURES=1`,
   serving all five sources from `tests/fixtures/ingest/`. This is what CI runs,
   so a red PR build means the repo broke, not that OWID was down.
@@ -1742,7 +1786,7 @@ Gotchas:
   run at all. Nothing proved any of them would *notice*: the bodies were only
   ever executed by a full materialize, so `just test` could not tell a working
   check from one whose logic had inverted, and the answer arrived minutes later
-  in `just test-pipeline` instead of in the ~1s loop.
+  in `just test-pipeline` instead of in the `just test` loop.
   `AssetChecksDefinition` is callable and none of the seven take a `context`, so
   no execution harness is needed — point the module's `DUCKDB_PATH` (or
   `LAKE_DIR`, or `page_routes`) at a throwaway, call the check, read the

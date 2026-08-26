@@ -11,12 +11,8 @@ dependencies = [
     "dlt[duckdb]>=1.5",   # EL: API/file ingestion into DuckDB with schema inference
     "duckdb>=1.1",        # in-process analytical warehouse
     "polars>=1.17",       # heavy/columnar transforms in Python
-    # Required at runtime, not a convenience: DuckDB reaches pyarrow for both
-    # `to_arrow_reader()` (the retail ingest) and `.pl()` (both Polars
-    # transforms), so an install without it raises ModuleNotFoundError from
-    # three places. It used to arrive only as harlequin's grand-transitive,
-    # which meant the runtime set was incomplete for as long as it was
-    # undeclared and nothing said so. See CLAUDE.md.
+    # Runtime, not a convenience: DuckDB reaches it for `to_arrow_reader()` and
+    # for `.pl()`, so an install without it fails in three places. See CLAUDE.md.
     "pyarrow>=17",        # DuckDB's Arrow bridge — needed by the ingest and both transforms
     "dbt-duckdb>=1.9",    # T: dbt adapter targeting the DuckDB file
 ]
@@ -24,34 +20,24 @@ dependencies = [
 [dependency-groups]
 # `uv sync --group dev` — tooling that isn't needed to run the pipeline
 dev = [
-    # Pinned exactly, and this is the *only* place it is pinned. The upstream
-    # sqlfluff pre-commit hook used to carry a second `rev`, and the two drifted:
-    # 3.3.0 there flagged an LT14 (`order by` in a window clause) that the venv's
-    # 4.2.2 accepts, so a tree that passed `just lint` failed on commit. The hook
-    # is now a `local` one that shells out to the recipe, so there is one copy.
-    # Don't reintroduce a second pin. (ruff is the other way round — it lives
-    # only in .pre-commit-config.yaml, and that `rev` is its single pin.)
+    # Exact, and the *only* place it is pinned — the upstream pre-commit hook
+    # carried a second `rev` and the two drifted. Don't reintroduce one. (ruff is
+    # the mirror image: pinned only in .pre-commit-config.yaml.) See CLAUDE.md.
     "sqlfluff==4.2.2",     # SQL linter/formatter (dbt templater)
     "sqlfluff-templater-dbt==4.2.2",  # .sqlfluff sets templater = dbt; useless without this
     "pre-commit>=4.0",     # git hooks
     "pytest>=8.3",         # unit tests over the ingest/transform logic (see tests/)
-    # Type checker. Astral's, so it reads `requires-python` for the target
-    # version exactly as ruff does — 3.13 stays declared in one place. It lives
-    # in this group (unlike ruff) because there is no second copy to drift from:
-    # nothing in .pre-commit-config.yaml or CI runs it, and the editor/LSP entry
-    # in .claude/marketplace/ty-lsp shells out to `uv run ty`, so uv.lock is the
-    # only pin.
-    # A `>=` bound rather than sqlfluff's `==` for the same reason — no CI gate
-    # can go red from a version move. Promote it to an exact pin *before*
-    # putting it in pre-commit or a workflow: it is 0.0.x and pre-1.0, and its
-    # diagnostics change between patch releases.
+    # Driven as `coverage run -m pytest`, not via pytest-cov: that wrapper
+    # measured identically for one more package. `>=` and no CI gate, for ty's
+    # reason below. Rationale and the traps are in CLAUDE.md's commands table.
+    "coverage>=7.0",       # `just coverage`; reports, gates nothing
+    # `>=` unlike sqlfluff because nothing gates on it. It is 0.0.x and its
+    # diagnostics move between patches — promote to an exact pin *before* putting
+    # it in pre-commit or a workflow. See CLAUDE.md.
     "ty>=0.0.74",           # `just typecheck`; agent/editor LSP via `ty server`
-    # The CLI as a PyPI wheel, official (`duckdb` org), not the `duckdb` library
-    # already above — that ships no `duckdb` command. Pinning it here instead of
-    # `curl https://install.duckdb.org | sh` means `just sql` needs no separate
-    # install step and can't drift from the library version `uv.lock` already
-    # resolves: both landed on 1.5.5. A bare `uvx duckdb-cli` would dodge that
-    # lock the same way `uvx dg` does — see CLAUDE.md.
+    # The official CLI wheel, not the `duckdb` library above (which ships no
+    # binary). Here rather than a curl install or `uvx` so `just sql` can't drift
+    # from the locked library version — both are on 1.5.5. See CLAUDE.md.
     "duckdb-cli>=1.5.5",    # `just sql`; the CLI binary, via `uv run duckdb`
 ]
 # `uv sync --group orchestration` — the Dagster asset graph in orchestration/.
@@ -71,8 +57,9 @@ requires = ["uv_build>=0.12.0,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv]
-# keep dev/notebook groups out of the default sync if desired:
-# default-groups = ["dev"]
+# `default-groups` left unset, so uv's own default (`dev`) applies — which is how
+# pyarrow stayed undeclared and green for months. `uv sync --no-default-groups`
+# is what reproduces a runtime-only install. See CLAUDE.md.
 
 [tool.ruff]
 # The Python here was written to ~100 columns and `.sqlfluff` caps SQL at 120;
@@ -80,18 +67,10 @@ build-backend = "uv_build"
 line-length = 100
 
 [tool.ruff.lint]
-# No `select`: this project runs ruff's own default rules, which 0.16 widened
-# from 59 to 413 (https://docs.astral.sh/ruff/default-rules/). The default set is
-# curated per release rather than fixed, so what holds it still is the exact
-# `rev` in .pre-commit-config.yaml — that file is the pin, and `pre-commit
-# autoupdate` is the only thing that can move the rule set. There is no second
-# copy of ruff to drift from it (unlike sqlfluff, it isn't in the dev group).
-#
-# 0.16 also *dropped* 18 opinionated pycodestyle/pyflakes rules from the default
-# set. They were enforced here before the widening and the tree still passes
-# them, so they go back explicitly rather than being lost to a version bump —
-# star imports and stray `==`/`is` comparisons are exactly what you want caught
-# in a repo where the linter is the only reviewer.
+# No `select`: this runs ruff's own defaults, and the exact `rev` in
+# .pre-commit-config.yaml is the only thing that holds them still. `extend-select`
+# re-adds the 18 rules 0.16 dropped from that set, so a version bump can't
+# silently stop checking star imports and `== None`. See CLAUDE.md.
 extend-select = [
     "E401", "E402",                                   # multiple / non-top-level imports
     "E701", "E702", "E703",                           # colons and stray semicolons
@@ -103,10 +82,8 @@ extend-select = [
 
 [tool.ruff.lint.isort]
 # Keep `from x import a, run as b` on one statement. ruff's default splits the
-# aliased name onto a second `from x import …` line, which would have turned the
-# eight-line import block at the top of orchestration/assets.py into twelve and
-# separated `run as write_lake` from the module it comes from — noise, given the
-# `run as …` aliases exist precisely because four layers each export a `run()`.
+# alias onto its own line, which shreds orchestration/assets.py's import block —
+# four layers each export a `run()`, so it aliases every one. See CLAUDE.md.
 combine-as-imports = true
 
 [tool.pytest.ini_options]
@@ -119,18 +96,35 @@ pythonpath = ["."]
 # path and runs the real modules against checked-in fixtures instead.
 addopts = "-q"
 
+[tool.coverage.run]
+# Here rather than on the recipe, so an ad-hoc run measures the same thing.
+# `modern_data_stack` is the installed package; the rest are top-level
+# directories — the split `pythonpath` above exists for.
+source = ["ingest", "transform", "lake", "orchestration", "scripts", "modern_data_stack"]
+# This repo argues about deliberately-unreachable branches in prose; branch
+# coverage makes them a number.
+branch = true
+
+[tool.coverage.report]
+# No `fail_under`: nothing gates on this, and a threshold nobody chose is the
+# vanity metric ty's entry in CLAUDE.md argues against. Nothing is `omit`ted
+# either — hiding a deliberate gap is how it stops being a decision.
+# tests/README.md has the two caveats on reading the total.
+show_missing = true
+# The default, restated because it is a decision and not an accident: a file at
+# 100% is evidence, and the short report is the tempting edit. It is what shows
+# `history.py` fully covered, which is the fact that corrected a survey calling
+# it untested — grep finds importers, coverage finds coverage.
+skip_covered = false
+
 [tool.ty]
-# Deliberately no `rules` overrides: like ruff above, this runs the checker's own
-# defaults, and uv.lock is what holds them still. Suppressions are inline
-# `# ty: ignore[rule]` at the point of the decision instead, so the reason sits
-# next to the code rather than in a list nobody reads.
+# No `rules` overrides, like ruff above: uv.lock is what holds the defaults
+# still. Suppressions are inline `# ty: ignore[rule]` at the decision instead.
 
 [tool.ty.environment]
-# Explicit, though ty finds it unaided. The LSP server is launched by the editor
-# from a cwd this project does not choose, and a type checker that cannot see
-# the venv does not fail — it reports every third-party import as missing and
-# buries the real diagnostics. (Measured: pyright did exactly that here, 54
-# phantom `reportMissingImports` until it was pointed at the same path.)
+# Explicit though ty finds it unaided: the LSP is launched from a cwd this
+# project does not choose, and a checker that cannot see the venv does not fail —
+# it buries real diagnostics under phantom missing imports. See CLAUDE.md.
 python = "./.venv"
 
 [tool.dagster]
