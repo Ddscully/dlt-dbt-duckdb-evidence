@@ -1239,11 +1239,18 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   file or `ATTACH … AS wh` and the views raise `Catalog "warehouse" does not
   exist` while the `marts`/`analytics` tables keep working — a confusing
   half-broken artifact. `tests/test_export.py` guards it.
-- **Releases redistribute upstream data**, which the repo itself doesn't. All
-  four sources are CC BY 4.0 / Eurostat reuse, so attribution is the obligation:
-  `ATTRIBUTION` in the export script is the single source of truth for both the
-  shipped file and the release notes. Keep it in step with the README's licence
-  section when a source is added.
+- **Releases redistribute upstream data**, which the repo itself doesn't. The
+  seven sources are CC BY 4.0 or a Eurostat/ECB reuse policy, and the CBAM
+  seeds are EU law under Decision 2011/833 — every one of which permits
+  redistribution *on condition of attribution*, so that is the obligation: `ATTRIBUTION` in the export script is
+  the single source of truth for both the shipped file and the release notes.
+  It said "all four sources" from the initial commit until 2026-08-26, having
+  never been touched when FX, retail and CBAM arrived.
+  - **It is enforced now** (`tests/test_export.py`), where it used to be an
+    instruction here to keep it in step with the README's licence section by
+    hand. Sources are tied to `ALL_URLS`; licences are compared against
+    README's `## License` in both directions. See *Testing* for what the
+    mapping costs and why it cannot be derived.
 - **`raw` and `history` ship in the DuckDB file but not as Parquet.** The flat
   files are the modelled layers only (`PUBLISHED_SCHEMAS`); anyone who wants
   dlt's landing tables or the snapshot downloads the database.
@@ -1451,6 +1458,9 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
 - **World Bank WDI** is fetched long (one row per indicator/country/year) and
   pivoted to wide columns in `stg_wdi.sql`. Add indicators in two places:
   `WB_WDI_INDICATORS` in `ingest/pipeline.py` and a `max(case …)` in `stg_wdi.sql`.
+  The dict already carries the column name, so those two places restate the
+  same mapping — `tests/test_ingest.py` holds them together, including against
+  a code pointed at the *wrong* column, which no range test can see.
 - **Eurostat is JSON-stat** — a flat `value` dict keyed by a row-major index over
   all dimensions. `eu_elec_prices` filters every dimension but `geo`/`time`
   server-side, then walks that grid (see `pipeline.py`). Its `geo` codes are ISO2
@@ -1812,6 +1822,59 @@ Gotchas:
     is guarded. A key check alone also passes a whitespace-only description,
     which renders as the same blank a missing key does, so the value floor is a
     `.strip()` rather than truthiness.
+- **Two more restatements were found and closed the same way, and choosing
+  *them* was a scoping decision rather than a survey result.** The rule now is
+  that a candidate must be a **live source**, a **published artifact** or a
+  **hand-maintained duplication** — a unit test over the retail archive guards
+  code nobody is editing against data that closed in December 2011. These two
+  clear it; more retail tests did not.
+  - **`WB_WDI_INDICATORS` against `stg_wdi.sql`.** The dict maps eleven
+    indicator codes to column names and the model says it again as
+    `max(case when indicator = 'X' then value end) as Y`. Written twice,
+    nothing tying them, while the bullet under *Conventions* invites the edit.
+    **The dangerous drift is the one where both sides agree on the keys**: swap
+    `NY.GDP.MKTP.CD` for `.KD` and current-dollar GDP lands in
+    `gdp_constant_usd`, which every intensity figure divides by. `stg_wdi`
+    carries fourteen data tests, every one an `accepted_range`, and both series
+    are non-negative USD, so nothing goes red — and per the GDP bullets above that
+    substitution flips the decarbonisation *sign* for 30 countries. A guard
+    written as `set(a) == set(b)`, the obvious form, passes it.
+  - **It parses the SQL, not the manifest**, which is why it has no skipif.
+    `just test` runs *before* `dbt deps && dbt parse` in `ci.yml`, so a
+    manifest-based guard would skip itself in a fresh clone — the one place it
+    is most needed. `tests/test_documented_counts.py` pays that cost; this
+    doesn't have to.
+  - **`ATTRIBUTION` against `ALL_URLS` and the README.** Sources tie to
+    `ALL_URLS` because that is already the authority for what the pipeline
+    fetches and already carries its own guards. **A fetch host is not a
+    publisher and neither string is derivable from the other** — OWID is
+    fetched from `raw.githubusercontent.com` and credited at `github.com/owid`,
+    the World Bank from `api.worldbank.org` and credited at
+    `data.worldbank.org`, the euro rates via `api.frankfurter.dev`, which is
+    credited *beside* the ECB rather than instead of it. So
+    `PUBLISHER_FOR_FETCH_HOST` states the mapping and is itself held to
+    `ALL_URLS` both ways. The CBAM seeds are the one credited row it cannot
+    reach: transcribed from a regulation rather than fetched, so no URL
+    represents them.
+  - **Licences match on the markdown label *or* the URL, and that is
+    load-bearing rather than defensive.** `ATTRIBUTION` links
+    `[CC BY 4.0](…)` and the README writes the bare words with no link, so a
+    URL-only comparison fails today on a difference that is entirely
+    legitimate. Taking the label out of the document also avoids a vocabulary
+    of known licences, which would go stale the first time a source arrived
+    under one nobody had listed.
+  - **Both weaknesses in the first draft were found by mutation, not review,
+    and both had already gone green.** Substring-searching the whole document
+    for a publisher passes on a *licence* URL that contains it —
+    `ec.europa.eu/eurostat` sits inside the Eurostat copyright-notice link, so
+    deleting Eurostat as a source was invisible. And `rows[1:]` skips the table
+    header by position, so deleting the header line silently drops the first
+    *source* instead — the row nothing else would mention. Generalising: a
+    substring check over a document full of links is nearly always too weak,
+    because URLs contain the names being searched for; and positional parsing
+    of hand-written markdown fails by quietly checking one row fewer rather
+    than by erroring. Matching the header by content and asserting it fixed the
+    second and caught a Publisher/Licence column swap for free.
 
 - **`pages.yml`'s path allowlist is a hand-maintained list like any other, and
   `tests/test_workflows.py` holds it to the tree.** Every tracked file must be

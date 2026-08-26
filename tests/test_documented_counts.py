@@ -131,6 +131,7 @@ CITED_MODELS = (
     "fct_retail_returns",
     "fct_retail_customer_cohorts",
     "dim_retail_customer",
+    "stg_wdi",
 )
 
 
