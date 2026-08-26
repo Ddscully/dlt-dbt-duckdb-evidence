@@ -75,7 +75,10 @@ justfile recipes and the asset graph all still call the same names.
   matters; it stays here rather than in the package because it's twenty lines
   wrapped around two of that module's constants). Every asset *check* is yours.
 - `.github/workflows/pages.yml` and `release-data.yml` — paths and the basePath
-  step are generic; the snapshot carry-forward only matters if you have a snapshot.
+  step are generic; the snapshot carry-forward only matters if you have a
+  snapshot. The one part to re-derive rather than copy is `pages.yml`'s `paths:`
+  allowlist, which names this repo's directories — and `tests/test_workflows.py`
+  with it, since that is what stops the allowlist drifting from your tree.
 - `reports/sources/warehouse/connection.yaml` — the relative path to the DuckDB
   file, nothing else.
 - `tests/test_lake.py`, `test_export.py`, `test_report.py` — structural tests over

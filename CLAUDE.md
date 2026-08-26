@@ -295,12 +295,28 @@ Types are ty (`just typecheck`), added 2026-08-24. It is **not** in pre-commit a
 - **`pages.yml` is the only workflow that needs Node** (24; the Evidence build).
   The other three run on a bare uv checkout — see the Orchestration section for
   why the site is excluded from `full_refresh`.
+- **`pages.yml` triggers on a path *allowlist*, and `paths-ignore` would have
+  been wrong.** It is a full ingest → dbt → Polars → lake → Evidence run against
+  the **live** public APIs, and it fired on every push to `main` until
+  2026-08-26: 23 of the 94 commits on `main` have been documentation, skills or
+  testing, and each one rebuilt and redeployed an identical site for the same
+  Actions minutes and the same API load as a data change. The obvious
+  `paths-ignore: ['**.md']` is the trap — `reports/pages/` is ten markdown files
+  and they *are* the dashboard, so a blanket markdown ignore would stop
+  republishing the site exactly when a page changed. An allowlist gets the two
+  mistakes the right way round: a build input left out of it makes the site
+  stale, which is visible and which the weekly cron caps at seven days, where a
+  doc directory left out of an ignore list is invisible and permanent.
+  `.dagster/dagster.yaml` is on the list because `DAGSTER_HOME` is the
+  checked-out `.dagster/`, so that file configures the live run rather than a
+  runner default. `tests/test_workflows.py` holds the list to the tree.
 - **Python is 3.13, set in one place: `.python-version`.** No workflow passes a
   `python-version` to `setup-uv`, so that file is what CI, the release job and a
   contributor's venv all read. Nothing watches it — Dependabot covers
   `github-actions`, `uv` and `npm`, none of which see it, so the interpreter is
-  the one version here that can only age deliberately. It sat on 3.12 from the
-  initial commit to 2026-08-10 for no reason anyone recorded.
+  one of the three versions here that can only age deliberately; the other two
+  are three bullets down. It sat on 3.12 from the initial commit to 2026-08-10
+  for no reason anyone recorded.
 - **`requires-python` tracks it (`>=3.13`), and here that bound is *not* a
   minimum-supported floor** — the opposite of the dependency bounds above, so
   the exception is worth knowing. This is an application, not a library: it
@@ -312,6 +328,23 @@ Types are ty (`just typecheck`), added 2026-08-24. It is **not** in pre-commit a
   cosmetic.** Raising it to `>=3.13` dropped a package (`win-precise-time`) and
   ~400 lines of `python_full_version < '3.13'` marker branches. Lowering it
   again is a re-lock, not an edit.
+- **Three versions here can only age deliberately, and the other two are the CI
+  linters.** The `.python-version` bullet above used to claim a set of one. The mechanism is
+  different in each case, which is why none of them ever shows up as a
+  Dependabot PR that failed to arrive:
+
+  | Version | Why nothing watches it |
+  |---|---|
+  | `.python-version` | no ecosystem covers the file at all |
+  | `sqlfluff` + `sqlfluff-templater-dbt` | `versioning-strategy: lockfile-only` edits `uv.lock` and never relaxes a `==` in `pyproject.toml`, so exactly one resolution stays valid forever |
+  | `ruff` | pre-commit is not a watched ecosystem — `grep -c pre-commit .github/dependabot.yml` is 0, and `pre-commit autoupdate` is its only mover |
+
+  That both CI linters land in this category is a coherent policy — a gate
+  should move when a person decides, which is the whole argument for pinning
+  them. It is also the *cost* of pinning, and the inverse of the sentence this
+  section opens with: green CI proves nothing about versions, and an exact pin
+  then makes the package invisible to the one mechanism that would have said it
+  moved. Somebody has to remember instead. This bullet is that somebody.
 - **Ruff's target version is inferred from `requires-python`**, with no
   `target-version` in `[tool.ruff]` — so that one line also decides which
   rewrites the linter will make. It reports `3.13` now; it reported `3.12`
@@ -1642,6 +1675,26 @@ Gotchas:
     which renders as the same blank a missing key does, so the value floor is a
     `.strip()` rather than truthiness.
 
+- **`pages.yml`'s path allowlist is a hand-maintained list like any other, and
+  `tests/test_workflows.py` holds it to the tree.** Every tracked file must be
+  claimed by exactly one of the workflow's `paths:` or the test's
+  `NOT_A_SITE_INPUT`; a path claimed by neither is a red test asking someone to
+  decide whether the published site is built from it. **It found six files on
+  its first run** — the community-health templates (`CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, the issue forms) that landed in `.github/` one commit
+  earlier. Three details are load-bearing:
+  - **Overlap is forbidden, not merely redundant.** A deny pattern that also
+    covered an allowed path would keep the file green after the allow entry was
+    deleted, which is precisely the drift the guard exists for.
+  - **The stale direction needs its own assertion**, because a rename fires the
+    *unclassified* one and stops there — the same finding as the
+    `RAW_DESCRIPTIONS` guard, and the same fix.
+  - **The `paths:` block is scanned, not parsed with PyYAML**, which is not a
+    declared dependency here (it arrives as dbt's transitive, and this repo has
+    already been bitten by exactly that shape — see the `pyarrow` bullet). A
+    scan that stops matching passes by not looking, so the vacuity guard is a
+    real test and the scan returns empty rather than raising, to make its
+    message the one a reader sees.
 - **The seven `@dg.asset_check` bodies are unit tested in
   `tests/test_asset_checks.py`, and were not before 2026-08-25.**
   `tests/test_definitions.py` proved each check was *registered* — that it would

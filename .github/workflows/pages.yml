@@ -14,6 +14,40 @@ name: pages
 on:
   push:
     branches: [main]
+    # An allowlist of what the site is actually built from, because this job is
+    # a full ingest -> dbt -> Polars -> lake -> Evidence run against the LIVE
+    # public APIs. Without it the cheapest commit in the repo costs the same
+    # Actions minutes and the same API load as a data change: 23 of the 94
+    # commits on main have been docs, skills or tests, and every one of them
+    # rebuilt and redeployed an identical site.
+    #
+    # `paths-ignore: ['**.md']` is the obvious version and it is wrong. The
+    # dashboard *is* markdown — `reports/pages/` holds the ten pages — so a
+    # blanket markdown ignore would stop republishing the site exactly when a
+    # page changed, which is this repo's collected failure mode: green and
+    # wrong.
+    #
+    # An allowlist rather than an exclusion list, because the two get their
+    # mistakes the right way round. A build input missing from this list makes
+    # the site stale, which is visible and which the weekly cron below caps at
+    # seven days. A doc directory missing from an exclusion list is invisible
+    # and permanent.
+    paths:
+      - "ingest/**"
+      - "transform/**"
+      - "lake/**"
+      - "orchestration/**"
+      - "src/**"
+      - "scripts/**"
+      - "dbt/**"
+      - "reports/**"
+      # DAGSTER_HOME is the checked-out .dagster/, so the instance config the
+      # build runs under is this file, not a runner default.
+      - ".dagster/dagster.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".python-version"
+      - ".github/workflows/pages.yml"
   schedule:
     # Weekly, 06:40 UTC Monday. The sources publish annually, so a nightly
     # rebuild would burn Actions minutes to republish identical numbers.
