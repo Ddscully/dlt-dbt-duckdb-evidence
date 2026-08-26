@@ -6,6 +6,14 @@ dist/
 wheels/
 *.egg-info
 
+# coverage.py's data file (`just coverage`). It is a required intermediate —
+# `coverage run` writes it and `coverage report` reads it — not an incidental
+# artifact, so it is always there after the recipe runs and a `git add -A`
+# would otherwise take it.
+.coverage
+.coverage.*
+htmlcov/
+
 # Virtual environments
 .venv
 .uv/

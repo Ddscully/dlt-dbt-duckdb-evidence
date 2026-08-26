@@ -247,7 +247,8 @@ No `just`? The recipes map to plain commands; see the [`justfile`](./justfile).
 ## Tests
 
 ```bash
-just test           # pytest: mocked payloads, no network, ~1s
+just test           # pytest: mocked payloads, no network, ~14s
+just coverage       # the same, with line + branch coverage; gates nothing
 just test-pipeline  # the whole pipeline against recorded fixtures, ~30s
 ```
 
