@@ -120,13 +120,19 @@ The formatting half of it is enforced by [`.sqlfluff`](.sqlfluff); run
 `just lint` (pre-commit runs the same check — literally: the hook is a `local`
 one whose entry is `just lint`).
 
-- **sqlfluff is pinned exactly** (`sqlfluff==4.2.2` in `pyproject.toml`) and lives
+- **sqlfluff is pinned exactly** (`sqlfluff==4.3.0` in `pyproject.toml`) and lives
   in exactly one place. Don't restore the upstream `sqlfluff/sqlfluff` pre-commit
   hook: it installs its own copy, which is how the repo ended up with 3.3.0
-  rejecting an `order by` inside a window clause that the venv's 4.2.2 accepts —
+  rejecting an `order by` inside a window clause that the venv's 4.2.2 accepted —
   `just lint` passed and the commit hook failed on the same file. It also can't
   run from `dbt/`, so the dbt templater resolves `profiles.yml`'s
   `../data/warehouse.duckdb` one directory too high and dies before linting.
+- **Bump the two sqlfluff lines together, or the resolution fails loudly.**
+  `sqlfluff-templater-dbt` requires `sqlfluff==<its own version>` — a stable
+  upstream property, checked across 3.3.0, 4.0.0, 4.1.0, 4.2.0, 4.2.2 and
+  4.3.0 — so the `sqlfluff==` line cannot independently decide anything. Keep it
+  anyway: `just lint` invokes `sqlfluff` directly, so it is an honest *direct*
+  dependency. This is the one failure mode here that is loud rather than green.
 - CI lints via the same venv, so it agrees on rules, and over the same paths
   (`models snapshots`) — a narrower set there would mean CI passing SQL a
   contributor's commit hook rejects.
@@ -389,11 +395,38 @@ Types are ty (`just typecheck`), added 2026-08-24. It is **not** in pre-commit a
   - **The manifest stays schema v12**, so `dagster-dbt`, `transform/pipeline_status.py`
     and `tests/test_documented_counts.py` all read it unchanged. Worth checking
     rather than assuming on any dbt minor: three consumers here parse it.
-  - **1.12 is blocked on dagster-dbt, not on us** — it requires `dbt-core<1.12`.
-    Same shape as the 3.14 bullet above, one layer over.
-  - **`sqlfluff-templater-dbt` is pinned exactly at 4.2.2 and compiled 1.11
+  - **1.12 is blocked on dagster-dbt, not on us** — it requires `dbt-core<1.12`,
+    and the newest release (0.29.19) still does. Same shape as the 3.14 bullet
+    above, one layer over. Everything else here is already ready for it:
+    resolved without dagster-dbt, `dbt-core 1.12.3`, `dbt-duckdb 1.11.0` and
+    `sqlfluff-templater-dbt 4.3.0` land together cleanly, so the day the cap
+    lifts this is a re-lock and nothing else.
+    - **Track [dagster#34085](https://github.com/dagster-io/dagster/pull/34085)**
+      ("Allow dbt-core 1.12", open since 2026-08-06; issue
+      [#34014](https://github.com/dagster-io/dagster/issues/34014)). It is a
+      *pure bound relaxation* — `<1.12` to `<1.13`, no code changes — and its
+      author verified the thing the bullet above says to check: **the manifest
+      stays schema v12**, all 23 `dbt.*`/`dbt_common.*` import sites still
+      resolve, and dagster-dbt's own CI reports identical pass/fail on 1.11.12
+      and 1.12.0. A maintainer has acknowledged it with no timeline.
+    - **So the cap is known-conservative, and forcing it is still refused.**
+      `[tool.uv] override-dependencies` would install 1.12 today and upstream's
+      test matrix is the evidence it works. It buys nothing — nothing 1.12
+      removes (`dbt login`, the bundled dbt-state plugin, `--manage-state`) is
+      used here — and it costs a **fourth entry in the three-versions table**:
+      an override is exactly as invisible to `lockfile-only` as a `==`, so when
+      #34085 merges nothing would report that the override had turned from a
+      workaround into the thing holding dbt back.
+    - **What would change that is adding a semantic layer.** 1.12 reworks the
+      Semantic Layer YAML spec and adds `osi_document.json`; this project has
+      no semantic model or metric yet, so authoring one against 1.11's spec
+      would mean migrating it almost immediately. That is the one piece of work
+      whose value here is worth reopening the override question for.
+  - **`sqlfluff-templater-dbt` is pinned exactly at 4.3.0 and compiled 1.11
     fine**, but it is the thing to check first on any dbt bump: it is the one
-    consumer that cannot move independently, by deliberate design.
+    consumer that cannot move independently, by deliberate design. 4.3.0
+    resolves against dbt-core 1.12 when nothing holds it back, so the cap that
+    keeps this tree on 1.11 is `dagster-dbt`'s, not the templater's.
 - **"Lightweight" is a measured claim, and the dev tooling was most of the
   weight.** Removing harlequin and marimo on 2026-08-25 took the tree from 198
   packages to 153 and the venv from 1.1 GB to 736 MB — a third of it — for two
