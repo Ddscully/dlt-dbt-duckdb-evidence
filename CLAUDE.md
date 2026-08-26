@@ -56,6 +56,17 @@ all unchanged.
 - **Config reaches a package module as a parameter, never as a constant.**
   Nothing under `src/` knows what a country is, and that is the whole of the
   split — a hardcoded table name there undoes it.
+- **A general operation belongs in the general module, and placement is the
+  problem even when the duplication is small.** `db.write_frames` — register a
+  Polars frame, `create or replace`, unregister — lived in `observability` as
+  `write_status` because that is where it was first needed, so the two Polars
+  transforms hand-rolled their own copy rather than import a module about
+  dbt/dlt metadata to write a carbon metric. Both copies omitted the
+  `unregister` the original does. Its `schema` parameter deliberately has **no
+  default**: all three callers write `analytics`, which is exactly what makes a
+  default invisible to the fourth caller that means something else, and
+  `create or replace` does not ask twice.
+
 - **`RawSchemaDltTranslator` stays in `orchestration/assets.py`** — twenty lines
   around two of that module's constants, and moving it would put Dagster (an
   optional dependency group) behind a package import.
@@ -1594,6 +1605,43 @@ Gotchas:
   - **Restore from a copy, never `git checkout <file>`.** During this work the
     tree is dirty by definition; `git checkout` is a revert to HEAD, not an
     undo, and it destroyed a round of uncommitted edits to three files.
+- **Two lists re-enumerated the seven dlt resources with no covering test, and
+  both fail green.** `SOURCE_TABLES` (`transform/pipeline_status.py`) is
+  iterated by `observability.build_sources`, so an unlisted source yields no
+  row and the pipeline page under-reports while looking complete — the exact
+  symptom CLAUDE.md already records from a *different* cause (the Arrow path's
+  missing `_dlt_load_id`, "six sources for seven"). `RAW_DESCRIPTIONS`
+  (`orchestration/assets.py`) is read with `.get(name)`, so an unlisted
+  resource materialises with no description at all. Both are now held to
+  `public_indicators()`, the same authority `load_groups` and
+  `PARTITIONED_RESOURCES` use.
+  - **`SOURCE_TABLES` is asserted, not derived, and the layering is the
+    reason.** Deriving deletes the list but makes `transform/` import from
+    `ingest/`, which no transform module does — and `pipeline_status` is the one
+    module that must run *after* dbt rather than beside ingestion. Coupling it
+    to the ingest layer at runtime to avoid restating seven strings is the worse
+    trade, and asserting is what every other list here already does.
+  - **Its guard cannot live in `tests/test_pipeline_status.py`**, which is the
+    obvious home: that module has an **autouse** fixture replacing
+    `SOURCE_TABLES` with a one-name stub, so a guard written there would assert
+    against the stub and be green forever. It sits in `tests/test_ingest.py`
+    beside the identical `load_groups` assertion, which is where the authority
+    already is and where no patch reaches it.
+  - **`RAW_DESCRIPTIONS` can only be asserted** — prose is not derivable — and
+    its guard is in `tests/test_definitions.py`, which already carries the
+    manifest skipif and is re-run by CI after `dbt parse`. Putting it in
+    `test_ingest.py` would drag a dagster import and a skip into the one module
+    that runs clean in a fresh clone.
+  - **A rename fires the *missing* assertion, never the *stale* one, so the
+    orphan branch needs its own mutation.** Renaming a key produces both a gap
+    and an orphan and the first assert wins, which leaves the second measuring
+    nothing; adding a key without removing one is what isolates it. Same lesson
+    as `lake_matches_warehouse`' two drift cases and the FX partitioning
+    fixture: a mutation that moves both ends at once cannot tell you which end
+    is guarded. A key check alone also passes a whitespace-only description,
+    which renders as the same blank a missing key does, so the value floor is a
+    `.strip()` rather than truthiness.
+
 - **The seven `@dg.asset_check` bodies are unit tested in
   `tests/test_asset_checks.py`, and were not before 2026-08-25.**
   `tests/test_definitions.py` proved each check was *registered* — that it would

@@ -84,6 +84,54 @@ def test_every_asset_check_defined_is_in_the_graph():
     )
 
 
+def test_every_raw_resource_has_an_asset_description():
+    """`RAW_DESCRIPTIONS` is the second hand-maintained list re-enumerating the
+    seven dlt resources, and the only one that cannot be derived — the prose is
+    not computable from the source, so this list stays and gets held to it.
+
+    `assets.py:156` reads it as `RAW_DESCRIPTIONS.get(name)`, which returns
+    `None` for an unlisted resource. The asset then materialises with no
+    description and nothing anywhere is red: the Dagster UI simply shows a blank
+    where every sibling has a sentence, which is the sort of gap that survives
+    review indefinitely.
+
+    Lives here rather than in `tests/test_ingest.py` because reading the dict
+    means importing `orchestration.assets`, which needs both dagster (an
+    optional group) and the dbt manifest. This module already carries the
+    manifest skipif and CI re-runs the file after `dbt parse`, so the guard does
+    execute in CI; dragging a dagster import into `test_ingest.py` would only
+    spread the skip to the one module that runs clean in a fresh clone.
+    """
+    from ingest import pipeline
+    from orchestration.assets import RAW_DESCRIPTIONS
+
+    resources = {r.name for r in pipeline.public_indicators().resources.values()}
+
+    # Both directions, as separate assertions rather than one set equality: they
+    # catch different bugs and the failure message should say which happened.
+    undescribed = resources - RAW_DESCRIPTIONS.keys()
+    assert not undescribed, (
+        "dlt resources with no entry in orchestration/assets.py RAW_DESCRIPTIONS "
+        f"(they materialise with no description): {sorted(undescribed)}"
+    )
+
+    # The reverse direction is the one nothing else could ever surface. `.get()`
+    # never consults a key that no resource matches, so a stale entry left by a
+    # rename is invisible for as long as it survives — where a *missing* entry at
+    # least shows as a blank in the UI next to six siblings that have prose.
+    orphaned = RAW_DESCRIPTIONS.keys() - resources
+    assert not orphaned, (
+        "RAW_DESCRIPTIONS entries naming no dlt resource — renamed or removed "
+        f"upstream and left behind here: {sorted(orphaned)}"
+    )
+
+    # A key check alone is satisfied by an empty string, which renders as the
+    # same blank the missing key does. The floor is deliberately a length rather
+    # than truthiness: `" "` is falsy nowhere and blank everywhere.
+    blank = sorted(name for name, text in RAW_DESCRIPTIONS.items() if not text.strip())
+    assert not blank, f"RAW_DESCRIPTIONS entries that render blank: {blank}"
+
+
 def _job_keys(name: str) -> set[dg.AssetKey]:
     """The assets a job actually *materializes*.
 

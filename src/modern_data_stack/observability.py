@@ -116,7 +116,7 @@ def build_tables(
     An empty `exclude_prefix` means "exclude nothing", and has to drop the
     predicate rather than pass it: `not like '' || '%'` is `not like '%'`, which
     matches no row at all. That returns an empty inventory, which surfaces much
-    later and much less legibly as an empty frame out of `write_status`.
+    later and much less legibly as an empty frame out of `db.write_frames`.
     """
     predicate = ""
     params: dict[str, object] = {"layers": list(layers)}
@@ -279,22 +279,3 @@ def build_tests(
             }
         )
     return pl.DataFrame(rows)
-
-
-def write_status(
-    con: duckdb.DuckDBPyConnection,
-    frames: dict[str, pl.DataFrame],
-    schema: str = "analytics",
-) -> dict[str, int]:
-    """Write each frame to `<schema>.<name>`, replacing it. Returns rows written.
-
-    Takes a connection rather than a path: the frames were read through one, and
-    DuckDB allows a single writer, so re-opening the file here would be a lock to
-    trip over for no benefit.
-    """
-    con.sql(f"create schema if not exists {schema}")
-    for name, frame in frames.items():
-        con.register("frame_df", frame)  # DuckDB reads Polars frames directly
-        con.sql(f"create or replace table {schema}.{name} as select * from frame_df")
-        con.unregister("frame_df")
-    return {name: frame.height for name, frame in frames.items()}
