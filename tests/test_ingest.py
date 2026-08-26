@@ -9,6 +9,7 @@ call to exercise. The end-to-end path lives in `just test-pipeline`.
 from __future__ import annotations
 
 import json
+import re
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -440,6 +441,85 @@ def test_partitioned_resources_is_a_subset_of_the_incremental_ones():
     ]
     assert sorted(unpartitioned + list(pipeline.PARTITIONED_RESOURCES)) == sorted(
         r.name for r in pipeline.public_indicators().resources.values()
+    )
+
+
+STG_WDI = Path(__file__).resolve().parent.parent / "dbt" / "models" / "staging" / "stg_wdi.sql"
+
+# `max(case when indicator = '<code>' then value end) as <column>`, the one line
+# shape `stg_wdi.sql` uses for every indicator. Read off the SQL text and not the
+# dbt manifest on purpose: this file runs in `just test`, which comes *before*
+# `dbt deps && dbt parse` in ci.yml, and a guard that needs the manifest would
+# skip itself exactly where a fresh clone needs it most.
+WDI_PIVOT = re.compile(
+    r"max\(\s*case\s+when\s+indicator\s*=\s*'([^']+)'\s+then\s+value\s+end\s*\)\s+as\s+(\w+)",
+    re.IGNORECASE,
+)
+
+
+def test_the_wdi_pivot_maps_every_indicator_to_the_column_it_was_configured_for():
+    """`WB_WDI_INDICATORS` and `stg_wdi.sql` restate the same mapping.
+
+    The dict in `ingest/pipeline.py` already carries the column name
+    (`"NY.GDP.MKTP.KD": "gdp_constant_usd"`), and `stg_wdi.sql` says it again as
+    a `max(case ...)` branch. Eleven entries, written twice, and until this test
+    nothing tied them — while CLAUDE.md documents "add indicators in two places"
+    as the workflow, so the divergence is invited rather than accidental.
+
+    Three ways they can drift and all three are silent. A configured indicator
+    with no branch lands in `raw.wb_wdi` and never reaches a column. A branch
+    with no indicator is a column of nulls. **Worst is a code against the wrong
+    column**, because the columns it can plausibly be crossed with are the ones
+    that look alike: swap `NY.GDP.MKTP.CD` for `.KD` and current-dollar GDP
+    lands in `gdp_constant_usd`, which is what every intensity figure downstream
+    divides by. All 14 of this model's data tests are `accepted_range`, and both
+    series are non-negative USD, so every one passes — and per CLAUDE.md's GDP
+    section that substitution flips the decarbonisation *sign* for 30 countries.
+
+    WDI is the reason this list is worth guarding when others are not: it is a
+    live source the World Bank revises, and adding an indicator is a routine
+    edit. A frozen source cannot drift into any of these states.
+
+    Every branch below has been seen to fire: deleting a pivot line, adding one
+    for an unconfigured code, crossing `.CD` with `.KD`, and changing the pivot
+    idiom so nothing matches. The whitespace tolerance is deliberate and was
+    checked too — reflowing one branch across a newline still matches, so a
+    `sqlfluff` reformat cannot silently empty this test.
+    """
+    pivot = dict(WDI_PIVOT.findall(STG_WDI.read_text()))
+    configured = dict(pipeline.WB_WDI_INDICATORS)
+
+    # Vacuity guard, the same reason `test_documented_counts.py` carries one: a
+    # regex that stops matching passes by not looking, and this one reads a file
+    # nothing else in the suite parses.
+    assert len(pivot) >= 10, (
+        f"WDI_PIVOT matched only {len(pivot)} branches in {STG_WDI.name}; "
+        "the pattern or the model's formatting has drifted"
+    )
+
+    missing = sorted(set(configured) - set(pivot))
+    assert not missing, (
+        f"configured in WB_WDI_INDICATORS but not pivoted in {STG_WDI.name}: {missing} — "
+        "they land in raw.wb_wdi and reach no column"
+    )
+    # Its own assertion, not folded into the one above: renaming a code produces
+    # a gap *and* an orphan, the first assert wins, and the orphan branch is then
+    # never measured. Same finding as the `RAW_DESCRIPTIONS` guard.
+    orphaned = sorted(set(pivot) - set(configured))
+    assert not orphaned, (
+        f"pivoted in {STG_WDI.name} but not configured in WB_WDI_INDICATORS: {orphaned} — "
+        "the column is all nulls"
+    )
+    # The dangerous one, and it is invisible to both checks above: the two
+    # collections agree on *which* codes exist and disagree on where they go.
+    crossed = {
+        code: (configured[code], pivot[code])
+        for code in configured
+        if configured[code] != pivot[code]
+    }
+    assert not crossed, (
+        "WB_WDI_INDICATORS and stg_wdi.sql disagree about which column an "
+        f"indicator feeds (code: configured -> pivoted): {crossed}"
     )
 
 
