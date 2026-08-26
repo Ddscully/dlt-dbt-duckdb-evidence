@@ -294,8 +294,11 @@ year for all of them.
 is a node in the asset graph (`reports/evidence_site`), so the workflow
 materializes it instead of running npm itself. It builds against the **live**
 sources rather than the fixtures — a published dashboard showing the 17-country
-test slice would be worse than none — on every push to `main`, weekly, and on
-demand.
+test slice would be worse than none — weekly, on demand, and on any push to
+`main` that touches something the site is built from. That last one is a
+`paths:` allowlist rather than a `paths-ignore`, because `reports/pages/` is
+markdown and ignoring markdown would stop republishing exactly when a page
+changed.
 
 Setting this up yourself takes three things nobody tells you about; they're in
 [`reports/README.md`](./reports/README.md#deploying-to-github-pages).

@@ -128,7 +128,7 @@ def test_an_empty_exclude_prefix_excludes_nothing(warehouse):
     """`not like '' || '%'` is `not like '%'`, which matches no row at all — so an
     empty prefix has to drop the predicate rather than pass it. Passing it gives
     an empty inventory, which surfaces two calls later as polars' "must have at
-    least one column" out of `write_status`, naming neither the parameter nor the
+    least one column" out of `db.write_frames`, naming neither the parameter nor the
     cause. A reuser with no `pipeline_*` tables is the one who'd hit it.
     """
     con = duckdb.connect(str(warehouse))

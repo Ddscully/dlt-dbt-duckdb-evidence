@@ -24,6 +24,7 @@ import datetime as dt
 import duckdb
 import polars as pl
 
+from modern_data_stack import db
 from modern_data_stack.paths import warehouse_path
 
 DUCKDB_PATH = warehouse_path()
@@ -231,9 +232,7 @@ def run(duckdb_path: str = DUCKDB_PATH) -> int:
         if not isinstance(as_of_date, dt.date):
             raise TypeError(f"last_order_date holds {type(as_of_date).__name__}, expected a date")
         out = build_retail_rfm(customers, as_of_date)
-        con.sql("create schema if not exists analytics")
-        con.register("out_df", out)  # DuckDB reads Polars frames directly
-        con.sql("create or replace table analytics.retail_rfm as select * from out_df")
+        db.write_frames(con, {"retail_rfm": out}, "analytics")
         return out.height
     finally:
         con.close()

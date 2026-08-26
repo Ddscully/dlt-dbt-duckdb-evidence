@@ -1,4 +1,4 @@
-"""Scalar and single-row reads from DuckDB, with the Optional taken off.
+"""Reads and writes against a DuckDB connection, with the Optional taken off.
 
 `DuckDBPyConnection.fetchone()` is typed `tuple[Any, ...] | None`, because in
 general a query need not return a row. Almost none of the reads in this repo are
@@ -16,6 +16,13 @@ stating it buys a real check as a side effect. `.fetchone()[0]` against a query
 that unexpectedly returns nothing raises `TypeError: 'NoneType' object is not
 subscriptable` from whichever line happened to touch it; `scalar()` raises
 naming the query.
+
+`write_frames` is here for a different reason: it is the one write shape this
+project repeats — register a Polars frame, `create or replace`, unregister — and
+it lived in `observability` because that is where it was first needed. Writing a
+carbon metric by importing a module about dbt/dlt metadata reads wrong, so the
+general operation sits in the general module and `observability` is back to
+being about metadata.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import duckdb
+import polars as pl
 
 
 def row(
@@ -66,3 +74,30 @@ def scalar(
     `as_of_date` guard in `transform/retail_rfm.py`.
     """
     return row(con, sql, params)[0]
+
+
+def write_frames(
+    con: duckdb.DuckDBPyConnection,
+    frames: dict[str, pl.DataFrame],
+    schema: str,
+) -> dict[str, int]:
+    """Write each frame to `<schema>.<name>`, replacing it. Returns rows written.
+
+    Takes a connection rather than a path: the frames were read through one, and
+    DuckDB allows a single writer, so re-opening the file here would be a lock to
+    trip over for no benefit.
+
+    `schema` has no default. The three callers all write `analytics` today, which
+    is exactly what would make a default invisible — a fourth caller meaning some
+    other schema would get this one by omission, and `create or replace` does not
+    ask twice.
+    """
+    con.sql(f"create schema if not exists {schema}")
+    for name, frame in frames.items():
+        con.register("frame_df", frame)  # DuckDB reads Polars frames directly
+        con.sql(f"create or replace table {schema}.{name} as select * from frame_df")
+        # Neither of the two hand-rolled copies this replaced unregistered, so a
+        # long-lived connection kept the last frame alive and a second write
+        # silently rebound the same name.
+        con.unregister("frame_df")
+    return {name: frame.height for name, frame in frames.items()}

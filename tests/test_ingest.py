@@ -19,6 +19,7 @@ from dlt.extract.exceptions import ResourceExtractionError
 
 from ingest import fixtures, pipeline
 from modern_data_stack import workbook
+from transform import pipeline_status
 
 
 class FakeResponse:
@@ -383,6 +384,34 @@ def test_load_groups_covers_every_resource_in_the_source_exactly_once():
     graph as well.
     """
     listed = [name for names, _ in pipeline.load_groups() for name in names]
+    assert sorted(listed) == sorted(r.name for r in pipeline.public_indicators().resources.values())
+    assert len(listed) == len(set(listed))
+
+
+def test_source_tables_names_every_resource_in_the_source_exactly_once():
+    """`pipeline_status.SOURCE_TABLES` re-enumerates the seven dlt resources.
+
+    `observability.build_sources` iterates only the names it is handed, so a
+    resource missing here yields no row and the pipeline page under-reports
+    while looking complete. That exact symptom has already happened once from a
+    different cause — the Arrow path landing `retail_invoice_lines` with no
+    `_dlt_load_id`, so the page showed six sources for seven — and this list is
+    a second, unguarded route to the identical wrong page.
+
+    Asserted rather than derived. Deriving would delete the list, but it would
+    also make `transform/` import from `ingest/`, which no transform module
+    does: `pipeline_status` is the one module that must run *after* dbt rather
+    than beside ingestion, and coupling it to the ingest layer at runtime to
+    avoid restating seven strings is the worse trade. It is also the shape every
+    other list in this repo already uses — `load_groups`, `PARTITIONED_RESOURCES`
+    and `TABLE_TO_ASSET_KEY` are all held to their source, none is derived from
+    it.
+
+    Lives here rather than in `tests/test_pipeline_status.py` because that
+    module has an *autouse* fixture replacing `SOURCE_TABLES` with a one-name
+    stub. A guard written there would assert against the stub and pass forever.
+    """
+    listed = list(pipeline_status.SOURCE_TABLES)
     assert sorted(listed) == sorted(r.name for r in pipeline.public_indicators().resources.values())
     assert len(listed) == len(set(listed))
 

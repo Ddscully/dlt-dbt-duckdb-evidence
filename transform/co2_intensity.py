@@ -11,6 +11,7 @@ from __future__ import annotations
 import duckdb
 import polars as pl
 
+from modern_data_stack import db
 from modern_data_stack.paths import warehouse_path
 
 DUCKDB_PATH = warehouse_path()
@@ -64,9 +65,7 @@ def run(duckdb_path: str = DUCKDB_PATH) -> int:
     con = duckdb.connect(duckdb_path)
     try:
         out = build_co2_intensity(con.sql("select * from marts.fct_emissions_energy").pl())
-        con.sql("create schema if not exists analytics")
-        con.register("out_df", out)  # DuckDB reads Polars frames directly
-        con.sql("create or replace table analytics.co2_intensity as select * from out_df")
+        db.write_frames(con, {"co2_intensity": out}, "analytics")
         return out.height
     finally:
         con.close()

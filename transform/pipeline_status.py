@@ -24,7 +24,7 @@ from __future__ import annotations
 import duckdb
 import polars as pl
 
-from modern_data_stack import observability
+from modern_data_stack import db, observability
 from modern_data_stack.paths import dbt_manifest_path, warehouse_path
 
 DUCKDB_PATH = warehouse_path()
@@ -82,7 +82,7 @@ def run(duckdb_path: str = DUCKDB_PATH, manifest_path: str = MANIFEST_PATH) -> d
             "pipeline_tables": build_tables(con),
             "pipeline_tests": build_tests(con, manifest_path),
         }
-        return observability.write_status(con, frames)
+        return db.write_frames(con, frames, "analytics")
     finally:
         con.close()
 
