@@ -77,7 +77,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 
 | Command | What it does |
 |---------|--------------|
-| `just setup` | `uv sync --group dev --group orchestration` |
+| `just setup` | `uv sync --group dev --group orchestration`, then `install ducklake` — the extension is a binary from extensions.duckdb.org that no lockfile can name, so it is fetched rather than pinned (DuckDB asks for its own build, so it matches `uv.lock` by construction) |
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
@@ -944,6 +944,30 @@ survives a format that content-addresses its files and prunes on statistics.
     is absent **at every snapshot**, not merely the current one — which is the
     assertion that matters, because time travel is what makes
     copy-then-drop useless as a mitigation.
+  - **The DuckLake extension is the one version in this stack that nothing can
+    pin, and it is not the coupling people expect.** It cannot drift against
+    `duckdb`: builds are served per DuckDB version and one built for another
+    refuses to load, naming both versions. What is unpinnable is the extension
+    *itself* — it is a 36 MB binary from extensions.duckdb.org with no PyPI
+    package, and `duckdb_extensions()` reports its version as a git hash
+    (`d8a1881e`) where `parquet` reports `v1.5.5`. That is the "unpinned binary
+    no lockfile here can see" shape that lost pyright to ty and keeps `uvx dg`
+    out, except here there is no lockfile-visible alternative to choose.
+    - **`just setup` installs it, and that is a download location rather than a
+      pin.** DuckDB autoloads it on first use, so the lake works without this;
+      what it buys is that a network failure surfaces at setup instead of inside
+      a `dbt build` in a Dagster op. The version is right by construction — the
+      extension directory is keyed on the DuckDB version, so a bump re-fetches
+      rather than going stale, and `duckdb-cli` reads the same directory, so one
+      install serves `just sql`. Plain `install` and not `force install`: the
+      only case the no-op misses is a rebuild republished for an unchanged
+      DuckDB version.
+    - **The catalog records a spec version and nothing guards it**, which is the
+      gap worth knowing: `ducklake_metadata` holds `version` (`1.0` today) and
+      `created_by`, the direct analogue of the DuckDB file's `storage_version` —
+      and `manifest.json` carries that pair for `warehouse.duckdb` while saying
+      nothing about `lakehouse.tar.gz`. Both are published artifacts; only one
+      has a compatibility tripwire.
   - **dbt's `ATTACH IF NOT EXISTS` leaves an empty DuckDB file** at the catalog
     path on any build that runs before the first ingest, and a read-only attach
     of *that* fails with `Existing DuckLake … does not exist - and creating a new
