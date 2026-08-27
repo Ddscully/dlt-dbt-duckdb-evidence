@@ -32,7 +32,10 @@ from orchestration.resources import dbt_project
 
 # Same reason as `tests/test_definitions.py`: `just test` runs before
 # `dbt deps && dbt parse` in ci.yml, so the manifest is not there yet. CI
-# re-runs this file after the parse step.
+# re-runs this file after the parse step — which was untrue from the day this
+# line was written until the workflow was corrected to name it, so every count
+# cited in the docs went unchecked on every pull request. The claim is a test
+# now, in `tests/test_workflows.py`, rather than a comment.
 pytestmark = pytest.mark.skipif(
     not dbt_project.manifest_path.exists(),
     reason="needs dbt/target/manifest.json — run `just dbt-deps` and `dbt parse` first",

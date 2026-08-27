@@ -20,6 +20,7 @@ test asking someone to decide, which is the whole point.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -28,6 +29,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PAGES_WORKFLOW = REPO_ROOT / ".github/workflows/pages.yml"
+CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
 
 # Tracked paths the published site is *not* built from. Every one of these has
 # a reason, and the reason is never "it is markdown" — `reports/pages/*.md` is
@@ -153,3 +155,59 @@ def test_no_pattern_has_outlived_the_path_it_named(side):
     tracked = tracked_files()
     orphaned = [p for p in patterns if not any(_matches(f, p) for f in tracked)]
     assert not orphaned, f"{side} patterns matching no tracked file: {orphaned}"
+
+
+# --------------------------------------------------------------------------- #
+# ci.yml re-runs the manifest-gated tests, and that list is hand-maintained too
+# --------------------------------------------------------------------------- #
+
+
+# Anchored at column 0, so it matches a real module-level `pytestmark` and not a
+# file that merely *mentions* one. The first draft searched for the two strings
+# anywhere and flagged this module — which writes both, in the code below — as
+# gated. A guard that reads source as text has to say where it is looking.
+_GATED = re.compile(
+    r"^pytestmark\s*=\s*pytest\.mark\.skipif\((?:.|\n)*?manifest_path", re.MULTILINE
+)
+
+
+def manifest_gated() -> set[str]:
+    """Test files that skip themselves when `dbt/target/manifest.json` is absent."""
+    return {
+        path.name
+        for path in (REPO_ROOT / "tests").glob("test_*.py")
+        if _GATED.search(path.read_text())
+    }
+
+
+def re_run_after_parse() -> set[str]:
+    """The files `ci.yml` names once the manifest exists.
+
+    The unit-test step is a bare `uv run pytest` with nothing after it, so it
+    contributes nothing here — which is the point: that is the run where these
+    files skip.
+    """
+    named = re.findall(r"uv run pytest ([^\n]+)", CI_WORKFLOW.read_text())
+    return {Path(arg).name for line in named for arg in line.split()}
+
+
+def test_every_manifest_gated_test_file_is_re_run_after_dbt_parse():
+    """A file that skips itself in CI's first step and is not named in its second
+    runs **nowhere** in CI, and nothing says so.
+
+    That is not hypothetical: `ci.yml` named only `test_definitions.py` while
+    `test_asset_checks.py` and `test_documented_counts.py` carried the same
+    skipif, so the asset-check bodies and every count cited in the docs went
+    unchecked on every pull request — and both files' own headers claimed CI
+    re-ran them. The skip is the loud-looking part and it is the honest half; the
+    silence is in the step that was supposed to pick them back up.
+
+    Compared as a set both ways, so adding a gated file without adding it here
+    fails, and removing one from the workflow while it still skips fails too.
+    """
+    gated, re_run = manifest_gated(), re_run_after_parse()
+    assert gated == re_run, (
+        "ci.yml's post-parse pytest step and the manifest-gated test files disagree.\n"
+        f"  gated but never re-run (they run nowhere in CI): {sorted(gated - re_run)}\n"
+        f"  re-run but not gated (harmless, but the list is now wrong): {sorted(re_run - gated)}"
+    )

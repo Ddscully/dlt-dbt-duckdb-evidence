@@ -47,16 +47,21 @@ jobs:
       # Parses the dbt manifest and resolves the whole asset graph, so a broken
       # ref, a renamed source or a dangling asset key fails before any I/O.
       #
-      # `tests/test_definitions.py` runs here rather than in the step above: it
-      # imports orchestration.assets, which needs the manifest that `dbt parse`
-      # writes, so in the unit-test tier it skips itself. What `validate` cannot
-      # see is an asset that was never registered — the graph it checks is only
-      # the one `Definitions` was handed — so this is the step that catches it.
+      # Three test files run here rather than in the step above: each needs the
+      # manifest that `dbt parse` writes, so in the unit-test tier they skip
+      # themselves. This list is held to the tree by `tests/test_workflows.py` —
+      # it named only `test_definitions.py` for months while the other two
+      # skipped in the first step and were never re-run, so they ran nowhere in
+      # CI at all and both said in their own headers that they did.
+      #
+      # What `validate` cannot see is an asset that was never registered — the
+      # graph it checks is only the one `Definitions` was handed — so this is the
+      # step that catches it.
       - name: Validate Dagster definitions
         run: |
           cd dbt && uv run dbt deps && uv run dbt parse && cd ..
           uv run dagster definitions validate -m orchestration.definitions
-          uv run pytest tests/test_definitions.py
+          uv run pytest tests/test_definitions.py tests/test_asset_checks.py tests/test_documented_counts.py
 
       # Runs ingest -> dbt build + test -> Polars in asset-graph order, and
       # evaluates the asset checks alongside dbt's tests — all against fixtures.

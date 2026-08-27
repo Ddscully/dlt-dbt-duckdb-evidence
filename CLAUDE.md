@@ -1612,11 +1612,26 @@ Gotchas:
 - **No routine command evaluates an asset check body, which is how one can read
   the wrong database for a week.** `just test-pipeline` runs the four modules in
   shell order and never calls `dagster job execute`, so it evaluates none of
-  them. `tests/test_asset_checks.py` calls them directly, but skips itself
-  wherever `dbt/target/manifest.json` is absent — which is CI's unit-test step,
-  and the parse step after it re-runs `tests/test_definitions.py` *by name*
-  rather than the suite, so in CI that file never runs at all. What is left is a
-  full materialize and a developer's own `just test` after a `dbt parse`.
+  them. `tests/test_asset_checks.py` calls them directly, and now runs in CI —
+  see the next bullet for why that took correcting. What no test replaces is a
+  real materialize: these bodies meet the actual warehouse and catalog only
+  there.
+- **A test file that skips itself in CI's first step and is not named in its
+  second runs *nowhere* in CI, and the skip is the honest-looking half.**
+  `ci.yml` runs a bare `uv run pytest` before `dbt deps && dbt parse`, so the
+  three files gated on `dbt/target/manifest.json` skip; the step after the parse
+  then re-runs them *by name*, and it named only `tests/test_definitions.py`.
+  So `test_asset_checks.py` and `test_documented_counts.py` ran on no pull
+  request at all — the asset-check bodies and every count cited in the docs —
+  and **both files' own headers said CI re-ran them**. The 30 skips were visible
+  in every build log and read as normal, because 30 skips *is* normal there.
+  `tests/test_workflows.py` compares the gated set against what the workflow
+  names, both directions, so a fourth gated file cannot join in silence.
+  - **A guard that reads test source as text has to say where it is looking.**
+    The first detector searched for `pytestmark` and `manifest_path.exists()`
+    anywhere in a file and flagged *itself* — the module writes both strings, in
+    the code doing the searching. It is anchored at column 0 now, which is the
+    difference between a module-level mark and a mention of one.
   - **Patching the database under a check proves its logic and never its
     wiring**, which is the half that broke: `wdi_indicators_all_present` went on
     reading `data/warehouse.duckdb` after the landing zone moved into DuckLake,
