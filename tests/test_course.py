@@ -148,18 +148,29 @@ def ignored(paths: set[str]) -> set[str]:
 
     Without this the guard passes on a developer's machine, where the site has
     been built, and fails in CI — the exact shape of rot it exists to catch.
+
+    Every path is asked about twice, with and without a trailing slash, because
+    `git check-ignore` is not a pure function of the .gitignore. A directory-only
+    pattern — `dbt/target/`, written with the slash — matches only a path git can
+    see is a directory, and it asks the filesystem to decide. So a cited
+    `dbt/target` was exempt on a machine that had built and exempt nowhere else:
+    green locally, red on a fresh checkout, which is this helper's own failure
+    mode arriving inside the exemption meant to prevent it. A trailing slash on
+    the probe answers the directory question without the filesystem.
     """
     if not paths:
         return set()
+    probes = {form for c in paths for form in (c.rstrip("/"), c.rstrip("/") + "/")}
     done = subprocess.run(
         ["git", "check-ignore", "--stdin"],
         cwd=project_root(),
-        input="\n".join(sorted(paths)),
+        input="\n".join(sorted(probes)),
         capture_output=True,
         text=True,
         check=False,  # exit 1 simply means nothing matched
     )
-    return {line.strip() for line in done.stdout.splitlines() if line.strip()}
+    hits = {line.strip() for line in done.stdout.splitlines() if line.strip()}
+    return {c for c in paths if c.rstrip("/") in hits or c.rstrip("/") + "/" in hits}
 
 
 @pytest.mark.parametrize("doc", cited_files(), ids=_ids(cited_files()))
