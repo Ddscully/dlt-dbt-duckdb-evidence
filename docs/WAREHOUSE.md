@@ -116,3 +116,41 @@ object storage. The two tables that come out well are the ones whose grain is
 much finer than their partition column — `fct_retail_order_line` is 1.07M rows
 over three year-partitions, at 13 MB, 12 MB and 836 kB. See
 [CLAUDE.md](../CLAUDE.md#the-lake-lakearchivepy) for the full arithmetic.
+
+## The lakehouse: `data/lakehouse/`
+
+`just lakehouse` writes the same kind of Parquet through
+[DuckLake](https://ducklake.select), which adds a catalog database holding
+schema, snapshots and per-file statistics. It covers the two weather tables and
+sits *beside* the archive rather than replacing it — the two answer the same
+question, *what moved upstream?*, in different ways.
+
+```sql
+install ducklake; load ducklake;
+attach 'ducklake:data/lakehouse/catalog.ducklake' as lakehouse
+    (data_path 'data/lakehouse/data/');
+
+-- what was revised in the last run, and what it used to say
+select change_type, country_iso3, weather_date, temperature_2m_mean
+from ducklake_table_changes('lakehouse', 'raw', 'om_weather_daily', 5, 5);
+```
+
+- **The archive answers "which file changed"; this answers "which row, and what
+  did it say before".** `sha256sum` over the partitions tells you one of 793
+  files moved. The change feed returns the row twice, as `update_preimage` and
+  `update_postimage`.
+- **A run over unchanged data writes nothing and creates no snapshot**, because
+  the write is a `MERGE` gated on the row actually differing. A snapshot in the
+  list is therefore evidence rather than bookkeeping.
+- **No partition column.** DuckLake prunes on catalog statistics, so a filter
+  still reads one file with no directory layout to arrange it —
+  `raw.om_weather_daily` has no `year` column at all, and needs none.
+- **The catalog is not optional.** `read_parquet` over `data/lakehouse/data/`
+  will not give you the table: DuckLake writes positional delete files that the
+  catalog is responsible for applying. That is the portability the hive archive
+  keeps and this layer gives up, which is why both exist.
+
+Weather is the table here because it is the only source in this warehouse that
+restates on a schedule — Open-Meteo serves preliminary ERA5T and Copernicus
+supersedes it with final ERA5 two to three months later, so every ingest
+re-merges 90 days of daily rows in place.

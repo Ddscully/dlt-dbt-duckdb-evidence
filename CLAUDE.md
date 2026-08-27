@@ -89,7 +89,8 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
 | `just lake` | year-partitioned Parquet archive of the warehouse → `data/lake/` |
-| `just run` | ingest → dbt-build → transform → pipeline-status → lake (shell ordering) |
+| `just lakehouse` | merge the weather tables into the DuckLake lakehouse → `data/lakehouse/` |
+| `just run` | ingest → dbt-build → transform → pipeline-status → lake → lakehouse (shell ordering) |
 | `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
 | `just materialize` | same pipeline, ordered by the asset graph (`load_retail` then `full_refresh`, no Evidence) |
 | `just materialize-site` | the same two jobs + the Evidence site (`publish_site`; needs Node) |
@@ -820,6 +821,74 @@ checks the read-back row counts and year spans against the warehouse.
 - **`LAKE_DIR` overrides the destination** the way `WAREHOUSE_PATH` does for the
   warehouse — `just test-pipeline` points it at a temp directory so a fixture run
   can't overwrite the real archive with the 17-country slice.
+
+## The lakehouse (`lake/lakehouse.py`)
+
+`just lakehouse` merges `raw.om_weather_daily` and `marts.fct_country_weather_year`
+into a DuckLake catalog under `data/lakehouse/` (gitignored). It is an asset
+(`lake/lakehouse`) with a parity check, and it sits **beside** the hive archive
+rather than replacing it — the archive answers *which file moved*, this answers
+*which row moved and what it said before*.
+
+- **Weather, because nothing else here exercises the update path.** FX is
+  append-only, retail is frozen at 2011-12, and `raw.owid_co2` has produced zero
+  observed restatements locally. `WEATHER_LOOKBACK_DAYS` re-merges 41 × 90 =
+  3,690 rows every ingest against a *scheduled* upstream property (ERA5T
+  superseded by final ERA5), so the revisions are real rather than simulated.
+  Weather is also the cleanest place to introduce the format because it is not
+  in `ARCHIVED_TABLES` at all — nothing is being migrated.
+- **The write is a `MERGE` gated on the row actually differing, and that is the
+  whole layer.** A literal port of `lake.archive`'s delete-and-rewrite was
+  measured first: it retires the old file and writes a new one every run, and
+  the catalog's change log is *identical* for a no-op and a real restatement.
+  With the guard, an unchanged run creates **no snapshot at all**, and a
+  restatement hands back `update_preimage` / `update_postimage` — the old and
+  new values side by side, at row grain. Measured end to end: one day's
+  temperature moved 4 °C, and the change feed showed the daily row and Germany's
+  2021 HDD total (2519.3 → 2523.3) as one revision each.
+- **`_dlt_load_id` and `_dlt_id` are excluded from that comparison, or the feed
+  is noise.** dlt regenerates *both* on every row it re-merges, byte-identical
+  data or not — measured by loading one fixture three times. Compare them and
+  every ingest reports its whole 3,690-row window as revised. The cost, stated:
+  the mirrored load id is the load that last *changed* a row, not the one that
+  last touched it. `Synced.provenance_columns` carries this and a test holds
+  every `raw.` rule to `history.DLT_COLUMNS`.
+- **Upsert and prune are two statements**, because DuckLake's `MERGE` supports a
+  single UPDATE/DELETE action. The prune is not optional: it is the same
+  requirement `shutil.rmtree` meets in the archive — a row that vanished
+  upstream must stop answering queries. Both are silent when they touch nothing,
+  so the no-snapshot property survives the split. `RETURNING` is also not
+  implemented for DuckLake, so the insert/update/delete breakdown is read back
+  out of `ducklake_table_changes()` — which is the better source anyway, being
+  one a consumer can re-derive months later.
+- **No partition column at all, and this is the sharpest case for that in the
+  repo.** DuckLake prunes on catalog min/max statistics, so a filter still reads
+  one file with no directory layout arranging it. `raw.om_weather_daily` has no
+  `year` column — it is keyed on `weather_date` — so the hive archive would need
+  a column *invented for the layout*. This one chooses nothing.
+- **`read_parquet` over the data directory is not the table, in either
+  configuration.** Measured by restating one row and then reading the files:
+  at DuckLake's default `data_inlining_row_limit` of 10 the change is written
+  into the *catalog database* and `read_parquet` silently returns the superseded
+  value; at 0 it reaches Parquet but so does a `…-delete.parquet` of
+  `(file_path, pos)`, which makes a glob fail on the schema mismatch and, if you
+  exclude it by name, returns **both** versions of the row. So the portable
+  half of the archive's appeal does not survive the format. `DATA_INLINING_ROW_LIMIT`
+  is 0 here anyway, for two other reasons: it keeps a one-row fixture on the same
+  code path as the real 3,690-row window, and it keeps rows out of the catalog.
+- **The catalog is a second piece of state no rebuild reproduces**, and `just
+  clean` deliberately does not take `data/lakehouse/`. The Parquet is as
+  regenerable as `data/lake/`; the snapshot lineage is not, which is
+  `history`'s property in a new place. **It is not yet carried between releases**
+  — `CARRIED` in `scripts/restore_history.py` names relations inside one DuckDB
+  file and the catalog is a separate one. Nothing publishes the lakehouse today,
+  so the gap costs a local change log rather than a released one; publishing it
+  would need that decided first.
+  - **So every CI run is a first load**, exactly as `history` is: `full_refresh`
+    contains this asset and builds from an empty checkout, which means
+    `inserted` equals the row count and `revised` is always 0 there. That is the
+    honest state and not a broken build — the change feed is a local artifact
+    until the catalog is carried.
 
 ## Publishing (`scripts/export_warehouse.py`)
 

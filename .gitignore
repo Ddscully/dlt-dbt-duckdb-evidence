@@ -73,3 +73,7 @@ node_modules/
 # whatever the last session left here. The three files tracked before this rule
 # landed stay tracked; `git add -f` for anything new that's worth keeping.
 docs/sessions/
+
+# DuckLake lakehouse built by `just lakehouse`. The Parquet is regenerable;
+# the catalog beside it holds snapshot lineage that no rebuild reproduces.
+data/lakehouse/

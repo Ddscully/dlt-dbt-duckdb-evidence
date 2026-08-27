@@ -78,6 +78,7 @@ dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 | [**Dagster**](https://dagster.io/) | orchestration: every layer as a software-defined asset |
 | [**Polars**](https://pola.rs/) | heavy columnar transforms / window logic in Python |
 | **Parquet** | hive-partitioned archive of the warehouse in `data/lake/`: pruning, portability, a diffable raw layer |
+| [**DuckLake**](https://ducklake.select/) | the same Parquet with a catalog, in `data/lakehouse/`: snapshots and a row-level change feed over the weather tables |
 | [**Evidence**](https://evidence.dev/) | BI-as-code dashboard, deployable to GitHub Pages |
 | [**sqlfluff**](https://sqlfluff.com/) + pre-commit | SQL linting / CI rigor |
 | [**pytest**](https://docs.pytest.org/) | unit tests over the ingest/transform logic |
@@ -156,7 +157,7 @@ jobs and the partitioned WDI backfill.
 ```
 .
 ├── src/modern_data_stack/ # the domain-neutral half: paths, fixtures, lake,
-│                      #   observability, export, snapshot carry-forward
+│                      #   ducklake, observability, export, carry-forward
 ├── ingest/            # dlt pipeline: sources -> DuckDB (schema `raw`)
 ├── orchestration/     # Dagster: the pipeline as an asset graph + schedule
 ├── dbt/               # dbt-duckdb project
@@ -165,7 +166,8 @@ jobs and the partitioned WDI backfill.
 │   ├── snapshots/     # SCD2 history: CO2 estimates + grid factors (schema `history`)
 │   └── macros/        # generate_schema_name -> clean schema names
 ├── transform/         # Polars: derived metrics -> schema `analytics`
-├── lake/              # DuckDB -> hive-partitioned Parquet in data/lake/
+├── lake/              # DuckDB -> hive-partitioned Parquet in data/lake/,
+│                      #   and a DuckLake catalog in data/lakehouse/
 ├── tests/             # pytest + the recorded API fixtures CI runs against
 ├── scripts/           # record_fixtures.py, export_warehouse.py (the release)
 ├── reports/           # Evidence dashboard (BI as code)

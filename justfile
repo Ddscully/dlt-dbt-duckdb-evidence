@@ -94,6 +94,14 @@ dbt-docs-serve: dbt-docs
 lake:
     uv run python -m lake.archive
 
+# Merge the weather tables into the DuckLake lakehouse in data/lakehouse/.
+# Beside `just lake`, not instead of it: the archive answers "which file moved"
+# and this answers "which row moved, and what did it say before". A run over
+# unchanged data writes nothing and creates no snapshot, so an empty output here
+# is the result, not a failure.
+lakehouse:
+    uv run python -m lake.lakehouse
+
 # Polars derived metrics
 transform:
     uv run python -m transform.co2_intensity
@@ -105,7 +113,7 @@ pipeline-status:
     uv run python -m transform.pipeline_status
 
 # Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
-run: ingest dbt-build transform pipeline-status lake
+run: ingest dbt-build transform pipeline-status lake lakehouse
 
 # Unit tests — mocked API payloads, no network, no warehouse
 test:
@@ -126,9 +134,11 @@ test-pipeline:
     set -euo pipefail
     export INGEST_FIXTURES=1
     export WAREHOUSE_PATH="$(mktemp -d)/warehouse.duckdb"
-    # ...and the lake beside it, or a fixture run would overwrite data/lake/
-    # with the 17-country slice.
+    # ...and both file layers beside it, or a fixture run would overwrite
+    # data/lake/ with the 17-country slice — and, worse for the lakehouse, merge
+    # the slice into a catalog whose snapshot lineage no rebuild reproduces.
     export LAKE_DIR="$(dirname "$WAREHOUSE_PATH")/lake"
+    export LAKEHOUSE_DIR="$(dirname "$WAREHOUSE_PATH")/lakehouse"
     echo "fixture warehouse: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
     cd dbt && uv run dbt deps && uv run dbt build && cd ..
@@ -136,6 +146,7 @@ test-pipeline:
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
     uv run python -m lake.archive
+    uv run python -m lake.lakehouse
 
 # `.github/workflows/release-data.yml` runs this, then attaches the result to a
 # dated GitHub release.
@@ -477,6 +488,12 @@ clean scope="safe" force="":
     #   data/cache        re-downloaded on the next ingest
     #   reports/build     `just report`
     #   reports/.evidence `just report-clean`
+    #
+    # data/lakehouse is deliberately absent. Its Parquet is as regenerable as
+    # data/lake's, but the DuckLake catalog beside it holds the snapshot lineage
+    # — which revision landed when — and no rebuild invents that, the same
+    # property that makes `history` unreproducible. Deleting it costs the change
+    # log, silently, and there is nothing in the output to say so.
     drop dbt/target dbt/dbt_packages dbt/logs \
          data/lake data/export data/course data/cache \
          reports/build reports/.evidence

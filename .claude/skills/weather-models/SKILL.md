@@ -101,6 +101,23 @@ its first source with a *finite budget*.
     describes, and `ecb_fx_rates` is the one that fails. `sync_destination()`
     does not help. `scripts/restore_history.py` refuses when both conditions
     hold and names `rm -rf ~/.dlt/pipelines/modern_data_stack` as the fix.
+- **The 90-day lookback is also what makes weather the DuckLake table**
+  (`lake/lakehouse.py`, `just lakehouse`). The format's argument is that it can
+  say what changed, and nothing else in this warehouse restates: FX is
+  append-only, retail is frozen at 2011-12, and `raw.owid_co2` has produced zero
+  observed revisions locally. Re-merging 41 x 90 = 3,690 rows in place every
+  ingest, on the *scheduled* ERA5T-to-ERA5 supersession, is the one real update
+  path here. Weather also has no hive baseline to migrate — neither weather
+  table is in `ARCHIVED_TABLES` — and no `year` column to partition on, which
+  makes it the sharpest case for the format's claim that the catalog's own
+  statistics replace a partition column.
+  - **`_dlt_load_id` and `_dlt_id` must be excluded from the change comparison,
+    and this is the trap.** dlt regenerates *both* on every row it re-merges,
+    byte-identical weather or not — measured by loading one fixture three times.
+    Compare them and every routine ingest reports its whole 3,690-row window as
+    revised, which is precisely the opposite of what the layer is for.
+    `Synced.provenance_columns` carries them and `tests/test_lakehouse.py` holds
+    every `raw.` rule to `history.DLT_COLUMNS`.
 - **A cold start fetches three years, not the whole series, and getting that
   wrong is a *hang* rather than a failure.** `WEATHER_FIRST_YEAR` (2007) is the
   backfill floor; `WEATHER_COLD_START_YEARS` is what an unpartitioned load asks

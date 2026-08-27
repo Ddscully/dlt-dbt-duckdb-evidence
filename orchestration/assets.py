@@ -47,7 +47,16 @@ from ingest.pipeline import (
     public_indicators,
 )
 from lake.archive import ARCHIVED_TABLES, LAKE_DIR, run as write_lake, table_dir
+from lake.lakehouse import (
+    DATA_INLINING_ROW_LIMIT,
+    LAKEHOUSE_DIR,
+    SYNCED_TABLES,
+    catalog_path,
+    data_path,
+    run as write_lakehouse,
+)
 from modern_data_stack.db import row, scalar
+from modern_data_stack.ducklake import connect as ducklake_connect
 from orchestration.resources import dbt_project
 from scripts.build_report import (
     BUILD_DIR,
@@ -566,6 +575,61 @@ def parquet_archive(context: AssetExecutionContext) -> dg.MaterializeResult:
     )
 
 
+LAKEHOUSE = dg.AssetKey(["lake", "lakehouse"])
+
+
+@dg.asset(
+    key=LAKEHOUSE,
+    # One dep per mirrored table rather than the single edge that would order it
+    # last. The archive gets away with `deps=[the mart]` because everything it
+    # writes is downstream of that one node; this mirrors a landing table *and* a
+    # mart, and a graph showing it hanging off only the mart would say the wrong
+    # thing about what a stale change feed means.
+    deps=[
+        dg.AssetKey(["raw", "om_weather_daily"]),
+        get_asset_key_for_model([dbt_models], "fct_country_weather_year"),
+    ],
+    group_name="lake",
+    kinds={"duckdb", "parquet"},
+    freshness_policy=MODELLED_FRESHNESS,
+    description=(
+        "DuckLake mirror of the weather tables under data/lakehouse/ — Parquet "
+        "with a catalog, so a run reports which rows were revised and what they "
+        "said before, rather than which files differ. A run over unchanged data "
+        "creates no snapshot at all."
+    ),
+)
+def lakehouse(context: AssetExecutionContext) -> dg.MaterializeResult:
+    summary = write_lakehouse()
+    for table, stats in summary.items():
+        if stats["snapshot"] is None:
+            context.log.info("%s -> unchanged, nothing written", table)
+            continue
+        context.log.info(
+            "%s -> snapshot %s: +%s ~%s -%s (%s rows, %s files)",
+            table,
+            stats["snapshot"],
+            stats["inserted"],
+            stats["updated"],
+            stats["deleted"],
+            stats["rows"],
+            stats["files"],
+        )
+    return dg.MaterializeResult(
+        metadata={
+            "dagster/row_count": sum(s["rows"] for s in summary.values()),
+            # The three that make this layer worth having. A materialisation
+            # whose revised count is non-zero is the one worth opening.
+            "inserted": sum(s["inserted"] for s in summary.values()),
+            "revised": sum(s["updated"] for s in summary.values()),
+            "deleted": sum(s["deleted"] for s in summary.values()),
+            "files": sum(s["files"] for s in summary.values()),
+            "bytes": sum(s["bytes"] for s in summary.values()),
+            "tables": summary,
+        }
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Layer 5 — the Evidence site
 # --------------------------------------------------------------------------- #
@@ -837,6 +901,41 @@ def lake_matches_warehouse() -> dg.AssetCheckResult:
     return dg.AssetCheckResult(
         passed=not mismatches,
         metadata={"tables_checked": len(ARCHIVED_TABLES), "mismatches": mismatches},
+    )
+
+
+@dg.asset_check(asset=LAKEHOUSE, blocking=False)
+def lakehouse_matches_warehouse() -> dg.AssetCheckResult:
+    """Every mirrored table holds the same rows in the lakehouse as in the warehouse.
+
+    The archive's parity check exists because a half-finished `COPY` leaves files
+    that look materialised. This one exists for a different failure: the merge
+    and the prune are two statements, so a run can update rows and then fail
+    before removing the ones that vanished upstream — leaving a lakehouse that is
+    internally consistent, queryable, and quietly a superset of the warehouse.
+
+    Reads through the catalog rather than over the files, because a `read_parquet`
+    of the data directory is not the table — DuckLake writes positional delete
+    files the catalog is responsible for applying.
+    """
+    con = ducklake_connect(
+        catalog_path(LAKEHOUSE_DIR),
+        data_path(LAKEHOUSE_DIR),
+        DUCKDB_PATH,
+        data_inlining_row_limit=DATA_INLINING_ROW_LIMIT,
+    )
+    try:
+        mismatches = {}
+        for rule in SYNCED_TABLES:
+            warehouse = scalar(con, f"select count(*) from wh.{rule.table}")
+            mirrored = scalar(con, f"select count(*) from lakehouse.{rule.table}")
+            if warehouse != mirrored:
+                mismatches[rule.table] = {"warehouse": warehouse, "lakehouse": mirrored}
+    finally:
+        con.close()
+    return dg.AssetCheckResult(
+        passed=not mismatches,
+        metadata={"tables_checked": len(SYNCED_TABLES), "mismatches": mismatches},
     )
 
 

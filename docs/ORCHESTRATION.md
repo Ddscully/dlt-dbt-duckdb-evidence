@@ -14,6 +14,10 @@ raw/eu_elec_prices─┘                            (dbt snapshot)              
                     ...and history/snap_grid_emission_factors ─▶ marts/dim_grid_emission_factors
                        (the same shape again) ─▶ marts/fct_example_scope2_emissions
 
+  raw/om_weather_daily ─▶ staging/stg_weather_daily ─▶ marts/fct_country_weather_year
+                       └────────────────────┬──────────────────────┘
+                                            └─▶ lake/lakehouse   (DuckDB → DuckLake)
+
   raw/ecb_fx_rates ─▶ staging/stg_fx_rates ─▶ the four marts/dim_date + fct_fx_rates_* tables
   raw/retail_invoice_lines ─▶ staging/stg_retail_lines ─▶ the five retail marts
                                                        └─▶ analytics/retail_rfm  (Polars)
