@@ -1,7 +1,7 @@
 ---
 title: Coverage
 description: What the warehouse knows, what it doesn't, and where the two facts differ by column.
-sidebar_position: 7
+sidebar_position: 8
 sidebar_badge: Method
 ---
 

@@ -675,7 +675,7 @@ the point of the layer is that none of it is a comment.
     inferred from data could have differed. `just test-pipeline` was run to check
     it rather than assumed — all 17 contracts hold on the slice.
 - **Exposures are per *page*, not per site, and they are checked.**
-  `dbt/models/_exposures.yml` declares eight Evidence pages and the monthly data
+  `dbt/models/_exposures.yml` declares nine Evidence pages and the monthly data
   release, so `dbt ls --select +exposure:evidence_retail` answers "what breaks if
   I change this" for one page. `scripts/build_report.py` gained `page_tables()`
   (page → source query → warehouse table) and `tests/test_exposures.py` fails if
@@ -1145,6 +1145,22 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
     what was carried in. `pages.yml` runs the same step `continue-on-error`,
     because there the snapshot is a read-only display and a missing release
     should cost one section of one page, not the deploy.
+  - **A release is two assets and a workflow that downloads one of them fails
+    silently, which `pages.yml` did until 2026-08-27.** It asked for
+    `warehouse.duckdb` alone; `restore_history` finds the lakehouse *beside* the
+    database rather than being told where it is, so it got a directory with no
+    tarball in it — which is the "restoring nothing is normal" path, not an
+    error. The cost lands a layer down and is a *depth*, not a failure: every
+    workflow rebuilds the marts from `raw`, `raw` is in the DuckLake catalog now,
+    so the published database carries no weather rows at all —
+    `weather_watermark()` reads null, the ingest cold-starts at
+    `WEATHER_COLD_START_YEARS`, and `marts.fct_country_weather_year` builds three
+    years deep against the release's fifteen. The Weather page then renders
+    perfectly off a thin mart. Green build, green checks, right shape, wrong
+    depth, and no line anywhere saying so. This is the "no workflow goes through
+    `just`, so all four needed the same line" shape again, one asset further on;
+    `tests/test_workflows.py` now derives which workflows restore and asserts each
+    downloads every asset, with the names read from the code rather than retyped.
   - **It refuses to overwrite a destination that already holds carried state**,
     so running it against the real warehouse can't destroy months of local
     versions — `--force` if that is genuinely what you want. It also rejects a
@@ -1478,7 +1494,7 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 - **`site_pages_all_rendered` is blocking, and it checks file *size*.**
   `evidence build` exits 0 for a site missing a page, and nothing downstream reads
   `reports/build/` — so a route that emitted only the SvelteKit shell would
-  materialise green and deploy. The ten pages render at 19–92 kB; the floor is
+  materialise green and deploy. The eleven pages render at 19–92 kB; the floor is
   8 kB. The two smallest are the ones carrying the least SQL — the routing front
   page (19 kB) and Restatements (20 kB) — so it is prose-only pages, not chart
   pages, that would ever bring the floor into play.

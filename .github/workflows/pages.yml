@@ -22,7 +22,7 @@ on:
     # rebuilt and redeployed an identical site.
     #
     # `paths-ignore: ['**.md']` is the obvious version and it is wrong. The
-    # dashboard *is* markdown — `reports/pages/` holds the ten pages — so a
+    # dashboard *is* markdown — `reports/pages/` holds the eleven pages — so a
     # blanket markdown ignore would stop republishing the site exactly when a
     # page changed, which is this repo's collected failure mode: green and
     # wrong.
@@ -139,10 +139,20 @@ jobs:
       # accumulates that history across monthly releases; borrowing the newest
       # one here means the page shows what OWID has actually restated since.
       #
-      # Soft-failing on purpose, unlike release-data.yml: there the snapshot is
-      # the artifact and losing it is permanent, here it is a read-only display.
+      # **Both release assets, and the second one is not a nicety.** This job
+      # rebuilds every mart from `raw`, so a mart is only ever as deep as the
+      # landing table under it — and since `raw` moved into the DuckLake catalog,
+      # `warehouse.duckdb` carries no weather rows at all. Download the database
+      # alone and `weather_watermark()` reads null, the ingest cold-starts at
+      # `WEATHER_COLD_START_YEARS`, and the Weather page deploys with three years
+      # of archive against the release's fifteen. Nothing goes red: a cold start
+      # is a valid state, the mart builds, the page renders, and the only symptom
+      # is a thin chart. The two assets are one artifact and are downloaded as one.
+      #
+      # Soft-failing on purpose, unlike release-data.yml: there the pair is the
+      # artifact and losing it is permanent, here it is a read-only display.
       # A missing release should cost one section of one page, not the deploy.
-      - name: Borrow snapshot history from the latest data release
+      - name: Borrow snapshot history and the landing zone from the latest data release
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -150,10 +160,19 @@ jobs:
           prev=$(gh release list --limit 30 --json tagName \
             --jq '[.[].tagName | select(startswith("data-"))] | first // empty')
           if [ -z "$prev" ]; then
-            echo "No data-* release yet — the Restatements page will show version 1 only."
+            echo "No data-* release yet — Restatements shows version 1 only and"
+            echo "the weather archive cold-starts."
             exit 0
           fi
           gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
+          # `restore_history` finds the landing zone beside the database rather
+          # than being told where it is, so this only has to land in the same
+          # directory. `|| true` because `gh` calls a pattern that matches
+          # nothing a failure, and a release cut before the asset existed has
+          # none — the same "restoring nothing is normal" rule the snapshot
+          # follows, and the same line release-data.yml uses.
+          gh release download "$prev" --pattern lakehouse.tar.gz \
+            --dir prev-release || true
           uv run python -m scripts.restore_history prev-release/warehouse.duckdb
           rm -rf prev-release
 

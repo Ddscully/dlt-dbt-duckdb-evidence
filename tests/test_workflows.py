@@ -211,3 +211,68 @@ def test_every_manifest_gated_test_file_is_re_run_after_dbt_parse():
         f"  gated but never re-run (they run nowhere in CI): {sorted(gated - re_run)}\n"
         f"  re-run but not gated (harmless, but the list is now wrong): {sorted(re_run - gated)}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# A release is two assets, and a workflow that restores one must download both
+# --------------------------------------------------------------------------- #
+
+
+WORKFLOWS_DIR = REPO_ROOT / ".github/workflows"
+
+
+def release_restoring_workflows() -> dict[str, str]:
+    """`{"pages.yml": "<text>", …}` — the workflows that carry a release forward."""
+    return {
+        path.name: path.read_text()
+        for path in sorted(WORKFLOWS_DIR.glob("*.yml"))
+        if "scripts.restore_history" in path.read_text()
+    }
+
+
+def downloaded_assets(text: str) -> set[str]:
+    """Every `--pattern <asset>` a workflow asks `gh release download` for."""
+    return set(re.findall(r"--pattern\s+(\S+)", text))
+
+
+def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
+    """A release is a database *and* a landing zone, and taking only the first is silent.
+
+    `restore_history` finds the lakehouse beside the database rather than being
+    told where it is, so a workflow that downloads `warehouse.duckdb` alone hands
+    it a directory with no tarball in it — which is the module's documented
+    "restoring nothing is a normal outcome" path, not an error. Nothing fails.
+
+    What it costs is measured one layer down. Every workflow here rebuilds the
+    marts from `raw`, and since `raw` moved into the DuckLake catalog the
+    published database carries no weather rows at all — so the archive is not
+    carried, `weather_watermark()` reads null, the ingest cold-starts at
+    `WEATHER_COLD_START_YEARS`, and `marts.fct_country_weather_year` is built
+    three years deep instead of the release's fifteen. The Weather page then
+    renders correctly off a thin mart: green build, green checks, right shape,
+    wrong depth. `pages.yml` shipped exactly that between the DuckLake move and
+    2026-08-27.
+
+    The asset names come from the code rather than from string literals here, so
+    renaming either one fails this instead of quietly matching nothing.
+    """
+    from scripts import restore_history
+
+    required = {Path(restore_history.DUCKDB_PATH).name, restore_history.LAKEHOUSE_ASSET}
+    workflows = release_restoring_workflows()
+
+    # The scan reads workflow text, so it has to be shown to find something —
+    # rename the module and an empty result would pass every assertion below.
+    assert {"pages.yml", "release-data.yml"} <= set(workflows), (
+        f"the restore scan found {sorted(workflows)}; both of those restore a release"
+    )
+
+    missing = {
+        name: sorted(required - downloaded_assets(text))
+        for name, text in workflows.items()
+        if not required <= downloaded_assets(text)
+    }
+    assert not missing, (
+        "workflows that restore a release but do not download all of it: "
+        f"{missing}\nEach asset needs its own `gh release download --pattern` line."
+    )

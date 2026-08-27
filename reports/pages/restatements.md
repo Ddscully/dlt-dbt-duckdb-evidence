@@ -1,7 +1,7 @@
 ---
 title: Restatements
 description: CO₂ estimates OWID has revised since this warehouse first loaded them.
-sidebar_position: 8
+sidebar_position: 9
 sidebar_badge: Method
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: Pipeline
 description: The state of the pipeline that built this site, from load times to layer sizes and every dbt test.
-sidebar_position: 9
+sidebar_position: 10
 sidebar_badge: Ops
 ---
 

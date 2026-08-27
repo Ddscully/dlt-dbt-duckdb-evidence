@@ -1,9 +1,9 @@
 ---
 title: What this warehouse answers
-description: A working data warehouse covering carbon border costs, emission factors for disclosure, retail customer economics, currency effects and long-run emissions trends.
+description: A working data warehouse covering carbon border costs, emission factors for disclosure, retail customer economics, currency effects, weather as a control variable and long-run emissions trends.
 ---
 
-Five self-contained analyses built on public data. Each one ends in a decision
+Six self-contained analyses built on public data. Each one ends in a decision
 somebody has to make, and every figure is a live query, so the numbers move when
 the underlying data does.
 
@@ -29,6 +29,11 @@ back, and the three definitions that quietly change the answer.
 depending on the currency you counted it in, and when to use an average rate
 rather than a spot one.
 
+**Attributing an energy or emissions movement to anything at all**
+→ **[Weather](/weather)** — whether it was simply a colder year, which is the
+competing explanation that has to be ruled out first, and what happens when you
+actually test it.
+
 **Long-run emissions strategy, siting or supply agreements**
 → **[Eight Findings](/findings)** — what two decades of national emissions and
 energy data support, and what they don't.
@@ -38,11 +43,11 @@ the **[Country Explorer](/countries)**.
 
 ## What sits underneath
 
-Six public sources — emissions and energy from Our World in Data, development
+Seven public sources — emissions and energy from Our World in Data, development
 indicators from the World Bank, electricity prices from Eurostat, exchange rates
-from the European Central Bank, the EU's own CBAM reference values, and one
-retailer's transaction log — loaded, modelled, tested and published on a
-schedule.
+from the European Central Bank, capital-city weather from Open-Meteo's ERA5
+archive, the EU's own CBAM reference values, and one retailer's transaction log —
+loaded, modelled, tested and published on a schedule.
 
 Every table is released publicly each month as both Parquet and a DuckDB file.
 
@@ -64,6 +69,7 @@ not a fixed record.
 <a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>,
 <a href="https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204">Eurostat electricity prices</a>,
 <a href="https://frankfurter.dev">ECB reference rates via Frankfurter</a>,
+<a href="https://open-meteo.com/">Open-Meteo</a> (ERA5, Copernicus/ECMWF),
 <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621">Implementing Regulation (EU) 2025/2621</a>,
 <a href="https://archive.ics.uci.edu/dataset/502/online+retail+ii">UCI Online Retail II</a>.
 Built with dlt, dbt, DuckDB, Polars, Dagster &amp; Evidence &mdash; every model,
