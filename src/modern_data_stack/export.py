@@ -209,6 +209,7 @@ def export(
     grain: str | None = None,
     extra_manifest: Callable[[duckdb.DuckDBPyConnection], dict] | None = None,
     prepare_copy: Callable[[duckdb.DuckDBPyConnection], dict] | None = None,
+    extra_artifacts: Callable[[Path], dict] | None = None,
     period_column: str = "year",
     max_storage_version: int | None = None,
 ) -> dict:
@@ -311,6 +312,7 @@ def export(
             "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "data_loaded_at": loaded_at(con),
             **prepared,
+            **(extra_artifacts(dest_dir) if extra_artifacts else {}),
             **(extra_manifest(con) if extra_manifest else {}),
             "git_sha": git_sha(),
             "duckdb_version": duckdb.__version__,
@@ -335,7 +337,19 @@ def export(
     (dest_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (dest_dir / "ATTRIBUTION.md").write_text(attribution)
     (dest_dir / "RELEASE_NOTES.md").write_text(release_notes(manifest, repo or repo_slug(), tag))
-    sums = [f"{manifest['warehouse']['sha256']}  {manifest['warehouse']['file']}"]
-    sums += [f"{t['sha256']}  {t['file']}" for t in manifest["tables"]]
+    # **Checksums are computed by walking the directory, not by listing what we
+    # think we wrote.** The two were identical when the release was a database
+    # and some Parquet, and they stop being identical the moment anything else
+    # ships — an `extra_artifacts` hook writing a directory of files would have
+    # been published unverified, and nothing would have said so. Walking makes
+    # SHA256SUMS a statement about the artifact rather than about this function's
+    # memory. The four excluded names are the metadata *about* the release, which
+    # cannot describe themselves.
+    described = {"SHA256SUMS", "manifest.json", "RELEASE_NOTES.md", "ATTRIBUTION.md"}
+    sums = [
+        f"{sha256(path)}  {path.relative_to(dest_dir).as_posix()}"
+        for path in sorted(dest_dir.rglob("*"))
+        if path.is_file() and path.relative_to(dest_dir).as_posix() not in described
+    ]
     (dest_dir / "SHA256SUMS").write_text("\n".join(sums) + "\n")
     return manifest

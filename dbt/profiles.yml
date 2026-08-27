@@ -1,9 +1,17 @@
-# Local dbt profile — points the DuckDB adapter at the file dlt wrote.
-# Kept in-repo (no secrets) so the demo runs with zero setup.
+# Local dbt profile.
 #
-# WAREHOUSE_PATH overrides the target file so a fixture run can use a throwaway
-# warehouse; it must be absolute, since this path is resolved from `dbt/` while
-# the Python layers resolve theirs from the repo root.
+# Two databases now, and the split is the architecture: `raw` lives in the
+# DuckLake catalog that dlt writes, and everything dbt *builds* goes into the
+# DuckDB file, which is the whole of what the release publishes.
+#
+# WAREHOUSE_PATH and LAKEHOUSE_DIR override both so a fixture run can use
+# throwaway copies; both must be **absolute**, since this file is resolved from
+# `dbt/` while the Python layers resolve theirs from the repo root.
+#
+# The attach is what makes `source('raw', …)` resolve — `_sources.yml` declares
+# `database: lakehouse`, and that name is this alias. Change one without the
+# other and dbt cannot find the sources at all, which at least fails loudly;
+# the silent version is renaming a dlt resource, which splits the asset graph.
 modern_data_stack:
   target: dev
   outputs:
@@ -14,3 +22,9 @@ modern_data_stack:
       extensions:
         - httpfs
         - parquet
+        - ducklake
+      attach:
+        - path: "ducklake:duckdb:{{ env_var('LAKEHOUSE_DIR', '../data/lakehouse') }}/catalog.duckdb"
+          alias: lakehouse
+          options:
+            data_path: "{{ env_var('LAKEHOUSE_DIR', '../data/lakehouse') }}/data/"

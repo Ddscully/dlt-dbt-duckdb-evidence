@@ -1,274 +1,205 @@
-"""Unit tests for the DuckLake lakehouse.
+"""The lakehouse: dlt's landing zone, and the revision log derived from it.
 
-The archive's tests pin a directory layout; these pin a *change log*, which is
-the whole reason the second layer exists. Every assertion here is about the
-difference between a run that should leave a trace and one that should not —
-because the failure this layer is built to avoid is not a crash, it is a catalog
-that records a snapshot for a run over data nobody touched.
+These tests replace a suite written against a *mirror* — when `raw` lived in the
+DuckDB file and a gated `MERGE` copied two weather tables into DuckLake beside
+it. dlt writes the catalog directly now, so the merge, the prune and their
+parity check are gone, and what is left to guard is narrower and sharper: the
+substitute for the change feed.
 
-No network and no real warehouse: a miniature DuckDB file with dlt's two
-bookkeeping columns on it is enough.
+**Why there is a substitute at all** is the finding these tests exist to hold.
+`ducklake_table_changes()` is the obvious answer and it does not work behind
+dlt: reloading 500 identical rows through `write_disposition="merge"` reports
+`update_preimage: 500, update_postimage: 500`, because dlt regenerates `_dlt_id`
+*and* `_dlt_load_id` on every row it touches. The feed is faithful and the
+writer is what makes it useless. `revisions()` diffs two snapshots with `EXCEPT`
+instead, projecting those columns away.
+
+The failure that matters is not an exception. Drop a column from the ignore list
+and the diff returns *every* row as revised — a plausible number, in the right
+shape, that reads as a catastrophic upstream restatement. So the tests here
+assert the zero as hard as they assert the one.
 """
 
 from __future__ import annotations
-
-from datetime import date
 
 import duckdb
 import pytest
 
 from lake import lakehouse
-from modern_data_stack.ducklake import Synced
+from modern_data_stack.ducklake import attach, revisions, table_versions
 
-RULE = Synced(
-    table="raw.om_weather_daily",
-    key=("country_iso3", "weather_date"),
-    provenance_columns=("_dlt_load_id", "_dlt_id"),
-)
+WEATHER = "raw.om_weather_daily"
 
-# The project's real rules, captured before the autouse fixture below replaces
-# them. The two tests at the bottom of this file guard that tuple against the
-# rest of the tree, and reading it through the module would have them guarding
-# `RULE` above instead — passing whatever the project said, which is the exact
-# shape of a test that measures nothing. Verified by mutation: with
-# `lakehouse.SYNCED_TABLES` those two stayed green through a merge key changed
-# to `("country_iso3",)`.
-DECLARED = lakehouse.SYNCED_TABLES
+# One day, two capitals. Small enough to read, and two rows is the minimum that
+# can distinguish "one row changed" from "everything changed".
+DAY = [("DEU", "2021-12-20", 3.5), ("FRA", "2021-12-20", 7.1)]
 
 
-@pytest.fixture
-def warehouse(tmp_path):
-    """Three days of weather for two countries, stamped the way dlt stamps it."""
-    path = tmp_path / "warehouse.duckdb"
-    con = duckdb.connect(str(path))
-    con.sql("create schema raw")
-    con.sql(
-        """
-        create table raw.om_weather_daily as
-        select * from (values
-            ('DEU', date '2022-01-01', 1.0, 'load-1', 'id-a'),
-            ('DEU', date '2022-01-02', 2.0, 'load-1', 'id-b'),
-            ('FRA', date '2022-01-01', 5.0, 'load-1', 'id-c')
-        ) as t(country_iso3, weather_date, temperature_2m_mean, _dlt_load_id, _dlt_id)
-        """
-    )
-    con.close()
-    return path
+def _write(lake_dir, loads: list[list[tuple]]) -> None:
+    """Write `raw.om_weather_daily` once per entry in `loads`.
 
-
-@pytest.fixture(autouse=True)
-def _one_table(monkeypatch):
-    monkeypatch.setattr(lakehouse, "SYNCED_TABLES", (RULE,))
-
-
-def edit(warehouse, sql):
-    con = duckdb.connect(str(warehouse))
-    con.sql(sql)
-    con.close()
-
-
-def read(lake_dir, sql):
-    """Query the lakehouse the way a consumer would — through the catalog."""
+    Every write stamps fresh `_dlt_load_id`/`_dlt_id` values, which is what dlt
+    does on every merge and the whole reason the diff has to ignore them. Plain
+    SQL rather than a dlt run: what is under test is the diff, and a loader in
+    the loop would make these tests about dlt's merge instead.
+    """
+    (lake_dir / "data").mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
-    con.execute("install ducklake")
-    con.execute("load ducklake")
-    con.execute(
-        f"attach 'ducklake:{lakehouse.catalog_path(lake_dir)}' as lakehouse "
-        f"(data_path '{lakehouse.data_path(lake_dir)}/')"
-    )
+    attach(con, lake_dir / "catalog.duckdb", lake_dir / "data", alias="lakehouse")
+    con.execute("create schema if not exists lakehouse.raw")
     try:
-        return con.execute(sql).fetchall()
+        for n, rows in enumerate(loads):
+            values = ", ".join(
+                f"('{iso}', date '{day}', {temp}, 'load_{n}', 'id_{n}_{i}')"
+                for i, (iso, day, temp) in enumerate(rows)
+            )
+            con.execute(f"drop table if exists lakehouse.{WEATHER}")
+            con.execute(
+                f"create table lakehouse.{WEATHER} as select * from (values {values}) as t"
+                "(country_iso3, weather_date, temperature_2m_mean, _dlt_load_id, _dlt_id)"
+            )
     finally:
         con.close()
 
 
-def test_the_first_run_creates_the_table_and_counts_every_row_as_an_insert(warehouse, tmp_path):
-    summary = lakehouse.run(str(warehouse), str(tmp_path / "lh"))["raw.om_weather_daily"]
-
-    assert (summary["rows"], summary["inserted"], summary["updated"], summary["deleted"]) == (
-        3,
-        3,
-        0,
-        0,
-    )
-    assert summary["snapshot"] is not None
-    assert summary["files"] == 1
+def _connect(lake_dir):
+    con = duckdb.connect()
+    attach(con, lake_dir / "catalog.duckdb", lake_dir / "data", alias="lakehouse", read_only=True)
+    return con
 
 
-def test_an_unchanged_rerun_writes_nothing_at_all(warehouse, tmp_path):
-    """The property the whole layer is for.
+def test_an_identical_reload_yields_no_revisions(tmp_path):
+    """The routine case, and the one the change feed gets wrong.
 
-    A literal port of `lake.archive`'s delete-and-rewrite gives a no-op run and a
-    real restatement *identical* catalog entries, so the format buys nothing.
-    What makes them different is the `when matched and (… is distinct from …)`
-    guard: with it, a run over unmoved data produces no snapshot to read.
+    Every ingest re-merges 41 x 90 = 3,690 weather rows whether ERA5 moved or
+    not. If that reads as 3,690 revisions the log is noise, which is precisely
+    what `ducklake_table_changes()` reports here.
     """
-    lake_dir = str(tmp_path / "lh")
-    first = lakehouse.run(str(warehouse), lake_dir)["raw.om_weather_daily"]
-    again = lakehouse.run(str(warehouse), lake_dir)["raw.om_weather_daily"]
+    _write(tmp_path, [DAY, DAY])
+    con = _connect(tmp_path)
+    try:
+        versions = table_versions(con, "lakehouse", WEATHER)
+        assert len(versions) >= 2
+        changed = revisions(
+            con, "lakehouse", WEATHER, versions[-2], versions[-1], ignore=lakehouse.DLT_COLUMNS
+        )
+    finally:
+        con.close()
+    assert changed == []
 
-    assert again["snapshot"] is None
-    assert (again["inserted"], again["updated"], again["deleted"]) == (0, 0, 0)
-    assert again["files"] == first["files"]
-    assert again["bytes"] == first["bytes"]
+
+def test_one_restated_value_yields_exactly_that_row(tmp_path):
+    _write(tmp_path, [DAY, [("DEU", "2021-12-20", -0.5), ("FRA", "2021-12-20", 7.1)]])
+    con = _connect(tmp_path)
+    try:
+        versions = table_versions(con, "lakehouse", WEATHER)
+        changed = revisions(
+            con, "lakehouse", WEATHER, versions[-2], versions[-1], ignore=lakehouse.DLT_COLUMNS
+        )
+    finally:
+        con.close()
+    assert len(changed) == 1
+    assert changed[0][0] == "DEU"
+    assert changed[0][2] == -0.5
 
 
-def test_a_restated_value_keeps_both_versions_in_the_change_feed(warehouse, tmp_path):
-    """What the hive archive cannot say.
+def test_forgetting_the_provenance_columns_reports_the_whole_table(tmp_path):
+    """The mutation that proves the ignore list is load-bearing.
 
-    `sha256sum` over the partitions reports which *file* moved; this reports
-    which row, and what it used to be.
+    This is the bug the design exists to avoid, run deliberately: compare
+    without ignoring anything and an identical reload reports both rows. It
+    raises nothing and returns nothing malformed — a wrong answer of the right
+    shape, which is the only kind this repo has ever had trouble seeing.
     """
-    lake_dir = str(tmp_path / "lh")
-    lakehouse.run(str(warehouse), lake_dir)
-    edit(
-        warehouse,
-        "update raw.om_weather_daily set temperature_2m_mean = 9.5 "
-        "where country_iso3 = 'DEU' and weather_date = date '2022-01-02'",
-    )
-    summary = lakehouse.run(str(warehouse), lake_dir)["raw.om_weather_daily"]
-
-    assert (summary["updated"], summary["inserted"], summary["deleted"]) == (1, 0, 0)
-    snapshot = summary["snapshot"]
-    assert read(
-        lake_dir,
-        f"""
-        select change_type, country_iso3, weather_date, temperature_2m_mean
-        from ducklake_table_changes('lakehouse', 'raw', 'om_weather_daily', {snapshot}, {snapshot})
-        order by change_type
-        """,
-    ) == [
-        ("update_postimage", "DEU", date(2022, 1, 2), 9.5),
-        ("update_preimage", "DEU", date(2022, 1, 2), 2.0),
-    ]
+    _write(tmp_path, [DAY, DAY])
+    con = _connect(tmp_path)
+    try:
+        versions = table_versions(con, "lakehouse", WEATHER)
+        unfiltered = revisions(con, "lakehouse", WEATHER, versions[-2], versions[-1], ignore=())
+        filtered = revisions(
+            con, "lakehouse", WEATHER, versions[-2], versions[-1], ignore=lakehouse.DLT_COLUMNS
+        )
+    finally:
+        con.close()
+    assert len(unfiltered) == len(DAY)
+    assert filtered == []
 
 
-def test_a_row_that_vanished_upstream_is_deleted(warehouse, tmp_path):
-    """`lake.archive` deletes each directory before writing precisely so a row
-    that disappeared upstream cannot keep answering queries. DuckLake's `MERGE`
-    allows one UPDATE/DELETE action, so the prune is a second statement — and
-    dropping it would leave this layer with the defect and no `rmtree` to cover
-    it."""
-    lake_dir = str(tmp_path / "lh")
-    lakehouse.run(str(warehouse), lake_dir)
-    edit(warehouse, "delete from raw.om_weather_daily where country_iso3 = 'FRA'")
-    summary = lakehouse.run(str(warehouse), lake_dir)["raw.om_weather_daily"]
+def test_ignoring_every_column_is_refused_rather_than_answered(tmp_path):
+    """`ignore` covering the whole table would compare nothing and return nothing
+    — indistinguishable from "no revisions" and wrong in the safe-looking
+    direction. It raises instead."""
+    _write(tmp_path, [DAY])
+    con = _connect(tmp_path)
+    try:
+        versions = table_versions(con, "lakehouse", WEATHER)
+        all_columns = (
+            "country_iso3",
+            "weather_date",
+            "temperature_2m_mean",
+            *lakehouse.DLT_COLUMNS,
+        )
+        with pytest.raises(ValueError, match="no columns left"):
+            revisions(con, "lakehouse", WEATHER, versions[0], None, ignore=all_columns)
+    finally:
+        con.close()
 
-    assert (summary["deleted"], summary["rows"]) == (1, 2)
-    assert read(
-        lake_dir, "select count(*) from lakehouse.raw.om_weather_daily where country_iso3 = 'FRA'"
-    ) == [(0,)]
+
+def test_a_table_the_catalog_does_not_hold_is_named_in_the_error(tmp_path):
+    _write(tmp_path, [DAY])
+    con = _connect(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="raw.not_a_table"):
+            revisions(con, "lakehouse", "raw.not_a_table", 0, None, ignore=())
+    finally:
+        con.close()
 
 
-def test_a_new_load_id_on_unchanged_weather_is_not_a_revision(warehouse, tmp_path):
-    """The finding that decides `Synced.provenance_columns`.
+def test_an_unqualified_table_name_is_refused(tmp_path):
+    _write(tmp_path, [DAY])
+    con = _connect(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="schema-qualified"):
+            revisions(con, "lakehouse", "om_weather_daily", 0, None, ignore=())
+    finally:
+        con.close()
 
-    dlt regenerates `_dlt_load_id` *and* `_dlt_id` for every row it re-merges,
-    byte-identical values or not — measured by loading one fixture three times
-    and watching both columns change under unchanged weather. A routine ingest
-    re-merges 41 x 90 = 3,690 rows, so comparing those columns would report the
-    entire merge window as restated on every single run and the change feed
-    would be noise.
+
+def test_the_provenance_list_is_the_one_dlt_actually_writes():
+    """`DLT_COLUMNS` here must name every column dlt regenerates, and
+    `modern_data_stack.history` already states that set for the carry-forward
+    rules. Two hand-written copies of the same fact is how one of them goes
+    stale; this holds them together.
     """
-    lake_dir = str(tmp_path / "lh")
-    lakehouse.run(str(warehouse), lake_dir)
-    edit(
-        warehouse,
-        "update raw.om_weather_daily set _dlt_load_id = 'load-2', _dlt_id = _dlt_id || 'x'",
-    )
-    summary = lakehouse.run(str(warehouse), lake_dir)["raw.om_weather_daily"]
+    from modern_data_stack.history import DLT_COLUMNS as CARRIED_COLUMNS
 
-    assert summary["snapshot"] is None
-    assert (summary["inserted"], summary["updated"], summary["deleted"]) == (0, 0, 0)
-    # And the cost of that, stated: the mirrored id is the load that last
-    # *changed* the row, not the one that last touched it.
-    assert read(lake_dir, "select distinct _dlt_load_id from lakehouse.raw.om_weather_daily") == [
-        ("load-1",)
-    ]
+    assert lakehouse.DLT_COLUMNS == CARRIED_COLUMNS
 
 
-def test_a_real_change_arriving_with_a_new_load_id_is_still_caught(warehouse, tmp_path):
-    """The other side of the previous test, and the reason it needs one.
+def test_the_weather_table_named_here_is_the_one_dlt_loads():
+    """`WEATHER_TABLE` is a hand-written copy of a dlt resource name in the
+    `raw` dataset. A renamed resource would leave the revision log pointed at a
+    table that no longer exists — which raises, but months later and nowhere
+    near the rename."""
+    from ingest.pipeline import INCREMENTAL_RESOURCES, PIPELINE_DATASET
 
-    Ignoring the provenance columns must not ignore the *row* they sit on — a
-    guard that skipped any row whose load id moved would pass the test above and
-    silently stop archiving anything at all.
-    """
-    lake_dir = str(tmp_path / "lh")
-    lakehouse.run(str(warehouse), lake_dir)
-    edit(
-        warehouse,
-        "update raw.om_weather_daily set temperature_2m_mean = 3.5, _dlt_load_id = 'load-2' "
-        "where country_iso3 = 'FRA'",
-    )
-    summary = lakehouse.run(str(warehouse), lake_dir)["raw.om_weather_daily"]
-
-    assert (summary["updated"], summary["inserted"], summary["deleted"]) == (1, 0, 0)
-    assert read(
-        lake_dir,
-        "select temperature_2m_mean, _dlt_load_id from lakehouse.raw.om_weather_daily where country_iso3 = 'FRA'",
-    ) == [(3.5, "load-2")]
+    schema, name = lakehouse.WEATHER_TABLE.split(".")
+    assert schema == PIPELINE_DATASET
+    assert name in INCREMENTAL_RESOURCES
 
 
-def test_the_configured_inlining_limit_keeps_a_small_change_in_parquet(warehouse, tmp_path):
-    """`DATA_INLINING_ROW_LIMIT = 0` is why a one-row test means anything.
+def test_the_attach_alias_is_the_database_dbt_declares():
+    """dbt's `_sources.yml` says `database: lakehouse` and `profiles.yml` attaches
+    under that alias. Both are the constant here; a change to one of the three
+    that misses the others means dbt cannot resolve a single source."""
+    from pathlib import Path
 
-    On DuckLake's default of 10 a change this size is written into the catalog
-    database instead of out to files — so a fixture restating one row would
-    exercise a path the real 3,690-row merge window never takes.
-    """
-    lake_dir = str(tmp_path / "lh")
-    first = lakehouse.run(str(warehouse), lake_dir)["raw.om_weather_daily"]
-    edit(
-        warehouse,
-        "update raw.om_weather_daily set temperature_2m_mean = 9.5 where country_iso3 = 'FRA'",
-    )
-    after = lakehouse.run(str(warehouse), lake_dir)["raw.om_weather_daily"]
+    import yaml
 
-    assert lakehouse.DATA_INLINING_ROW_LIMIT == 0
-    assert after["files"] > first["files"]
+    sources = yaml.safe_load(Path("dbt/models/staging/_sources.yml").read_text())
+    raw = next(s for s in sources["sources"] if s["name"] == "raw")
+    assert raw["database"] == lakehouse.ATTACH_ALIAS
 
-
-def test_a_missing_key_column_is_refused_by_name(warehouse, tmp_path, monkeypatch):
-    """A merge key that is not in the table would otherwise fail inside the
-    generated SQL, naming the ON clause rather than the rule that wrote it."""
-    monkeypatch.setattr(
-        lakehouse, "SYNCED_TABLES", (Synced(table="raw.om_weather_daily", key=("station_id",)),)
-    )
-    with pytest.raises(ValueError, match="station_id"):
-        lakehouse.run(str(warehouse), str(tmp_path / "lh"))
-
-
-def test_a_rule_needs_a_key_and_a_qualified_name():
-    """Both would otherwise produce a syntactically valid merge with no `on`
-    condition, or a lakehouse table in the wrong schema."""
-    with pytest.raises(ValueError, match="merge key"):
-        Synced(table="raw.om_weather_daily", key=())
-    with pytest.raises(ValueError, match="qualified"):
-        Synced(table="om_weather_daily", key=("country_iso3",))
-
-
-def test_the_weather_merge_key_is_the_one_dlt_merges_on():
-    """A hand-written copy of `WEATHER_PRIMARY_KEY`, held to it.
-
-    They have to agree: dlt decides which rows are the same row when it lands
-    them, and this decides the same thing when they are mirrored. Diverge and
-    the lakehouse either collapses distinct rows or records every restatement as
-    an insert beside the old value — neither of which is an error.
-    """
-    from ingest.pipeline import WEATHER_PRIMARY_KEY
-
-    rule = next(r for r in DECLARED if r.table == "raw.om_weather_daily")
-    assert rule.key == WEATHER_PRIMARY_KEY
-
-
-def test_every_landing_table_names_dlts_columns_as_provenance():
-    """Adding a second `raw.` rule without this is a silent regression: the new
-    table would report its whole merge window as revised on every ingest."""
-    from modern_data_stack.history import DLT_COLUMNS
-
-    for rule in DECLARED:
-        if rule.schema == "raw":
-            assert rule.provenance_columns == DLT_COLUMNS, rule.table
-        else:
-            assert rule.provenance_columns == (), rule.table
+    profile = yaml.safe_load(Path("dbt/profiles.yml").read_text())
+    attached = profile["modern_data_stack"]["outputs"]["dev"]["attach"]
+    assert [a["alias"] for a in attached] == [lakehouse.ATTACH_ALIAS]

@@ -152,7 +152,11 @@ def test_the_period_column_reaches_every_table(tmp_path: Path):
 def test_sha256sums_is_checkable(export: dict):
     """`sha256sum -c` format: hash, two spaces, bare filename."""
     lines = (export["out"] / "SHA256SUMS").read_text().splitlines()
-    assert lines[0].split("  ") == [export["warehouse"]["sha256"], "warehouse.duckdb"]
+    # Sorted by path, because the list is produced by walking the directory
+    # rather than by naming what we think we wrote — see `export()`. The
+    # warehouse is no longer first and no longer special.
+    assert f"{export['warehouse']['sha256']}  warehouse.duckdb" in lines
+    assert lines == sorted(lines, key=lambda line: line.split("  ", 1)[1])
     assert len(lines) == len(export["tables"]) + 1
 
 

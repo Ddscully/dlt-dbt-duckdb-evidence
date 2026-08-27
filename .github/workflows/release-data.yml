@@ -74,16 +74,19 @@ jobs:
       - name: Install dbt packages and parse the project
         run: cd dbt && uv run dbt deps && uv run dbt parse
 
-      # Two kinds of table cannot be rebuilt, for two different reasons, and
-      # `scripts/restore_history.py` carries both. The `history` schema is state
-      # *in principle* — no rebuild invents a revision upstream has overwritten —
-      # so every release used to publish snapshots holding one version per row
-      # and a permanently empty Restatements page. `raw.om_weather_daily` is
-      # unreproducible within a *budget*: Open-Meteo allows 10,000 weighted units
-      # a day and the archive costs more, so refetching it every run is not an
-      # option the free tier offers. Copying both in *before* the build is what
-      # makes `dbt snapshot` compare against last month and what keeps the
-      # weather history deepening instead of resetting to a cold start.
+      # Two kinds of state cannot be rebuilt, for two different reasons, and they
+      # now live in two different artifacts. The `history` schema is state *in
+      # principle* — no rebuild invents a revision upstream has overwritten — and
+      # it is inside `warehouse.duckdb`. `raw.om_weather_daily` is unreproducible
+      # within a *budget* (Open-Meteo allows 10,000 weighted units a day and the
+      # archive costs more), and it is in the `lakehouse.tar.gz` asset, because
+      # dlt lands `raw` in a DuckLake catalog rather than in the database.
+      #
+      # `scripts/restore_history.py` carries both: it finds the lakehouse beside
+      # the database rather than being told where it is, so the download has to
+      # bring the pair. Copying them in *before* the build is what makes
+      # `dbt snapshot` compare against last month and what keeps the weather
+      # archive deepening instead of resetting to a three-year cold start.
       #
       # Only the "no previous release" case is allowed to skip. A download or
       # restore that fails is fatal: continuing would silently reset the carried
@@ -101,6 +104,14 @@ jobs:
           fi
           echo "Restoring history from $prev"
           gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
+          # The landing zone is one tarball beside the database, and
+          # `restore_history` looks for it there. A release cut before the asset
+          # existed simply has none, which `gh` reports as a failure — hence the
+          # `|| true`. That is the "restoring nothing is normal" rule one level
+          # down, and it is safe here for the same reason it is safe there: the
+          # verify step below asserts what actually got carried.
+          gh release download "$prev" --pattern lakehouse.tar.gz \
+            --dir prev-release || true
           uv run python -m scripts.restore_history prev-release/warehouse.duckdb
           uv run python - <<'PY' >> "$GITHUB_OUTPUT"
           import sys
@@ -123,6 +134,18 @@ jobs:
           for relation, n in counts.items():
               print(f"carried {relation}: {n:,} rows", file=sys.stderr)
           print(f"restored_rows={sum(counts.values())}")
+
+          # The landing zone is counted separately because it is a separate
+          # artifact — `CARRIED` names relations inside the database and the
+          # weather archive is not in it any more. Two numbers because they can
+          # fail independently: a missing `warehouse.duckdb` loses the revision
+          # log, a missing `lakehouse.tar.gz` loses the weather archive, and
+          # each is silent on its own.
+          from lake import lakehouse
+
+          weather = lakehouse.carried_rows()
+          print(f"carried lakehouse: {weather:,} rows", file=sys.stderr)
+          print(f"restored_lakehouse_rows={weather}")
           PY
           rm -rf prev-release
 
@@ -189,6 +212,7 @@ jobs:
         working-directory: data/export
         env:
           RESTORED_ROWS: ${{ steps.history.outputs.restored_rows }}
+          RESTORED_LAKEHOUSE_ROWS: ${{ steps.history.outputs.restored_lakehouse_rows }}
           # `modern_data_stack` is a src-layout package and installs, so it
           # imports from anywhere; `scripts/` is a plain top-level directory and
           # does not, and this step runs from `data/export`. Without this the
@@ -241,12 +265,28 @@ jobs:
               assert rows > 0, f"{relation} is empty"
               print(f"{relation}: {rows:,} rows")
 
+          # The landing zone is the *other* carried artifact and is checked on
+          # its own terms: it has to be in the release at all, and it can only
+          # grow. A release that shipped without it would look completely
+          # healthy — every assertion above passes — and the cost would land on
+          # the *next* run as a weather archive cold-started at three years.
+          published = manifest["lakehouse"]
+          assert published["file"], (
+              "no lakehouse asset in this release: the landing zone was not "
+              "published, so the next release cold-starts the weather archive"
+          )
+          carried_weather = int(os.environ.get("RESTORED_LAKEHOUSE_ROWS") or 0)
+          assert published["rows"] >= carried_weather, (
+              f"published lakehouse holds {published['rows']:,} rows, fewer than "
+              f"the {carried_weather:,} carried in"
+          )
+          print(f"{published['file']}: {published['rows']:,} rows")
+
           # What was carried can only grow. Smaller than what went in means the
           # restore never reached the build, and this release would publish a
-          # history that silently lost its earlier versions — or a weather
-          # archive reset to a three-year cold start, which costs days of API
-          # budget to get back. Counted through `CARRIED`, the same rules that
-          # produced `restored_rows`, so the two sides cannot drift apart.
+          # history that silently lost its earlier versions. Counted through
+          # `CARRIED`, the same rules that produced `restored_rows`, so the two
+          # sides cannot drift apart.
           restored = int(os.environ.get("RESTORED_ROWS") or 0)
           counts = carried_rows(con, CARRIED, database="warehouse")
           for relation, n in counts.items():

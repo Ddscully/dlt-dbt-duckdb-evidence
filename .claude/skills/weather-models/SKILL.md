@@ -75,14 +75,20 @@ its first source with a *finite budget*.
   the watermark travels *with the rows*, and the rows are all a published DuckDB
   file can carry. Making the data its own watermark also removes the second
   place it could be wrong.
-- **Carrying a raw table forward works, and it fails loudly if you get it
-  wrong.** Verified rather than assumed: planting `raw.om_weather_daily` without
-  dlt's own columns makes the next load die at the load step with DuckDB's
-  `Adding columns with constraints not yet supported` — dlt tries to
-  `alter table add column _dlt_load_id ... NOT NULL`. Carried *with*
-  `_dlt_load_id` and `_dlt_id`, a merge resource lands on it cleanly: the
-  carried row survives, the overlapping row is restated, the new row appends.
-  `history.restore` copies with `select *`, so it preserves them for free.
+- **Carrying the archive forward is what makes it deepen, and it now travels as
+  its own release asset.** `raw` lives in the DuckLake catalog under
+  `data/lakehouse/`, not in `data/warehouse.duckdb`, so the release publishes
+  `lakehouse.tar.gz` beside the database and `scripts/restore_history.py`
+  restores both. Verified end to end: restore a release into an empty tree and
+  `weather_watermark()` reads the last day it carried, so the next ingest asks
+  for a 90-day lookback rather than a three-year cold start.
+  - **Only this table is published, and the allowlist has two independent
+    reasons.** Cost — nothing else in `raw` is unreproducible within the budget.
+    Disclosure — `raw.retail_invoice_lines` and dlt's `raw_staging` copy hold
+    824,364 clear customer ids between them. And it cannot be filtered after the
+    fact: DuckLake keeps dropped tables in earlier snapshots, so `at (version =>
+    …)` still returns them (measured, with a customer id in it). The published
+    catalog is *built* from `PUBLISHED_TABLES`, never trimmed down to it.
 - **This makes `raw.om_weather_daily` the second table a rebuild cannot
   reproduce, for a new reason.** `history.snap_co2_estimates` is unreproducible
   in *principle* — a snapshot is state. This one is unreproducible within a
@@ -101,23 +107,24 @@ its first source with a *finite budget*.
     describes, and `ecb_fx_rates` is the one that fails. `sync_destination()`
     does not help. `scripts/restore_history.py` refuses when both conditions
     hold and names `rm -rf ~/.dlt/pipelines/modern_data_stack` as the fix.
-- **The 90-day lookback is also what makes weather the DuckLake table**
-  (`lake/lakehouse.py`, `just lakehouse`). The format's argument is that it can
-  say what changed, and nothing else in this warehouse restates: FX is
-  append-only, retail is frozen at 2011-12, and `raw.owid_co2` has produced zero
-  observed revisions locally. Re-merging 41 x 90 = 3,690 rows in place every
-  ingest, on the *scheduled* ERA5T-to-ERA5 supersession, is the one real update
-  path here. Weather also has no hive baseline to migrate — neither weather
-  table is in `ARCHIVED_TABLES` — and no `year` column to partition on, which
-  makes it the sharpest case for the format's claim that the catalog's own
-  statistics replace a partition column.
-  - **`_dlt_load_id` and `_dlt_id` must be excluded from the change comparison,
-    and this is the trap.** dlt regenerates *both* on every row it re-merges,
-    byte-identical weather or not — measured by loading one fixture three times.
-    Compare them and every routine ingest reports its whole 3,690-row window as
-    revised, which is precisely the opposite of what the layer is for.
-    `Synced.provenance_columns` carries them and `tests/test_lakehouse.py` holds
-    every `raw.` rule to `history.DLT_COLUMNS`.
+- **The 90-day lookback is why weather is the table a revision log is about.**
+  Nothing else in this warehouse restates: FX is append-only, retail is frozen at
+  2011-12, and `raw.owid_co2` has produced zero observed revisions locally.
+  Re-merging 41 x 90 = 3,690 rows in place every ingest, on the *scheduled*
+  ERA5T-to-ERA5 supersession, is the one real update path here.
+  - **DuckLake's own change feed cannot report it, because of dlt.** dlt
+    regenerates `_dlt_id` *and* `_dlt_load_id` on every row it re-merges,
+    byte-identical weather or not — measured by reloading 500 identical rows,
+    which returned 500 `update_preimage`/`update_postimage` pairs. So
+    `ducklake_table_changes()` answers the same thing for a no-op reload and a
+    real restatement. `lake.lakehouse.revisions()` diffs two snapshots with
+    `EXCEPT` instead, projecting those columns away: 0 rows for the reload, 1 for
+    the change.
+  - **The failure is a plausible number, not an error.** Forget a provenance
+    column and the diff reports the whole table, which reads as a catastrophic
+    upstream restatement. `weather_revisions_are_derivable` is bounded on the
+    total for that reason, and `tests/test_lakehouse.py` asserts the zero as hard
+    as the one.
 - **A cold start fetches three years, not the whole series, and getting that
   wrong is a *hang* rather than a failure.** `WEATHER_FIRST_YEAR` (2007) is the
   backfill floor; `WEATHER_COLD_START_YEARS` is what an unpartitioned load asks

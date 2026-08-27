@@ -6,6 +6,15 @@ set dotenv-load := true
 # Dagster keeps its run/event storage here (gitignored except dagster.yaml).
 export DAGSTER_HOME := justfile_directory() / ".dagster"
 
+# **Absolute, and exported for every recipe — this one is not a convenience.**
+# A DuckLake catalog stores its `data_path` exactly as given and checks it on
+# every attach. dbt runs from `dbt/` and the Python layers from the repo root,
+# so a relative default means dbt creates a catalog recording
+# `../data/lakehouse/data/` that `lake.lakehouse` then cannot open — measured,
+# and the error names a path nobody typed. `WAREHOUSE_PATH` gets away with a
+# relative default because a plain file has no such record.
+export LAKEHOUSE_DIR := env("LAKEHOUSE_DIR", justfile_directory() / "data/lakehouse")
+
 default:
     @just --list
 
@@ -44,6 +53,13 @@ dlt-state pipeline="modern_data_stack":
 # Install dbt packages (dbt_utils) into dbt/dbt_packages/ — gitignored, so this
 # is needed once per clone and after any packages.yml change
 dbt-deps:
+    # The directory, not the catalog. dbt's profile attaches the DuckLake on
+    # every invocation — including `dbt parse` and sqlfluff's templater — and
+    # DuckLake will not create the catalog file's *parent*, so on a fresh clone
+    # `just lint` died with `Cannot open file .../catalog.duckdb: No such file or
+    # directory` before linting a single model. dbt creates the catalog itself
+    # once the directory is there; `just ingest` is what puts tables in it.
+    mkdir -p "$LAKEHOUSE_DIR"
     cd dbt && uv run dbt deps
 
 # T: build + test dbt models
@@ -90,15 +106,10 @@ dbt-docs: dbt-deps
 dbt-docs-serve: dbt-docs
     cd dbt && uv run dbt docs serve
 
-# Write the year-partitioned Parquet archive to data/lake/ (gitignored)
-lake:
-    uv run python -m lake.archive
-
-# Merge the weather tables into the DuckLake lakehouse in data/lakehouse/.
-# Beside `just lake`, not instead of it: the archive answers "which file moved"
-# and this answers "which row moved, and what did it say before". A run over
-# unchanged data writes nothing and creates no snapshot, so an empty output here
-# is the result, not a failure.
+# Report what the DuckLake landing zone holds: tables, rows, snapshot lineage.
+# It *reports* rather than writes — `just ingest` is what fills it, because dlt
+# now lands there directly. `lake.lakehouse.revisions()` is the other half:
+# what a table says now that it did not say at an earlier snapshot.
 lakehouse:
     uv run python -m lake.lakehouse
 
@@ -113,7 +124,7 @@ pipeline-status:
     uv run python -m transform.pipeline_status
 
 # Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
-run: ingest dbt-build transform pipeline-status lake lakehouse
+run: ingest dbt-build transform pipeline-status
 
 # Unit tests — mocked API payloads, no network, no warehouse
 test:
@@ -134,10 +145,10 @@ test-pipeline:
     set -euo pipefail
     export INGEST_FIXTURES=1
     export WAREHOUSE_PATH="$(mktemp -d)/warehouse.duckdb"
-    # ...and both file layers beside it, or a fixture run would overwrite
-    # data/lake/ with the 17-country slice — and, worse for the lakehouse, merge
-    # the slice into a catalog whose snapshot lineage no rebuild reproduces.
-    export LAKE_DIR="$(dirname "$WAREHOUSE_PATH")/lake"
+    # ...and the lakehouse beside it. This one is not an optimisation: dlt now
+    # *lands* in the lakehouse, so without the override a fixture run merges the
+    # 17-country slice into the real landing zone — whose snapshot lineage and
+    # weather archive no rebuild reproduces.
     export LAKEHOUSE_DIR="$(dirname "$WAREHOUSE_PATH")/lakehouse"
     echo "fixture warehouse: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
@@ -145,7 +156,6 @@ test-pipeline:
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
-    uv run python -m lake.archive
     uv run python -m lake.lakehouse
 
 # `.github/workflows/release-data.yml` runs this, then attaches the result to a
@@ -346,7 +356,7 @@ course-sandbox:
     # Absolute, or dbt (which runs from dbt/) and the Python layers (which run
     # from the repo root) resolve it to two different files.
     export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"
-    export LAKE_DIR="{{ justfile_directory() }}/data/course/lake"
+    export LAKEHOUSE_DIR="{{ justfile_directory() }}/data/course/lakehouse"
     mkdir -p "$(dirname "$WAREHOUSE_PATH")"
     rm -f "$WAREHOUSE_PATH" "$WAREHOUSE_PATH.wal"
     echo "course sandbox: $WAREHOUSE_PATH"
@@ -355,7 +365,6 @@ course-sandbox:
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
-    uv run python -m lake.archive
     echo "sandbox ready — 'just course-rebuild' after you change a model"
 
 # Seconds rather than a full `just course-sandbox`, because the fixtures have
@@ -482,20 +491,20 @@ clean scope="safe" force="":
     # Regenerable with no state in them at all.
     #   dbt/target        `dbt parse` / `just dbt-build`   (the manifest)
     #   dbt/dbt_packages  `just dbt-deps`
-    #   data/lake         `just lake`
     #   data/export       `just export-data`
     #   data/course       `just course-sandbox`
     #   data/cache        re-downloaded on the next ingest
     #   reports/build     `just report`
     #   reports/.evidence `just report-clean`
     #
-    # data/lakehouse is deliberately absent. Its Parquet is as regenerable as
-    # data/lake's, but the DuckLake catalog beside it holds the snapshot lineage
-    # — which revision landed when — and no rebuild invents that, the same
-    # property that makes `history` unreproducible. Deleting it costs the change
-    # log, silently, and there is nothing in the output to say so.
+    # data/lakehouse is deliberately absent, and the reason got stronger when it
+    # stopped being a mirror: it is now the *only* copy of every landing table.
+    # Deleting it costs the snapshot lineage (which no rebuild invents, the same
+    # property that makes `history` unreproducible) and the weather archive
+    # (which no rebuild can afford — days of Open-Meteo's budget). Silently, in
+    # both cases: nothing in the output would say so.
     drop dbt/target dbt/dbt_packages dbt/logs \
-         data/lake data/export data/course data/cache \
+         data/export data/course data/cache \
          reports/build reports/.evidence
 
     # Dagster run/event storage. `.dagster/dagster.yaml` is checked in and stays.

@@ -48,9 +48,9 @@ is in the `unit-testing-dbt-models` skill.
     orphan branch needs its own mutation.** Renaming a key produces both a gap
     and an orphan and the first assert wins, which leaves the second measuring
     nothing; adding a key without removing one is what isolates it. Same lesson
-    as `lake_matches_warehouse`' two drift cases and the FX partitioning
-    fixture: a mutation that moves both ends at once cannot tell you which end
-    is guarded. A key check alone also passes a whitespace-only description,
+    as the retired `lake_matches_warehouse`' two drift cases and the FX
+    partitioning fixture: a mutation that moves both ends at once cannot tell
+    you which end is guarded. A key check alone also passes a whitespace-only description,
     which renders as the same blank a missing key does, so the value floor is a
     `.strip()` rather than truthiness.
 - **Two more restatements were found and closed the same way, and choosing
@@ -159,17 +159,25 @@ is in the `unit-testing-dbt-models` skill.
     The clause stays, because it states the intent; the docstring next to the
     case says so, to save the next reader an afternoon on a fixture that cannot
     exist.
-  - **`lake_matches_warehouse` compares three numbers, so it takes three cases,
-    and the first fixture only reached one.** Dropping a partition moves the row
-    count *and* the span together, so a mutation comparing only `count(*)` still
-    went red and the span half was never measured. Both drift cases keep the row
-    count equal — 2020-2022 is three rows either way — and move exactly one end,
-    via a stale `year=` directory an earlier run left behind, which is precisely
-    what `overwrite true` does *not* prevent. **One fixture moving both ends is
-    not enough**: it survives a mutation that drops either one, which is why
-    these are parametrised into `min-year-only` and `max-year-only` rather than
-    written as a single case. Same lesson as the FX partitioning fixture, where
-    the symmetric setup returns the right answer under the mutation too.
+  - **`weather_revisions_are_derivable` guards a wrong *number*, not an
+    exception, and that is what makes its fixtures unusual.** The check exists
+    because dlt rewrites `_dlt_id`/`_dlt_load_id` on every merged row, so a
+    revision log built without projecting those away returns the whole table —
+    a plausible count, in the right shape, that reads as a catastrophic upstream
+    restatement. Nothing raises. So the zero is asserted as hard as the one:
+    `test_an_identical_reload_yields_no_revisions` is the case that fails if the
+    ignore list is dropped, and
+    `test_forgetting_the_provenance_columns_reports_the_whole_table` runs that
+    mutation deliberately and pins what it returns.
+    - **This replaced `lake_matches_warehouse`, whose lesson is worth keeping
+      after the check itself is gone.** It compared three numbers (row count,
+      min year, max year) and its first fixture only reached one: dropping a
+      partition moves the count *and* the span together, so a mutation comparing
+      only `count(*)` still went red and the span half was never measured. One
+      fixture moving both ends at once cannot tell you which end is guarded —
+      the same lesson as the FX partitioning fixture, and the reason the
+      lakehouse cases separate "nothing changed" from "one row changed" instead
+      of testing a single mixed load.
 
 - **A determinism fix invalidates the evidence gathered for it.** Everything
   measured while diagnosing `fct_retail_returns`' tied `asof` came from a model
@@ -238,8 +246,8 @@ is in the `unit-testing-dbt-models` skill.
   still correct — it was the `#fragment` after it that named a heading no longer
   there. `test_every_cross_file_anchor_resolves` slugs every heading in the
   target file the way GitHub does (lowercase, drop anything outside
-  `[a-z0-9 _-]`, spaces to hyphens, which is why `## The lake
-  (`lake/archive.py`)` anchors as `#the-lake-lakearchivepy`).
+  `[a-z0-9 _-]`, spaces to hyphens, which is why `## The lakehouse
+  (`lake/lakehouse.py`)` anchors as `#the-lakehouse-lakelakehousepy`).
   - **The vacuity guard is non-emptiness and deliberately not a count.** There
     are four anchors in the tree and deleting one is a normal edit, so a floor
     would go red on a correct change — the opposite trade from `seen > 35` in

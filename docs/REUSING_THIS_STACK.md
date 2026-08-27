@@ -35,13 +35,14 @@ depend on it and write only the layers below.
 | `export` | package a warehouse as a publishable artifact | schemas, attribution, a notes renderer |
 | `history` | carry a dbt snapshot forward between builds | the snapshot schema name |
 
-Each project module keeps the entry point, so `python -m lake.archive`, the
+Each project module keeps the entry point, so `python -m lake.lakehouse`, the
 justfile recipes and the asset graph all still call the same names.
 
 ### Config-only — copy the file, change the constants at the top
 
 - `ingest/fixtures.py` — the `_ROUTES` table.
-- `lake/archive.py` — `ARCHIVED_TABLES` and `PARTITION_COLUMN`.
+- `lake/lakehouse.py` — where the DuckLake landing zone lives, `PUBLISHED_TABLES`
+  and the merge keys.
 - `transform/pipeline_status.py` — `SOURCE_TABLES` and `LAYERS`.
 - `scripts/export_warehouse.py` — `PUBLISHED_SCHEMAS`, `ATTRIBUTION`, the release
   notes and whatever your manifest wants that the generic one can't know.

@@ -8,8 +8,8 @@ A public demo of a modern, lightweight data-engineering + BI stack. Everything
 runs locally with `uv` against a single DuckDB file — no cloud warehouse.
 
 ```
-dlt (EL) → DuckDB → dbt (staging/marts) → Polars (heavy T) → Evidence (BI)
-                       └─▶ Parquet lake (data/lake/, partitioned by year)
+dlt (EL) → DuckLake (raw) → dbt (staging/marts) → Polars (heavy T) → Evidence (BI)
+   data/lakehouse/            └────────▶ data/warehouse.duckdb ─▶ the release
                     all orchestrated by Dagster
 ```
 
@@ -33,12 +33,12 @@ in `docs/` **and** here.
 
 ## The package (`src/modern_data_stack/`)
 
-The domain-neutral mechanisms live here — `paths`, `fixtures`, `lake`,
+The domain-neutral mechanisms live here — `paths`, `fixtures`, `ducklake`,
 `observability`, `export`, `history`, `db` — and take their configuration as
 arguments. The project modules that call them (`ingest/fixtures.py`,
-`lake/archive.py`, `transform/pipeline_status.py`, `scripts/export_warehouse.py`,
+`lake/lakehouse.py`, `transform/pipeline_status.py`, `scripts/export_warehouse.py`,
 `scripts/restore_history.py`) hold this project's constants and stay the entry
-points, so `python -m lake.archive`, the justfile recipes and the asset keys are
+points, so `python -m lake.lakehouse`, the justfile recipes and the asset keys are
 all unchanged.
 
 - **`modern_data_stack.paths` is the single answer to "where is the project".**
@@ -88,9 +88,8 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
-| `just lake` | year-partitioned Parquet archive of the warehouse → `data/lake/` |
-| `just lakehouse` | merge the weather tables into the DuckLake lakehouse → `data/lakehouse/` |
-| `just run` | ingest → dbt-build → transform → pipeline-status → lake → lakehouse (shell ordering) |
+| `just lakehouse` | report what the DuckLake landing zone holds — tables, rows, snapshots |
+| `just run` | ingest → dbt-build → transform → pipeline-status (shell ordering) |
 | `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
 | `just materialize` | same pipeline, ordered by the asset graph (`load_retail` then `full_refresh`, no Evidence) |
 | `just materialize-site` | the same two jobs + the Evidence site (`publish_site`; needs Node) |
@@ -706,7 +705,7 @@ the point of the layer is that none of it is a comment.
   `co2_kg_per_gdp_ppp_2011` — the old name gave neither unit nor basis while a
   differently-based intensity column sat one schema away.
   - **v2 is aliased back to the bare relation name.** The Evidence source query,
-    `ARCHIVED_TABLES`, `TABLE_TO_DBT_MODEL` and the release notes all say
+    `TABLE_TO_DBT_MODEL` and the release notes all say
     `marts.fct_emissions_energy`; a migration that renames the table out from
     under them is not a migration.
   - **v1 is a view over v2, not a second copy of the model.** `select * exclude
@@ -786,109 +785,122 @@ leave the other free to land after the inventory meant to count it.
 - **It must run after `dbt build`** — it reads `dbt_test__audit` and the
   manifest, neither of which exists before one.
 
-## The lake (`lake/archive.py`)
-
-`just lake` writes the year-keyed tables back out of DuckDB as hive-partitioned
-Parquet under `data/lake/<table>/year=<year>/data_0.parquet` (zstd, gitignored,
-793 files / ~60 MB today). It's part of `just run`, an asset
-(`lake/parquet_archive`) downstream of the mart, and `lake_matches_warehouse`
-checks the read-back row counts and year spans against the warehouse.
-
-- **It's an archive of the warehouse, not a landing zone in front of it.** dlt's
-  filesystem destination writes Parquet but can't partition by a data column;
-  DuckDB's `COPY … PARTITION_BY` can. Reversing the flow (lake first, dbt reading
-  it with `read_parquet`) would mean giving up dlt's schema inference and the
-  `raw` freshness checks — not worth it for a demo of file layout.
-- **`overwrite true` is not enough** and the archive deletes each table's
-  directory before writing. DuckDB only replaces the partitions it is *writing*,
-  so a year whose last row disappeared upstream would keep answering queries out
-  of a stale file. `tests/test_lake.py` pins that.
-- **Rewriting from empty still leaves the output byte-identical run to run**, so
-  the diff is meaningful: revising one country-year upstream changes exactly one
-  of the 793 files. That is the point of the layer — the DuckDB file differs
-  everywhere on every run, so it can't tell you what moved.
-- **Most partitions are far too small for a real lake.** The CO2 archive is 275
-  of them averaging ~47 kB, against a ~100 MB rule of thumb, and on object
-  storage that is 275 round trips. The two exceptions are both tables whose
-  grain is finer than their partition column, which is the whole rule:
-  `marts.fct_fx_rates_daily` is 381k rows over 28 year-partitions, and
-  `marts.fct_retail_order_line` is the best in the archive at 1.07M rows over
-  **three** — 13 MB, 12 MB and 836 kB, i.e. 26 MB of a 60 MB archive in three
-  objects. A transaction grain against a year partition is a 350,000:1 ratio
-  where a country-year is 150:1. Year is the partition column anyway because
-  it's the one every query filters on, and pruning still measures:
-  `where year = 2020` runs in ~23 ms against ~50 ms for the whole archive.
-- **`LAKE_DIR` overrides the destination** the way `WAREHOUSE_PATH` does for the
-  warehouse — `just test-pipeline` points it at a temp directory so a fixture run
-  can't overwrite the real archive with the 17-country slice.
-
 ## The lakehouse (`lake/lakehouse.py`)
 
-`just lakehouse` merges `raw.om_weather_daily` and `marts.fct_country_weather_year`
-into a DuckLake catalog under `data/lakehouse/` (gitignored). It is an asset
-(`lake/lakehouse`) with a parity check, and it sits **beside** the hive archive
-rather than replacing it — the archive answers *which file moved*, this answers
-*which row moved and what it said before*.
+**dlt lands `raw` in a DuckLake catalog under `data/lakehouse/`, and the DuckDB
+file holds only what dbt builds.** dbt attaches the catalog (`profiles.yml`'s
+`attach:`, `_sources.yml`'s `database: lakehouse`) and writes `staging`, `marts`,
+`history` into `data/warehouse.duckdb`, which is the whole of what the release
+publishes. `just lakehouse` *reports* the catalog; `just ingest` is what fills it.
 
-- **Weather, because nothing else here exercises the update path.** FX is
-  append-only, retail is frozen at 2011-12, and `raw.owid_co2` has produced zero
-  observed restatements locally. `WEATHER_LOOKBACK_DAYS` re-merges 41 × 90 =
-  3,690 rows every ingest against a *scheduled* upstream property (ERA5T
-  superseded by final ERA5), so the revisions are real rather than simulated.
-  Weather is also the cleanest place to introduce the format because it is not
-  in `ARCHIVED_TABLES` at all — nothing is being migrated.
-- **The write is a `MERGE` gated on the row actually differing, and that is the
-  whole layer.** A literal port of `lake.archive`'s delete-and-rewrite was
-  measured first: it retires the old file and writes a new one every run, and
-  the catalog's change log is *identical* for a no-op and a real restatement.
-  With the guard, an unchanged run creates **no snapshot at all**, and a
-  restatement hands back `update_preimage` / `update_postimage` — the old and
-  new values side by side, at row grain. Measured end to end: one day's
-  temperature moved 4 °C, and the change feed showed the daily row and Germany's
-  2021 HDD total (2519.3 → 2523.3) as one revision each.
-- **`_dlt_load_id` and `_dlt_id` are excluded from that comparison, or the feed
-  is noise.** dlt regenerates *both* on every row it re-merges, byte-identical
-  data or not — measured by loading one fixture three times. Compare them and
-  every ingest reports its whole 3,690-row window as revised. The cost, stated:
-  the mirrored load id is the load that last *changed* a row, not the one that
-  last touched it. `Synced.provenance_columns` carries this and a test holds
-  every `raw.` rule to `history.DLT_COLUMNS`.
-- **Upsert and prune are two statements**, because DuckLake's `MERGE` supports a
-  single UPDATE/DELETE action. The prune is not optional: it is the same
-  requirement `shutil.rmtree` meets in the archive — a row that vanished
-  upstream must stop answering queries. Both are silent when they touch nothing,
-  so the no-snapshot property survives the split. `RETURNING` is also not
-  implemented for DuckLake, so the insert/update/delete breakdown is read back
-  out of `ducklake_table_changes()` — which is the better source anyway, being
-  one a consumer can re-derive months later.
-- **No partition column at all, and this is the sharpest case for that in the
-  repo.** DuckLake prunes on catalog min/max statistics, so a filter still reads
-  one file with no directory layout arranging it. `raw.om_weather_daily` has no
-  `year` column — it is keyed on `weather_date` — so the hive archive would need
-  a column *invented for the layout*. This one chooses nothing.
-- **`read_parquet` over the data directory is not the table, in either
-  configuration.** Measured by restating one row and then reading the files:
-  at DuckLake's default `data_inlining_row_limit` of 10 the change is written
-  into the *catalog database* and `read_parquet` silently returns the superseded
-  value; at 0 it reaches Parquet but so does a `…-delete.parquet` of
-  `(file_path, pos)`, which makes a glob fail on the schema mismatch and, if you
-  exclude it by name, returns **both** versions of the row. So the portable
-  half of the archive's appeal does not survive the format. `DATA_INLINING_ROW_LIMIT`
-  is 0 here anyway, for two other reasons: it keeps a one-row fixture on the same
-  code path as the real 3,690-row window, and it keeps rows out of the catalog.
-- **The catalog is a second piece of state no rebuild reproduces**, and `just
-  clean` deliberately does not take `data/lakehouse/`. The Parquet is as
-  regenerable as `data/lake/`; the snapshot lineage is not, which is
-  `history`'s property in a new place. **It is not yet carried between releases**
-  — `CARRIED` in `scripts/restore_history.py` names relations inside one DuckDB
-  file and the catalog is a separate one. Nothing publishes the lakehouse today,
-  so the gap costs a local change log rather than a released one; publishing it
-  would need that decided first.
-  - **So every CI run is a first load**, exactly as `history` is: `full_refresh`
-    contains this asset and builds from an empty checkout, which means
-    `inserted` equals the row count and `revised` is always 0 there. That is the
-    honest state and not a broken build — the change feed is a local artifact
-    until the catalog is carried.
+**The hive archive is gone with it** — `lake/archive.py`, `data/lake/`,
+`ARCHIVED_TABLES`, the `lake/parquet_archive` asset and `lake_matches_warehouse`.
+It was a second copy of the warehouse written by hand, and DuckLake writes the
+same Parquet with a catalog on top. Two of its lessons died with it and are worth
+knowing were once true: the archive's output was byte-identical run to run (so a
+diff of the *files* was meaningful), and its 275 partitions averaging ~47 kB were
+the repo's worked example of partitions far too small for a real lake. Neither
+survives a format that content-addresses its files and prunes on statistics.
+
+- **dlt's merge destroys DuckLake's change feed, and this is the finding the
+  layer is built around.** `ducklake_table_changes()` returns
+  `insert`/`delete`/`update_preimage`/`update_postimage` at row grain and is the
+  obvious way to ask what moved. Behind dlt it answers the same thing for
+  everything: reloading 500 *identical* rows through `write_disposition="merge"`
+  reports **500 preimages and 500 postimages**, because dlt regenerates `_dlt_id`
+  *and* `_dlt_load_id` on every row it touches. The feed is faithful; the writer
+  is what makes it useless. Measured with three loads — first, identical, one-row
+  change — and the second and third are indistinguishable.
+  - **The replacement is a snapshot diff, and it is better in two ways.**
+    `revisions()` compares the table at two versions with `EXCEPT`, projecting
+    dlt's provenance columns away: **0 rows** for the identical reload, **1 row**
+    for the one-row change, naming it. It works between *any* two snapshots
+    rather than adjacent ones, and it is a query a consumer can re-derive from a
+    published catalog months later with no bookkeeping this repo has to keep
+    right.
+  - **The failure mode is a plausible number, not an exception.** Drop a column
+    from the ignore list and every row differs on `_dlt_id` alone, so the diff
+    returns the whole table — which reads exactly like a catastrophic upstream
+    restatement. `weather_revisions_are_derivable` is bounded on the total for
+    that reason, and `tests/test_lakehouse.py` asserts the zero as hard as the
+    one.
+- **`table_versions` reads the catalog database, because the query surface
+  cannot answer the question.** A dlt load writes several snapshots (staging,
+  merge, cleanup), so "the previous snapshot" is usually not the previous
+  snapshot *of this table*. `snapshots()` returns a `changes` map keyed on table
+  *ids*; `table_changes(name, from, to)` raises `Table … does not exist at
+  version N` for a range starting before the table did — it needs the answer as
+  its argument. DuckLake attaches its own catalog as
+  `__ducklake_metadata_<alias>`, so `ducklake_data_file` is readable with no
+  second ATTACH (which DuckDB refuses outright: *unique file handle conflict*).
+  - **Inlined rows have to be unioned in, and missing them fails silently.**
+    DuckLake writes a change of `data_inlining_row_limit` rows or fewer (default
+    10) into the catalog rather than to Parquet, leaving no `ducklake_data_file`
+    row at all. A version list built from files alone skips that load rather than
+    erroring. Not a test-only case: a quiet FX day is under ten rows.
+- **`read_parquet` over `data/lakehouse/data/` is not the table**, in either
+  configuration. At the default inlining limit small changes live in the catalog
+  and the files return superseded values; at 0 they reach Parquet but so does a
+  `…-delete.parquet` of `(file_path, pos)`, which makes a glob fail on the schema
+  mismatch or — excluded by name — return **both** versions of the row.
+- **The catalog stores its `data_path` as given, and that decides portability.**
+  Absolute (what this repo writes) means a consumer needs
+  `ATTACH … (OVERRIDE_DATA_PATH true)` or a one-row rewrite of
+  `ducklake_metadata`; relative relocates with a bare `ATTACH`. Absolute is right
+  here because dlt reads it from the repo root and dbt from `dbt/`, which no
+  relative path serves — and because the lakehouse is not published. **Publishing
+  it would make relative mandatory**, and that is the open decision below.
+- **It is the only copy of every landing table, so `just clean` still does not
+  take it** — and the reason got stronger. Deleting it costs the snapshot lineage
+  *and* the weather archive, which is days of Open-Meteo budget. Both silently.
+- **The landing zone is published as a second release asset**, `lakehouse.tar.gz`,
+  and that is what keeps the weather archive deepening instead of cold-starting
+  every month. `CARRIED` names `history` alone now — the weather rows are not in
+  the database to carry — so `scripts/restore_history.py` restores the tarball
+  beside it and one command still carries both. Verified end to end: restore a
+  release into an empty tree and `weather_watermark()` reads 2022-12-31, so the
+  next ingest asks for a 90-day lookback rather than three years.
+  - **What ships is an allowlist (`PUBLISHED_TABLES`), for two reasons that would
+    each be sufficient.** Cost: only the weather archive is unreproducible within
+    the budget; everything else in `raw` is a free re-fetch. Disclosure:
+    `raw.retail_invoice_lines` and dlt's `raw_staging` copy hold 824,364 clear
+    customer ids between them, and shipping `raw` whole would undo the largest
+    privacy gain of the move.
+  - **And it cannot be fixed by dropping afterwards, which is why the catalog is
+    *built* from the list.** DuckLake keeps dropped tables in earlier snapshots:
+    after `drop table`, `select * from lh.raw.secret at (version => 2)` returned
+    the row — measured, with a customer id in it. A published catalog contains
+    what it was created with, permanently.
+  - **The published catalog's `data_path` is relative and the working one's is
+    absolute**, and the form is rewritten at each boundary (`publish` out,
+    `restore` in). There is no form that serves both: a consumer needs relative
+    to open it with a bare `ATTACH` wherever they unpacked it, and the working
+    copy needs absolute because dlt reads it from the repo root and dbt from
+    `dbt/`. DuckLake checks the stored path on every attach and refuses a
+    mismatch, so getting this wrong fails loudly on the *next* command.
+  - **`just` exports an absolute `LAKEHOUSE_DIR` for every recipe**, which is not
+    a convenience. `profiles.yml`'s relative default made a `dbt build` create a
+    catalog recording `../data/lakehouse/data/`, which `lake.lakehouse` then
+    could not open — and the error names a path nobody typed. `WAREHOUSE_PATH`
+    gets away with a relative default because a plain file keeps no such record.
+  - **A tarball rather than loose files**, because a GitHub release asset is a
+    file and a DuckLake is a directory. One asset also means one line in
+    `SHA256SUMS`, so `sha256sum -c` still covers the whole release.
+  - **`SHA256SUMS` is now produced by walking the export directory** rather than
+    by listing what the code thinks it wrote. The two were identical while the
+    release was a database and some Parquet; the first artifact written by a hook
+    would have shipped unverified with nothing to say so.
+  - **dbt's `ATTACH IF NOT EXISTS` leaves an empty DuckDB file** at the catalog
+    path on any build that runs before the first ingest, and a read-only attach
+    of *that* fails with `Existing DuckLake … does not exist - and creating a new
+    DuckLake is explicitly disabled`. So "is there a lakehouse here" is
+    `is_catalog()` — does it hold `ducklake_metadata` — not `path.exists()`.
+  - **The warm-state refusal moved with the landing zone and is unchanged in
+    substance.** dlt with local state against a restored destination still dies
+    with `Table with name _dlt_version does not exist!`; re-measured against the
+    directory copy rather than inherited from the table carry, because a new
+    mechanism does not escape an old trap by being new.
+
 
 ## Publishing (`scripts/export_warehouse.py`)
 
@@ -956,7 +968,7 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
     `MIN_READER_VERSION` live in `scripts/export_warehouse.py` together.
   - **The ceiling is tested from both sides**, because `>` against `>=` is the
     slip and a one-sided test passes under either — the same lesson as
-    `lake_matches_warehouse`' two drift cases and the FX partitioning fixture.
+    the export ceiling's two sides and the FX partitioning fixture.
   - **Not an upper bound on `duckdb`, deliberately.** Pinning would block every
     unrelated fix in 2.x to guard one property; the tripwire lets the bump land
     and makes a person decide the format question with a red test naming it.
@@ -1487,7 +1499,10 @@ Gotchas:
   *and* dbt's profile. It must be **absolute**: dbt resolves its path from `dbt/`,
   the Python layers from the repo root. `just test-pipeline` sets it to a temp file
   — without that, a fixture run overwrites the real warehouse with the 17-country
-  slice. `LAKE_DIR` is the same idea for `data/lake/`, and the recipe sets both.
+  slice. `LAKEHOUSE_DIR` is the same idea for `data/lakehouse/`, and the recipe
+  sets both — but that one is not an optimisation. dlt *lands* in the
+  lakehouse, so without the override a fixture run merges the 17-country slice
+  into the real landing zone, over a weather archive no rebuild can afford.
 - **Fixtures filter rows, never columns**, and `fixtures.path_for()` raises on an
   unmapped URL rather than falling back to the network — otherwise "offline CI"
   quietly becomes "CI that's online sometimes". `_ROUTES` is an *ordered*

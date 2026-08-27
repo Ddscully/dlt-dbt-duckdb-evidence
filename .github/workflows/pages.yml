@@ -15,7 +15,7 @@ on:
   push:
     branches: [main]
     # An allowlist of what the site is actually built from, because this job is
-    # a full ingest -> dbt -> Polars -> lake -> Evidence run against the LIVE
+    # a full ingest -> dbt -> Polars -> Evidence run against the LIVE
     # public APIs. Without it the cheapest commit in the repo costs the same
     # Actions minutes and the same API load as a data change: 23 of the 94
     # commits on main have been docs, skills or tests, and every one of them
@@ -113,7 +113,7 @@ jobs:
           printf '\ndeployment:\n  basePath: /%s\n' \
             '${{ github.event.repository.name }}' >> reports/evidence.config.yaml
 
-      # ingest -> dbt build + test -> Polars -> lake -> Evidence, in asset-graph
+      # ingest -> dbt build + test -> Polars -> Evidence, in asset-graph
       # order. `publish_site` is `full_refresh` plus `reports/evidence_site`,
       # which shells out to npm (install, `sources:strict`, `build`) — so the
       # site is a node in the graph here rather than three steps bolted on after

@@ -33,24 +33,21 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import dlt
-import duckdb
 import polars as pl
 import requests
 from dlt.common.schema.typing import TColumnSchema
 
 from ingest import fixtures
+from lake.lakehouse import dlt_credentials
 from modern_data_stack import db, workbook
-from modern_data_stack.paths import cache_dir, warehouse_path
+from modern_data_stack.paths import cache_dir
 from modern_data_stack.ratelimit import WeightedWindowLimiter
 from modern_data_stack.workbook import excel_serial_to_timestamp, extract_member
 
-# WAREHOUSE_PATH lets a fixture run target a throwaway file instead of the real
-# warehouse. It must be absolute: dbt resolves its own copy of this from `dbt/`,
-# and `just test-pipeline` passes an absolute path for exactly that reason.
-# Resolution — and the project root it falls back to — lives in
-# `modern_data_stack.paths`, so every layer agrees on the answer without
-# importing it from whichever layer happened to compute it first.
-DUCKDB_PATH = warehouse_path()
+# Where this layer writes is now `LAKEHOUSE_DIR`, not `WAREHOUSE_PATH` — see
+# `lake.lakehouse`. The env var that a fixture run overrides changed with it, and
+# `just test-pipeline` sets both, because dbt still needs a throwaway warehouse
+# to build into even though nothing here writes to one.
 
 OWID_CO2 = "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv"
 OWID_ENERGY = "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv"
@@ -1066,7 +1063,7 @@ def weather_start_date(last_loaded_date: str | None, today: date | None = None) 
     return max(start, floor).isoformat()
 
 
-def weather_watermark(duckdb_path: str | Path = DUCKDB_PATH) -> str | None:
+def weather_watermark(lakehouse_dir: str | Path | None = None) -> str | None:
     """The newest day already in `raw.om_weather_daily`, or None if there is none.
 
     **Read from the destination, not from dlt's resource state**, which is the
@@ -1077,28 +1074,36 @@ def weather_watermark(duckdb_path: str | Path = DUCKDB_PATH) -> str | None:
     is free for them and would cost this one a fortnight of API budget.
 
     Carrying the table forward between releases only saves anything if the
-    watermark travels *with the rows*, and the rows are the only thing a
-    published DuckDB file can carry. Making the data its own watermark is also
+    watermark travels *with the rows*. Making the data its own watermark is also
     strictly more honest: there is no second place for it to be wrong.
 
-    A missing file or table is "nothing loaded yet". A file that cannot be *read*
-    is not — that raises, because falling back would silently re-seed from 2007.
+    **The destination is now the lakehouse**, which changes what "carry the rows
+    forward" means: it is the DuckLake catalog and its Parquet that a release has
+    to ship, not a schema inside the published DuckDB file. Ship neither and this
+    returns None on every workflow run, and every release cold-starts the archive
+    at `WEATHER_COLD_START_YEARS` — silently, because a cold start is a valid
+    state and not an error.
+
+    A missing catalog is "nothing loaded yet". A catalog that cannot be *read* is
+    not — that raises, because falling back would silently re-seed from 2007.
     """
-    path = Path(duckdb_path)
-    if not path.exists():
+    from lake.lakehouse import LAKEHOUSE_DIR, catalog_path, read_only_connection
+
+    lake = Path(lakehouse_dir if lakehouse_dir is not None else LAKEHOUSE_DIR)
+    if not catalog_path(lake).exists():
         return None
-    con = duckdb.connect(str(path), read_only=True)
+    con = read_only_connection(lake)
     try:
         present = db.scalar(
             con,
             """
-            select count(*) from duckdb_tables()
-            where schema_name = 'raw' and table_name = 'om_weather_daily'
+            select count(*) from information_schema.tables
+            where table_schema = 'raw' and table_name = 'om_weather_daily'
             """,
         )
         if not present:
             return None
-        newest = db.scalar(con, "select max(weather_date) from raw.om_weather_daily")
+        newest = db.scalar(con, "select max(weather_date) from lakehouse.raw.om_weather_daily")
         return None if newest is None else str(newest)
     finally:
         con.close()
@@ -1439,9 +1444,22 @@ def build_pipeline() -> dlt.Pipeline:
     # place to remember.
     os.environ.setdefault("NORMALIZE__PARQUET_NORMALIZER__ADD_DLT_LOAD_ID", "true")
 
+    # **The destination is the lakehouse, not the DuckDB file.** `raw` lands as
+    # Parquet under a DuckLake catalog; dbt attaches that catalog and builds
+    # `staging`/`marts` into `data/warehouse.duckdb`, which is then the whole of
+    # what gets published. Two consequences worth knowing here rather than three
+    # modules away:
+    #
+    # * dlt's merge regenerates `_dlt_id` and `_dlt_load_id` on every row it
+    #   touches, so DuckLake's change feed reports a no-op reload and a one-row
+    #   restatement identically. `lake.lakehouse.revisions()` diffs two
+    #   snapshots instead, projecting those columns away.
+    # * the catalog is now the only copy of the landing tables, which makes it
+    #   the state a rebuild cannot reproduce — the role `data/warehouse.duckdb`
+    #   used to hold for `raw.om_weather_daily`.
     return dlt.pipeline(
         pipeline_name=pipeline_name(),
-        destination=dlt.destinations.duckdb(DUCKDB_PATH),
+        destination=dlt.destinations.ducklake(dlt_credentials()),
         dataset_name=PIPELINE_DATASET,
     )
 

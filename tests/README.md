@@ -25,7 +25,7 @@ runs (via the Dagster asset graph, so the asset checks are evaluated too).
 
 It sets `WAREHOUSE_PATH` to a temp file, and `LAKE_DIR` to a temp directory
 beside it. Don't drop either: without them a fixture run overwrites
-`data/warehouse.duckdb` and `data/lake/` with the 17-country slice.
+`data/warehouse.duckdb` and `data/lakehouse/` with the 17-country slice.
 
 ## `just coverage` — line and branch coverage of the first tier, ~17s
 

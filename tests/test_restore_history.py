@@ -14,13 +14,16 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from lake import lakehouse
+from modern_data_stack import history
 from modern_data_stack.db import scalar
+from modern_data_stack.history import DLT_COLUMNS, SCD2_COLUMNS, Carry
 from scripts import restore_history
-from scripts.restore_history import CARRIED_RAW_TABLES, irreplaceable_rows, run
+from scripts.restore_history import irreplaceable_rows, run
 
 # Captured before the autouse fixture below replaces it, so the one test that
 # exercises the real lookup can still reach it.
-_real_state_lookup = restore_history._local_pipeline_state
+_real_state_lookup = lakehouse._local_pipeline_state
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +38,7 @@ def no_local_dlt_state(monkeypatch):
     the lookup itself is what gets replaced. Tests about the refusal override
     this deliberately.
     """
-    monkeypatch.setattr(restore_history, "_local_pipeline_state", lambda: None)
+    monkeypatch.setattr(lakehouse, "_local_pipeline_state", lambda: None)
 
 
 # One country-year at version 1, shaped the way dbt writes a `check`-strategy
@@ -189,29 +192,58 @@ def test_refuses_to_restore_a_warehouse_onto_itself(previous: Path):
         run(previous, previous)
 
 
-def test_carries_the_weather_archive_alongside_the_snapshot(tmp_path: Path):
-    """`raw.om_weather_daily` is unreproducible within a *budget* rather than in
-    principle, which has the same consequence — so one mechanism carries both."""
+def test_a_landing_table_in_the_source_is_deliberately_not_carried(tmp_path: Path):
+    """`raw` is no longer in this file, and the rule that carried it is gone.
+
+    dlt lands in the DuckLake catalog now, so a published `warehouse.duckdb`
+    holds nothing from `raw` for a rule to find and `CARRIED` names `history`
+    alone. This test exists because the consequence is quiet and expensive:
+    `weather_watermark()` reads the destination, a fresh runner's catalog is
+    empty, and every release therefore cold-starts the archive at
+    `WEATHER_COLD_START_YEARS` without anything going red.
+
+    Asserting it against a source that *does* hold the table is the point — the
+    old behaviour would carry it, so this fails the moment the rule comes back
+    without the publishing decision that has to come with it.
+    """
     source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT + WEATHER)
     dest = tmp_path / "new" / "warehouse.duckdb"
 
     summary = run(source, dest)
 
-    assert summary["tables"] == [
-        {"table": "history.snap_co2_estimates", "rows": 2},
-        {"table": "raw.om_weather_daily", "rows": 2},
-    ]
-    assert summary["rows"] == 4
+    assert summary["tables"] == [{"table": "history.snap_co2_estimates", "rows": 2}]
+    assert summary["rows"] == 2
 
 
-def test_carries_only_the_named_raw_tables_and_not_dlt_bookkeeping(tmp_path: Path):
-    """The failure this prevents is silent and total. dlt keys "is this
-    destination fresh?" on `_dlt_loads`; carry that and the next load skips,
-    so the release ships last month's raw data believing it refetched it."""
+def test_the_allowlist_mechanism_still_works_for_a_landing_schema(tmp_path: Path):
+    """The `Carry` rule this project stopped using is still correct, and stays
+    tested at the package level.
+
+    `modern_data_stack.history` is domain-neutral: the reason this project has no
+    `raw` rule today is that its landing tables moved to another file, not that
+    carrying a landing schema became wrong. Dropping the coverage with the rule
+    would leave the next project to rediscover why `tables` is not optional —
+    copying `raw` whole brings dlt's `_dlt_loads` with it, and the next load then
+    believes the destination is not fresh and skips.
+    """
     source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT + WEATHER)
     dest = tmp_path / "new" / "warehouse.duckdb"
 
-    run(source, dest)
+    carry = (
+        Carry(schema="history", kind="dbt snapshot", required_columns=SCD2_COLUMNS),
+        Carry(
+            schema="raw",
+            kind="dlt landing table",
+            required_columns=DLT_COLUMNS,
+            tables=("om_weather_daily",),
+        ),
+    )
+    summary = history.restore(source, dest, carry=carry)
+
+    assert [t["table"] for t in summary["tables"]] == [
+        "history.snap_co2_estimates",
+        "raw.om_weather_daily",
+    ]
 
     con = duckdb.connect(str(dest), read_only=True)
     try:
@@ -226,15 +258,7 @@ def test_carries_only_the_named_raw_tables_and_not_dlt_bookkeeping(tmp_path: Pat
     assert landed == {"om_weather_daily"}, f"carried more of `raw` than intended: {landed}"
 
 
-def test_a_source_without_the_weather_table_is_not_an_error(previous: Path, tmp_path: Path):
-    """The first release to carry a new table has a predecessor that predates
-    it. Treating the gap as fatal would break exactly one release."""
-    summary = run(previous, tmp_path / "wh" / "warehouse.duckdb")
-
-    assert summary["tables"] == [{"table": "history.snap_co2_estimates", "rows": 2}]
-
-
-def test_rejects_a_landing_table_without_dlt_provenance(tmp_path: Path):
+def test_the_allowlist_mechanism_still_rejects_a_table_without_dlt_provenance(tmp_path: Path):
     """Measured, not assumed: carried without `_dlt_load_id`/`_dlt_id` the next
     load dies with DuckDB's `Adding columns with constraints not yet supported`,
     because dlt tries to add the column NOT NULL to a table that has rows."""
@@ -247,39 +271,39 @@ def test_rejects_a_landing_table_without_dlt_provenance(tmp_path: Path):
             t(country_iso3, weather_date, temperature_2m_mean);
         """,
     )
+    carry = (
+        Carry(
+            schema="raw",
+            kind="dlt landing table",
+            required_columns=DLT_COLUMNS,
+            tables=("om_weather_daily",),
+        ),
+    )
 
     with pytest.raises(ValueError, match="not a dlt landing table"):
-        run(source, tmp_path / "wh" / "warehouse.duckdb")
+        history.restore(source, tmp_path / "wh" / "warehouse.duckdb", carry=carry)
 
 
-def test_refuses_to_overwrite_a_carried_landing_table(tmp_path: Path):
-    """Same rule as the snapshot: a day of API budget is no easier to get back
-    than a revision is."""
-    source = _db(tmp_path / "prev" / "warehouse.duckdb", WEATHER)
-    dest = _db(tmp_path / "wh" / "warehouse.duckdb", WEATHER)
+def test_a_source_without_the_weather_table_is_not_an_error(previous: Path, tmp_path: Path):
+    """The first release to carry a new table has a predecessor that predates
+    it. Treating the gap as fatal would break exactly one release."""
+    summary = run(previous, tmp_path / "wh" / "warehouse.duckdb")
 
-    with pytest.raises(ValueError, match="refusing to overwrite"):
-        run(source, dest)
+    assert summary["tables"] == [{"table": "history.snap_co2_estimates", "rows": 2}]
 
 
 def test_irreplaceable_rows_counts_every_carried_relation(tmp_path: Path):
-    """What `just clean warehouse` asks before deleting the file. Counting the
-    snapshot alone would wave through a weather archive costing days to refetch."""
+    """What `just clean warehouse` asks before deleting the file.
+
+    Two rows now, not four: the weather archive is real state and is no longer
+    *here*, so this gate no longer speaks for it. Deleting `data/lakehouse/` is
+    the act that costs days of API budget, and `just clean` guards that by not
+    listing the directory at all.
+    """
     warehouse = _db(tmp_path / "wh" / "warehouse.duckdb", SNAPSHOT + WEATHER)
 
-    assert irreplaceable_rows(warehouse) == 4
+    assert irreplaceable_rows(warehouse) == 2
     assert irreplaceable_rows(tmp_path / "gone.duckdb") == 0
-
-
-def test_carried_raw_tables_are_real_dlt_resources():
-    """A hand-written copy of a resource name. Rename the resource without this
-    and the table stops being carried in silence — the cost lands a month later,
-    as a day of API budget, on a workflow nobody is watching."""
-    from ingest.pipeline import FULL_REFRESH_RESOURCES, INCREMENTAL_RESOURCES
-
-    resources = set(FULL_REFRESH_RESOURCES) | set(INCREMENTAL_RESOURCES)
-    unknown = set(CARRIED_RAW_TABLES) - resources
-    assert not unknown, f"carried raw tables that no dlt resource writes: {unknown}"
 
 
 def test_the_carried_schema_is_the_one_dlt_loads_into():
@@ -290,18 +314,53 @@ def test_the_carried_schema_is_the_one_dlt_loads_into():
     assert restore_history.RAW_SCHEMA == PIPELINE_DATASET
 
 
-def test_refuses_to_carry_a_landing_table_when_dlt_has_local_state(tmp_path, monkeypatch):
-    """Measured: with local state dlt trusts what it already knows, goes to
-    update its stored schema against a restored file that has no `_dlt_version`,
-    and dies. Refusing here names the remedy instead of the symptom."""
-    source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT + WEATHER)
+def test_refuses_to_restore_the_lakehouse_when_dlt_has_local_state(tmp_path, monkeypatch):
+    """Measured, and re-measured after the mechanism changed completely.
+
+    This refusal was written when a landing *table* was carried into the
+    warehouse's `raw` schema. The carry is now a directory copy of a DuckLake
+    catalog — different code, different artifact — and the failure is byte for
+    byte the same: dlt with local state trusts what it knows, goes to update its
+    stored schema against a destination that has no `_dlt_version`, and dies.
+    Verified against the new path rather than inherited from the old one.
+    """
+    source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT)
+    _published_lakehouse(tmp_path / "prev")
     state = tmp_path / "dlt" / "pipelines" / "modern_data_stack"
-    monkeypatch.setattr(restore_history, "_local_pipeline_state", lambda: state)
+    monkeypatch.setattr(lakehouse, "_local_pipeline_state", lambda: state)
 
     with pytest.raises(RuntimeError, match="_dlt_version"):
-        run(source, tmp_path / "wh" / "warehouse.duckdb")
+        run(source, tmp_path / "wh" / "warehouse.duckdb", lakehouse_dir=tmp_path / "lh")
 
-    assert not (tmp_path / "wh" / "warehouse.duckdb").exists(), "refused after writing"
+    assert not (tmp_path / "lh").exists(), "refused after writing"
+
+
+def _published_lakehouse(release_dir: Path) -> None:
+    """A minimal relocatable catalog, tarred the way the release ships it."""
+    import tarfile
+    import tempfile
+
+    import duckdb as _duckdb
+
+    from modern_data_stack.ducklake import attach, set_data_path
+
+    staging = Path(tempfile.mkdtemp())
+    dest = staging / "lakehouse"
+    (dest / "data").mkdir(parents=True, exist_ok=True)
+    con = _duckdb.connect()
+    attach(con, dest / "catalog.duckdb", dest / "data", alias="lh")
+    con.execute("create schema lh.raw")
+    con.execute(
+        "create table lh.raw.om_weather_daily as select * from (values "
+        "('DEU', date '2024-01-01', 3.2, 'l', 'i')) "
+        "t(country_iso3, weather_date, temperature_2m_mean, _dlt_load_id, _dlt_id)"
+    )
+    con.close()
+    set_data_path(dest / "catalog.duckdb", "data/")
+
+    release_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(release_dir / restore_history.LAKEHOUSE_ASSET, "w:gz") as tar:
+        tar.add(dest, arcname="lakehouse")
 
 
 def test_a_history_only_restore_is_unaffected_by_local_dlt_state(tmp_path, monkeypatch):
@@ -310,11 +369,58 @@ def test_a_history_only_restore_is_unaffected_by_local_dlt_state(tmp_path, monke
     refusal must not fire — otherwise this change breaks the recipe it extends."""
     source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT)
     state = tmp_path / "dlt" / "pipelines" / "modern_data_stack"
-    monkeypatch.setattr(restore_history, "_local_pipeline_state", lambda: state)
+    monkeypatch.setattr(lakehouse, "_local_pipeline_state", lambda: state)
 
     summary = run(source, tmp_path / "wh" / "warehouse.duckdb")
 
     assert summary["tables"] == [{"table": "history.snap_co2_estimates", "rows": 2}]
+    assert summary["lakehouse"] == {}, "no published lakehouse, so nothing to refuse over"
+
+
+def test_carries_the_published_lakehouse_in_beside_the_snapshot(tmp_path):
+    """Both halves of the release, one command. `history` is unreproducible in
+    principle and the weather archive within a budget; a release has the pair or
+    it has neither, so finding the directory beside the database is what keeps
+    them from drifting apart."""
+    source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT)
+    _published_lakehouse(tmp_path / "prev")
+
+    summary = run(source, tmp_path / "wh" / "warehouse.duckdb", lakehouse_dir=tmp_path / "lh")
+
+    assert summary["tables"] == [{"table": "history.snap_co2_estimates", "rows": 2}]
+    assert summary["lakehouse"] == {"raw.om_weather_daily": 1}
+    assert (tmp_path / "lh" / "catalog.duckdb").exists()
+
+
+def test_the_restored_lakehouse_gets_an_absolute_data_path_back(tmp_path):
+    """The published catalog is relative so a consumer can open it anywhere; a
+    working one cannot be, because dlt reads it from the repo root and dbt from
+    `dbt/`. DuckLake checks the stored path on every attach and refuses a
+    mismatch, so a restore that forgot to put the absolute form back would fail
+    on the *next* command rather than this one."""
+    import duckdb as _duckdb
+
+    source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT)
+    _published_lakehouse(tmp_path / "prev")
+
+    run(source, tmp_path / "wh" / "warehouse.duckdb", lakehouse_dir=tmp_path / "lh")
+
+    con = _duckdb.connect(str(tmp_path / "lh" / "catalog.duckdb"), read_only=True)
+    try:
+        stored = scalar(con, "select value from ducklake_metadata where key = 'data_path'")
+    finally:
+        con.close()
+    assert Path(stored).is_absolute(), f"restored catalog kept a relative data_path: {stored}"
+
+
+def test_the_release_layout_is_the_one_the_export_writes():
+    """`restore_history` finds the lakehouse beside the database rather than
+    being told where it is, so the two modules agree on one asset name by
+    convention. A rename on either side makes the restore find nothing and
+    cold-start the weather archive, with nothing going red."""
+    from scripts.export_warehouse import LAKEHOUSE_ASSET as EXPORTED
+
+    assert restore_history.LAKEHOUSE_ASSET == EXPORTED
 
 
 def test_the_state_check_looks_for_the_pipeline_dlt_would_actually_use(tmp_path, monkeypatch):

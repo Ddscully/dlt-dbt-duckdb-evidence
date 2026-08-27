@@ -16,6 +16,7 @@ import pytest
 
 from modern_data_stack import observability
 from modern_data_stack.db import scalar
+from modern_data_stack.ducklake import attach
 from transform import pipeline_status
 
 
@@ -23,18 +24,27 @@ from transform import pipeline_status
 def warehouse(tmp_path):
     """A miniature warehouse covering each of the three inventories."""
     path = tmp_path / "warehouse.duckdb"
-    con = duckdb.connect(str(path))
 
-    con.sql("create schema raw")
+    # `raw` lives in the lakehouse, not in the warehouse file — so the fixture
+    # builds one. Writing it into the warehouse instead would still *pass* the
+    # source inventory if the catalog filter were dropped, which is exactly the
+    # regression `raw_database` exists to prevent: `information_schema` spans
+    # every attached catalog, so a `raw` schema in either would match.
+    lake_dir = tmp_path / "lakehouse"
+    (lake_dir / "data").mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(path))
+    attach(con, lake_dir / "catalog.duckdb", lake_dir / "data", alias="lakehouse")
+    con.sql("create schema lakehouse.raw")
     # `_dlt_load_id` is a varchar holding a unix epoch — 2021-01-01T00:00:00Z.
     con.sql(
         """
-        create table raw.owid_co2 as
+        create table lakehouse.raw.owid_co2 as
         select * from (values ('USA', 2020, '1609459200.0'),
                               ('KEN', 2021, '1609459200.0'))
         as t(iso_code, year, _dlt_load_id)
         """
     )
+    con.sql("detach lakehouse")
 
     con.sql("create schema marts")
     con.sql(
@@ -99,6 +109,13 @@ def manifest(tmp_path):
 def test_sources_resolve_the_dlt_epoch(warehouse):
     con = duckdb.connect(str(warehouse), read_only=True)
     try:
+        attach(
+            con,
+            warehouse.parent / "lakehouse" / "catalog.duckdb",
+            warehouse.parent / "lakehouse" / "data",
+            alias="lakehouse",
+            read_only=True,
+        )
         frame = pipeline_status.build_sources(con)
     finally:
         con.close()
@@ -354,7 +371,9 @@ def test_tests_survive_a_missing_manifest(warehouse, tmp_path):
 
 
 def test_run_writes_all_three_tables(warehouse, manifest):
-    written = pipeline_status.run(str(warehouse), str(manifest))
+    written = pipeline_status.run(
+        str(warehouse), str(manifest), str(warehouse.parent / "lakehouse")
+    )
     assert written == {"pipeline_sources": 1, "pipeline_tables": 1, "pipeline_tests": 2}
 
     con = duckdb.connect(str(warehouse), read_only=True)

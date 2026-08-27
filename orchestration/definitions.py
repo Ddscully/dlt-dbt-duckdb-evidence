@@ -102,8 +102,6 @@ defs = dg.Definitions(
         assets.co2_intensity,
         assets.retail_rfm,
         assets.pipeline_status,
-        assets.parquet_archive,
-        assets.lakehouse,
         assets.evidence_site,
     ],
     asset_checks=[
@@ -112,8 +110,7 @@ defs = dg.Definitions(
         assets.fx_rates_reach_the_present,
         assets.co2_intensity_rank_is_dense,
         assets.rfm_scores_do_not_split_ties,
-        assets.lake_matches_warehouse,
-        assets.lakehouse_matches_warehouse,
+        assets.weather_revisions_are_derivable,
         assets.site_pages_all_rendered,
     ],
     jobs=[load_retail_job, full_refresh_job, publish_site_job],

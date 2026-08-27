@@ -1,9 +1,8 @@
 """The pipeline as a Dagster asset graph.
 
-    raw/*  (dlt)  ->  staging/stg_*  ->  marts/fct_*  (dbt)  +->  analytics/co2_intensity  (Polars)
+    raw/*  (dlt -> DuckLake)  ->  staging/stg_*  ->  marts/fct_*  (dbt)  +->  analytics/co2_intensity  (Polars)
                                                              +->  analytics/retail_rfm     (Polars)
                                                              |      +->  analytics/pipeline_status
-                                                             +->  lake/parquet_archive  (Parquet)
                                                              +->  reports/evidence_site  (Evidence)
 
 The layers are wired by *asset key*, not by ordering:
@@ -46,17 +45,14 @@ from ingest.pipeline import (
     load_groups,
     public_indicators,
 )
-from lake.archive import ARCHIVED_TABLES, LAKE_DIR, run as write_lake, table_dir
 from lake.lakehouse import (
-    DATA_INLINING_ROW_LIMIT,
     LAKEHOUSE_DIR,
-    SYNCED_TABLES,
-    catalog_path,
-    data_path,
-    run as write_lakehouse,
+    WEATHER_TABLE,
+    revisions as weather_revisions,
+    rows as weather_rows,
+    versions as table_versions_for,
 )
 from modern_data_stack.db import row, scalar
-from modern_data_stack.ducklake import connect as ducklake_connect
 from orchestration.resources import dbt_project
 from scripts.build_report import (
     BUILD_DIR,
@@ -541,93 +537,20 @@ def pipeline_status(context: AssetExecutionContext) -> dg.MaterializeResult:
 # --------------------------------------------------------------------------- #
 
 
-@dg.asset(
-    key=dg.AssetKey(["lake", "parquet_archive"]),
-    # The mart is downstream of every raw table, so depending on it is enough to
-    # order the archive after the whole warehouse.
-    deps=[FCT_EMISSIONS_ENERGY],
-    group_name="lake",
-    kinds={"duckdb", "parquet"},
-    freshness_policy=MODELLED_FRESHNESS,
-    description=(
-        "Year-partitioned Parquet copy of the raw and mart tables under "
-        "data/lake/ — partition pruning, portability, and a diff between runs "
-        "that shows which years upstream actually changed."
-    ),
-)
-def parquet_archive(context: AssetExecutionContext) -> dg.MaterializeResult:
-    summary = write_lake()
-    for table, stats in summary.items():
-        context.log.info(
-            "%s -> %s rows in %s partitions (%.1f MB)",
-            table,
-            stats["rows"],
-            stats["partitions"],
-            stats["bytes"] / 1e6,
-        )
-    return dg.MaterializeResult(
-        metadata={
-            "dagster/row_count": sum(s["rows"] for s in summary.values()),
-            "files": sum(s["files"] for s in summary.values()),
-            "bytes": sum(s["bytes"] for s in summary.values()),
-            "tables": summary,
-        }
-    )
+# **There is no asset here any more, and that is the shape of the change.**
+# This layer used to hold two: `lake/parquet_archive`, which copied the
+# warehouse out to hive-partitioned Parquet, and `lake/lakehouse`, which merged
+# two weather tables into a DuckLake catalog beside it. dlt now writes DuckLake
+# *directly*, so the files this layer used to produce are produced by the
+# ingest assets, and an asset that re-copied them would be archiving the
+# archive.
+#
+# What survives is the observability: `just lakehouse` reports the catalog's
+# tables and snapshot lineage, and the check below guards the one capability
+# that the move actually put at risk.
 
 
-LAKEHOUSE = dg.AssetKey(["lake", "lakehouse"])
-
-
-@dg.asset(
-    key=LAKEHOUSE,
-    # One dep per mirrored table rather than the single edge that would order it
-    # last. The archive gets away with `deps=[the mart]` because everything it
-    # writes is downstream of that one node; this mirrors a landing table *and* a
-    # mart, and a graph showing it hanging off only the mart would say the wrong
-    # thing about what a stale change feed means.
-    deps=[
-        dg.AssetKey(["raw", "om_weather_daily"]),
-        get_asset_key_for_model([dbt_models], "fct_country_weather_year"),
-    ],
-    group_name="lake",
-    kinds={"duckdb", "parquet"},
-    freshness_policy=MODELLED_FRESHNESS,
-    description=(
-        "DuckLake mirror of the weather tables under data/lakehouse/ — Parquet "
-        "with a catalog, so a run reports which rows were revised and what they "
-        "said before, rather than which files differ. A run over unchanged data "
-        "creates no snapshot at all."
-    ),
-)
-def lakehouse(context: AssetExecutionContext) -> dg.MaterializeResult:
-    summary = write_lakehouse()
-    for table, stats in summary.items():
-        if stats["snapshot"] is None:
-            context.log.info("%s -> unchanged, nothing written", table)
-            continue
-        context.log.info(
-            "%s -> snapshot %s: +%s ~%s -%s (%s rows, %s files)",
-            table,
-            stats["snapshot"],
-            stats["inserted"],
-            stats["updated"],
-            stats["deleted"],
-            stats["rows"],
-            stats["files"],
-        )
-    return dg.MaterializeResult(
-        metadata={
-            "dagster/row_count": sum(s["rows"] for s in summary.values()),
-            # The three that make this layer worth having. A materialisation
-            # whose revised count is non-zero is the one worth opening.
-            "inserted": sum(s["inserted"] for s in summary.values()),
-            "revised": sum(s["updated"] for s in summary.values()),
-            "deleted": sum(s["deleted"] for s in summary.values()),
-            "files": sum(s["files"] for s in summary.values()),
-            "bytes": sum(s["bytes"] for s in summary.values()),
-            "tables": summary,
-        }
-    )
+WEATHER_RAW = dg.AssetKey(["raw", "om_weather_daily"])
 
 
 # --------------------------------------------------------------------------- #
@@ -871,71 +794,53 @@ def rfm_scores_do_not_split_ties() -> dg.AssetCheckResult:
     )
 
 
-@dg.asset_check(asset=parquet_archive, blocking=True)
-def lake_matches_warehouse() -> dg.AssetCheckResult:
-    """Every archived table reads back from Parquet with the row count and year
-    span it has in the warehouse.
+@dg.asset_check(asset=WEATHER_RAW, blocking=False)
+def weather_revisions_are_derivable() -> dg.AssetCheckResult:
+    """The restatement log can still be computed from the catalog.
 
-    The failure mode this catches is a partial write: `COPY … PARTITION_BY` that
-    half-succeeded, or a stale partition left behind by an earlier run. Nothing
-    downstream reads the lake, so without a check a broken archive would sit
-    there looking materialised.
+    This replaces two checks that the move deleted, and it guards a narrower
+    thing than either of them did — deliberately, because the failures they
+    covered are now impossible rather than merely unobserved.
+    `lake_matches_warehouse` compared a hand-written Parquet copy against the
+    warehouse, and there is no copy any more; `lakehouse_matches_warehouse`
+    caught an upsert that succeeded while its prune failed, and dlt performs
+    both inside one load package.
+
+    What is *newly* fragile is the substitute for the change feed. dlt rewrites
+    `_dlt_id` and `_dlt_load_id` on every row it re-merges, so
+    `ducklake_table_changes()` reports a no-op reload and a real restatement
+    identically — measured at 500 preimages for 500 unchanged rows. The
+    replacement is an `EXCEPT` between two snapshots with those columns
+    projected away, and it depends on three things staying true: the catalog
+    keeping more than one version of the table, `at (version => …)` remaining
+    valid for the oldest of them, and the provenance list still naming every
+    column dlt regenerates. If any of those slips the diff does not error — it
+    returns *every* row as revised, which reads exactly like a catastrophic
+    upstream restatement.
+
+    Non-blocking because a single-version catalog is the honest state of a first
+    load, which is what every CI run is.
     """
-    con = duckdb.connect(DUCKDB_PATH, read_only=True)
-    try:
-        mismatches = {}
-        for table in ARCHIVED_TABLES:
-            glob = f"{table_dir(LAKE_DIR, table)}/**/*.parquet"
-            warehouse = row(con, f"select count(*), min(year), max(year) from {table}")
-            archived = row(
-                con,
-                f"""
-                select count(*), min(year), max(year)
-                from read_parquet('{glob}', hive_partitioning = 1)
-                """,
-            )
-            if warehouse != archived:
-                mismatches[table] = {"warehouse": list(warehouse), "lake": list(archived)}
-    finally:
-        con.close()
+    versions = table_versions_for(WEATHER_TABLE, LAKEHOUSE_DIR)
+    if len(versions) < 2:
+        return dg.AssetCheckResult(
+            passed=True,
+            metadata={"versions": len(versions), "note": "first load — nothing to diff yet"},
+        )
+
+    since, until = versions[-2], versions[-1]
+    revised = weather_revisions(WEATHER_TABLE, since, until, LAKEHOUSE_DIR)
+    total = weather_rows(WEATHER_TABLE, LAKEHOUSE_DIR)
+    # Every row "revised" is the provenance-column failure, not a restatement:
+    # upstream cannot restate an entire ERA5 archive between two loads.
+    suspect = total > 0 and len(revised) == total
     return dg.AssetCheckResult(
-        passed=not mismatches,
-        metadata={"tables_checked": len(ARCHIVED_TABLES), "mismatches": mismatches},
-    )
-
-
-@dg.asset_check(asset=LAKEHOUSE, blocking=False)
-def lakehouse_matches_warehouse() -> dg.AssetCheckResult:
-    """Every mirrored table holds the same rows in the lakehouse as in the warehouse.
-
-    The archive's parity check exists because a half-finished `COPY` leaves files
-    that look materialised. This one exists for a different failure: the merge
-    and the prune are two statements, so a run can update rows and then fail
-    before removing the ones that vanished upstream — leaving a lakehouse that is
-    internally consistent, queryable, and quietly a superset of the warehouse.
-
-    Reads through the catalog rather than over the files, because a `read_parquet`
-    of the data directory is not the table — DuckLake writes positional delete
-    files the catalog is responsible for applying.
-    """
-    con = ducklake_connect(
-        catalog_path(LAKEHOUSE_DIR),
-        data_path(LAKEHOUSE_DIR),
-        DUCKDB_PATH,
-        data_inlining_row_limit=DATA_INLINING_ROW_LIMIT,
-    )
-    try:
-        mismatches = {}
-        for rule in SYNCED_TABLES:
-            warehouse = scalar(con, f"select count(*) from wh.{rule.table}")
-            mirrored = scalar(con, f"select count(*) from lakehouse.{rule.table}")
-            if warehouse != mirrored:
-                mismatches[rule.table] = {"warehouse": warehouse, "lakehouse": mirrored}
-    finally:
-        con.close()
-    return dg.AssetCheckResult(
-        passed=not mismatches,
-        metadata={"tables_checked": len(SYNCED_TABLES), "mismatches": mismatches},
+        passed=not suspect,
+        metadata={
+            "compared": f"{since} -> {until}",
+            "rows_revised": len(revised),
+            "rows_total": total,
+        },
     )
 
 
@@ -976,7 +881,6 @@ __all__ = [
     "co2_intensity",
     "dbt_models",
     "evidence_site",
-    "parquet_archive",
     "pipeline_status",
     "raw_assets",
     "raw_retail_asset",

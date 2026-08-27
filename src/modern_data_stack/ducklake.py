@@ -1,302 +1,314 @@
-"""Keep a DuckLake lakehouse in step with warehouse tables, one `MERGE` per table.
+"""Attach a DuckLake catalog, and read what changed between two snapshots.
 
-The sibling of `lake.py`, answering the same question — *what moved upstream?* —
-with a catalog instead of a directory layout. Both write plain Parquet; the
-difference is what remembers.
+DuckLake is a table format: plain Parquet under a data directory, plus a
+catalog database holding schema, snapshot lineage and per-file statistics. This
+module is the domain-neutral half — attaching one, listing its snapshots, and
+diffing a table across two of them. What lives in the lakehouse, and where it
+sits, is `lake/lakehouse.py`.
 
-## Why this is a `MERGE` and not the archive's write
+## Why the diff is here rather than `ducklake_table_changes()`
 
-`lake.archive` deletes each table's directory and writes it again, because
-`COPY … (overwrite true)` only replaces the partitions it is *writing* and a
-partition whose last row vanished upstream would otherwise keep answering
-queries. Ported literally onto DuckLake that is a regression, measured before
-this module was written: every run retires the old file and writes a whole new
-one, and the catalog's change log reads **identically** for a run over unchanged
-data and a run over a real restatement. Only reading the data separates them.
-So the port would give up the archive's byte-diff property and replace it with
-nothing, plus a file's worth of growth per table per run.
+DuckLake ships a change feed that returns `insert` / `delete` /
+`update_preimage` / `update_postimage` at row grain, and it is the obvious
+answer. It is the wrong one whenever the writer rewrites rows it did not change
+— which dlt does on every merge, regenerating `_dlt_id` and `_dlt_load_id` per
+row. Measured: 500 identical rows loaded a second time report 500 preimages and
+500 postimages. The feed is faithful; the *writer* is what makes it useless.
 
-A `MERGE` gated on *the row actually differing* inverts that:
+So `revisions()` compares the table at two versions with `EXCEPT`, projecting
+away whichever columns the caller says are provenance. `ignore` has **no
+default**, matching `db.write_frames`'s `schema` and `export`'s
+`max_storage_version`: which columns are bookkeeping is a fact about the writer,
+this module knows nothing about it, and a wrong default is invisible — it
+returns a plausible answer rather than an error.
 
-* nothing changed upstream — no rows touched, **no snapshot created at all**;
-* a row was restated — one snapshot, and `ducklake_table_changes()` hands back
-  the old and new values side by side as `update_preimage` / `update_postimage`;
-* a row appeared or vanished — one snapshot, `insert` or `delete`.
+## What `read_parquet` over the data directory is not
 
-That is strictly more than the hive archive can say. `sha256sum` over the
-partitions reports *which file* differs; the change feed reports which row, and
-what it used to be.
-
-## Three things the format made non-obvious
-
-**No partition column, deliberately.** DuckLake keeps per-file min/max
-statistics in its catalog and prunes on them, so a filter still reads one file
-without any directory layout to arrange it. Partitioning by year was measured at
-2.4x the bytes of the same data unpartitioned (275 small Parquet files compress
-far worse than one) and no faster. The archive has to choose a partition column
-up front; this does not have to choose one at all.
-
-**Upsert and prune are two statements.** DuckLake's `MERGE` supports a single
-UPDATE/DELETE action, so `when matched … then update` and `when not matched by
-source then delete` cannot share a statement — the second is a plain `DELETE`
-here. Both are silent when they touch nothing, which is what matters: the
-no-snapshot property survives the split.
-
-**`RETURNING` is not implemented for DuckLake**, so the per-action breakdown is
-read back out of the change feed rather than returned by the write. That is the
-better source anyway: the counts in the summary are ones a consumer can
-re-derive from the catalog months later, not ones that only existed in the
-process that wrote them.
-
-## The catalog is not optional, and that is the format's real cost
-
-The hive archive's appeal is that anything reading Parquet can read it. A
-DuckLake directory looks like it keeps that and does not, in **both** available
-configurations — measured by restating one row and then reading the files
-directly:
-
-* **`data_inlining_row_limit` at DuckLake's default of 10** — the change is
-  written into the catalog database and never reaches Parquet at all.
-  `read_parquet` over the data directory returns the *superseded* value with no
-  indication anything is missing.
-* **At 0** — the change reaches Parquet, and so does a `…-delete.parquet` whose
-  schema is `(file_path, pos)`. A glob over the directory now fails outright on
-  the schema mismatch; excluding the delete files by name instead returns
-  **both** versions of the row, because applying them positionally is the
-  catalog's job.
-
-So `read_parquet` over a DuckLake directory is stale, broken or duplicated —
-never merely incomplete. That is worth stating plainly rather than discovering:
-the files are portable, the *table* is not, and `ducklake_list_files()` is the
-supported way to hand a consumer the current set.
+It is not the table, in either configuration, and this is worth stating because
+the directory looks like a hive archive and invites the shortcut. At DuckLake's
+default `data_inlining_row_limit` of 10 a small change is written into the
+catalog *database*, so the files silently return the superseded value. At 0 it
+reaches Parquet, but so does a `…-delete.parquet` of `(file_path, pos)`, which
+makes a glob fail on the schema mismatch and — if excluded by name — returns
+**both** versions of the row. The catalog is not optional.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import duckdb
 
-from .db import row, scalar
+from .db import scalar
 
-# The connection attaches both databases under fixed aliases rather than working
-# *from* either of them. A DuckDB catalog is named after its file stem, so
-# reading `warehouse.raw.…` would break the moment `WAREHOUSE_PATH` pointed at a
-# temp file with another name — which `just test-pipeline` does on every run.
-WAREHOUSE_ALIAS = "wh"
-LAKEHOUSE_ALIAS = "lakehouse"
+__all__ = [
+    "attach",
+    "publish",
+    "revisions",
+    "row_count",
+    "set_data_path",
+    "snapshots",
+    "table_versions",
+]
 
 
-@dataclass(frozen=True)
-class Synced:
-    """One warehouse table to mirror, and what identifies a row in it.
+def meta_alias(alias: str) -> str:
+    """The name DuckLake attaches the catalog database under, alongside the lake.
 
-    `key` is the merge key — the columns that say *this is the same row as
-    before*, so that a changed value reads as a revision instead of as a new row
-    beside the old one. It is the table's grain, and getting it wrong is not a
-    crash: too few columns collapses distinct rows into one and too many turns
-    every restatement into an insert.
-
-    `provenance_columns` are copied like everything else and **excluded from the
-    test for whether a row changed**, which is the difference between a change
-    feed and a noise generator. dlt regenerates `_dlt_load_id` *and* `_dlt_id`
-    on every row it re-merges, whether or not the values moved — measured, by
-    loading one fixture three times and watching both columns change under
-    byte-identical weather. Compare them and a routine ingest reports its whole
-    merge window as restated.
-
-    The cost of leaving them out is worth stating: the mirrored `_dlt_load_id`
-    is then the load that last *changed* the row rather than the one that last
-    *touched* it. For an archive of what upstream said, that is the more useful
-    of the two, but it is not the same number as the warehouse's.
+    Attaching the catalog file a second time by hand is what this replaced, and
+    DuckDB refuses it outright: `Unique file handle conflict: Cannot attach
+    "lakehouse_meta" - the database file … is already attached by database
+    "__ducklake_metadata_lakehouse"`. The catalog is already there; the name is
+    just undocumented enough to be worth writing down once.
     """
-
-    table: str
-    key: tuple[str, ...]
-    provenance_columns: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if self.table.count(".") != 1:
-            raise ValueError(f"{self.table!r} is not a schema-qualified table name")
-        if not self.key:
-            raise ValueError(f"{self.table} needs a merge key — see `Synced.key`")
-
-    @property
-    def schema(self) -> str:
-        return self.table.split(".")[0]
-
-    @property
-    def name(self) -> str:
-        return self.table.split(".")[1]
+    return f"__ducklake_metadata_{alias}"
 
 
-def connect(
+def attach(
+    con: duckdb.DuckDBPyConnection,
     catalog_path: str | Path,
     data_path: str | Path,
-    duckdb_path: str | Path,
-    data_inlining_row_limit: int,
-):
-    """An in-memory connection with the warehouse and the lakehouse attached.
+    alias: str,
+    read_only: bool = False,
+    data_inlining_row_limit: int | None = None,
+) -> None:
+    """Attach the DuckLake at `catalog_path` as `alias`, and its catalog beside it.
 
-    The warehouse is **read-only**: this layer is an archive of it and must never
-    be able to write back, the same promise `lake.archive` makes by connecting
-    read-only.
+    `data_path` is passed on every attach even though the catalog already
+    records it, because DuckLake *checks* the two agree and refuses otherwise —
+    a mismatch is a moved lakehouse, which is a thing worth being told about
+    rather than silently reading someone else's files.
 
-    `data_inlining_row_limit` has **no default**, matching `db.write_frames`'s
-    `schema` and `export`'s `max_storage_version`. It decides whether a small
-    change is written into the catalog database or out to Parquet, which is a
-    statement about the artifact rather than a tuning knob — and a default here
-    would be invisible to the caller who meant the other one. See the module
-    docstring for what each value does to a `read_parquet` over the directory.
+    **The catalog database comes along for free**, attached by DuckLake itself
+    as `__ducklake_metadata_<alias>` — see `meta_alias`. It is needed because
+    DuckLake's *query* surface cannot answer "which snapshots
+    changed *this table*": `snapshots()` returns a `changes` map keyed on table
+    *ids*, and `table_changes(name, from, to)` needs the answer as its argument
+    — it raises `Table … does not exist at version N` for a range that starts
+    before the table did. The catalog schema is part of the DuckLake 1.0 spec
+    rather than an internal, so `ducklake_data_file` is a supported place to
+    read it from, and `table_versions` below is the only thing that does.
     """
-    Path(catalog_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(data_path).mkdir(parents=True, exist_ok=True)
-
-    con = duckdb.connect()
     con.execute("install ducklake")
     con.execute("load ducklake")
-    # ATTACH takes literals, not bind parameters (`attach $path` is a parser
-    # error), so the paths are interpolated — as in `history.restore`.
-    con.execute(f"attach '{duckdb_path}' as {WAREHOUSE_ALIAS} (read_only)")
-    con.execute(
-        f"attach 'ducklake:{catalog_path}' as {LAKEHOUSE_ALIAS} "
-        f"(data_path '{data_path}/', data_inlining_row_limit {int(data_inlining_row_limit)})"
-    )
-    return con
+
+    options = [f"data_path '{Path(data_path)}/'"]
+    if read_only:
+        options.append("read_only")
+    if data_inlining_row_limit is not None:
+        options.append(f"data_inlining_row_limit {int(data_inlining_row_limit)}")
+
+    # ATTACH takes literals, not bind parameters — `attach $path` is a parser
+    # error — so the paths are interpolated, as they are in `history.restore`.
+    con.execute(f"attach 'ducklake:duckdb:{Path(catalog_path)}' as {alias} ({', '.join(options)})")
 
 
-def _head(con: duckdb.DuckDBPyConnection) -> int:
-    """The newest snapshot in the catalog. Unchanged means nothing was written."""
-    return scalar(con, f"select max(snapshot_id) from {LAKEHOUSE_ALIAS}.snapshots()")
+def snapshots(con: duckdb.DuckDBPyConnection, alias: str) -> list[int]:
+    """Every snapshot id in the catalog, oldest first."""
+    return [
+        row[0] for row in con.execute(f"select snapshot_id from {alias}.snapshots()").fetchall()
+    ]
 
 
-def _columns(con: duckdb.DuckDBPyConnection, relation: str) -> list[str]:
-    return [name for (name, *_) in con.execute(f"describe {relation}").fetchall()]
+def table_versions(con: duckdb.DuckDBPyConnection, alias: str, table: str) -> list[int]:
+    """Snapshots in which `table` actually changed, oldest first.
+
+    The catalog records a snapshot per *write*, and a dlt load performs several
+    — staging tables, the merge, cleanup — so most snapshot ids say nothing
+    about any given table. Asking which ones touched it is what makes "compare
+    against the previous version" mean the previous version *of this table*
+    rather than of whatever else happened to be written in between.
+    """
+    schema, name = _split(table)
+    meta = meta_alias(alias)
+    ids = [
+        row[0]
+        for row in con.execute(
+            f"""
+            select t.table_id
+            from {meta}.ducklake_table t
+            join {meta}.ducklake_schema s on s.schema_id = t.schema_id
+            where t.table_name = $table and s.schema_name = $schema
+            """,
+            {"table": name, "schema": schema},
+        ).fetchall()
+    ]
+    if not ids:
+        return []
+    id_list = ", ".join(str(int(i)) for i in ids)
+
+    # **Both halves are required, and the missing one fails silently.** DuckLake
+    # writes a change of `data_inlining_row_limit` rows or fewer (default 10)
+    # into the catalog instead of out to Parquet, so a small load leaves no
+    # `ducklake_data_file` row at all — and a version list built from files
+    # alone simply does not see it. That is not a test-only case: an FX day is
+    # ~29 rows but a quiet one is fewer, and the symptom is a revision log that
+    # skips a load rather than one that errors.
+    sources = [
+        f"select begin_snapshot from {meta}.ducklake_data_file where table_id in ({id_list})"
+    ]
+    inlined = con.execute(
+        f"select table_name from {meta}.ducklake_inlined_data_tables where table_id in ({id_list})"
+    ).fetchall()
+    sources += [f'select begin_snapshot from {meta}."{row[0]}"' for row in inlined]
+
+    rows = con.execute(
+        f"select distinct begin_snapshot from ({' union all '.join(sources)}) order by 1"
+    ).fetchall()
+    return [row[0] for row in rows]
 
 
-def _exists(con: duckdb.DuckDBPyConnection, schema: str, name: str) -> bool:
+def revisions(
+    con: duckdb.DuckDBPyConnection,
+    alias: str,
+    table: str,
+    since: int,
+    until: int | None = None,
+    ignore: tuple[str, ...] = (),
+) -> list[tuple]:
+    """Rows of `table` at `until` that are not present, identically, at `since`.
+
+    An insert and an update are both "a row here that was not there before", and
+    the caller almost always wants both — this is "what does the table say now
+    that it did not say then", which is the question a restatement log answers.
+    Deletions are the mirror image and are not returned; swap the arguments.
+    """
+    columns = [c for c in _columns(con, alias, table) if c not in ignore]
+    if not columns:
+        raise ValueError(f"{table} has no columns left to compare after ignoring {ignore}")
+    projection = ", ".join(f'"{c}"' for c in columns)
+
+    at_until = "" if until is None else f" at (version => {until})"
+    return con.execute(
+        f"""
+        select {projection} from {alias}.{table}{at_until}
+        except
+        select {projection} from {alias}.{table} at (version => {since})
+        """
+    ).fetchall()
+
+
+def _split(table: str) -> tuple[str, str]:
+    if table.count(".") != 1:
+        raise ValueError(f"{table!r} is not a schema-qualified table name")
+    schema, name = table.split(".")
+    return schema, name
+
+
+def _columns(con: duckdb.DuckDBPyConnection, alias: str, table: str) -> list[str]:
+    schema, name = _split(table)
+    rows = con.execute(
+        """
+        select column_name from information_schema.columns
+        where table_catalog = $catalog and table_schema = $schema and table_name = $table
+        order by ordinal_position
+        """,
+        {"catalog": alias, "schema": schema, "table": name},
+    ).fetchall()
+    if not rows:
+        raise ValueError(f"{alias}.{table} does not exist")
+    return [row[0] for row in rows]
+
+
+def row_count(con: duckdb.DuckDBPyConnection, alias: str, table: str) -> int:
+    return scalar(con, f"select count(*) from {alias}.{table}")
+
+
+def publish(
+    con: duckdb.DuckDBPyConnection,
+    source_alias: str,
+    dest_dir: str | Path,
+    tables: tuple[str, ...],
+    data_dirname: str,
+    catalog_name: str,
+) -> dict[str, int]:
+    """Build a **relocatable** DuckLake at `dest_dir` holding only `tables`.
+
+    Two properties, and both are the point.
+
+    **It is built, never filtered.** Copying the catalog and dropping what should
+    not ship does not work: DuckLake keeps dropped tables in earlier snapshots,
+    so `select * from lh.raw.secret at (version => 2)` returns the rows after the
+    drop — verified, and it returned a customer id. A published catalog therefore
+    contains what it was *created* with, and an allowlist is the only safe shape.
+    The cost is that snapshot lineage does not survive: the published catalog has
+    one version per table, and the accumulation happens in the rows.
+
+    **Its `data_path` is relative**, which is what makes it openable by someone
+    who is not us. DuckLake stores the path as given and checks it on every
+    attach, so an absolute one forces `OVERRIDE_DATA_PATH` on every consumer. The
+    catalog cannot simply be *created* relative here — DuckDB resolves it against
+    the process's working directory, not the file's — so it is created absolute
+    and the single `ducklake_metadata` row is rewritten afterwards. The per-file
+    paths were relative all along.
+    """
+    dest = Path(dest_dir)
+    (dest / data_dirname).mkdir(parents=True, exist_ok=True)
+    catalog = dest / catalog_name
+    if catalog.exists():
+        catalog.unlink()
+
+    attach(con, catalog, dest / data_dirname, alias="_publish")
+    copied = {}
+    try:
+        for table in tables:
+            schema, name = _split(table)
+            # A table the source has not got is skipped, not an error. Two ways
+            # that happens and both are normal: the first release after a table
+            # is added has a source that predates it, and dbt's
+            # `ATTACH IF NOT EXISTS` creates an empty catalog on any build that
+            # runs before the first ingest.
+            if not _exists(con, source_alias, schema, name):
+                continue
+            con.execute(f"create schema if not exists _publish.{schema}")
+            con.execute(
+                f'create table _publish.{schema}."{name}" as '
+                f'select * from {source_alias}.{schema}."{name}"'
+            )
+            copied[table] = scalar(con, f'select count(*) from _publish.{schema}."{name}"')
+    finally:
+        con.execute("detach _publish")
+
+    set_data_path(catalog, f"{data_dirname}/")
+    return copied
+
+
+def set_data_path(catalog_path: str | Path, data_path: str) -> None:
+    """Rewrite the one absolute-or-relative row that decides who can open a catalog.
+
+    DuckLake stores `data_path` exactly as it was given and **checks it on every
+    attach**, refusing a mismatch rather than trusting the caller. That check is
+    the right behaviour — a mismatch means someone moved the lakehouse — but it
+    means a published catalog and a working one want *opposite* forms of the same
+    path, and there is no form that serves both:
+
+    * **relative** (`data/`) opens with a bare `ATTACH` from the directory it was
+      unpacked into, which is the only thing a consumer can be asked to do;
+    * **absolute** is what a working copy needs, because dlt reads it from the
+      repo root and dbt from `dbt/`, and one relative path cannot mean the same
+      thing in both.
+
+    So the form is rewritten at each boundary — `publish` on the way out, and the
+    restoring caller on the way in. The per-file paths are relative in both, so
+    this single row is the whole of it.
+    """
+    meta = duckdb.connect(str(Path(catalog_path)))
+    try:
+        meta.execute(
+            "update ducklake_metadata set value = $path where key = 'data_path'",
+            {"path": data_path},
+        )
+    finally:
+        meta.close()
+
+
+def _exists(con: duckdb.DuckDBPyConnection, alias: str, schema: str, name: str) -> bool:
     return bool(
         con.execute(
             """
-            select 1 from duckdb_tables()
-            where database_name = $db and schema_name = $schema and table_name = $name
+            select 1 from information_schema.tables
+            where table_catalog = $catalog and table_schema = $schema and table_name = $table
             """,
-            {"db": LAKEHOUSE_ALIAS, "schema": schema, "name": name},
-        ).fetchall()
+            {"catalog": alias, "schema": schema, "table": name},
+        ).fetchone()
     )
-
-
-def _changes(
-    con: duckdb.DuckDBPyConnection, rule: Synced, since: int, until: int
-) -> dict[str, int]:
-    """The catalog's own account of what the last write did.
-
-    `update_preimage` and `update_postimage` come back as separate rows for one
-    revision, so the pair is counted once — a summary saying two updates for one
-    changed row would be wrong in the direction people quote.
-    """
-    counts = dict(
-        con.execute(
-            f"""
-            select change_type, count(*)
-            from ducklake_table_changes(
-                '{LAKEHOUSE_ALIAS}', '{rule.schema}', '{rule.name}', {since}, {until}
-            )
-            group by change_type
-            """
-        ).fetchall()
-    )
-    return {
-        "inserted": counts.get("insert", 0),
-        "updated": counts.get("update_postimage", 0),
-        "deleted": counts.get("delete", 0),
-    }
-
-
-def _sync_table(con: duckdb.DuckDBPyConnection, rule: Synced) -> dict:
-    source = f"{WAREHOUSE_ALIAS}.{rule.schema}.{rule.name}"
-    target = f"{LAKEHOUSE_ALIAS}.{rule.schema}.{rule.name}"
-
-    columns = _columns(con, source)
-    missing = [c for c in (*rule.key, *rule.provenance_columns) if c not in columns]
-    if missing:
-        raise ValueError(f"{source} has no column {', '.join(missing)} — check `Synced` for it")
-
-    before = _head(con)
-    con.execute(f"create schema if not exists {LAKEHOUSE_ALIAS}.{rule.schema}")
-
-    if not _exists(con, rule.schema, rule.name):
-        con.execute(f"create table {target} as select * from {source}")
-    else:
-        on = " and ".join(f't."{c}" = s."{c}"' for c in rule.key)
-        # The columns that decide whether a row was *revised*: everything except
-        # the key (equal by the ON clause) and the provenance columns (see
-        # `Synced`). A row comparison, because `t.* is distinct from s.*` is a
-        # binder error — STAR is not allowed in that position.
-        compared = [c for c in columns if c not in rule.key and c not in rule.provenance_columns]
-        differs = " or ".join(f'(t."{c}" is distinct from s."{c}")' for c in compared) or "false"
-
-        # `insert by name`, never a positional insert: a column list that has
-        # been reordered anywhere upstream loads every value into the wrong
-        # column and returns no error, because the types mostly match.
-        con.execute(
-            f"""
-            merge into {target} as t
-            using (select * from {source}) as s
-            on {on}
-            when matched and ({differs}) then update
-            when not matched then insert by name
-            """
-        )
-        # The vanished-row half, and the reason it exists at all: `lake.archive`
-        # deletes each directory before writing precisely so a row that
-        # disappeared upstream cannot keep answering queries. Dropping this
-        # would leave the lakehouse with the same defect and no `rmtree` to
-        # cover it.
-        key_match = " and ".join(f's."{c}" = t."{c}"' for c in rule.key)
-        con.execute(
-            f"""
-            delete from {target} as t
-            where not exists (select 1 from {source} as s where {key_match})
-            """
-        )
-
-    after = _head(con)
-    summary = {
-        "rows": scalar(con, f"select count(*) from {target}"),
-        "snapshot": after if after != before else None,
-        **(
-            _changes(con, rule, before + 1, after)
-            if after != before
-            else {"inserted": 0, "updated": 0, "deleted": 0}
-        ),
-    }
-    files, data_bytes = row(
-        con,
-        f"""
-        select count(*), coalesce(sum(data_file_size_bytes), 0)
-        from ducklake_list_files('{LAKEHOUSE_ALIAS}', '{rule.name}', schema := '{rule.schema}')
-        """,
-    )
-    return {**summary, "files": files, "bytes": data_bytes}
-
-
-def sync(
-    tables: tuple[Synced, ...],
-    duckdb_path: str | Path,
-    catalog_path: str | Path,
-    data_path: str | Path,
-    data_inlining_row_limit: int,
-) -> dict[str, dict]:
-    """Bring the lakehouse level with the warehouse. Returns a per-table summary.
-
-    `snapshot` is `None` for a table nothing changed in, which is the whole point
-    of the layer: a run over unmoved data leaves the catalog exactly as it found
-    it, so a snapshot in the list is evidence rather than bookkeeping.
-    """
-    con = connect(catalog_path, data_path, duckdb_path, data_inlining_row_limit)
-    try:
-        return {rule.table: _sync_table(con, rule) for rule in tables}
-    finally:
-        con.close()

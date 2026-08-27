@@ -48,7 +48,6 @@ from pathlib import Path
 import duckdb
 
 from modern_data_stack.history import (
-    DLT_COLUMNS,
     SCD2_COLUMNS,
     Carry,
     carried_rows,
@@ -61,11 +60,16 @@ DUCKDB_PATH = warehouse_path()
 HISTORY_SCHEMA = "history"
 RAW_SCHEMA = "raw"
 
+# The published landing zone, as it is named in the release.
+# `scripts/export_warehouse.LAKEHOUSE_ASSET` is the other half; a test holds them
+# together, because a rename here would make the restore silently find nothing
+# and cold-start the weather archive with nothing going red.
+LAKEHOUSE_ASSET = "lakehouse.tar.gz"
+
 # Landing tables a rebuild cannot afford to refetch. One entry today, and it is
 # a hand-written copy of a dlt resource name — `tests/test_restore_history.py`
 # holds it to `ingest.pipeline`, because a renamed resource would otherwise stop
 # being carried in silence and only cost a day of API budget a month later.
-CARRIED_RAW_TABLES = ("om_weather_daily",)
 
 # What this warehouse cannot rebuild, and what proves each relation is the thing
 # it claims to be. The package knows nothing about either — see `Carry`.
@@ -75,32 +79,36 @@ CARRIED_RAW_TABLES = ("om_weather_daily",)
 # update. `release-data.yml` learned that lesson once already, having asserted
 # "history didn't shrink" against `snap_co2_estimates` by name until
 # `snap_grid_emission_factors` arrived and was carried but never verified.
+# **The `raw` rule is gone, and its job is not done — it moved out of reach.**
+# `raw.om_weather_daily` was carried here because it is unreproducible within
+# Open-Meteo's daily budget. It is still unreproducible; it is simply no longer
+# in this file. dlt lands `raw` in the DuckLake catalog under `data/lakehouse/`,
+# which the release does not publish, so there is nothing in a published
+# `warehouse.duckdb` for this rule to find.
+#
+# The consequence is quiet and expensive, which is why it is written here rather
+# than left to be discovered: `weather_watermark()` reads the destination table,
+# a fresh runner's catalog is empty, and every release therefore cold-starts the
+# archive at `WEATHER_COLD_START_YEARS`. Nothing errors — a cold start is a valid
+# state — and the published series silently stops deepening.
+#
+# Carrying it forward again means publishing the lakehouse as a second release
+# asset and restoring it before the graph runs. That is *simpler* than what this
+# module does, not harder: a DuckLake is a directory, so the restore is a copy
+# rather than a schema-aware `create or replace`. What it needs first is the
+# decision to publish it, and one measured detail — the catalog stores its
+# `data_path` as given, so a published one has to be created with a relative
+# path (verified: relative survives a move with a bare ATTACH; absolute needs
+# `OVERRIDE_DATA_PATH`).
 CARRIED: tuple[Carry, ...] = (
     Carry(schema=HISTORY_SCHEMA, kind="dbt snapshot", required_columns=SCD2_COLUMNS),
-    # `raw` is the opposite case and `tables` is not optional here. The schema
-    # holds seven other landing tables and dlt's own bookkeeping, and carrying
-    # that bookkeeping is what would make the next load think the destination
-    # was not fresh — so this rule names exactly what it wants and nothing else.
-    #
-    # `DLT_COLUMNS` is sufficient because `restore` copies with `select *`: the
-    # two columns are the ones a merge resource needs to land on an existing
-    # table, and a source that has them keeps everything else for free. Without
-    # them the next load dies at the load step with DuckDB's `Adding columns
-    # with constraints not yet supported` — dlt trying to add `_dlt_load_id`
-    # NOT NULL to a table that already has rows.
-    Carry(
-        schema=RAW_SCHEMA,
-        kind="dlt landing table",
-        required_columns=DLT_COLUMNS,
-        tables=CARRIED_RAW_TABLES,
-    ),
 )
 
 __all__ = [
     "CARRIED",
-    "CARRIED_RAW_TABLES",
     "DUCKDB_PATH",
     "HISTORY_SCHEMA",
+    "LAKEHOUSE_ASSET",
     "RAW_SCHEMA",
     "irreplaceable_rows",
     "main",
@@ -108,40 +116,11 @@ __all__ = [
 ]
 
 
-def _source_landing_tables(source: Path) -> set[str]:
-    """Which of `CARRIED_RAW_TABLES` the source actually holds."""
-    con = duckdb.connect(str(source), read_only=True)
-    try:
-        present = {
-            name
-            for (name,) in con.execute(
-                "select table_name from duckdb_tables() where schema_name = ?",
-                [RAW_SCHEMA],
-            ).fetchall()
-        }
-    finally:
-        con.close()
-    return present & set(CARRIED_RAW_TABLES)
-
-
-def _local_pipeline_state() -> Path | None:
-    """dlt's state directory for this project's pipeline, if it has one.
-
-    Read rather than built: constructing the pipeline to ask its name is what
-    would create the state this is looking for.
-    """
-    from dlt.common.pipeline import get_dlt_pipelines_dir
-
-    from ingest.pipeline import pipeline_name
-
-    state = Path(get_dlt_pipelines_dir()) / pipeline_name()
-    return state if state.exists() else None
-
-
 def run(
     source: str | Path,
     duckdb_path: str | Path = DUCKDB_PATH,
     force: bool = False,
+    lakehouse_dir: str | Path | None = None,
 ) -> dict:
     """Copy `source`'s unreproducible tables into `duckdb_path`. Returns a summary.
 
@@ -152,51 +131,37 @@ def run(
     **Refuses when a landing table would be carried and dlt already has local
     state**, because the two together do not work — see `_refuse_warm_state`.
     """
-    src = Path(source)
-    if src.exists() and _source_landing_tables(src):
-        state = _local_pipeline_state()
-        if state is not None:
-            _refuse_warm_state(state)
-    return restore(source, duckdb_path, carry=CARRIED, force=force)
+    summary = restore(source, duckdb_path, carry=CARRIED, force=force)
+    summary["lakehouse"] = _restore_lakehouse(Path(source), lakehouse_dir)
+    return summary
 
 
-def _refuse_warm_state(state: Path) -> None:
-    """Stop before a restore that dlt's local state would make fail.
+def _restore_lakehouse(source: Path, lakehouse_dir: str | Path | None) -> dict[str, int]:
+    """Carry the published landing zone in beside the snapshot, if there is one.
 
-    Carrying a table into `raw` *creates that schema*, and dlt then finds a
-    dataset its own bookkeeping does not describe. What happens next depends
-    entirely on whether dlt has local state, which is why this is invisible in
-    CI and immediate on a laptop:
+    Both halves of the release are unreproducible and they are unreproducible for
+    different reasons — `history` in principle, the weather archive within a
+    budget — so one command carries both and a release either has the pair or has
+    neither. The lakehouse sits next to the database in the release, so it is
+    found rather than named: a `--lakehouse` flag would be a second thing to get
+    right on a path that is already fixed by the export's own layout.
 
-    * **No local state** (a fresh runner — `release-data.yml`, `pages.yml`,
-      `nightly.yml`) — dlt queries the destination, finds no `_dlt_version`,
-      concludes the dataset is new and creates its bookkeeping. The carried rows
-      survive and the merge lands on them. This is the path the whole
-      carry-forward is built for, and it is measured: 44,936 carried weather
-      rows through a full load.
-    * **Local state** (any machine that has run `just ingest`) — dlt trusts what
-      it already knows, goes to update its stored schema and dies with
-      `Table with name _dlt_version does not exist!`.
-
-    Carrying dlt's bookkeeping along is *worse*, not better: dlt then believes
-    every table the schema describes is present, and the other merge resources
-    fail on the ones that were never carried (`DELETE FROM "raw"."ecb_fx_rates"
-    … does not exist`). `sync_destination()` does not help either — it keeps the
-    local schema rather than deferring to the destination.
-
-    So the remedy is to drop the state, not to work around it. That is also the
-    honest answer: a restored file is a destination the local state has never
-    described, and dlt already resets itself when a destination is empty.
+    A release that predates the lakehouse asset simply has no directory, which is
+    the same "restoring nothing is a normal outcome" rule the snapshot follows.
     """
-    raise RuntimeError(
-        f"dlt has local pipeline state at {state}, and this restore would carry a "
-        f"landing table into `{RAW_SCHEMA}`. dlt would then look for bookkeeping the "
-        "restored file does not have and fail with `Table with name _dlt_version "
-        "does not exist!`. Drop the state first — it describes a destination this "
-        f"restore is replacing:\n    rm -rf {state}\n"
-        "The next load re-fetches what that state was tracking (WDI's watermark), "
-        "which is eleven requests and free."
-    )
+    import tarfile
+    import tempfile
+
+    from lake import lakehouse
+
+    archive = source.parent / LAKEHOUSE_ASSET
+    if not archive.exists():
+        return {}
+    target = lakehouse_dir if lakehouse_dir is not None else lakehouse.LAKEHOUSE_DIR
+    with tempfile.TemporaryDirectory() as staging:
+        with tarfile.open(archive) as tar:
+            tar.extractall(staging, filter="data")
+        return lakehouse.restore(Path(staging) / "lakehouse", target)
 
 
 def irreplaceable_rows(duckdb_path: str | Path = DUCKDB_PATH) -> int:
@@ -230,6 +195,8 @@ def main() -> None:
     args = parser.parse_args()
 
     summary = run(args.source, args.warehouse, args.force)
+    for table, rows in summary.get("lakehouse", {}).items():
+        print(f"  {table:32} {rows:>8,} rows  (lakehouse)")
     if not summary["tables"]:
         print(f"nothing to carry forward from {summary['source']} — starting from empty")
         return

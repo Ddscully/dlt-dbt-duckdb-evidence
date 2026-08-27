@@ -2,7 +2,12 @@ version: 2
 
 sources:
   - name: raw
-    description: Landing tables loaded by the dlt pipeline.
+    description: >
+      Landing tables loaded by the dlt pipeline, in the DuckLake catalog under
+      data/lakehouse/ — not in the DuckDB file. `database: lakehouse` is the
+      ATTACH alias from profiles.yml and from `lake.lakehouse.ATTACH_ALIAS`;
+      the three have to agree or dbt cannot resolve a single source.
+    database: lakehouse
     schema: raw
     # Freshness here measures when *we* last loaded, not when the upstream
     # publisher last updated: dlt stamps every row with `_dlt_load_id`, a unix
