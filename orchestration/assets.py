@@ -46,8 +46,10 @@ from ingest.pipeline import (
     public_indicators,
 )
 from lake.lakehouse import (
+    ATTACH_ALIAS,
     LAKEHOUSE_DIR,
     WEATHER_TABLE,
+    read_only_connection,
     revisions as weather_revisions,
     rows as weather_rows,
     versions as table_versions_for,
@@ -639,10 +641,21 @@ def wdi_indicators_all_present() -> dg.AssetCheckResult:
     `_get_json` now raises on a non-2xx, but the World Bank also answers a bad
     indicator code with a 200 and an empty series — which would quietly become
     an all-null column in `stg_wdi` rather than a failure.
+
+    It reads the **lakehouse**, not the warehouse file. dlt lands `raw` in the
+    catalog now and `data/warehouse.duckdb` holds only what dbt builds, so the
+    old spelling was wrong in both directions at once: on a tree that predates
+    the move it passed against the stale pre-migration `raw.wb_wdi` still sitting
+    in that file, and on a fresh checkout it raised `Cannot open database … in
+    read-only mode` — the file does not exist until dbt has run, and this check
+    gates the ingest that comes before it.
     """
-    con = duckdb.connect(DUCKDB_PATH, read_only=True)
+    con = read_only_connection(LAKEHOUSE_DIR)
     try:
-        found = {r[0] for r in con.sql("select distinct indicator from raw.wb_wdi").fetchall()}
+        found = {
+            r[0]
+            for r in con.sql(f"select distinct indicator from {ATTACH_ALIAS}.raw.wb_wdi").fetchall()
+        }
     finally:
         con.close()
     missing = sorted(set(WB_WDI_INDICATORS) - found)

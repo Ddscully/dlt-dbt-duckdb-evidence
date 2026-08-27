@@ -13,7 +13,17 @@ shape as a check nobody registered — green, and measuring nothing.
 
 `AssetChecksDefinition` is callable, and none of these seven take a `context`,
 so they need no execution harness: point the module's `DUCKDB_PATH` at a
-throwaway file, call the check, read the `AssetCheckResult`.
+throwaway file — or its `LAKEHOUSE_DIR` at a throwaway catalog, for the checks
+that read `raw` — call the check, read the `AssetCheckResult`.
+
+**Which of the two a check reads is itself the thing to get right**, and
+patching only the warehouse hides it. `wdi_indicators_all_present` went on
+reading `DUCKDB_PATH` after the landing zone moved into DuckLake: these tests
+kept passing because they handed it a file that did have `raw.wb_wdi` in it,
+while CI could not open the warehouse at all at that point in the graph. So the
+lakehouse cases assert `indicators_loaded` as well as the verdict — an unpatched
+`LAKEHOUSE_DIR` reads the developer's real catalog, where the count is every
+configured indicator and the verdict alone still looks right.
 """
 
 from __future__ import annotations
@@ -24,6 +34,8 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from lake.lakehouse import ATTACH_ALIAS, catalog_path, data_path
+from modern_data_stack.ducklake import attach
 from orchestration.resources import dbt_project
 
 # Same guard as `tests/test_definitions.py`: `just test` runs before
@@ -59,6 +71,27 @@ def _warehouse(tmp_path: Path, *statements: str) -> str:
     return str(path)
 
 
+def _lakehouse(tmp_path: Path, *statements: str) -> Path:
+    """A throwaway DuckLake built from `statements`, returned as a directory str.
+
+    `_warehouse`'s counterpart for the landing zone. The layout comes from
+    `lake.lakehouse`'s own `catalog_path`/`data_path` rather than being spelled
+    again here, so a test cannot be built against a shape production does not
+    use. Statements run against the attached alias, so they name tables exactly
+    as the check does.
+    """
+    lakehouse_dir = tmp_path / "lakehouse"
+    data_path(lakehouse_dir).mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect()
+    try:
+        attach(con, catalog_path(lakehouse_dir), data_path(lakehouse_dir), alias=ATTACH_ALIAS)
+        for statement in statements:
+            con.execute(statement)
+    finally:
+        con.close()
+    return lakehouse_dir
+
+
 def _meta(result, key):
     """The plain Python value behind a `MetadataValue` on an `AssetCheckResult`."""
     value = result.metadata[key]
@@ -83,13 +116,14 @@ def _values_clause(rows: list[tuple]) -> str:
 
 
 def test_wdi_check_passes_when_every_configured_indicator_landed(tmp_path, monkeypatch, assets):
-    path = _warehouse(
+    lakehouse = _lakehouse(
         tmp_path,
-        "create schema raw",
-        "create table raw.wb_wdi (indicator varchar)",
-        "insert into raw.wb_wdi values ('NY.GDP.MKTP.KD'), ('NY.GDP.MKTP.KD'), ('SP.POP.TOTL')",
+        f"create schema {ATTACH_ALIAS}.raw",
+        f"create table {ATTACH_ALIAS}.raw.wb_wdi (indicator varchar)",
+        f"insert into {ATTACH_ALIAS}.raw.wb_wdi values "
+        "('NY.GDP.MKTP.KD'), ('NY.GDP.MKTP.KD'), ('SP.POP.TOTL')",
     )
-    monkeypatch.setattr(assets, "DUCKDB_PATH", path)
+    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lakehouse))
     monkeypatch.setattr(assets, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "SP.POP.TOTL"))
 
     result = assets.wdi_indicators_all_present()
@@ -104,19 +138,23 @@ def test_wdi_check_names_the_indicator_the_world_bank_answered_empty(tmp_path, m
     The table is non-empty and every other indicator is fine, so nothing in the
     load fails — the column just arrives all-null in `stg_wdi`.
     """
-    path = _warehouse(
+    lakehouse = _lakehouse(
         tmp_path,
-        "create schema raw",
-        "create table raw.wb_wdi (indicator varchar)",
-        "insert into raw.wb_wdi values ('NY.GDP.MKTP.KD')",
+        f"create schema {ATTACH_ALIAS}.raw",
+        f"create table {ATTACH_ALIAS}.raw.wb_wdi (indicator varchar)",
+        f"insert into {ATTACH_ALIAS}.raw.wb_wdi values ('NY.GDP.MKTP.KD')",
     )
-    monkeypatch.setattr(assets, "DUCKDB_PATH", path)
+    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lakehouse))
     monkeypatch.setattr(assets, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "EN.ATM.CO2E.PC"))
 
     result = assets.wdi_indicators_all_present()
 
     assert not result.passed
     assert _meta(result, "missing_indicators") == ["EN.ATM.CO2E.PC"]
+    # The count, not just the verdict: against an unpatched `LAKEHOUSE_DIR` this
+    # reads the real catalog, where `EN.ATM.CO2E.PC` is still absent and the two
+    # assertions above pass unchanged. This is the one that notices.
+    assert _meta(result, "indicators_loaded") == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -401,7 +439,7 @@ def test_rfm_check_fails_an_unsegmented_customer(tmp_path, monkeypatch, assets):
 # the check's own docstring.
 
 
-def _lakehouse(tmp_path: Path, loads: list[list[tuple]]):
+def _weather_lakehouse(tmp_path: Path, loads: list[list[tuple]]) -> Path:
     """A DuckLake holding `raw.om_weather_daily`, written once per entry in `loads`.
 
     Written through plain SQL rather than through dlt, because what is under
@@ -409,27 +447,26 @@ def _lakehouse(tmp_path: Path, loads: list[list[tuple]]):
     network-shaped dependency into a unit test. The `_dlt_*` columns are set to
     a fresh value on every write, which is exactly what dlt does and exactly
     what the diff has to ignore.
-    """
-    from modern_data_stack.ducklake import attach
 
-    lake_dir = tmp_path / "lh"
-    (lake_dir / "data").mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect()
-    attach(con, lake_dir / "catalog.duckdb", lake_dir / "data", alias="lakehouse")
-    con.execute("create schema if not exists lakehouse.raw")
+    The layout is `_lakehouse`'s, not its own. This helper spelled
+    `catalog.duckdb`, `data` and `lakehouse` out by hand until the WDI check
+    needed a catalog too, and a second copy under the same name simply shadowed
+    the first — Python takes the last `def`, so the earlier one was unreachable
+    rather than ambiguous.
+    """
+    statements = [f"create schema if not exists {ATTACH_ALIAS}.raw"]
     for n, rows in enumerate(loads):
         values = ", ".join(
             f"('{iso}', date '{day}', {temp}, 'load_{n}', 'id_{n}_{i}')"
             for i, (iso, day, temp) in enumerate(rows)
         )
-        con.execute("drop table if exists lakehouse.raw.om_weather_daily")
-        con.execute(
-            "create table lakehouse.raw.om_weather_daily as "
+        statements += [
+            f"drop table if exists {ATTACH_ALIAS}.raw.om_weather_daily",
+            f"create table {ATTACH_ALIAS}.raw.om_weather_daily as "
             "select * from (values " + values + ") as t"
-            "(country_iso3, weather_date, temperature_2m_mean, _dlt_load_id, _dlt_id)"
-        )
-    con.close()
-    return lake_dir
+            "(country_iso3, weather_date, temperature_2m_mean, _dlt_load_id, _dlt_id)",
+        ]
+    return _lakehouse(tmp_path, *statements)
 
 
 DAY1 = [("DEU", "2021-12-20", 3.5), ("FRA", "2021-12-20", 7.1)]
@@ -442,7 +479,7 @@ def test_weather_check_passes_when_nothing_was_restated(tmp_path, monkeypatch, a
     one `ducklake_table_changes()` gets wrong, reporting the whole window as
     revised. Zero is the right answer and the check must see it as healthy.
     """
-    lake_dir = _lakehouse(tmp_path, [DAY1, DAY1])
+    lake_dir = _weather_lakehouse(tmp_path, [DAY1, DAY1])
     monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lake_dir))
 
     result = assets.weather_revisions_are_derivable()
@@ -454,7 +491,7 @@ def test_weather_check_passes_when_nothing_was_restated(tmp_path, monkeypatch, a
 def test_weather_check_passes_a_genuine_restatement(tmp_path, monkeypatch, assets):
     """One temperature moves. The diff must find exactly that row."""
     restated = [("DEU", "2021-12-20", -0.5), ("FRA", "2021-12-20", 7.1)]
-    lake_dir = _lakehouse(tmp_path, [DAY1, restated])
+    lake_dir = _weather_lakehouse(tmp_path, [DAY1, restated])
     monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lake_dir))
 
     result = assets.weather_revisions_are_derivable()
@@ -474,7 +511,7 @@ def test_weather_check_fails_when_every_row_reads_as_revised(tmp_path, monkeypat
     thing the bound is actually asserting cannot happen.
     """
     all_moved = [("DEU", "2021-12-20", -9.9), ("FRA", "2021-12-20", -9.9)]
-    lake_dir = _lakehouse(tmp_path, [DAY1, all_moved])
+    lake_dir = _weather_lakehouse(tmp_path, [DAY1, all_moved])
     monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lake_dir))
 
     result = assets.weather_revisions_are_derivable()
@@ -487,7 +524,7 @@ def test_weather_check_is_green_on_a_first_load(tmp_path, monkeypatch, assets):
     """Every CI run is a first load, and a single-version catalog has nothing to
     diff. That is the honest state, not a broken build — the same shape as the
     restatements page rendering its "nothing revised yet" branch."""
-    lake_dir = _lakehouse(tmp_path, [DAY1])
+    lake_dir = _weather_lakehouse(tmp_path, [DAY1])
     monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lake_dir))
 
     result = assets.weather_revisions_are_derivable()
