@@ -86,9 +86,21 @@ its first source with a *finite budget*.
 - **This makes `raw.om_weather_daily` the second table a rebuild cannot
   reproduce, for a new reason.** `history.snap_co2_estimates` is unreproducible
   in *principle* — a snapshot is state. This one is unreproducible within a
-  *budget*, which is a weaker claim with the same consequence, and it reaches
-  everything that currently names one schema: `just clean warehouse`'s guard,
-  `release-data.yml`'s fatal restore step and its "did not shrink" verify.
+  *budget*, which is a weaker claim with the same consequence — so it is carried
+  forward by the same mechanism, and the guards that named one schema were
+  generalised to a tuple of `Carry` rules rather than duplicated (`just clean
+  warehouse`'s gate, `release-data.yml`'s restore step and its "did not shrink"
+  verify all count through `irreplaceable_rows()` now).
+  - **Carrying it only works where dlt has no local state, and that is why the
+    restore refuses rather than tries.** Landing it into `raw` creates that
+    schema; a fresh runner then finds no `_dlt_version`, treats the dataset as
+    new and merges onto the carried rows — 44,936 of them, measured. A machine
+    that has run `just ingest` trusts its own state instead and dies with
+    `Table with name _dlt_version does not exist!`. Carrying dlt's bookkeeping
+    along is worse, not better: dlt then expects every table the schema
+    describes, and `ecb_fx_rates` is the one that fails. `sync_destination()`
+    does not help. `scripts/restore_history.py` refuses when both conditions
+    hold and names `rm -rf ~/.dlt/pipelines/modern_data_stack` as the fix.
 - **A cold start fetches three years, not the whole series, and getting that
   wrong is a *hang* rather than a failure.** `WEATHER_FIRST_YEAR` (2007) is the
   backfill floor; `WEATHER_COLD_START_YEARS` is what an unpartitioned load asks

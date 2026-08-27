@@ -99,7 +99,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just backfill-weather 2012 2026` | deepen the capital-city weather archive one year at a time — paced against Open-Meteo's budget, so a decade is about an hour and fifteen years is the most one run can hold |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
 | `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
-| `just restore-history prev/warehouse.duckdb` | copy `history` out of a published release so `dbt build` appends to that snapshot |
+| `just restore-history prev/warehouse.duckdb` | copy the unreproducible tables (`history`, `raw.om_weather_daily`) out of a published release so the build appends to them — refuses if dlt has local state |
 | `just test` | `pytest` — mocked-payload unit tests, no network |
 | `just coverage` | the same with line + branch coverage; reports, gates nothing |
 | `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
@@ -357,12 +357,11 @@ is now a test too.
   `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`, `om_weather_daily`.
   **`om_weather_daily` is the second table a rebuild cannot reproduce** — not in
   principle, the way a snapshot isn't, but within Open-Meteo's daily allowance,
-  which is a weaker claim with the same consequence. **The three guards written
-  for the first one still name only `history`** — `just clean warehouse`'s gate,
-  `release-data.yml`'s fatal restore step and its "did not shrink" verify, plus
-  `history.restore`'s single `history_schema` parameter — and each of them
-  reaches this table too. The `weather-models` skill has the measurement that a
-  carried raw table works at all
+  which is a weaker claim with the same consequence. **It is carried forward
+  like the snapshot now**, and the three guards written for the first one were
+  generalised rather than duplicated — see *Publishing* below. The
+  `weather-models` skill has the measurement that a carried raw table works at
+  all
 - `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain —
   except `stg_fx_rates`, which is `(rate_date, quote_currency)`,
   `stg_retail_lines`, which is `(invoice, line_number)`, and
@@ -455,10 +454,13 @@ this is the only place a revision leaves a trace.
   found the places that had hardcoded the first: `release-data.yml` counted
   restored rows and asserted "history didn't shrink" against
   `history.snap_co2_estimates` by name, so a snapshot added later would have been
-  carried forward by `restore_history` but never verified. Both spots now sum
-  over every table in the schema. `scripts/restore_history.py` needed no change —
-  it copies the schema, not a table list — which is the reason to keep it that
-  way.
+  carried forward by `restore_history` but never verified. Both spots now count
+  through `CARRIED` instead. **"It copies the schema, not a table list" was the
+  reason to keep it that way, and carrying a *landing* table is what ended it**:
+  `history` may be copied whole because everything in it is unreproducible by
+  definition, while `raw` holds seven other tables plus dlt's bookkeeping and has
+  to be an allowlist. The rule carries its own guard with it — dbt's SCD2 columns
+  for a snapshot, dlt's `_dlt_load_id`/`_dlt_id` for a landing table.
 - **Verify a snapshot change by simulating a revision**, not by waiting for OWID:
   build, `update raw.owid_co2 set co2 = co2 * 1.05 where iso_code = 'DEU' and
   year = 2019` in a throwaway warehouse, build again, and check
@@ -890,14 +892,43 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
     unrelated fix in 2.x to guard one property; the tripwire lets the bump land
     and makes a person decide the format question with a red test naming it.
     `dagster<3.15` therefore remains the only hard upper bound in the tree.
-- **Each release carries the previous one's `history` forward**
+- **Each release carries the previous one's unreproducible tables forward**
   (`scripts/restore_history.py`), which is what makes the published snapshot
-  accumulate a real revision log instead of holding one version per row forever.
-  The restore runs *before* the graph, writing a history-only DuckDB file that
-  dlt then lands `raw` into — safe because dlt keys "is this destination fresh?"
-  on its own bookkeeping inside `raw`, not on the file existing (verified: a
-  fixture load into a restored file still fetched the full WDI series, not a
+  accumulate a real revision log instead of holding one version per row forever,
+  and what keeps the weather archive deepening instead of resetting to a
+  three-year cold start every month. The restore runs *before* the graph, so dlt
+  lands into a file that already exists — safe because dlt keys "is this
+  destination fresh?" on its own bookkeeping, not on the file existing (verified:
+  a fixture load into a restored file still fetched the full WDI series, not a
   five-year window).
+  - **Two reasons a table is carried, and one mechanism.** `history` is state *in
+    principle*: no rebuild invents a revision. `raw.om_weather_daily` is
+    unreproducible within a *budget* — the archive costs more than Open-Meteo's
+    10,000 units a day. Different arguments, identical consequence, so
+    `modern_data_stack.history` takes a tuple of `Carry` rules (schema, optional
+    table allowlist, the columns that prove the relation qualifies) and `carry`
+    has **no default**, for `db.write_frames`'s reason.
+  - **The allowlist is not a stylistic choice.** Copying `raw` whole would bring
+    dlt's `_dlt_loads`/`_dlt_version`/`_dlt_pipeline_state` with it, and dlt would
+    then believe every table the schema describes is present — the *other* merge
+    resources die on `DELETE FROM "raw"."ecb_fx_rates" … does not exist`. Measured,
+    along with the fact that carrying more bookkeeping makes it worse rather than
+    better.
+  - **Whether it works at all depends on dlt's *local* state, which is why the
+    failure is invisible in CI.** A fresh runner has no `~/.dlt`, so dlt queries
+    the destination, finds no `_dlt_version`, treats the dataset as new and merges
+    onto the carried rows — measured at 44,936 weather rows surviving a full load.
+    A machine that has run `just ingest` has state, trusts it, and dies with
+    `Table with name _dlt_version does not exist!`. `sync_destination()` does not
+    fix it. So `run()` **refuses** when a landing table would be carried and dlt
+    has local state, naming `rm -rf ~/.dlt/pipelines/modern_data_stack` as the
+    remedy — the restore is replacing the destination that state describes.
+    Carrying `history` alone never creates the `raw` schema and is unaffected,
+    which a test pins: the recipe that already worked has to keep working.
+  - **`irreplaceable_rows()` is the one count.** `just clean warehouse`'s gate,
+    the restore step's `restored_rows` and the "did not shrink" verify all call
+    it, so a rule added to `CARRIED` reaches all three at once instead of leaving
+    whichever was added last unguarded.
   - **Only "no previous release" may skip.** A failed download or restore is
     fatal in `release-data.yml`: continuing would publish an empty history that
     the *next* release then inherits, which is the exact failure the step
@@ -905,11 +936,14 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
     what was carried in. `pages.yml` runs the same step `continue-on-error`,
     because there the snapshot is a read-only display and a missing release
     should cost one section of one page, not the deploy.
-  - **It refuses to overwrite a destination that already holds history**, so
-    running it against the real warehouse can't destroy months of local versions
-    — `--force` if that is genuinely what you want. It also rejects a source
-    table lacking dbt's SCD2 columns, which would otherwise fail later and much
-    less legibly inside `dbt build`.
+  - **It refuses to overwrite a destination that already holds carried state**,
+    so running it against the real warehouse can't destroy months of local
+    versions — `--force` if that is genuinely what you want. It also rejects a
+    source relation missing the columns its rule requires, which would otherwise
+    fail later and much less legibly: a snapshot without dbt's SCD2 columns dies
+    inside `dbt build`, and a landing table without `_dlt_load_id`/`_dlt_id` dies
+    at the next load with DuckDB's `Adding columns with constraints not yet
+    supported`, dlt trying to add the column `NOT NULL` to a table with rows.
   - Verified end to end against fixtures rather than by waiting for OWID: export
     release 1, restore into a fresh warehouse, restate three country-years in
     `raw.owid_co2`, rebuild — 595 snapshot rows became 598 and

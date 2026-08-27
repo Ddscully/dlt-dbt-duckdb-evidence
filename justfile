@@ -409,23 +409,30 @@ clean scope="safe" force="":
     # which is a poor thing for a command that refused to do.
     #
     # Mirrors `scripts/restore_history.py`: the gate is not "is this scary", it
-    # is "is there history here to lose". An empty `history` schema (a fresh
-    # clone, a warehouse built but never snapshotted) has nothing a rebuild
-    # cannot reproduce, so it goes without ceremony. Rows there stop it until
+    # is "is there anything here a rebuild cannot make again". A warehouse with
+    # no snapshots and no carried landing tables (a fresh clone, or one built
+    # but never snapshotted) goes without ceremony. Anything else stops it until
     # `--force`, and the message names the count — the same shape, and the same
     # sentence, as the refusal in `modern_data_stack.history`.
     #
-    # Summed over every table in the schema, not over a named snapshot: there
-    # are two of them and anything naming one has to name both.
+    # The count comes from `irreplaceable_rows()` rather than SQL written out
+    # here, because there are now two *kinds* of unreproducible table and the
+    # list will grow again: the `history` snapshots, and `raw.om_weather_daily`,
+    # which is bounded by Open-Meteo's daily budget rather than by principle.
+    # A gate with its own copy of the list is a gate that waves through whatever
+    # was added last.
     if [ "{{ scope }}" = "warehouse" ]; then
       if [ ! -e data/warehouse.duckdb ]; then
         echo "  data/warehouse.duckdb is already gone"
       else
-        history_rows='import duckdb; from modern_data_stack.db import scalar; con = duckdb.connect("data/warehouse.duckdb", read_only=True); q = "select table_name from information_schema.tables where table_schema = ?"; tables = [r[0] for r in con.execute(q, ["history"]).fetchall()]; print(sum(scalar(con, f"select count(*) from history.{t}") for t in tables))'
-        held=$(uv run python -c "$history_rows") || held=""
+        # The path is passed explicitly rather than left to `warehouse_path()`:
+        # the deletion below names `data/warehouse.duckdb`, so the gate has to
+        # count that file and not whatever `WAREHOUSE_PATH` currently points at.
+        count='from scripts.restore_history import irreplaceable_rows; print(irreplaceable_rows("data/warehouse.duckdb"))'
+        held=$(uv run python -c "$count") || held=""
         # An unreadable count must refuse, not fall through. `[ "" -gt 0 ]` is an
         # error, but inside an `if` that reads as *false* and `set -e` does not
-        # fire — so a warehouse whose history could not be counted would have
+        # fire — so a warehouse whose state could not be counted would have
         # been deleted by the safe-looking branch. Fail closed instead.
         #
         # `--force` deliberately does not override this one. The check cannot
@@ -434,14 +441,14 @@ clean scope="safe" force="":
         # escape hatch, and it is the right amount of friction.
         case "$held" in
           ''|*[!0-9]*)
-            echo "could not read the history row count from data/warehouse.duckdb" >&2
+            echo "could not count the unreproducible rows in data/warehouse.duckdb" >&2
             echo "(locked by another process?) — refusing to delete it" >&2
             exit 1
             ;;
         esac
         if [ "$held" -gt 0 ] && [ "{{ force }}" != "--force" ]; then
-          echo "data/warehouse.duckdb holds $held rows of snapshot history — refusing" >&2
-          echo "to delete history that a rebuild cannot reproduce. Pass --force if" >&2
+          echo "data/warehouse.duckdb holds $held rows a rebuild cannot make again" >&2
+          echo "(snapshot history and carried landing tables). Pass --force if" >&2
           echo "that is really what you want:" >&2
           echo "  just clean warehouse --force" >&2
           echo "A published release can restore some of it: just restore-history <file>" >&2

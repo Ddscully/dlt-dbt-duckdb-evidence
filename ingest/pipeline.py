@@ -1385,6 +1385,24 @@ def load_groups(resources: Iterable[str] | None = None) -> list[tuple[list[str],
     return groups
 
 
+# The dataset dlt loads into — the `raw` schema every landing table lands in.
+# Named because `scripts/restore_history.py` carries a table *into* it and has to
+# agree with this about which schema that is.
+PIPELINE_DATASET = "raw"
+
+
+def pipeline_name() -> str:
+    """`modern_data_stack`, or `modern_data_stack_fixtures` under fixtures.
+
+    A function rather than a constant because `fixtures.enabled()` reads the
+    environment, which a test may set after import. Split out of
+    `build_pipeline` because the restore script needs the name to locate dlt's
+    *local* state directory, and must do so without building a pipeline —
+    constructing one is what would create the state it is checking for.
+    """
+    return f"modern_data_stack{'_fixtures' if fixtures.enabled() else ''}"
+
+
 def build_pipeline() -> dlt.Pipeline:
     """The one dlt pipeline definition, shared by the CLI and the Dagster assets.
 
@@ -1421,11 +1439,10 @@ def build_pipeline() -> dlt.Pipeline:
     # place to remember.
     os.environ.setdefault("NORMALIZE__PARQUET_NORMALIZER__ADD_DLT_LOAD_ID", "true")
 
-    suffix = "_fixtures" if fixtures.enabled() else ""
     return dlt.pipeline(
-        pipeline_name=f"modern_data_stack{suffix}",
+        pipeline_name=pipeline_name(),
         destination=dlt.destinations.duckdb(DUCKDB_PATH),
-        dataset_name="raw",
+        dataset_name=PIPELINE_DATASET,
     )
 
 
