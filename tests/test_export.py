@@ -5,6 +5,14 @@ These build a miniature warehouse in a tmp dir rather than reading
 real pipeline has been run. What's worth asserting is the packaging contract, not
 the numbers: which schemas ship, that the manifest describes what's on disk, and
 that the `staging` views still resolve after the database is copied.
+
+**That independence was briefly untrue and passed anyway**, which is the reason
+`lakehouse_dir` is now pinned by the fixture rather than defaulted. The second
+release asset is built from `lake.lakehouse.LAKEHOUSE_DIR`, so the exporter's
+output shape depended on whether the developer's machine had ingested: an empty
+`data/lakehouse/` gave five SHA256SUMS lines and a populated one gave six. CI
+builds from nothing, so it would never have gone red there — only on the machine
+of anyone who had run `just ingest` once.
 """
 
 from __future__ import annotations
@@ -22,6 +30,7 @@ from test_fixtures import ALL_URLS
 
 from modern_data_stack import export as _export
 from modern_data_stack.db import scalar
+from modern_data_stack.ducklake import meta_alias
 from modern_data_stack.export import storage_version
 from scripts.export_warehouse import (
     ATTRIBUTION,
@@ -83,7 +92,16 @@ def export(warehouse: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     """
     monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
     out = tmp_path / "export"
-    manifest = run(str(warehouse), str(out), tag="data-1999-12-31", repo="acme/demo")
+    # An empty directory, named rather than defaulted: see the module docstring.
+    # This is the no-lakehouse shape, which is a legitimate export and the one
+    # every other test here wants to be looking at.
+    manifest = run(
+        str(warehouse),
+        str(out),
+        tag="data-1999-12-31",
+        repo="acme/demo",
+        lakehouse_dir=tmp_path / "no-lakehouse",
+    )
     manifest["out"] = out
     return manifest
 
@@ -462,3 +480,158 @@ def test_the_release_attribution_and_the_readme_agree_on_the_licences():
     assert not orphaned, (
         f"README's License section links sources the release attribution does not: {orphaned}"
     )
+
+
+# --------------------------------------------------------------------------
+# The second release asset
+#
+# `lakehouse.tar.gz` had no test at all until 2026-08-27, which is how the
+# ambient-directory bug above stayed green. It is a *published artifact*, so it
+# earns one on this repo's own terms — and the three properties below are the
+# ones a consumer or the next release actually depends on.
+# --------------------------------------------------------------------------
+
+# Two tables, and only one of them may ship. `PUBLISHED_TABLES` is an allowlist
+# rather than a denylist because a published DuckLake cannot be filtered after
+# the fact — see `test_a_table_outside_the_allowlist_is_absent_at_every_version`.
+LAKEHOUSE_SETUP = [
+    (
+        "raw.om_weather_daily",
+        """
+        select * from (values ('DEU', date '2021-12-20', 3.5, 'load_1', 'id_1'),
+                              ('FRA', date '2021-12-20', 7.1, 'load_1', 'id_2'))
+            t(country_iso3, weather_date, temperature_2m_mean, _dlt_load_id, _dlt_id)
+        """,
+    ),
+    (
+        "raw.retail_invoice_lines",
+        "select * from (values (17850, 'a-clear-customer-id')) t(customer_id, note)",
+    ),
+]
+
+
+@pytest.fixture
+def lakehouse_dir(tmp_path: Path) -> Path:
+    """A miniature DuckLake holding one publishable table and one that is not."""
+    from modern_data_stack.ducklake import attach
+
+    lake = tmp_path / "lakehouse"
+    (lake / "data").mkdir(parents=True)
+    con = duckdb.connect()
+    attach(con, lake / "catalog.duckdb", lake / "data", alias="lh")
+    con.execute("create schema lh.raw")
+    for table, body in LAKEHOUSE_SETUP:
+        con.execute(f"create table lh.{table} as {body}")
+    con.close()
+    return lake
+
+
+@pytest.fixture
+def export_with_lakehouse(
+    warehouse: Path, lakehouse_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> dict:
+    monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
+    out = tmp_path / "export-lh"
+    manifest = run(
+        str(warehouse),
+        str(out),
+        tag="data-1999-12-31",
+        repo="acme/demo",
+        lakehouse_dir=lakehouse_dir,
+    )
+    manifest["out"] = out
+    return manifest
+
+
+def _unpack(manifest: dict, into: Path) -> Path:
+    import tarfile
+
+    with tarfile.open(manifest["out"] / manifest["lakehouse"]["file"]) as tar:
+        # `filter="data"` is the 3.14 default and a DeprecationWarning before it.
+        tar.extractall(into, filter="data")
+    return into / "lakehouse"
+
+
+def test_the_landing_zone_ships_as_a_second_asset_and_is_checksummed(
+    export_with_lakehouse: dict, tmp_path: Path
+):
+    """The tarball is a file in the release like any other, so `sha256sum -c`
+    has to cover it. It does only because SHA256SUMS is produced by *walking*
+    the export directory — a list built from what the exporter thinks it wrote
+    would have shipped the first hook-written artifact unverified."""
+    lh = export_with_lakehouse["lakehouse"]
+    assert lh["file"] == "lakehouse.tar.gz"
+    assert lh["tables"] == {"raw.om_weather_daily": 2}
+    assert lh["rows"] == 2
+
+    archive = export_with_lakehouse["out"] / lh["file"]
+    assert lh["bytes"] == archive.stat().st_size
+
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    lines = (export_with_lakehouse["out"] / "SHA256SUMS").read_text().splitlines()
+    assert f"{digest}  lakehouse.tar.gz" in lines
+    assert len(lines) == len(export_with_lakehouse["tables"]) + 2
+
+
+def test_the_published_catalog_opens_with_a_bare_attach_from_anywhere(
+    export_with_lakehouse: dict, tmp_path: Path
+):
+    """The whole reason `publish` rewrites `data_path` to a relative form.
+
+    DuckLake stores that path verbatim and refuses an attach that disagrees with
+    it, so an absolute one would force every consumer to pass
+    `OVERRIDE_DATA_PATH`. Measured here rather than assumed, including the part
+    that is easy to get wrong in the other direction: the relative path resolves
+    against the *catalog file*, not the process working directory, so unpacking
+    it anywhere and opening it from anywhere both work.
+    """
+    unpacked = _unpack(export_with_lakehouse, tmp_path / "consumer")
+
+    with duckdb.connect(str(unpacked / "catalog.duckdb")) as meta:
+        assert (
+            scalar(meta, "select value from ducklake_metadata where key = 'data_path'") == "data/"
+        )
+
+    con = duckdb.connect()
+    con.execute("install ducklake")
+    con.execute("load ducklake")
+    # No `data_path` option and no chdir — exactly what a consumer would type.
+    con.execute(f"attach 'ducklake:duckdb:{unpacked / 'catalog.duckdb'}' as lh (read_only)")
+    assert scalar(con, "select count(*) from lh.raw.om_weather_daily") == 2
+    con.close()
+
+
+def test_a_table_outside_the_allowlist_is_absent_at_every_version(
+    export_with_lakehouse: dict, tmp_path: Path
+):
+    """The privacy property, and it is why the catalog is *built* rather than
+    copied-and-pruned.
+
+    DuckLake keeps dropped tables in earlier snapshots: `select * from
+    lh.raw.secret at (version => 2)` returns the rows after a `drop table`, and
+    when this was measured on the real landing zone it returned a customer id.
+    So "ship the catalog, then drop what should not be in it" is not a
+    mitigation at all, and the assertion that matters is over *every* snapshot
+    rather than the current one.
+    """
+    unpacked = _unpack(export_with_lakehouse, tmp_path / "consumer")
+
+    con = duckdb.connect()
+    con.execute("install ducklake")
+    con.execute("load ducklake")
+    con.execute(f"attach 'ducklake:duckdb:{unpacked / 'catalog.duckdb'}' as lh (read_only)")
+
+    # DuckLake attaches its catalog as a sibling *database*, not a schema inside
+    # the lake — `meta_alias` is the one place that name is written down.
+    meta = meta_alias("lh")
+    names = [r[0] for r in con.execute(f"select table_name from {meta}.ducklake_table").fetchall()]
+    assert names == ["om_weather_daily"], f"published catalog holds {names}"
+
+    for snapshot in [
+        r[0] for r in con.execute("select snapshot_id from lh.snapshots()").fetchall()
+    ]:
+        with pytest.raises(duckdb.Error):
+            con.execute(
+                f"select * from lh.raw.retail_invoice_lines at (version => {snapshot})"
+            ).fetchall()
+    con.close()

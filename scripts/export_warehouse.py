@@ -212,8 +212,13 @@ def classifications(manifest_path: str = MANIFEST_PATH) -> dict[tuple[str, str, 
     return privacy.classifications(json.loads(path.read_text())) | EXTRA_CLASSIFICATIONS
 
 
-def publish_lakehouse(dest_dir: Path) -> dict:
+def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -> dict:
     """Write the publishable landing tables to `<dest_dir>/lakehouse/`.
+
+    `lakehouse_dir` is a parameter rather than the module constant because
+    reading the ambient one made this function's *output shape* depend on the
+    developer's machine, and the test that covered it passed for that reason.
+    See `tests/test_export.py`.
 
     A second release asset rather than a schema inside the first, because they
     are different kinds of thing: `warehouse.duckdb` is what dbt built and is
@@ -231,6 +236,8 @@ def publish_lakehouse(dest_dir: Path) -> dict:
 
     from lake import lakehouse
 
+    lake_dir = lakehouse.LAKEHOUSE_DIR if lakehouse_dir is None else Path(lakehouse_dir)
+
     # **Absent is recorded, never skipped silently.** A warehouse with no
     # lakehouse beside it is a legitimate thing to export — `tests/test_export.py`
     # builds one, and so would anyone packaging a database from elsewhere — but in
@@ -239,12 +246,12 @@ def publish_lakehouse(dest_dir: Path) -> dict:
     # carries `"rows": 0` and an empty table map rather than omitting the key,
     # which gives `release-data.yml` something to assert on. An absent key can
     # only be checked by code that remembers to look for it.
-    if not lakehouse.is_catalog():
+    if not lakehouse.is_catalog(lake_dir):
         return {"lakehouse": {"file": None, "tables": {}, "rows": 0}}
 
     with tempfile.TemporaryDirectory() as staging:
         built = Path(staging) / "lakehouse"
-        copied = lakehouse.publish(built)
+        copied = lakehouse.publish(built, lake_dir)
         # **A catalog holding none of the published tables is absent, not empty.**
         # dbt's `ATTACH IF NOT EXISTS` creates a real DuckLake — metadata table
         # and all — on any build that runs before the first ingest, so
@@ -671,8 +678,14 @@ def run(
     out_dir: str = EXPORT_DIR,
     tag: str | None = None,
     repo: str | None = None,
+    lakehouse_dir: str | Path | None = None,
 ) -> dict:
-    """Build `out_dir` from `duckdb_path`. Returns the manifest."""
+    """Build `out_dir` from `duckdb_path`. Returns the manifest.
+
+    `lakehouse_dir` defaults to the project's, and exists so a caller packaging a
+    database from somewhere else — or a test — can say which landing zone goes
+    with it instead of picking up whichever one happens to be on the machine.
+    """
     if not Path(duckdb_path).exists():
         raise FileNotFoundError(f"no warehouse at {duckdb_path} — run `just run` first")
     return export(
@@ -686,7 +699,7 @@ def run(
         grain="(country_iso3, year)",
         extra_manifest=lambda con: {"history": _history(con)},
         prepare_copy=prepare_published_copy,
-        extra_artifacts=publish_lakehouse,
+        extra_artifacts=lambda dest: publish_lakehouse(dest, lakehouse_dir),
         max_storage_version=MAX_PUBLISHED_STORAGE_VERSION,
     )
 
@@ -704,7 +717,11 @@ def main() -> None:
     args = parser.parse_args()
 
     manifest = run(args.warehouse, args.out, args.tag, args.repo)
-    assets = len(manifest["tables"]) + 1
+    # Parquet, plus the database, plus the landing zone when there is one — the
+    # count is printed to a person deciding whether the release looks right, so
+    # a hardcoded `+ 1` that silently ignored the second asset would understate
+    # exactly the artifact most likely to be missing.
+    assets = len(manifest["tables"]) + 1 + (1 if manifest["lakehouse"]["file"] else 0)
     total = manifest["warehouse"]["bytes"] + sum(t["bytes"] for t in manifest["tables"])
     print(f"{manifest['tag']}: {assets} assets, {total / 1e6:.1f} MB in {args.out}")
     for table in manifest["tables"]:

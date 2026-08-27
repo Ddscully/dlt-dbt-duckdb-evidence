@@ -298,14 +298,27 @@ backfill-weather start end='': dbt-parse
 # machine happened to have. Note that `just --list` shows only the LAST comment
 # line above a recipe, so that line has to be the summary.
 #
+# **The lakehouse has to be attached, or a third of the warehouse does not open.**
+# `raw` lives in DuckLake now and the nine `staging` models are *views* over it,
+# so a bare `duckdb data/warehouse.duckdb` binds `marts`, `analytics` and
+# `history` fine and fails every staging view with `Catalog "lakehouse" does not
+# exist!`. That is the mirror of the trap the release guards from the other side
+# — a published copy renamed away from `warehouse` breaks its views the same way
+# — and the export solves it by materialising staging (`solidify_staging`), which
+# is exactly what an interactive session cannot do.
+#
+# Attached in the same mode as the warehouse, so `just sql write` can fix a
+# landing table and the default cannot touch one by accident.
+#
 # Open the warehouse in the DuckDB CLI (`just sql write` for a writer)
 sql mode="read":
     #!/usr/bin/env bash
     set -euo pipefail
+    attach="install ducklake; load ducklake; attach 'ducklake:duckdb:$LAKEHOUSE_DIR/catalog.duckdb' as lakehouse (data_path '$LAKEHOUSE_DIR/data/'"
     if [ "{{ mode }}" = "write" ]; then
-      uv run duckdb data/warehouse.duckdb
+      uv run duckdb data/warehouse.duckdb -cmd "$attach);"
     else
-      uv run duckdb -readonly data/warehouse.duckdb
+      uv run duckdb -readonly data/warehouse.duckdb -cmd "$attach, read_only);"
     fi
 
 # Lint SQL — from dbt/, because the dbt templater opens the warehouse via the

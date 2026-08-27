@@ -106,7 +106,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
 | `just lint` | `sqlfluff lint dbt/models dbt/snapshots` |
 | `just typecheck` | `ty check` — Python type diagnostics; reports, gates nothing |
-| `just sql` | open the warehouse in the DuckDB CLI, read-only (`just sql write` to write) |
+| `just sql` | open the warehouse in the DuckDB CLI with the lakehouse attached, read-only (`just sql write` to write) |
 | `just clean` | delete the gitignored build output (`deep` also drops `reports/node_modules`) |
 
 Always run tools through `uv run` so they use the project venv. dbt commands
@@ -844,12 +844,37 @@ survives a format that content-addresses its files and prunes on statistics.
   `…-delete.parquet` of `(file_path, pos)`, which makes a glob fail on the schema
   mismatch or — excluded by name — return **both** versions of the row.
 - **The catalog stores its `data_path` as given, and that decides portability.**
-  Absolute (what this repo writes) means a consumer needs
+  Absolute (what the *working* copy holds) means a consumer needs
   `ATTACH … (OVERRIDE_DATA_PATH true)` or a one-row rewrite of
-  `ducklake_metadata`; relative relocates with a bare `ATTACH`. Absolute is right
-  here because dlt reads it from the repo root and dbt from `dbt/`, which no
-  relative path serves — and because the lakehouse is not published. **Publishing
-  it would make relative mandatory**, and that is the open decision below.
+  `ducklake_metadata`; relative is what the published copy holds and what a bare
+  `ATTACH` needs. Absolute is right for the working copy because dlt reads it
+  from the repo root and dbt from `dbt/`, which no relative path serves; the form
+  is rewritten at each boundary (`publish` out, `restore` in).
+  - **A relative `data_path` resolves against the catalog *file*, not the process
+    working directory** — measured both ways, from the unpacked directory and
+    from its parent, and the bare `ATTACH` reads the same rows from either. That
+    is stronger than "relocatable" and is what lets the consumer instruction be
+    one line with no `cd` in it. `tests/test_export.py` pins it.
+- **`just sql` attaches the lakehouse, and without it a third of the warehouse
+  does not open.** The nine `staging` models are *views* over `lakehouse.raw`, so
+  a bare `duckdb data/warehouse.duckdb` binds the 26 `marts`/`analytics`/`history`
+  relations and fails every one of the 9 staging views with `Catalog "lakehouse"
+  does not exist!`. This is the `Catalog "warehouse" does not exist` trap from the
+  other side, and the export already solves its own half by materialising staging
+  (`solidify_staging`) — which is exactly what an interactive session cannot do.
+  The recipe attaches in the same mode as the warehouse, so `just sql write` can
+  repair a landing table and the default cannot touch one by accident.
+- **A tree that predates the move has to be migrated, and nothing says so.** A
+  fresh clone cold-starts and a release restore carries the tarball, but a
+  working tree that already held `raw` inside `data/warehouse.duckdb` gets
+  neither: dbt reads `lakehouse.raw`, the catalog is empty, and the weather
+  watermark reads null — so the next ingest cold-starts at
+  `WEATHER_COLD_START_YEARS` and *silently* ignores however many years the old
+  file holds. Nothing is lost and nothing goes red; the archive is simply in the
+  wrong file. Carrying `raw.om_weather_daily` across with its
+  `_dlt_load_id`/`_dlt_id` is the whole of the fix, and it is the same shape as
+  `restore` — dlt finds no `_dlt_version`, calls the dataset new, and merges onto
+  the carried rows.
 - **It is the only copy of every landing table, so `just clean` still does not
   take it** — and the reason got stronger. Deleting it costs the snapshot lineage
   *and* the weather archive, which is days of Open-Meteo budget. Both silently.
@@ -890,6 +915,23 @@ survives a format that content-addresses its files and prunes on statistics.
     by listing what the code thinks it wrote. The two were identical while the
     release was a database and some Parquet; the first artifact written by a hook
     would have shipped unverified with nothing to say so.
+  - **The exporter takes `lakehouse_dir` as a parameter, and defaulting it made a
+    test pass for the wrong reason.** `publish_lakehouse` read the module
+    constant, so the *shape of the export* depended on whether the machine had
+    ingested: an empty `data/lakehouse/` gave five `SHA256SUMS` lines and a
+    populated one gave six, and `test_sha256sums_is_checkable` asserted five. It
+    was green at commit time because the lakehouse happened to be empty, and it
+    would have stayed green in CI forever — CI builds from nothing. It only fails
+    on the machine of anyone who has run `just ingest` once. The fixture names an
+    empty directory now instead of inheriting one.
+  - **The second release asset had no test at all**, which is how the above
+    survived. It is a *published artifact*, so it earns three on this repo's own
+    terms, and each was confirmed by mutation: the tarball is checksummed (walk
+    the directory, not the list); the published catalog opens with a **bare**
+    `ATTACH` from any working directory; and a table outside `PUBLISHED_TABLES`
+    is absent **at every snapshot**, not merely the current one — which is the
+    assertion that matters, because time travel is what makes
+    copy-then-drop useless as a mitigation.
   - **dbt's `ATTACH IF NOT EXISTS` leaves an empty DuckDB file** at the catalog
     path on any build that runs before the first ingest, and a read-only attach
     of *that* fails with `Existing DuckLake … does not exist - and creating a new
