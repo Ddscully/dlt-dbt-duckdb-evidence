@@ -40,7 +40,9 @@ from orchestration.resources import dbt_project
 
 # Same guard as `tests/test_definitions.py`: `just test` runs before
 # `dbt deps && dbt parse` in ci.yml, and importing `orchestration.assets` needs
-# the manifest that parse writes. CI re-runs this file after the parse step.
+# the manifest that parse writes. Unlike `test_definitions.py`, CI does *not*
+# re-run this file after the parse step — that step names that file, not the
+# suite — so these bodies meet real wiring only in a materialize.
 pytestmark = pytest.mark.skipif(
     not dbt_project.manifest_path.exists(),
     reason="needs dbt/target/manifest.json — run `just dbt-deps` and `dbt parse` first",

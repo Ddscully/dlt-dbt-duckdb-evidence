@@ -908,6 +908,18 @@ survives a format that content-addresses its files and prunes on statistics.
     catalog recording `../data/lakehouse/data/`, which `lake.lakehouse` then
     could not open — and the error names a path nobody typed. `WAREHOUSE_PATH`
     gets away with a relative default because a plain file keeps no such record.
+    - **No workflow goes through `just`, so all four needed the same line, and
+      the DuckLake move shipped without it.** They run `uv run dagster job
+      execute` directly, and only `ci.yml` set any path at all (`WAREHOUSE_PATH`,
+      absolute, for the reason above). dlt writes the catalog from the repo root
+      and records an absolute `data_path`; dbt then resolves `profiles.yml`'s
+      relative default from `dbt/`, and DuckLake compares the two **as strings**
+      — so *the same directory under two spellings* is refused with `DATA_PATH
+      parameter "../data/lakehouse/data/" does not match existing data path`.
+      The failure is in `dbt build`, one layer downstream of the layer that
+      chose the spelling. It cannot be reproduced by any recipe, because every
+      recipe exports the variable that hides it: a faithful run has to unset
+      `LAKEHOUSE_DIR` and work in a clone, or it proves nothing.
   - **A tarball rather than loose files**, because a GitHub release asset is a
     file and a DuckLake is a directory. One asset also means one line in
     `SHA256SUMS`, so `sha256sum -c` still covers the whole release.
@@ -1523,6 +1535,28 @@ Two tiers, and the split is the point — see [`tests/README.md`](tests/README.m
 
 Gotchas:
 
+- **No routine command evaluates an asset check body, which is how one can read
+  the wrong database for a week.** `just test-pipeline` runs the four modules in
+  shell order and never calls `dagster job execute`, so it evaluates none of
+  them. `tests/test_asset_checks.py` calls them directly, but skips itself
+  wherever `dbt/target/manifest.json` is absent — which is CI's unit-test step,
+  and the parse step after it re-runs `tests/test_definitions.py` *by name*
+  rather than the suite, so in CI that file never runs at all. What is left is a
+  full materialize and a developer's own `just test` after a `dbt parse`.
+  - **Patching the database under a check proves its logic and never its
+    wiring**, which is the half that broke: `wdi_indicators_all_present` went on
+    reading `data/warehouse.duckdb` after the landing zone moved into DuckLake,
+    and both tests kept passing because they handed it a throwaway file that did
+    contain `raw.wb_wdi`. On a tree that predates the move the real warehouse
+    *also* still holds a stale `raw`, so the check passed against a copy of a
+    table that no longer lives there — see the migration bullet under *The
+    lakehouse*.
+  - **A check's verdict is not enough to assert.** Pointed at the lakehouse, the
+    healthy-half test failed loudly and the failing-half test stayed green: it
+    asserts a bogus indicator is missing, and it is missing from the real
+    catalog too. It asserts the *count* now, which is the assertion that
+    notices — the same shape as an export test that passed because the machine
+    happened not to have ingested.
 - **The way a test here earns its place is mutation**: break the model in a
   plausible way against a *copy* of the warehouse, run its full data-test suite,
   and record the number that moves. "Nothing went red" is the finding, not the

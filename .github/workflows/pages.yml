@@ -70,6 +70,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # No INGEST_FIXTURES: see the note at the top.
+      # Absolute for the same reason, and here it is not merely tidiness: dlt
+      # writes the catalog from the repo root, so DuckLake records an *absolute*
+      # data_path, while dbt resolves profiles.yml's relative default from dbt/.
+      # DuckLake stores the path as given and compares the two as strings, so
+      # one directory under two spellings is refused — `DATA_PATH parameter
+      # "../data/lakehouse/data/" does not match existing data path`.
+      LAKEHOUSE_DIR: ${{ github.workspace }}/data/lakehouse
       DAGSTER_HOME: ${{ github.workspace }}/.dagster
     steps:
       - uses: actions/checkout@v7
