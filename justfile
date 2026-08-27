@@ -238,15 +238,22 @@ backfill-wdi start end='': dbt-parse
         -m orchestration.definitions --select 'raw/wb_wdi' \
         --partition-range "{{ start }}...${end:-{{ start }}}"
 
-# Deepen the capital-city weather archive: `just backfill-weather 2007 2023`.
+# Deepen the capital-city weather archive: `just backfill-weather 2012 2026`.
 # A routine load only fetches the last few years (WEATHER_COLD_START_YEARS), and
 # ERA5 reaches back to 1940, so this is how the history gets there — and unlike
 # `backfill-wdi` it is **slow on purpose**.
 # Open-Meteo's free tier allows 600 units a minute, 5,000 an hour and 10,000 a
 # day, one year of 41 capitals costs ~641, and the resource paces itself against
-# all three windows. So a decade is roughly two hours of mostly waiting, and
-# asking for more than about fifteen years in one go will exhaust the daily
-# budget and stop with a message saying so.
+# all three windows. So a decade is about an hour of mostly waiting, and
+# **fifteen years is the most one run can hold**: 2012-2026 is 9,401 units, 94%
+# of the day's allowance, and sixteen goes over it.
+#
+# Going over does not fail — it *sleeps*. The limiter honours the daily window by
+# waiting for it to drain, so a seventeen-year range paces for two hours and then
+# sits for twenty-two more with nothing on stdout. That is the same hang
+# `WEATHER_COLD_START_YEARS` exists to keep out of the three live workflows,
+# reached from the backfill side instead, so split a deeper history across two
+# days rather than rounding the range up.
 #
 # The rows are carried forward into the next release, which is what makes this
 # worth doing once rather than every run — see `scripts/restore_history.py`.

@@ -843,7 +843,7 @@ WEATHER_EXPECTED_UNITS = {
 # The earliest year worth asking for: 2007 is the first year Eurostat publishes
 # an electricity price, so it is the floor of the span the payoff joins to. ERA5
 # itself reaches back to 1940 and `raw/om_weather_daily` is year-partitioned, so
-# this is not a limit either — `just backfill-weather 1990 2006` goes deeper
+# this is not a limit either — `just backfill-weather 1997 2006` goes deeper
 # whenever someone decides to spend the budget.
 #
 # **It is deliberately not where a cold start begins.** See
