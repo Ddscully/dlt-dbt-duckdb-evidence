@@ -9,9 +9,6 @@
     "polars": {
       "source": { "source": "github", "repo": "polars-inc/skills" }
     },
-    "duckdb-skills": {
-      "source": { "source": "github", "repo": "duckdb/duckdb-skills" }
-    },
     "modern-data-stack": {
       "source": { "source": "directory", "path": "./.claude/marketplace" }
     },
@@ -23,9 +20,7 @@
     "dbt@dbt-agent-marketplace": true,
     "dagster-expert@dagster": true,
     "polars@polars": true,
-    "duckdb-skills@duckdb-skills": true,
     "ty-lsp@modern-data-stack": true,
-    "astral@astral-sh": true,
     "skill-creator@claude-plugins-official": true
   },
   "permissions": {

@@ -265,8 +265,6 @@ knowledge.
 | `dbt@dbt-agent-marketplace` | [dbt Labs' skills](https://github.com/dbt-labs/dbt-agent-skills) — models, tests, docs, debugging |
 | `dagster-expert@dagster` | [Dagster's skills](https://github.com/dagster-io/skills) — assets, automation, CLI |
 | `polars@polars` | [Polars' skill](https://github.com/polars-inc/skills) — idiomatic lazy-API Polars |
-| `duckdb-skills@duckdb-skills` | [DuckDB's skills](https://github.com/duckdb/duckdb-skills) — querying, file formats, docs search |
-| `astral@astral-sh` | [Astral's skills](https://github.com/astral-sh/claude-code-plugins) — uv, ruff and ty, the three tools this repo's Python half is built on |
 | `skill-creator@claude-plugins-official` | authoring and evaluating the project skills below — the one entry here that is about the repo's own tooling rather than a layer of the stack |
 
 Not enabled, but worth knowing about: `dbt-migration@dbt-agent-marketplace`
@@ -293,26 +291,58 @@ project declaration re-registers it on the next session, because the source is
 right there in the tree. Removing a `github` one (`astral-sh`) *uninstalls its
 plugins*, and the project declaration does **not** silently bring it back: a
 re-register needs a clone, which a non-interactive session will not do. The
-cache directory survives, so the only symptom is `Total LSP servers loaded: 1`
+cache directory survives, so the only symptom was `Total LSP servers loaded: 1`
 in the debug log and three skills quietly missing. The user-level entry for a
 github marketplace is therefore not duplication of the project one — leave it.
 
-**`ty-lsp` must stay above `astral` in `enabledPlugins`, and the reason is
-invisible.** Both declare a language server for `.py`, and the first one loaded
-wins — the loser is a `[WARN]` in `~/.claude/debug/latest` that nothing surfaces.
-Astral's runs `uvx ty@latest server`, the newest published ty on every launch,
-against a `just typecheck` that runs the version in `uv.lock`; ty is 0.0.x and
-its diagnostics move between patch releases, so letting theirs win means the
-editor showing findings the recipe cannot reproduce. Order in a JSON object is
-not a thing anyone expects to matter and `astral` sorts first, so alphabetising
-that block — the obvious tidy-up — silently hands `.py` to the unpinned server.
-`tests/test_plugin_settings.py` holds it, because JSON has nowhere to put a
-comment. Check by hand with `claude --debug -p ok` then
-`grep 'already handled by' ~/.claude/debug/latest`.
+**That symptom has since inverted, which is worth knowing before reading an old
+debug log.** `Total LSP servers loaded: 1` used to mean the `astral-sh`
+marketplace had gone missing; it is the *correct* state now that `astral` is
+deliberately not enabled, and it is `2` that would mean something changed. The
+line to grep is `already handled by`, not the count — no output is passing.
 
-Their ty skill also says to add an ignore comment only when the user asks for
-one. This repo carries two, both with the reason written next to them (see the
-ty bullets under *Style guide*); that is a considered disagreement, not drift.
+**`astral@astral-sh` and `duckdb-skills@duckdb-skills` were enabled and are
+not any more, and the measurement is the whole reason.** Across 187 transcripts
+(2026-07-29 to 2026-08-27) neither was invoked once: `duckdb-skills` cost ~670
+tokens of always-loaded descriptions for nine skills about ad-hoc file querying,
+S3 and spatial joins, none of which this project does — `querying-the-warehouse`
+covers DuckDB *in this warehouse*, lock and all. `astral` is the more
+interesting one, because it was doing worse than nothing.
+
+- **It lost the `.py` claim by design, and that made it dead by
+  construction.** `astral` and `ty-lsp` both declare a `ty` language server for
+  `.py`/`.pyi`; the first loaded wins, so `ty-lsp` had to be declared above it,
+  and the loser is two `[WARN]` lines in `~/.claude/debug/latest` that nothing
+  surfaces. The ordering rule worked for as long as it was the invariant. What
+  it also did was leave `astral` with no reachable surface at all: its LSP
+  declares those two extensions and nothing else, and its three skills (ruff,
+  ty, uv) were never once invoked. A plugin whose every surface is unreachable
+  is two warnings.
+- **Which server would have won is still why `ty-lsp` is the survivor.**
+  Astral's runs `uvx ty@latest server`, the newest published ty on every launch,
+  against a `just typecheck` that runs the version in `uv.lock`. ty is 0.0.x and
+  its diagnostics move between patch releases, so letting theirs win means the
+  editor showing findings the recipe cannot reproduce — the sqlfluff 3.3.0/4.2.2
+  split in a new outfit.
+- **The `astral-sh` marketplace stays registered, and `duckdb-skills`' does
+  not.** Removing a `github` marketplace *uninstalls its plugins*, and the
+  project declaration does **not** silently bring it back: a re-register needs a
+  clone, which a non-interactive session will not do. Astral is one line from
+  being re-enabled and is left that way; duckdb-skills is a decision, so its
+  marketplace goes too.
+- **`tests/test_plugin_settings.py` carries the invariant forward as an
+  *absence*.** It used to assert `ty-lsp` sorts before `astral`; it now asserts
+  `astral` is not enabled at all, with the ordering rule in the failure message
+  for whoever re-adds it. JSON has nowhere to put a comment, which is why either
+  version has to be a test. Check by hand with `claude --debug -p ok` then
+  `grep 'already handled by' ~/.claude/debug/latest` — **no output is the
+  passing state now.**
+
+Astral's ty skill said to add an ignore comment only when the user asks for one,
+and this repo carries two with the reason written next to them (see the ty
+bullets under *Style guide*). That was a considered disagreement rather than
+drift while the skill was loaded, and it is worth keeping written down: the
+suppressions outlive the plugin that would have argued about them.
 
 Project skills in `.claude/skills/` cover the seams the vendor skills can't know:
 
