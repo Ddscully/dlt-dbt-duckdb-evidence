@@ -57,6 +57,7 @@ from pathlib import Path
 import duckdb
 
 from modern_data_stack import privacy
+from modern_data_stack.ducklake import catalog_metadata
 from modern_data_stack.export import default_tag, export, loaded_at
 from modern_data_stack.paths import dbt_manifest_path, warehouse_path
 
@@ -72,6 +73,7 @@ __all__ = [
     "EXTRA_CLASSIFICATIONS",
     "LAKEHOUSE_ASSET",
     "MASKED_LABELS",
+    "MAX_PUBLISHED_LAKE_VERSION",
     "MAX_PUBLISHED_STORAGE_VERSION",
     "MIN_READER_VERSION",
     "PUBLISHED_SCHEMAS",
@@ -127,6 +129,26 @@ PUBLISHED_SCHEMAS = ("staging", "marts", "analytics")
 # along.
 MAX_PUBLISHED_STORAGE_VERSION = 64
 MIN_READER_VERSION = "0.10.0"
+
+# The same promise for the *other* published artifact, and the reason it needs
+# its own is that the two versions move for different reasons and are noticed at
+# different moments.
+#
+# `warehouse.duckdb`'s format is decided by the `duckdb` in `uv.lock`, so its
+# tripwire fires on a Dependabot PR — before the bump merges, with a person
+# already reading the diff. The DuckLake spec is decided by a 36 MB binary from
+# extensions.duckdb.org that no lockfile can name (`duckdb_extensions()` reports
+# its version as a git hash), so **there is no PR to fail**: the extension can
+# start writing a newer catalog schema with nothing in this repo changing at
+# all. What notices is `just test` on the next CI run, which is why the
+# toolchain half of this guard matters more here than it does for the file.
+#
+# 1.0 is what the installed extension writes today, so like the storage ceiling
+# this costs nothing now and is a tripwire rather than a constraint. dlt's own
+# `automatic_migration` defaults to False, so a catalog *we* write is safe by
+# refusal; this covers the half dlt cannot see — a consumer meeting a tarball
+# written against a spec their ducklake does not know.
+MAX_PUBLISHED_LAKE_VERSION = "1.0"
 
 ATTRIBUTION = """\
 # Data attribution
@@ -248,11 +270,19 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
     # which gives `release-data.yml` something to assert on. An absent key can
     # only be checked by code that remembers to look for it.
     if not lakehouse.is_catalog(lake_dir):
-        return {"lakehouse": {"file": None, "tables": {}, "rows": 0}}
+        return {
+            "lakehouse": {
+                "file": None,
+                "spec_version": None,
+                "created_by": None,
+                "tables": {},
+                "rows": 0,
+            }
+        }
 
     with tempfile.TemporaryDirectory() as staging:
         built = Path(staging) / "lakehouse"
-        copied = lakehouse.publish(built, lake_dir)
+        copied = lakehouse.publish(built, lake_dir, MAX_PUBLISHED_LAKE_VERSION)
         # **A catalog holding none of the published tables is absent, not empty.**
         # dbt's `ATTACH IF NOT EXISTS` creates a real DuckLake — metadata table
         # and all — on any build that runs before the first ingest, so
@@ -260,7 +290,22 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
         # Shipping that would put a tarball of nothing in the release and let the
         # workflow's "was the landing zone published" assertion pass on it.
         if not copied:
-            return {"lakehouse": {"file": None, "tables": {}, "rows": 0}}
+            return {
+                "lakehouse": {
+                    "file": None,
+                    "spec_version": None,
+                    "created_by": None,
+                    "tables": {},
+                    "rows": 0,
+                }
+            }
+
+        # Off the built catalog, before it is tarred: the manifest should
+        # describe the artifact that shipped, not the lakehouse it came from.
+        # `created_by` is a DuckDB git hash and answers "who wrote this";
+        # `spec_version` is the one a consumer is actually asking about — the
+        # same split as `duckdb_version` against `storage_version` above.
+        catalog = catalog_metadata(built / lakehouse.CATALOG_NAME)
 
         archive = dest_dir / LAKEHOUSE_ASSET
         with tarfile.open(archive, "w:gz") as tar:
@@ -273,6 +318,8 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
         "lakehouse": {
             "file": LAKEHOUSE_ASSET,
             "catalog": lakehouse.CATALOG_NAME,
+            "spec_version": catalog["version"],
+            "created_by": catalog["created_by"],
             "bytes": archive.stat().st_size,
             "tables": copied,
             "rows": sum(copied.values()),
@@ -517,6 +564,21 @@ def release_notes(manifest: dict, repo: str, tag: str) -> str:
     def size(n: int) -> str:
         return f"{n / 1e6:.1f} MB" if n >= 1e6 else f"{n / 1e3:.0f} kB"
 
+    # Conditional for `history_note`'s reason: a release without a landing zone
+    # is legitimate (the exporter records `file: None` rather than omitting the
+    # key), and a bullet reading "spec None" is worse than no bullet.
+    lake = manifest["lakehouse"]
+    lake_version_note = (
+        f"- **The landing zone has its own version, and it is not that one.** "
+        f"`{LAKEHOUSE_ASSET}` is a DuckLake catalog written against **spec "
+        f"{lake['spec_version']}** by {lake['created_by']}; what has to be new enough to open "
+        f"it is your `ducklake` extension, not your DuckDB. `INSTALL ducklake` fetches the "
+        f"build matching whatever DuckDB you are running, so in practice this only bites a "
+        f"client pinned to an older extension.\n"
+        if lake["file"]
+        else ""
+    )
+
     # The snapshot is the one table a rebuild can't reproduce, so say plainly how
     # much of it there is — including when the answer is "none yet".
     history = manifest.get("history")
@@ -681,7 +743,7 @@ select count(*) from lakehouse.raw.om_weather_daily;
   format is, and this file is format {manifest["storage_version"]}, the oldest DuckDB still writes. If that
   ever rises the minimum reader version rises with it and this line will say so. The
   Parquet files carry no such constraint either way.
-- **Data last landed:** {manifest.get("data_loaded_at") or "unknown"}.
+{lake_version_note}- **Data last landed:** {manifest.get("data_loaded_at") or "unknown"}.
 - **Revision history (CO₂ estimates):** {history_note}. OWID restates published
   years; `history.snap_co2_estimates` (in the DuckDB file, not the Parquet) keeps
   every version it has served and `marts.fct_co2_estimate_versions` summarises

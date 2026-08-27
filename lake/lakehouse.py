@@ -264,7 +264,11 @@ def carried_rows(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> int:
     return sum(rows(t, lakehouse_dir) for t in PUBLISHED_TABLES if _has_table(lakehouse_dir, t))
 
 
-def publish(dest_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> dict[str, int]:
+def publish(
+    dest_dir: str | Path,
+    lakehouse_dir: str | Path = LAKEHOUSE_DIR,
+    max_spec_version: str | None = None,
+) -> dict[str, int]:
     """Write the publishable subset of the landing zone to `dest_dir`.
 
     Relocatable, so a consumer opens it with a bare `ATTACH` from the directory
@@ -280,6 +284,7 @@ def publish(dest_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> 
             PUBLISHED_TABLES,
             data_dirname=DATA_DIRNAME,
             catalog_name=CATALOG_NAME,
+            max_spec_version=max_spec_version,
         )
     finally:
         con.close()

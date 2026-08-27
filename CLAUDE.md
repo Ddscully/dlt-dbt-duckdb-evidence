@@ -962,12 +962,11 @@ survives a format that content-addresses its files and prunes on statistics.
       install serves `just sql`. Plain `install` and not `force install`: the
       only case the no-op misses is a rebuild republished for an unchanged
       DuckDB version.
-    - **The catalog records a spec version and nothing guards it**, which is the
-      gap worth knowing: `ducklake_metadata` holds `version` (`1.0` today) and
-      `created_by`, the direct analogue of the DuckDB file's `storage_version` —
-      and `manifest.json` carries that pair for `warehouse.duckdb` while saying
-      nothing about `lakehouse.tar.gz`. Both are published artifacts; only one
-      has a compatibility tripwire.
+    - **So the catalog's own spec version is guarded instead** —
+      `ducklake_metadata` holds `version` (`1.0` today) and `created_by`, the
+      direct analogue of `storage_version` and `duckdb_version`, and both now
+      ship in `manifest.json` and the release notes. See *Publishing* for the
+      shape, which is the storage-version guard's with one part working harder.
   - **dbt's `ATTACH IF NOT EXISTS` leaves an empty DuckDB file** at the catalog
     path on any build that runs before the first ingest, and a read-only attach
     of *that* fails with `Existing DuckLake … does not exist - and creating a new
@@ -1072,6 +1071,36 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
     unrelated fix in 2.x to guard one property; the tripwire lets the bump land
     and makes a person decide the format question with a red test naming it.
     `dagster<3.15` therefore remains the only hard upper bound in the tree.
+- **The landing zone has its own format version, and its tripwire has to work
+  harder than the file's.** `ducklake_metadata.version` (`1.0`) is what decides
+  whether a consumer's `ducklake` can open `lakehouse.tar.gz`, exactly as
+  `storage_version` decides it for `warehouse.duckdb`;
+  `MAX_PUBLISHED_LAKE_VERSION` is the ceiling and `ducklake.publish` refuses
+  above it. What differs is the *moment*, and it is the whole reason this needed
+  building rather than copying.
+  - **There is no PR to fail.** DuckDB's format moves when `uv.lock` moves, so
+    that tripwire fires on a Dependabot PR with a person already reading the
+    diff. The DuckLake spec moves when extensions.duckdb.org republishes, and
+    nothing in this repo changes — see the extension bullet under *The
+    lakehouse*. `test_the_installed_ducklake_still_writes_the_spec_the_release_promises`
+    on the next CI run is the only thing that can say so, which makes the
+    toolchain half load-bearing here rather than merely thorough.
+  - **A ceiling that exists is not a ceiling that is applied**, and the two need
+    separate tests. `test_the_lakehouse_ceiling_is_inclusive` proves `publish`
+    enforces a limit it is handed — from both sides, for the `>` against `>=`
+    reason — while `test_the_release_path_applies_the_lakehouse_ceiling` drives
+    `run()` with an impossible one. Deleting the constant from
+    `publish_lakehouse`'s call fails only the second: the manifest assertions
+    keep passing, because the spec is still under the ceiling nobody checked.
+    Verified by mutation, as was each other half.
+  - **`created_by` is a DuckDB git hash and answers a different question.** It
+    ships beside the spec for `duckdb_version`'s reason — who wrote this, against
+    can I open it — and `catalog_metadata` returns the whole map so the two are
+    one read rather than two.
+  - dlt's own `automatic_migration` defaults to **False**, so a catalog *we*
+    write is safe by refusal if the spec ever moves under us. This guards the
+    half dlt cannot see: a consumer meeting a tarball written against a spec
+    their extension does not know.
 - **Each release carries the previous one's unreproducible tables forward**
   (`scripts/restore_history.py`), which is what makes the published snapshot
   accumulate a real revision log instead of holding one version per row forever,

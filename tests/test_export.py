@@ -30,10 +30,12 @@ from test_fixtures import ALL_URLS
 
 from modern_data_stack import export as _export
 from modern_data_stack.db import scalar
-from modern_data_stack.ducklake import meta_alias
+from modern_data_stack.ducklake import catalog_metadata, meta_alias, spec_version, version_key
 from modern_data_stack.export import storage_version
+from scripts import export_warehouse as _release
 from scripts.export_warehouse import (
     ATTRIBUTION,
+    MAX_PUBLISHED_LAKE_VERSION,
     MAX_PUBLISHED_STORAGE_VERSION,
     MIN_READER_VERSION,
     default_tag,
@@ -598,6 +600,126 @@ def test_the_landing_zone_ships_as_a_second_asset_and_is_checksummed(
     lines = (export_with_lakehouse["out"] / "SHA256SUMS").read_text().splitlines()
     assert f"{digest}  lakehouse.tar.gz" in lines
     assert len(lines) == len(export_with_lakehouse["tables"]) + 2
+
+
+def test_the_installed_ducklake_still_writes_the_spec_the_release_promises(tmp_path: Path):
+    """The landing zone's tripwire, and it has to work harder than the DuckDB one.
+
+    `warehouse.duckdb`'s format is decided by the `duckdb` in `uv.lock`, so its
+    equivalent fires on a Dependabot PR with a person already reading the diff.
+    The DuckLake spec is decided by a binary from extensions.duckdb.org that no
+    lockfile can name — `duckdb_extensions()` reports its version as a git hash —
+    so **there is no PR to fail**. The extension can start writing a newer
+    catalog schema with nothing in this repo changing at all, and this assertion
+    on the next CI run is the only thing that would say so.
+
+    A bare attach with no options, because that is what `publish` does, so what
+    it writes by default *is* the published spec. Every other test here reads a
+    catalog this same extension produced.
+    """
+    lake = tmp_path / "lh"
+    (lake / "data").mkdir(parents=True)
+    con = duckdb.connect()
+    con.execute(
+        f"attach 'ducklake:duckdb:{lake / 'catalog.duckdb'}' as lh (data_path '{lake}/data/')"
+    )
+    con.close()
+
+    written = spec_version(lake / "catalog.duckdb")
+    assert version_key(written) <= version_key(MAX_PUBLISHED_LAKE_VERSION), (
+        f"the installed ducklake extension now writes DuckLake spec {written}, above the "
+        f"{MAX_PUBLISHED_LAKE_VERSION} the release notes promise. Nothing in uv.lock pins that "
+        "extension, so no dependency PR will ever carry this change — raising the ceiling "
+        "strands every consumer whose ducklake is older than the new spec."
+    )
+
+
+def test_the_manifest_records_the_lakehouse_spec_and_not_only_its_writer(
+    export_with_lakehouse: dict, tmp_path: Path
+):
+    """`created_by` answers "who wrote this"; `spec_version` is what a consumer
+    is asking. The same split as `duckdb_version` against `storage_version`, and
+    measured off the catalog that shipped rather than the one it came from.
+    """
+    lake = export_with_lakehouse["lakehouse"]
+    unpacked = _unpack(export_with_lakehouse, tmp_path / "consumer-meta")
+    shipped = catalog_metadata(unpacked / "catalog.duckdb")
+
+    assert lake["spec_version"] == shipped["version"]
+    assert lake["created_by"] == shipped["created_by"]
+    assert version_key(lake["spec_version"]) <= version_key(MAX_PUBLISHED_LAKE_VERSION)
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [False, True],
+    ids=["publishes-at-the-ceiling", "refuses-one-above-it"],
+)
+def test_the_lakehouse_ceiling_is_inclusive(lakehouse_dir: Path, tmp_path: Path, refused: bool):
+    """Both sides, because `>` against `>=` is the slip and one side passes under
+    either — the same reason the storage ceiling is tested twice.
+
+    The published catalog is written by the installed extension, so its spec *is*
+    the ceiling: publishing at that number must succeed and one below it must
+    refuse.
+    """
+    from lake import lakehouse as lake_module
+
+    built = tmp_path / f"built-{refused}"
+    at_ceiling = spec_version(
+        _built_catalog(lake_module, lakehouse_dir, tmp_path / "probe"),
+    )
+    major, minor = version_key(at_ceiling)[:2]
+    limit = f"{major}.{minor - 1}" if refused else at_ceiling
+
+    if refused:
+        with pytest.raises(ValueError, match="spec version"):
+            lake_module.publish(built, lakehouse_dir, limit)
+        # The refusal fires on the catalog it measured, so the directory exists;
+        # what it guarantees is that no caller got a table map back to package.
+    else:
+        assert lake_module.publish(built, lakehouse_dir, limit)
+
+
+def _built_catalog(lake_module, lakehouse_dir: Path, dest: Path) -> Path:
+    """A published catalog, for reading the spec the installed extension writes."""
+    lake_module.publish(dest, lakehouse_dir)
+    return dest / lake_module.CATALOG_NAME
+
+
+def test_the_release_path_applies_the_lakehouse_ceiling(
+    warehouse: Path, lakehouse_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The ceiling has to *reach* the release, which is a different claim.
+
+    `test_the_lakehouse_ceiling_is_inclusive` proves `publish` enforces a limit
+    it is handed; nothing there would notice `publish_lakehouse` quietly ceasing
+    to hand it one, and the manifest assertions would all still pass because the
+    spec would still be under the ceiling. So this drives the real entry point
+    with an impossible ceiling and requires it to refuse. Dropping the constant
+    from that call fails here and nowhere else.
+    """
+    monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
+    monkeypatch.setattr(_release, "MAX_PUBLISHED_LAKE_VERSION", "0.9")
+    with pytest.raises(ValueError, match="spec version"):
+        run(
+            str(warehouse),
+            str(tmp_path / "refused"),
+            tag="data-1999-12-31",
+            repo="acme/demo",
+            lakehouse_dir=lakehouse_dir,
+        )
+
+
+def test_a_file_that_is_not_a_ducklake_catalog_is_named_as_such(tmp_path: Path):
+    """A plain DuckDB file has no `ducklake_metadata`, and dbt's
+    `ATTACH IF NOT EXISTS` leaves exactly that at the catalog path on any build
+    before the first ingest — so this is the file the guard will actually meet.
+    """
+    path = tmp_path / "empty.duckdb"
+    duckdb.connect(str(path)).close()
+    with pytest.raises(ValueError, match="not a DuckLake catalog"):
+        spec_version(path)
 
 
 def test_the_published_catalog_opens_with_a_bare_attach_from_anywhere(
