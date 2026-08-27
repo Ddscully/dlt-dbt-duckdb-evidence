@@ -8,7 +8,8 @@ The [README](../README.md) has the short version.
 Seven feeds from five publishers, all freely licensed and small enough to run
 locally. Six are country-keyed; the seventh isn't a country dataset at all. The
 CBAM default values are an eighth source that arrives as a seed instead of a
-feed, for the reasons in [CLAUDE.md](../CLAUDE.md#cbam-exposure-fct_cbam_exposure-the-cbam_-seeds-reportspagescbammd).
+feed, for the reasons in
+[the `compliance-models` skill](../.claude/skills/compliance-models/SKILL.md).
 
 | Dataset | Grain | Link |
 |---------|-------|------|
