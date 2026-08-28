@@ -17,17 +17,17 @@ for the pivot that turns row loss into column emptiness.
 ## 1. The census
 
 A dbt test is a `select` that must return no rows. That is the whole mechanism,
-and everything below is a consequence of it. This project has 369 of them:
+and everything below is a consequence of it. This project has 425 of them:
 
 | test | n | what it asserts |
 |---|---|---|
-| `not_null` | 168 | this column is populated on every row |
-| `dbt_utils.accepted_range` | 123 | this column's values lie in a band |
-| `dbt_utils.unique_combination_of_columns` | 26 | this is the grain |
-| `dbt_utils.expression_is_true` | 23 | an arbitrary row-level claim |
+| `not_null` | 194 | this column is populated on every row |
+| `dbt_utils.accepted_range` | 143 | this column's values lie in a band |
+| `dbt_utils.expression_is_true` | 30 | an arbitrary row-level claim |
+| `dbt_utils.unique_combination_of_columns` | 28 | this is the grain |
 | `accepted_values` | 12 | this column is an enum |
 | `unique` | 11 | this key does not repeat |
-| `relationships` | 3 | every value here exists over there |
+| `relationships` | 5 | every value here exists over there |
 | `dbt_utils.equal_rowcount` | 2 | these two relations are the same height |
 
 ```bash
@@ -36,7 +36,7 @@ select test_type, count(*) as n from analytics.pipeline_tests
 group by 1 order by 2 desc"
 ```
 
-Read the shape of that table rather than the total. **291 of the 369 (79%) are
+Read the shape of that table rather than the total. **337 of the 425 (79%) are
 `not_null` and `accepted_range`**, both of which are per-column statements about
 rows that are *present*. That is module 01's punchline restated as a census: the
 test suite is overwhelmingly made of assertions that a deletion makes *more*
@@ -87,7 +87,7 @@ Measured: 4,063 non-null rows, **1,268 of them negative and 268 above 100%**,
 topping out at Malta in 2016 on 1,023%. A `0–100` bound (the reflex for anything
 named `_share` or `_pct`) would fail on 1,536 rows, every one of them correct.
 A test that fires on real data does not get fixed. It gets muted, and it takes
-the credibility of the other 367 with it.
+the credibility of the other 424 with it.
 
 > The rule this section is built on: **write the bound after you have looked at
 > the distribution, and write down what you saw.** The description field is where
@@ -97,7 +97,7 @@ the credibility of the other 367 with it.
 ## 3. Three ways a row escapes a test
 
 This is the part that is not in the dbt documentation, and it is the whole reason
-369 tests is not the reassuring number it looks like.
+424 tests is not the reassuring number it looks like.
 
 **(a) The value is null.** `dbt_utils.accepted_range` compiles to:
 
@@ -171,12 +171,12 @@ Two consequences that are not obvious:
   failure against a build that finished `ERROR=0`, which is how the pipeline
   health page came to contradict the build it was reporting on.
   `src/modern_data_stack/observability.py` reads `fail_calc` out of the manifest
-  and applies it; 367 of the 369 tests here use the default.
+  and applies it; 422 of the 424 tests here use the default.
 - **dbt writes that schema every build and never cleans it.** An audit table
   whose test has been renamed or deleted stays, is empty, and therefore scores as
-  passing. The real warehouse currently holds **391 audit tables against 369
-  tests**: 22 orphans. `transform/pipeline_status.py` filters them against the
-  manifest for that reason.
+  passing. A real warehouse here held **391 audit tables, 22 of them orphans**
+  whose tests no longer existed. `transform/pipeline_status.py` filters them
+  against the manifest for that reason.
 
 ---
 
@@ -436,7 +436,7 @@ each get a self-consistent answer, and the two only meet in a meeting.
 
 ---
 
-## 🔍 Investigate 1 — how much of the warehouse do 369 tests actually look at?
+## 🔍 Investigate 1 — how much of the warehouse do 424 tests actually look at?
 
 > Real warehouse (`data/warehouse.duckdb`), not the sandbox.
 
@@ -510,7 +510,7 @@ column is the one place a cents/euros mix-up could enter — is being asked abou
 for knowing the number before you quote "43,138 rows, fully range-checked" to
 anybody.
 
-**3. 391 audit tables against 369 tests: 22 orphans.** dbt writes the audit
+**3. 391 audit tables against 424 tests: 22 orphans.** dbt writes the audit
 schema on every build and never removes a table whose test has gone, and the
 alias hash is computed over the test's arguments, so renaming a model orphans
 every audit table attached to it. Being empty, an orphan scores as *passing*, so
@@ -527,7 +527,7 @@ coverage are the sparse ones, which is backwards: sparse columns are where a
 join went wrong.
 
 *Correctly built:* tests are not free, and their cost is not runtime: it is that
-every test which can fail on reality trains people to ignore failures. 369 tests
+every test which can fail on reality trains people to ignore failures. 424 tests
 that have never had a false positive are worth more than 900 with a standing
 amber. The uncovered columns are largely OWID pass-throughs whose values this
 project does not compute; a bound on them tests the publisher, not the pipeline.

@@ -1,9 +1,8 @@
 """The pipeline as a Dagster asset graph.
 
-    raw/*  (dlt)  ->  staging/stg_*  ->  marts/fct_*  (dbt)  +->  analytics/co2_intensity  (Polars)
+    raw/*  (dlt -> DuckLake)  ->  staging/stg_*  ->  marts/fct_*  (dbt)  +->  analytics/co2_intensity  (Polars)
                                                              +->  analytics/retail_rfm     (Polars)
                                                              |      +->  analytics/pipeline_status
-                                                             +->  lake/parquet_archive  (Parquet)
                                                              +->  reports/evidence_site  (Evidence)
 
 The layers are wired by *asset key*, not by ordering:
@@ -46,7 +45,15 @@ from ingest.pipeline import (
     load_groups,
     public_indicators,
 )
-from lake.archive import ARCHIVED_TABLES, LAKE_DIR, run as write_lake, table_dir
+from lake.lakehouse import (
+    ATTACH_ALIAS,
+    LAKEHOUSE_DIR,
+    WEATHER_TABLE,
+    read_only_connection,
+    revisions as weather_revisions,
+    rows as weather_rows,
+    versions as table_versions_for,
+)
 from modern_data_stack.db import row, scalar
 from orchestration.resources import dbt_project
 from scripts.build_report import (
@@ -108,19 +115,33 @@ RAW_DESCRIPTIONS = {
         "and then partitioned by invoice month on the *load* rather than the "
         "fetch."
     ),
+    "om_weather_daily": (
+        "Open-Meteo ERA5 daily weather at each EU/EEA capital city, at "
+        "(country_iso3, weather_date) — the one source joined on a *coordinate*, "
+        "read off `stg_country`'s capital latitude/longitude. Loaded "
+        "incrementally: `merge` over a 90-day lookback (ERA5T is superseded by "
+        "final ERA5 months later), year-partitioned, and paced against a finite "
+        "API budget rather than fetched whole."
+    ),
 }
 
-# The blocks below split the seven resources by whether they are partitioned and
+# The blocks below split the eight resources by whether they are partitioned and
 # *at what grain*, not by how they load — `load_groups` still owns the
 # refresh/merge split, and each selection is passed through it.
 #
 # There are three blocks rather than two because **Dagster gives every asset in a
-# multi-asset the same `partitions_def`**, and the two partitioned resources are
-# not partitioned alike: WDI by year (the World Bank publishes annual series),
-# retail by month (a two-year transaction window, where a year would be one
-# partition and a day would be 740 of them for a shop that trades ~600). Putting
-# them in one block would force one grain onto both, and the only grain that fits
-# both is the finer one — 66 years of empty monthly WDI partitions.
+# multi-asset the same `partitions_def`**, and the three partitioned resources
+# are not all partitioned alike: WDI and capital weather by year (annual series,
+# and a yearly slice of an API budget), retail by month (a two-year transaction
+# window, where a year would be one partition and a day would be 740 of them for
+# a shop that trades ~600). Putting them in one block would force one grain onto
+# all three, and the only grain that fits every one is the finest — 66 years of
+# empty monthly WDI partitions.
+#
+# The corollary is that **the split is by grain, not one block per resource**:
+# `wb_wdi` and `om_weather_daily` share a block precisely because they share a
+# grain, and giving them a block each would give them a `partitions_def` each,
+# which is what `full_refresh` cannot resolve. See `YEARLY_PARTITIONS`.
 #
 # Three disjoint tuples covering the source, so an added resource lands in
 # exactly one block: a resource in two would be loaded twice per refresh, and one
@@ -129,7 +150,7 @@ RAW_DESCRIPTIONS = {
 # there rather than in a test of this module, because `just test` runs without
 # the optional `orchestration` dependency group and a Dagster import would make
 # the guard skip exactly when it is least likely to be noticed.
-YEAR_PARTITIONED_RESOURCES = ("wb_wdi",)
+YEAR_PARTITIONED_RESOURCES = ("wb_wdi", "om_weather_daily")
 MONTH_PARTITIONED_RESOURCES = ("retail_invoice_lines",)
 UNPARTITIONED_RESOURCES = (
     *FULL_REFRESH_RESOURCES,
@@ -162,11 +183,25 @@ class RawSchemaDltTranslator(DagsterDltTranslator):
         )
 
 
-# Yearly partitions, and only on `raw/wb_wdi` — see `raw_wdi_asset`. Dagster
-# requires every asset in a multi-asset to share one `partitions_def`, which is
-# why that resource sits in a second `@dlt_assets` block rather than beside the
-# other four.
-WDI_PARTITIONS = dg.TimeWindowPartitionsDefinition(
+# Yearly partitions, shared by the two resources that have them — see
+# `raw_year_partitioned_assets`. Dagster requires every asset in a multi-asset to
+# share one `partitions_def`, which is why these sit in their own block rather
+# than beside the unpartitioned five.
+#
+# **Sharing one definition is required, not merely tidy.** `full_refresh` is
+# `AssetSelection.all()` minus two things, so it contains both of these, and
+# `define_asset_job` resolves a selection to a *single* `partitions_def` or
+# raises — there is no opt-out for a named job. Two separate yearly definitions,
+# differing only in their start year, would therefore break the job that three
+# workflows execute, at definition time, for no behavioural gain.
+#
+# The cost of sharing is the start year: 1960 is the World Bank's floor, and
+# ERA5 reaches back to 1940. So weather's 1940-1959 is not addressable as a
+# partition. That is the right way round — the alternative starts both at 1940
+# and creates twenty WDI partitions that load nothing, which this repo already
+# treats as a defect rather than a curiosity (see `record_retail`'s monthly
+# top-up) — and it is 47 years below where the weather seed actually starts.
+YEARLY_PARTITIONS = dg.TimeWindowPartitionsDefinition(
     start=str(WDI_FIRST_YEAR),
     fmt="%Y",
     cron_schedule="0 0 1 1 *",
@@ -209,14 +244,17 @@ def raw_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
     dlt_source=public_indicators().with_resources(*YEAR_PARTITIONED_RESOURCES),
     dlt_pipeline=build_pipeline(),
     dagster_dlt_translator=RawSchemaDltTranslator(),
-    name="ingest_wdi",
-    partitions_def=WDI_PARTITIONS,
-    # One run per *range*, not per year: the World Bank takes `&date=lo:hi`, so a
-    # 30-year backfill is 11 requests (one per indicator) rather than 330.
+    name="ingest_year_partitioned",
+    partitions_def=YEARLY_PARTITIONS,
+    # One run per *range*, not per year: the World Bank takes `&date=lo:hi` and
+    # Open-Meteo takes `&start_date=…&end_date=…`, so a 30-year backfill is 11
+    # requests for WDI (one per indicator) rather than 330, and 30 for weather
+    # (one per year) rather than 30 — the same for weather either way, because
+    # there the chunking is a *budget* decision made inside the resource.
     backfill_policy=dg.BackfillPolicy.single_run(),
 )
-def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
-    """WDI, the one source with a per-year fetch to express.
+def raw_year_partitioned_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
+    """The two sources with a per-year fetch to express: WDI and capital weather.
 
     Partitioning the other five would be a fiction. Four are whole-file
     `replace` loads (two CSVs, a JSON-stat payload and a dimension table) with
@@ -224,19 +262,25 @@ def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     *does* take a date range — which is the interesting near-miss: merging is not
     what earns a partition. Its whole 27-year series is one three-second request,
     so partitioning it would trade a single call for thousands of Dagster
-    partitions and buy nothing. WDI's API takes a date range **and** its series
-    are large enough that a window is worth asking for, and its primary key
-    includes `year` — so a partition there is a real unit of work.
+    partitions and buy nothing.
+
+    The two here earn it for related but distinct reasons, and the second one
+    widens the rule. WDI's API takes a date range **and** its series are large
+    enough that a window is worth asking for. `om_weather_daily` takes a range
+    too, but what makes a year the right unit there is that the year is what the
+    *budget* is spent in: 41 capitals over 2007-2025 costs more of Open-Meteo's
+    daily allowance than a day contains, so unlike WDI the full history genuinely
+    cannot be fetched in one run however patient the caller is.
 
     Two paths into the same load, and the difference is only which window is
     asked for:
 
     * **partitioned** — an explicit year range, which is what a backfill from the
-      UI or `just backfill-wdi` sends. Loads exactly those years and leaves the
-      watermark alone.
+      UI or `just backfill-wdi` / `just backfill-weather` sends. Loads exactly
+      those years and leaves the watermark alone.
     * **unpartitioned** — the incremental lookback, i.e. what the daily schedule,
-      CI and the release workflow have always done. `full_refresh` contains this
-      asset and runs with no partition key, and *that has to keep working*:
+      CI and the release workflow have always done. `full_refresh` contains these
+      assets and runs with no partition key, and *that has to keep working*:
       three workflows execute that job on a bare checkout.
 
     A partitioned asset in an unpartitioned run doesn't fail at plan time — it
@@ -253,17 +297,25 @@ def raw_wdi_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     if context.has_partition_key or context.has_partition_key_range:
         key_range = context.partition_key_range
         years = (int(key_range.start), int(key_range.end))
-        context.log.info("loading wb_wdi for %s-%s (partition backfill)", *years)
-    else:
-        context.log.info("loading wb_wdi over its incremental lookback window")
+
+    # Scoped to what was actually selected, which matters now that the block
+    # holds two resources: materialising `raw/om_weather_daily` alone must not
+    # also re-ask the World Bank for eleven indicators. `raw_assets` has always
+    # done this; here it was a no-op with one resource in the tuple and stopped
+    # being one the moment a second arrived.
+    selected = {key.path[-1] for key in context.selected_asset_keys}
+    window = f"{years[0]}-{years[1]} (partition backfill)" if years else "incremental lookback"
 
     # `load_groups` again rather than a bare `dlt.run(...)`: it is what asserts
-    # this resource loads *without* `refresh`, which would drop the table and the
-    # watermark with it.
-    for names, kwargs in load_groups(YEAR_PARTITIONED_RESOURCES):
+    # these resources load *without* `refresh`, which would drop their tables and
+    # their watermarks with them.
+    for names, kwargs in load_groups(selected):
+        context.log.info("loading %s over %s", ", ".join(names), window)
         yield from dlt.run(
             context=context,
-            dlt_source=public_indicators(wdi_years=years).with_resources(*names),
+            dlt_source=public_indicators(wdi_years=years, weather_years=years).with_resources(
+                *names
+            ),
             **kwargs,
         )
 
@@ -487,38 +539,20 @@ def pipeline_status(context: AssetExecutionContext) -> dg.MaterializeResult:
 # --------------------------------------------------------------------------- #
 
 
-@dg.asset(
-    key=dg.AssetKey(["lake", "parquet_archive"]),
-    # The mart is downstream of every raw table, so depending on it is enough to
-    # order the archive after the whole warehouse.
-    deps=[FCT_EMISSIONS_ENERGY],
-    group_name="lake",
-    kinds={"duckdb", "parquet"},
-    freshness_policy=MODELLED_FRESHNESS,
-    description=(
-        "Year-partitioned Parquet copy of the raw and mart tables under "
-        "data/lake/ — partition pruning, portability, and a diff between runs "
-        "that shows which years upstream actually changed."
-    ),
-)
-def parquet_archive(context: AssetExecutionContext) -> dg.MaterializeResult:
-    summary = write_lake()
-    for table, stats in summary.items():
-        context.log.info(
-            "%s -> %s rows in %s partitions (%.1f MB)",
-            table,
-            stats["rows"],
-            stats["partitions"],
-            stats["bytes"] / 1e6,
-        )
-    return dg.MaterializeResult(
-        metadata={
-            "dagster/row_count": sum(s["rows"] for s in summary.values()),
-            "files": sum(s["files"] for s in summary.values()),
-            "bytes": sum(s["bytes"] for s in summary.values()),
-            "tables": summary,
-        }
-    )
+# **There is no asset here any more, and that is the shape of the change.**
+# This layer used to hold two: `lake/parquet_archive`, which copied the
+# warehouse out to hive-partitioned Parquet, and `lake/lakehouse`, which merged
+# two weather tables into a DuckLake catalog beside it. dlt now writes DuckLake
+# *directly*, so the files this layer used to produce are produced by the
+# ingest assets, and an asset that re-copied them would be archiving the
+# archive.
+#
+# What survives is the observability: `just lakehouse` reports the catalog's
+# tables and snapshot lineage, and the check below guards the one capability
+# that the move actually put at risk.
+
+
+WEATHER_RAW = dg.AssetKey(["raw", "om_weather_daily"])
 
 
 # --------------------------------------------------------------------------- #
@@ -607,10 +641,21 @@ def wdi_indicators_all_present() -> dg.AssetCheckResult:
     `_get_json` now raises on a non-2xx, but the World Bank also answers a bad
     indicator code with a 200 and an empty series — which would quietly become
     an all-null column in `stg_wdi` rather than a failure.
+
+    It reads the **lakehouse**, not the warehouse file. dlt lands `raw` in the
+    catalog now and `data/warehouse.duckdb` holds only what dbt builds, so the
+    old spelling was wrong in both directions at once: on a tree that predates
+    the move it passed against the stale pre-migration `raw.wb_wdi` still sitting
+    in that file, and on a fresh checkout it raised `Cannot open database … in
+    read-only mode` — the file does not exist until dbt has run, and this check
+    gates the ingest that comes before it.
     """
-    con = duckdb.connect(DUCKDB_PATH, read_only=True)
+    con = read_only_connection(LAKEHOUSE_DIR)
     try:
-        found = {r[0] for r in con.sql("select distinct indicator from raw.wb_wdi").fetchall()}
+        found = {
+            r[0]
+            for r in con.sql(f"select distinct indicator from {ATTACH_ALIAS}.raw.wb_wdi").fetchall()
+        }
     finally:
         con.close()
     missing = sorted(set(WB_WDI_INDICATORS) - found)
@@ -762,36 +807,53 @@ def rfm_scores_do_not_split_ties() -> dg.AssetCheckResult:
     )
 
 
-@dg.asset_check(asset=parquet_archive, blocking=True)
-def lake_matches_warehouse() -> dg.AssetCheckResult:
-    """Every archived table reads back from Parquet with the row count and year
-    span it has in the warehouse.
+@dg.asset_check(asset=WEATHER_RAW, blocking=False)
+def weather_revisions_are_derivable() -> dg.AssetCheckResult:
+    """The restatement log can still be computed from the catalog.
 
-    The failure mode this catches is a partial write: `COPY … PARTITION_BY` that
-    half-succeeded, or a stale partition left behind by an earlier run. Nothing
-    downstream reads the lake, so without a check a broken archive would sit
-    there looking materialised.
+    This replaces two checks that the move deleted, and it guards a narrower
+    thing than either of them did — deliberately, because the failures they
+    covered are now impossible rather than merely unobserved.
+    `lake_matches_warehouse` compared a hand-written Parquet copy against the
+    warehouse, and there is no copy any more; `lakehouse_matches_warehouse`
+    caught an upsert that succeeded while its prune failed, and dlt performs
+    both inside one load package.
+
+    What is *newly* fragile is the substitute for the change feed. dlt rewrites
+    `_dlt_id` and `_dlt_load_id` on every row it re-merges, so
+    `ducklake_table_changes()` reports a no-op reload and a real restatement
+    identically — measured at 500 preimages for 500 unchanged rows. The
+    replacement is an `EXCEPT` between two snapshots with those columns
+    projected away, and it depends on three things staying true: the catalog
+    keeping more than one version of the table, `at (version => …)` remaining
+    valid for the oldest of them, and the provenance list still naming every
+    column dlt regenerates. If any of those slips the diff does not error — it
+    returns *every* row as revised, which reads exactly like a catastrophic
+    upstream restatement.
+
+    Non-blocking because a single-version catalog is the honest state of a first
+    load, which is what every CI run is.
     """
-    con = duckdb.connect(DUCKDB_PATH, read_only=True)
-    try:
-        mismatches = {}
-        for table in ARCHIVED_TABLES:
-            glob = f"{table_dir(LAKE_DIR, table)}/**/*.parquet"
-            warehouse = row(con, f"select count(*), min(year), max(year) from {table}")
-            archived = row(
-                con,
-                f"""
-                select count(*), min(year), max(year)
-                from read_parquet('{glob}', hive_partitioning = 1)
-                """,
-            )
-            if warehouse != archived:
-                mismatches[table] = {"warehouse": list(warehouse), "lake": list(archived)}
-    finally:
-        con.close()
+    versions = table_versions_for(WEATHER_TABLE, LAKEHOUSE_DIR)
+    if len(versions) < 2:
+        return dg.AssetCheckResult(
+            passed=True,
+            metadata={"versions": len(versions), "note": "first load — nothing to diff yet"},
+        )
+
+    since, until = versions[-2], versions[-1]
+    revised = weather_revisions(WEATHER_TABLE, since, until, LAKEHOUSE_DIR)
+    total = weather_rows(WEATHER_TABLE, LAKEHOUSE_DIR)
+    # Every row "revised" is the provenance-column failure, not a restatement:
+    # upstream cannot restate an entire ERA5 archive between two loads.
+    suspect = total > 0 and len(revised) == total
     return dg.AssetCheckResult(
-        passed=not mismatches,
-        metadata={"tables_checked": len(ARCHIVED_TABLES), "mismatches": mismatches},
+        passed=not suspect,
+        metadata={
+            "compared": f"{since} -> {until}",
+            "rows_revised": len(revised),
+            "rows_total": total,
+        },
     )
 
 
@@ -832,10 +894,9 @@ __all__ = [
     "co2_intensity",
     "dbt_models",
     "evidence_site",
-    "parquet_archive",
     "pipeline_status",
     "raw_assets",
     "raw_retail_asset",
-    "raw_wdi_asset",
+    "raw_year_partitioned_assets",
     "retail_rfm",
 ]

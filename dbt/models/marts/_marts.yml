@@ -507,6 +507,188 @@ models:
           `sources/warehouse/latest_years.sql` excludes these years from
           `price_year`, so the site's price cross-section is always a full year.
 
+  - name: fct_country_weather_year
+    config:
+      contract:
+        enforced: true
+      group: country_stats
+    description: >
+      Capital-city weather aggregated to (country_iso3, year), for the 41 EU/EEA
+      countries Eurostat publishes an electricity price for. The warehouse's
+      control variable: it exists so that "was it colder that year" can be
+      disposed of before a movement in energy or price is attributed to anything
+      else.
+
+      Built from `stg_weather_daily` rather than from `dim_country_year`,
+      unlike the wide fact. The spine is the right base for a fact that must
+      carry every country the dimension knows; this one deliberately carries
+      only the countries it has data for, the same way
+      `fct_eu_electricity_prices_semiannual` sits at Eurostat's own grain and
+      coverage rather than being padded out to the spine.
+
+      `year_is_complete` is not a formality. The archive stops a few days short
+      of today, so the current year is always partial, and a degree-day total
+      over a partial year is not comparable with a whole one — the missing days
+      are whichever season the run happens to sit in. Filter on it for any
+      year-over-year comparison.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+      # **`hdd_total` and `hdd_minmax_total` being swapped is not catchable by a
+      # data test here.** A comment in this spot used to claim it was — that the
+      # (max + min)/2 convention "runs warmer than the mean-based one, never
+      # colder", by construction — and it was wrong twice over. The expression
+      # underneath it was `hdd_minmax_total >= 0 and hdd_total >= 0`: pure
+      # non-negativity, already carried by `not_null` and the two
+      # `accepted_range {min_value: 0}` below, and *invariant* under the swap it
+      # claimed to catch. And the ordering does not hold. Over the full archive
+      # (656 rows, 41 capitals x 16 years) `hdd_minmax_total` is the larger in
+      # 253 rows (38.6%) and the smaller in 403, gaps running -153.0 to +96.2 —
+      # whether the midpoint sits above or below the true daily mean depends on
+      # the day's diurnal shape, and both directions occur. So encoding the
+      # claim would redden the build on reality rather than on a bug.
+      #
+      # Two plausible totals, both in a legal range, differing by an amount with
+      # no fixed sign, is a wrong answer that is also a legal one — which is a
+      # unit test's job, not a data test's. Measured against a warehouse copy:
+      # swap the two columns in the model's final SELECT and **all 29 of
+      # `fct_country_weather_year`'s data tests pass**, with DEU 2022 reading
+      # 2170.55 where it should read 2177.70.
+      # `weather_year_keeps_the_two_degree_day_conventions_apart` is what fails
+      # on it.
+
+      # A country cannot need heating and cooling on the same day at these bases,
+      # so no year can max out both. Stated as a ceiling on the sum rather than on
+      # either one, because that is what a base-temperature mix-up would break.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "cdd_total < hdd_total + 5000"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "frost_days <= n_days"
+    columns:
+      - name: country_iso3
+        data_type: VARCHAR
+        description: ISO3. EU/EEA only — null for the rest of the world upstream.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_country')
+                field: country_iso3
+      - name: year
+        data_type: INTEGER
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1940, max_value: 2100}
+      - name: hdd_total
+        data_type: DOUBLE
+        description: >
+          Annual heating degree days from the daily mean, at `heating_base_c`.
+          The standard weather-normalisation denominator. Bounded generously:
+          Reykjavik and Nicosia are the two ends and the range has to hold both.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 10000}
+      - name: hdd_minmax_total
+        data_type: DOUBLE
+        description: The (max + min)/2 convention, for comparison with `hdd_total`.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 10000}
+      - name: cdd_total
+        data_type: DOUBLE
+        description: Annual cooling degree days from the daily mean, at `cooling_base_c`.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 5000}
+      - name: heating_base_c
+        data_type: DOUBLE
+        description: >
+          The base temperature these totals were computed against, carried per
+          row. A degree-day figure without its base is uninterpretable, and this
+          is a `var` — so the number can legitimately differ between builds.
+        data_tests:
+          - not_null
+      - name: cooling_base_c
+        data_type: DOUBLE
+        data_tests:
+          - not_null
+      - name: temp_mean_c
+        data_type: DOUBLE
+        description: Mean of the daily means. Not the same as a mean of hourly values.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -30, max_value: 40}
+      - name: temp_min_c
+        data_type: DOUBLE
+        description: Coldest daily minimum in the year.
+        data_tests:
+          - not_null
+      - name: temp_max_c
+        data_type: DOUBLE
+        description: Warmest daily maximum in the year.
+        data_tests:
+          - not_null
+      - name: frost_days
+        data_type: BIGINT
+        description: Days whose minimum fell below 0 C.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 366}
+      - name: precipitation_mm
+        data_type: DOUBLE
+        description: Annual total precipitation.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: solar_radiation_mj_m2
+        data_type: DOUBLE
+        description: Annual shortwave radiation sum.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: wind_speed_max_kmh
+        data_type: DOUBLE
+        description: Mean of the daily maximum wind speeds — wind does not accumulate.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: n_days
+        data_type: BIGINT
+        description: Days of data behind the row. 365, or 366 in a leap year, when complete.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1, max_value: 366}
+      - name: last_day
+        data_type: DATE
+        description: The newest day in the year that has data — where a partial year stops.
+        data_tests:
+          - not_null
+      - name: year_is_complete
+        data_type: BOOLEAN
+        description: >
+          Whether the year has all of its days. Compared against the year's own
+          length rather than 365, so a leap year is not permanently one short.
+        data_tests:
+          - not_null
+      - name: grid_distance_km
+        data_type: DOUBLE
+        description: >
+          Distance from the capital to the ERA5 cell that answered for it,
+          carried up from staging so the approximation stays visible at this
+          grain too.
+        data_tests:
+          - not_null
+
   - name: fct_eu_electricity_prices_semiannual
     config:
       contract:

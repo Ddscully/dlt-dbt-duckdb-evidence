@@ -96,13 +96,12 @@ defs = dg.Definitions(
         # Separate from the four above because each is partitioned and Dagster
         # gives a multi-asset one partitions_def for all of its assets: WDI by
         # year, retail by month.
-        assets.raw_wdi_asset,
+        assets.raw_year_partitioned_assets,
         assets.raw_retail_asset,
         assets.dbt_models,
         assets.co2_intensity,
         assets.retail_rfm,
         assets.pipeline_status,
-        assets.parquet_archive,
         assets.evidence_site,
     ],
     asset_checks=[
@@ -111,7 +110,7 @@ defs = dg.Definitions(
         assets.fx_rates_reach_the_present,
         assets.co2_intensity_rank_is_dense,
         assets.rfm_scores_do_not_split_ties,
-        assets.lake_matches_warehouse,
+        assets.weather_revisions_are_derivable,
         assets.site_pages_all_rendered,
     ],
     jobs=[load_retail_job, full_refresh_job, publish_site_job],

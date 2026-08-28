@@ -2,7 +2,12 @@ version: 2
 
 sources:
   - name: raw
-    description: Landing tables loaded by the dlt pipeline.
+    description: >
+      Landing tables loaded by the dlt pipeline, in the DuckLake catalog under
+      data/lakehouse/ — not in the DuckDB file. `database: lakehouse` is the
+      ATTACH alias from profiles.yml and from `lake.lakehouse.ATTACH_ALIAS`;
+      the three have to agree or dbt cannot resolve a single source.
+    database: lakehouse
     schema: raw
     # Freshness here measures when *we* last loaded, not when the upstream
     # publisher last updated: dlt stamps every row with `_dlt_load_id`, a unix
@@ -32,6 +37,32 @@ sources:
         freshness:
           warn_after: {count: 2, period: day}
           error_after: {count: 7, period: day}
+      - name: om_weather_daily
+        description: >
+          Open-Meteo ERA5 daily weather at each EU/EEA capital city, at
+          (country_iso3, weather_date). The only source joined on a *coordinate*
+          rather than a code: the capital latitude/longitude the World Bank
+          already publishes, which nothing in the warehouse read until this
+          landed. Six daily variables, kept under the API's own names.
+
+          Two things about it are unlike every other source here. It is
+          **budget-limited** — the free tier allows 10,000 weighted calls a day
+          and the full 2007- seed costs more than one day holds — so the rows
+          are carried forward from the previous release rather than refetched,
+          making this the only landing table a rebuild does not reproduce. And
+          the recent tail is **preliminary**: Open-Meteo serves ERA5T within a
+          day or two of real time and Copernicus supersedes it with final ERA5
+          two to three months later, which is what the 90-day merge lookback is
+          sized for.
+        # Daily, like the FX rates, so the annual thresholds would let it stop
+        # for a month unnoticed. Looser than FX's 2/7 because there is no
+        # business-day calendar here — every day exists — but the load is paced
+        # and a long backfill can legitimately hold the watermark still for
+        # hours.
+        freshness:
+          warn_after: {count: 3, period: day}
+          error_after: {count: 10, period: day}
+
       - name: retail_invoice_lines
         description: >
           UCI Online Retail II — a UK online gift retailer's order lines,

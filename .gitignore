@@ -27,7 +27,11 @@ data/raw/
 data/*.xlsx
 # Publishable artifact built by `just export-data`; it lives in GitHub releases
 data/export/
-# Parquet archive built by `just lake`; regenerated from the warehouse
+# Leftovers from the hive Parquet archive, which DuckLake replaced. **Keep this
+# entry.** The layer is gone but the directory is not: any clone that ran
+# `just lake` still has 793 files and 60 MB of it on disk, and dropping the
+# line stages every one of them on the next `git add -A` — measured, on the
+# commit that removed the layer.
 data/lake/
 # Downloads kept between runs so a partitioned load doesn't re-fetch a 45 MB zip
 # per partition. Byte-identical to what the URL still serves — safe to delete.
@@ -73,3 +77,10 @@ node_modules/
 # whatever the last session left here. The three files tracked before this rule
 # landed stay tracked; `git add -f` for anything new that's worth keeping.
 docs/sessions/
+
+# The DuckLake landing zone: where dlt writes `raw`. Filled by `just ingest`,
+# not by `just lakehouse` (which only reports on it). **This is the one
+# gitignored path that holds state no rebuild reproduces** — the snapshot
+# lineage, and the capital-city weather archive, which costs days of
+# Open-Meteo's daily allowance to refetch. `just clean` deliberately skips it.
+data/lakehouse/

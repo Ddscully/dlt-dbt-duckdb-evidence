@@ -27,6 +27,7 @@ from ingest.pipeline import (
     fx_url,
     retail_sql,
     wdi_url,
+    weather_url,
 )
 from modern_data_stack import fixtures as _fixtures, workbook
 
@@ -38,6 +39,13 @@ ALL_URLS = (
     # window off the watermark). One entry would leave the other shape untested,
     # and the end date is today's, so neither is a constant.
     + [fx_url(fx_start_date(None)), fx_url(fx_start_date("2026-01-15"))]
+    # A one-location stand-in rather than `weather_locations()`, which is a
+    # *fetch* — it reads the World Bank country payload, and this module is
+    # imported by `just test`, which has no network and no fixture flag set. The
+    # substitution is safe because the weather route captures nothing: every
+    # archive URL resolves to the same file whatever coordinates or window it
+    # carries, so a real location list could not select a different fixture.
+    + [weather_url([("DEU", 52.5235, 13.4115)], "2007-01-01", "2007-12-31")]
 )
 
 

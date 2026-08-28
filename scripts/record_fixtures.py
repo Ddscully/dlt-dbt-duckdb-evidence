@@ -1,6 +1,6 @@
 """Record the ingest fixtures that CI runs against.
 
-Hits the six live endpoints once, trims each payload to a representative slice,
+Hits the seven live endpoints once, trims each payload to a representative slice,
 and writes `tests/fixtures/ingest/`. Everything downstream of dlt then has real
 data to chew on without a pull request depending on OWID being up.
 
@@ -29,6 +29,7 @@ import io
 import json
 import tempfile
 import zipfile
+from datetime import date
 from pathlib import Path
 
 import polars as pl
@@ -43,14 +44,20 @@ from ingest.pipeline import (
     RETAIL_WORKBOOK_NAME,
     WB_COUNTRY_API,
     WB_WDI_INDICATORS,
+    WEATHER_RATE_LIMITS,
     _get_json,
+    _get_weather_json,
     fx_url,
     retail_sql,
     retail_workbook,
     wdi_url,
+    weather_call_units,
+    weather_locations,
+    weather_url,
 )
 from modern_data_stack import workbook
 from modern_data_stack.db import scalar
+from modern_data_stack.ratelimit import WeightedWindowLimiter
 
 # A slice wide enough that the modelled layers have something to do:
 #   - every World Bank region and all four income groups;
@@ -163,6 +170,57 @@ def record_fx() -> None:
     url = fx_url(FX_FIRST_DATE)
     payload = json.dumps(_get_json(url))
     _write(path_for(url), gzip.compress(payload.encode()))
+
+
+def record_weather() -> None:
+    """Three calendar years of daily weather for all 41 capitals, gzipped.
+
+    Two departures from `COUNTRIES`, and both are forced rather than chosen:
+
+    * **Every location, never a subset.** Open-Meteo matches a multi-location
+      response to its request *by position* — the entries carry a `location_id`
+      except the first, which has none — so a fixture recorded for a subset would
+      be read back against the full 41 and hand each country its neighbour's
+      weather. There is no key to repair that with.
+    * **A short date range instead**, which is the trim `COUNTRIES` would
+      normally be. 2020-2022 is chosen for what it contains: a leap day, two
+      calendar-year boundaries, and the 2021/2022 pair the heating-degree-day
+      comparison is built on, so CI computes the same numbers the analysis does.
+
+    ~1,900 units of Open-Meteo's budget, which is the one recorder call here with
+    a price attached — see `weather_call_units`. Recording is therefore not free
+    to repeat, and a re-record that fails partway costs the budget anyway.
+
+    **Fetched through the paced path, not `_get_json`.** That is not defensive
+    tidying: this call is the single largest weather request the repo ever makes,
+    and it is typically made right after someone has been exploring the API by
+    hand, so it is the *most* likely of all of them to meet a 429. Going through
+    `_get_json` — as this did in its first draft — gives it three retries over
+    4.5 seconds against a limit that wants a minute or an hour, and the recorder
+    then fails having spent the budget it needed.
+    """
+    locations = weather_locations()
+    url = weather_url(locations, WEATHER_FIXTURE_FIRST_DAY, WEATHER_FIXTURE_LAST_DAY)
+    days = (
+        date.fromisoformat(WEATHER_FIXTURE_LAST_DAY) - date.fromisoformat(WEATHER_FIXTURE_FIRST_DAY)
+    ).days + 1
+    payload = json.dumps(
+        _get_weather_json(
+            url,
+            WeightedWindowLimiter(WEATHER_RATE_LIMITS),
+            weather_call_units(len(locations), days),
+        )
+    )
+    _write(path_for(url), gzip.compress(payload.encode()))
+    print(f"  {'':<28} {len(locations):>9,} locations, {days:,} days")
+
+
+# The recorded window. Not a lookback off today: a fixture whose contents moved
+# with the recording date would make every downstream assertion about it — the
+# degree-day figures in the course material, the row counts in the tests — true
+# only until the next re-record.
+WEATHER_FIXTURE_FIRST_DAY = "2020-01-01"
+WEATHER_FIXTURE_LAST_DAY = "2022-12-31"
 
 
 def record_retail() -> None:
@@ -285,6 +343,7 @@ def main() -> None:
     record_eurostat()
     record_fx()
     record_retail()
+    record_weather()
     print("done — commit tests/fixtures/ingest/")
 
 

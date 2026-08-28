@@ -210,6 +210,7 @@ exposures:
       - ref('dim_retail_product')
       - ref('fct_cbam_exposure')
       - ref('fct_co2_estimate_versions')
+      - ref('fct_country_weather_year')
       - ref('fct_emissions_energy')
       - ref('fct_eu_electricity_prices_semiannual')
       - ref('fct_example_scope2_emissions')

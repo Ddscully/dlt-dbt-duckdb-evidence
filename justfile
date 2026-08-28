@@ -6,6 +6,15 @@ set dotenv-load := true
 # Dagster keeps its run/event storage here (gitignored except dagster.yaml).
 export DAGSTER_HOME := justfile_directory() / ".dagster"
 
+# **Absolute, and exported for every recipe — this one is not a convenience.**
+# A DuckLake catalog stores its `data_path` exactly as given and checks it on
+# every attach. dbt runs from `dbt/` and the Python layers from the repo root,
+# so a relative default means dbt creates a catalog recording
+# `../data/lakehouse/data/` that `lake.lakehouse` then cannot open — measured,
+# and the error names a path nobody typed. `WAREHOUSE_PATH` gets away with a
+# relative default because a plain file has no such record.
+export LAKEHOUSE_DIR := env("LAKEHOUSE_DIR", justfile_directory() / "data/lakehouse")
+
 default:
     @just --list
 
@@ -44,6 +53,13 @@ dlt-state pipeline="modern_data_stack":
 # Install dbt packages (dbt_utils) into dbt/dbt_packages/ — gitignored, so this
 # is needed once per clone and after any packages.yml change
 dbt-deps:
+    # The directory, not the catalog. dbt's profile attaches the DuckLake on
+    # every invocation — including `dbt parse` and sqlfluff's templater — and
+    # DuckLake will not create the catalog file's *parent*, so on a fresh clone
+    # `just lint` died with `Cannot open file .../catalog.duckdb: No such file or
+    # directory` before linting a single model. dbt creates the catalog itself
+    # once the directory is there; `just ingest` is what puts tables in it.
+    mkdir -p "$LAKEHOUSE_DIR"
     cd dbt && uv run dbt deps
 
 # T: build + test dbt models
@@ -90,9 +106,12 @@ dbt-docs: dbt-deps
 dbt-docs-serve: dbt-docs
     cd dbt && uv run dbt docs serve
 
-# Write the year-partitioned Parquet archive to data/lake/ (gitignored)
-lake:
-    uv run python -m lake.archive
+# Report what the DuckLake landing zone holds: tables, rows, snapshot lineage.
+# It *reports* rather than writes — `just ingest` is what fills it, because dlt
+# now lands there directly. `lake.lakehouse.revisions()` is the other half:
+# what a table says now that it did not say at an earlier snapshot.
+lakehouse:
+    uv run python -m lake.lakehouse
 
 # Polars derived metrics
 transform:
@@ -105,7 +124,7 @@ pipeline-status:
     uv run python -m transform.pipeline_status
 
 # Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
-run: ingest dbt-build transform pipeline-status lake
+run: ingest dbt-build transform pipeline-status
 
 # Unit tests — mocked API payloads, no network, no warehouse
 test:
@@ -126,16 +145,18 @@ test-pipeline:
     set -euo pipefail
     export INGEST_FIXTURES=1
     export WAREHOUSE_PATH="$(mktemp -d)/warehouse.duckdb"
-    # ...and the lake beside it, or a fixture run would overwrite data/lake/
-    # with the 17-country slice.
-    export LAKE_DIR="$(dirname "$WAREHOUSE_PATH")/lake"
+    # ...and the lakehouse beside it. This one is not an optimisation: dlt now
+    # *lands* in the lakehouse, so without the override a fixture run merges the
+    # 17-country slice into the real landing zone — whose snapshot lineage and
+    # weather archive no rebuild reproduces.
+    export LAKEHOUSE_DIR="$(dirname "$WAREHOUSE_PATH")/lakehouse"
     echo "fixture warehouse: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
     cd dbt && uv run dbt deps && uv run dbt build && cd ..
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
-    uv run python -m lake.archive
+    uv run python -m lake.lakehouse
 
 # `.github/workflows/release-data.yml` runs this, then attaches the result to a
 # dated GitHub release.
@@ -238,6 +259,35 @@ backfill-wdi start end='': dbt-parse
         -m orchestration.definitions --select 'raw/wb_wdi' \
         --partition-range "{{ start }}...${end:-{{ start }}}"
 
+# Deepen the capital-city weather archive: `just backfill-weather 2012 2026`.
+# A routine load only fetches the last few years (WEATHER_COLD_START_YEARS), and
+# ERA5 reaches back to 1940, so this is how the history gets there — and unlike
+# `backfill-wdi` it is **slow on purpose**.
+# Open-Meteo's free tier allows 600 units a minute, 5,000 an hour and 10,000 a
+# day, one year of 41 capitals costs ~641, and the resource paces itself against
+# all three windows. So a decade is about an hour of mostly waiting, and
+# **fifteen years is the most one run can hold**: 2012-2026 is 9,401 units, 94%
+# of the day's allowance, and sixteen goes over it.
+#
+# Going over does not fail — it *sleeps*. The limiter honours the daily window by
+# waiting for it to drain, so a seventeen-year range paces for two hours and then
+# sits for twenty-two more with nothing on stdout. That is the same hang
+# `WEATHER_COLD_START_YEARS` exists to keep out of the three live workflows,
+# reached from the backfill side instead, so split a deeper history across two
+# days rather than rounding the range up.
+#
+# The rows are carried forward into the next release, which is what makes this
+# worth doing once rather than every run — see `scripts/restore_history.py`.
+# Follow with `just dbt-build` or `just materialize`.
+backfill-weather start end='': dbt-parse
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$DAGSTER_HOME"
+    end="{{ end }}"
+    uv run --group orchestration dagster asset materialize \
+        -m orchestration.definitions --select 'raw/om_weather_daily' \
+        --partition-range "{{ start }}...${end:-{{ start }}}"
+
 # Read-only is the default because DuckDB takes a single writer: a session
 # holding the write lock makes `just run` fail with a lock error two terminals
 # away. Pass `just sql write` when you actually mean to write.
@@ -248,14 +298,27 @@ backfill-wdi start end='': dbt-parse
 # machine happened to have. Note that `just --list` shows only the LAST comment
 # line above a recipe, so that line has to be the summary.
 #
+# **The lakehouse has to be attached, or a third of the warehouse does not open.**
+# `raw` lives in DuckLake now and the nine `staging` models are *views* over it,
+# so a bare `duckdb data/warehouse.duckdb` binds `marts`, `analytics` and
+# `history` fine and fails every staging view with `Catalog "lakehouse" does not
+# exist!`. That is the mirror of the trap the release guards from the other side
+# — a published copy renamed away from `warehouse` breaks its views the same way
+# — and the export solves it by materialising staging (`solidify_staging`), which
+# is exactly what an interactive session cannot do.
+#
+# Attached in the same mode as the warehouse, so `just sql write` can fix a
+# landing table and the default cannot touch one by accident.
+#
 # Open the warehouse in the DuckDB CLI (`just sql write` for a writer)
 sql mode="read":
     #!/usr/bin/env bash
     set -euo pipefail
+    attach="install ducklake; load ducklake; attach 'ducklake:duckdb:$LAKEHOUSE_DIR/catalog.duckdb' as lakehouse (data_path '$LAKEHOUSE_DIR/data/'"
     if [ "{{ mode }}" = "write" ]; then
-      uv run duckdb data/warehouse.duckdb
+      uv run duckdb data/warehouse.duckdb -cmd "$attach);"
     else
-      uv run duckdb -readonly data/warehouse.duckdb
+      uv run duckdb -readonly data/warehouse.duckdb -cmd "$attach, read_only);"
     fi
 
 # Lint SQL — from dbt/, because the dbt templater opens the warehouse via the
@@ -306,7 +369,7 @@ course-sandbox:
     # Absolute, or dbt (which runs from dbt/) and the Python layers (which run
     # from the repo root) resolve it to two different files.
     export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"
-    export LAKE_DIR="{{ justfile_directory() }}/data/course/lake"
+    export LAKEHOUSE_DIR="{{ justfile_directory() }}/data/course/lakehouse"
     mkdir -p "$(dirname "$WAREHOUSE_PATH")"
     rm -f "$WAREHOUSE_PATH" "$WAREHOUSE_PATH.wal"
     echo "course sandbox: $WAREHOUSE_PATH"
@@ -315,7 +378,6 @@ course-sandbox:
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
-    uv run python -m lake.archive
     echo "sandbox ready — 'just course-rebuild' after you change a model"
 
 # Seconds rather than a full `just course-sandbox`, because the fixtures have
@@ -380,23 +442,30 @@ clean scope="safe" force="":
     # which is a poor thing for a command that refused to do.
     #
     # Mirrors `scripts/restore_history.py`: the gate is not "is this scary", it
-    # is "is there history here to lose". An empty `history` schema (a fresh
-    # clone, a warehouse built but never snapshotted) has nothing a rebuild
-    # cannot reproduce, so it goes without ceremony. Rows there stop it until
+    # is "is there anything here a rebuild cannot make again". A warehouse with
+    # no snapshots and no carried landing tables (a fresh clone, or one built
+    # but never snapshotted) goes without ceremony. Anything else stops it until
     # `--force`, and the message names the count — the same shape, and the same
     # sentence, as the refusal in `modern_data_stack.history`.
     #
-    # Summed over every table in the schema, not over a named snapshot: there
-    # are two of them and anything naming one has to name both.
+    # The count comes from `irreplaceable_rows()` rather than SQL written out
+    # here, because there are now two *kinds* of unreproducible table and the
+    # list will grow again: the `history` snapshots, and `raw.om_weather_daily`,
+    # which is bounded by Open-Meteo's daily budget rather than by principle.
+    # A gate with its own copy of the list is a gate that waves through whatever
+    # was added last.
     if [ "{{ scope }}" = "warehouse" ]; then
       if [ ! -e data/warehouse.duckdb ]; then
         echo "  data/warehouse.duckdb is already gone"
       else
-        history_rows='import duckdb; from modern_data_stack.db import scalar; con = duckdb.connect("data/warehouse.duckdb", read_only=True); q = "select table_name from information_schema.tables where table_schema = ?"; tables = [r[0] for r in con.execute(q, ["history"]).fetchall()]; print(sum(scalar(con, f"select count(*) from history.{t}") for t in tables))'
-        held=$(uv run python -c "$history_rows") || held=""
+        # The path is passed explicitly rather than left to `warehouse_path()`:
+        # the deletion below names `data/warehouse.duckdb`, so the gate has to
+        # count that file and not whatever `WAREHOUSE_PATH` currently points at.
+        count='from scripts.restore_history import irreplaceable_rows; print(irreplaceable_rows("data/warehouse.duckdb"))'
+        held=$(uv run python -c "$count") || held=""
         # An unreadable count must refuse, not fall through. `[ "" -gt 0 ]` is an
         # error, but inside an `if` that reads as *false* and `set -e` does not
-        # fire — so a warehouse whose history could not be counted would have
+        # fire — so a warehouse whose state could not be counted would have
         # been deleted by the safe-looking branch. Fail closed instead.
         #
         # `--force` deliberately does not override this one. The check cannot
@@ -405,14 +474,14 @@ clean scope="safe" force="":
         # escape hatch, and it is the right amount of friction.
         case "$held" in
           ''|*[!0-9]*)
-            echo "could not read the history row count from data/warehouse.duckdb" >&2
+            echo "could not count the unreproducible rows in data/warehouse.duckdb" >&2
             echo "(locked by another process?) — refusing to delete it" >&2
             exit 1
             ;;
         esac
         if [ "$held" -gt 0 ] && [ "{{ force }}" != "--force" ]; then
-          echo "data/warehouse.duckdb holds $held rows of snapshot history — refusing" >&2
-          echo "to delete history that a rebuild cannot reproduce. Pass --force if" >&2
+          echo "data/warehouse.duckdb holds $held rows a rebuild cannot make again" >&2
+          echo "(snapshot history and carried landing tables). Pass --force if" >&2
           echo "that is really what you want:" >&2
           echo "  just clean warehouse --force" >&2
           echo "A published release can restore some of it: just restore-history <file>" >&2
@@ -435,14 +504,20 @@ clean scope="safe" force="":
     # Regenerable with no state in them at all.
     #   dbt/target        `dbt parse` / `just dbt-build`   (the manifest)
     #   dbt/dbt_packages  `just dbt-deps`
-    #   data/lake         `just lake`
     #   data/export       `just export-data`
     #   data/course       `just course-sandbox`
     #   data/cache        re-downloaded on the next ingest
     #   reports/build     `just report`
     #   reports/.evidence `just report-clean`
+    #
+    # data/lakehouse is deliberately absent, and the reason got stronger when it
+    # stopped being a mirror: it is now the *only* copy of every landing table.
+    # Deleting it costs the snapshot lineage (which no rebuild invents, the same
+    # property that makes `history` unreproducible) and the weather archive
+    # (which no rebuild can afford — days of Open-Meteo's budget). Silently, in
+    # both cases: nothing in the output would say so.
     drop dbt/target dbt/dbt_packages dbt/logs \
-         data/lake data/export data/course data/cache \
+         data/export data/course data/cache \
          reports/build reports/.evidence
 
     # Dagster run/event storage. `.dagster/dagster.yaml` is checked in and stays.

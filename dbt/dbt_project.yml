@@ -22,6 +22,26 @@ vars:
   # whole sensitivity band from one build rather than needing one build per price.
   eu_ets_price_eur_per_t: 75
 
+  # The outdoor temperature below which buildings are assumed to need heating,
+  # and above which they need cooling. Degree days are the standard way to turn
+  # a temperature series into a demand proxy, and both numbers are *conventions*
+  # rather than measurements — the same winter produces different degree-day
+  # totals depending on which base a statistical office uses.
+  #
+  # 15.5 C is the UK/Eurostat convention for heating (Eurostat's HDD formula
+  # uses it, and the UK Met Office's degree-day service defaults to it); the US
+  # uses 65 F = 18.3 C. Cooling is conventionally set higher than heating rather
+  # than at the same point, because the gap between them is the band in which a
+  # building needs neither.
+  #
+  # Vars, not literals, for `fiscal_year_start_month`'s reason exactly: they are
+  # policies, the warehouse only ever builds one value of each, and so every
+  # other value they claim to support is untested by construction unless a unit
+  # test poses it. `stg_weather_daily` carries the base it used on every row, so
+  # a number lifted out of the warehouse says which convention produced it.
+  heating_degree_day_base_c: 15.5
+  cooling_degree_day_base_c: 22.0
+
   # The month a fiscal year starts in. 4 = April, which is the UK, Indian and
   # Japanese convention; the US federal year starts in October and most of
   # continental Europe runs on the calendar (1).

@@ -8,7 +8,8 @@ The [README](../README.md) has the short version.
 Seven feeds from five publishers, all freely licensed and small enough to run
 locally. Six are country-keyed; the seventh isn't a country dataset at all. The
 CBAM default values are an eighth source that arrives as a seed instead of a
-feed, for the reasons in [CLAUDE.md](../CLAUDE.md#cbam-exposure-fct_cbam_exposure-the-cbam_-seeds-reportspagescbammd).
+feed, for the reasons in
+[the `compliance-models` skill](../.claude/skills/compliance-models/SKILL.md).
 
 | Dataset | Grain | Link |
 |---------|-------|------|
@@ -86,32 +87,61 @@ The country-year spine is the dominant grain but not a house rule.
 the FX tables have no country, and the five retail models sit below country
 grain.
 
-## The lake: `data/lake/`
+## The lakehouse: `data/lakehouse/`
 
-`just lake` writes the year-keyed tables back out as hive-partitioned Parquet at
-`data/lake/<table>/year=<year>/data_0.parquet`, zstd, 793 files and ~60 MB today.
-One DuckDB file is not too small for this data. The file layout buys three things
-the single file can't:
+**This is where `raw` lives.** dlt lands the eight source tables into a
+[DuckLake](https://ducklake.select) catalog — plain Parquet under
+`data/lakehouse/data/`, plus a catalog database holding schema, snapshot lineage
+and per-file statistics. dbt attaches it and builds `staging`, `marts` and
+`history` into `data/warehouse.duckdb`, which is the only thing the release
+publishes. `just lakehouse` reports what the catalog holds; `just ingest` fills
+it.
 
 ```sql
--- reads one 47 kB file, not the table: ~23 ms vs ~50 ms for the whole archive
-select sum(co2) from read_parquet('data/lake/raw_owid_co2/**/*.parquet',
-                                  hive_partitioning = 1)
-where year = 2020;
+install ducklake; load ducklake;
+attach 'ducklake:duckdb:data/lakehouse/catalog.duckdb' as lakehouse
+    (data_path 'data/lakehouse/data/');
+
+select count(*) from lakehouse.raw.om_weather_daily;
 ```
 
-- **Pruning.** The partition column is in the path, so `where year = …` never
-  opens the other 274 files.
-- **Portability.** Parquet outlives a DuckDB storage version, and every engine
-  reads it.
-- **A diffable raw layer.** The output is byte-identical run to run, so a
-  restatement upstream shows up as exactly one changed file. The DuckDB file
-  differs everywhere, every time.
+There used to be a hive-partitioned archive beside this at `data/lake/`, written
+by hand from the warehouse. It is gone: it was a second copy of data DuckLake
+already stores as Parquet, and keeping both meant maintaining two answers to
+*what moved upstream?*.
 
-It's an archive *of* the warehouse and not a landing zone in front of it. The
-trade-off that makes is deliberate, and so is the one it doesn't get away with:
-275 partitions averaging 47 kB is far too many small files for a real lake on
-object storage. The two tables that come out well are the ones whose grain is
-much finer than their partition column — `fct_retail_order_line` is 1.07M rows
-over three year-partitions, at 13 MB, 12 MB and 836 kB. See
-[CLAUDE.md](../CLAUDE.md#the-lake-lakearchivepy) for the full arithmetic.
+- **Ask what changed by diffing two snapshots, not with the change feed.**
+  `ducklake_table_changes()` is the obvious tool and it does not survive dlt,
+  which regenerates `_dlt_id` and `_dlt_load_id` on every row it re-merges —
+  reloading 500 identical rows reports 500 `update_preimage`/`update_postimage`
+  pairs. The feed is right; the writer makes it meaningless. So:
+
+```python
+from lake.lakehouse import WEATHER_TABLE, revisions, versions
+
+v = versions(WEATHER_TABLE)              # snapshots in which this table changed
+revisions(WEATHER_TABLE, v[-2], v[-1])   # rows that genuinely differ
+```
+
+  which projects the provenance columns away and returns **0 rows** for a no-op
+  reload and exactly the changed rows for a real restatement. It also works
+  between *any* two snapshots, so "what changed since last month" is one query.
+
+- **No partition column, and none needed.** DuckLake prunes on catalog
+  statistics, so a filter still reads one file with no directory layout to
+  arrange it. `raw.om_weather_daily` is keyed on `weather_date` and has no `year`
+  column — the hive archive would have needed one invented for the layout.
+- **The catalog is not optional.** `read_parquet` over `data/lakehouse/data/`
+  will not give you the table: DuckLake writes positional delete files that only
+  the catalog applies, so a glob either fails on a schema mismatch or returns
+  superseded rows alongside current ones.
+- **Deleting `data/lakehouse/` is the destructive act in this repo now.** It is
+  the only copy of every landing table, and it holds both the snapshot lineage
+  (which no rebuild invents) and the capital-city weather archive (which no
+  rebuild can afford — days of Open-Meteo's daily budget). `just clean` does not
+  list it.
+
+Weather is the table worth diffing because it is the only source here that
+restates on a schedule — Open-Meteo serves preliminary ERA5T and Copernicus
+supersedes it with final ERA5 two to three months later, so every ingest
+re-merges 90 days of daily rows in place.

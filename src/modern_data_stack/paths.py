@@ -44,6 +44,7 @@ ROOT_MARKER = "pyproject.toml"
 ROOT_ENV_VAR = "PROJECT_ROOT"
 WAREHOUSE_ENV_VAR = "WAREHOUSE_PATH"
 LAKE_ENV_VAR = "LAKE_DIR"
+LAKEHOUSE_ENV_VAR = "LAKEHOUSE_DIR"
 CACHE_ENV_VAR = "INGEST_CACHE_DIR"
 
 
@@ -93,6 +94,16 @@ def warehouse_path() -> str:
 def lake_dir() -> str:
     """The Parquet archive's destination. ``LAKE_DIR`` overrides it, as above."""
     return os.environ.get(LAKE_ENV_VAR) or str(project_root() / "data" / "lake")
+
+
+def lakehouse_dir() -> str:
+    """The DuckLake lakehouse — catalog and data files. ``LAKEHOUSE_DIR`` overrides.
+
+    Separate from ``lake_dir`` rather than a subdirectory of it, because they are
+    two artifacts answering the same question two ways and a fixture run has to
+    be able to point them at different throwaway directories independently.
+    """
+    return os.environ.get(LAKEHOUSE_ENV_VAR) or str(project_root() / "data" / "lakehouse")
 
 
 def cache_dir() -> str:

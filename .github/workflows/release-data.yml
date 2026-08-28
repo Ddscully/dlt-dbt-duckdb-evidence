@@ -53,6 +53,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # No INGEST_FIXTURES: see the note at the top.
+      # Absolute for the same reason, and here it is not merely tidiness: dlt
+      # writes the catalog from the repo root, so DuckLake records an *absolute*
+      # data_path, while dbt resolves profiles.yml's relative default from dbt/.
+      # DuckLake stores the path as given and compares the two as strings, so
+      # one directory under two spellings is refused — `DATA_PATH parameter
+      # "../data/lakehouse/data/" does not match existing data path`.
+      LAKEHOUSE_DIR: ${{ github.workspace }}/data/lakehouse
       DAGSTER_HOME: ${{ github.workspace }}/.dagster
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -74,19 +81,25 @@ jobs:
       - name: Install dbt packages and parse the project
         run: cd dbt && uv run dbt deps && uv run dbt parse
 
-      # The `history` schema holds the tables a rebuild cannot reproduce
-      # (`snap_co2_estimates`, `snap_grid_emission_factors`), and every release
-      # used to start from an empty file — so the published snapshots held one
-      # version per row forever and the Restatements page shipped permanently
-      # empty. Copying the previous release's `history`
-      # in *before* the build makes `dbt snapshot` compare this month's numbers
-      # against last month's, so the releases accumulate a real revision log.
+      # Two kinds of state cannot be rebuilt, for two different reasons, and they
+      # now live in two different artifacts. The `history` schema is state *in
+      # principle* — no rebuild invents a revision upstream has overwritten — and
+      # it is inside `warehouse.duckdb`. `raw.om_weather_daily` is unreproducible
+      # within a *budget* (Open-Meteo allows 10,000 weighted units a day and the
+      # archive costs more), and it is in the `lakehouse.tar.gz` asset, because
+      # dlt lands `raw` in a DuckLake catalog rather than in the database.
+      #
+      # `scripts/restore_history.py` carries both: it finds the lakehouse beside
+      # the database rather than being told where it is, so the download has to
+      # bring the pair. Copying them in *before* the build is what makes
+      # `dbt snapshot` compare against last month and what keeps the weather
+      # archive deepening instead of resetting to a three-year cold start.
       #
       # Only the "no previous release" case is allowed to skip. A download or
-      # restore that fails is fatal: continuing would silently reset the history
-      # to empty and the next release would inherit that, which is exactly the
-      # failure this step exists to prevent.
-      - name: Carry snapshot history forward from the previous release
+      # restore that fails is fatal: continuing would silently reset the carried
+      # state to empty and the next release would inherit that, which is exactly
+      # the failure this step exists to prevent.
+      - name: Carry unreproducible tables forward from the previous release
         id: history
         run: |
           prev=$(gh release list --limit 30 --json tagName \
@@ -98,21 +111,48 @@ jobs:
           fi
           echo "Restoring history from $prev"
           gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
+          # The landing zone is one tarball beside the database, and
+          # `restore_history` looks for it there. A release cut before the asset
+          # existed simply has none, which `gh` reports as a failure — hence the
+          # `|| true`. That is the "restoring nothing is normal" rule one level
+          # down, and it is safe here for the same reason it is safe there: the
+          # verify step below asserts what actually got carried.
+          gh release download "$prev" --pattern lakehouse.tar.gz \
+            --dir prev-release || true
           uv run python -m scripts.restore_history prev-release/warehouse.duckdb
           uv run python - <<'PY' >> "$GITHUB_OUTPUT"
+          import sys
+
           import duckdb
 
-          # Every table in the schema, not a named one: a snapshot added later
-          # would otherwise be carried forward but never checked, which is the
-          # same silent-reset failure one step removed.
+          from modern_data_stack.history import carried_rows
+          from scripts.restore_history import CARRIED
+
+          # Counted through the same rules the restore used, rather than a schema
+          # name written out again here: a relation added to `CARRIED` would
+          # otherwise be carried forward but never checked, which is the same
+          # silent-reset failure one step removed. That has already happened once
+          # — `snap_grid_emission_factors` arrived beside a check that named
+          # `snap_co2_estimates` by hand.
+          #
+          # stdout is $GITHUB_OUTPUT here, so the per-relation lines go to stderr.
           con = duckdb.connect("data/warehouse.duckdb", read_only=True)
-          rows = 0
-          for (table,) in con.execute(
-              "select table_name from duckdb_tables() where schema_name = 'history'"
-          ).fetchall():
-              (n,) = con.execute(f'select count(*) from history."{table}"').fetchone()
-              rows += n
-          print(f"restored_rows={rows}")
+          counts = carried_rows(con, CARRIED)
+          for relation, n in counts.items():
+              print(f"carried {relation}: {n:,} rows", file=sys.stderr)
+          print(f"restored_rows={sum(counts.values())}")
+
+          # The landing zone is counted separately because it is a separate
+          # artifact — `CARRIED` names relations inside the database and the
+          # weather archive is not in it any more. Two numbers because they can
+          # fail independently: a missing `warehouse.duckdb` loses the revision
+          # log, a missing `lakehouse.tar.gz` loses the weather archive, and
+          # each is silent on its own.
+          from lake import lakehouse
+
+          weather = lakehouse.carried_rows()
+          print(f"carried lakehouse: {weather:,} rows", file=sys.stderr)
+          print(f"restored_lakehouse_rows={weather}")
           PY
           rm -rf prev-release
 
@@ -179,6 +219,7 @@ jobs:
         working-directory: data/export
         env:
           RESTORED_ROWS: ${{ steps.history.outputs.restored_rows }}
+          RESTORED_LAKEHOUSE_ROWS: ${{ steps.history.outputs.restored_lakehouse_rows }}
           # `modern_data_stack` is a src-layout package and installs, so it
           # imports from anywhere; `scripts/` is a plain top-level directory and
           # does not, and this step runs from `data/export`. Without this the
@@ -196,10 +237,12 @@ jobs:
           import duckdb
 
           from modern_data_stack.export import storage_version
+          from modern_data_stack.history import carried_rows
           from scripts.export_warehouse import (
               MAX_PUBLISHED_STORAGE_VERSION,
               MIN_READER_VERSION,
           )
+          from scripts.restore_history import CARRIED
 
           manifest = json.loads(Path("manifest.json").read_text())
           on_disk = storage_version(Path("warehouse.duckdb"))
@@ -229,21 +272,37 @@ jobs:
               assert rows > 0, f"{relation} is empty"
               print(f"{relation}: {rows:,} rows")
 
-          # The snapshots can only grow. If they came back smaller than what was
-          # carried forward, the restore didn't reach the build and this release
-          # would publish a history that silently lost its earlier versions.
-          # Summed over the schema, matching how `restored_rows` was counted.
+          # The landing zone is the *other* carried artifact and is checked on
+          # its own terms: it has to be in the release at all, and it can only
+          # grow. A release that shipped without it would look completely
+          # healthy — every assertion above passes — and the cost would land on
+          # the *next* run as a weather archive cold-started at three years.
+          published = manifest["lakehouse"]
+          assert published["file"], (
+              "no lakehouse asset in this release: the landing zone was not "
+              "published, so the next release cold-starts the weather archive"
+          )
+          carried_weather = int(os.environ.get("RESTORED_LAKEHOUSE_ROWS") or 0)
+          assert published["rows"] >= carried_weather, (
+              f"published lakehouse holds {published['rows']:,} rows, fewer than "
+              f"the {carried_weather:,} carried in"
+          )
+          print(f"{published['file']}: {published['rows']:,} rows")
+
+          # What was carried can only grow. Smaller than what went in means the
+          # restore never reached the build, and this release would publish a
+          # history that silently lost its earlier versions. Counted through
+          # `CARRIED`, the same rules that produced `restored_rows`, so the two
+          # sides cannot drift apart.
           restored = int(os.environ.get("RESTORED_ROWS") or 0)
-          rows = 0
-          for (table,) in con.execute(
-              "select table_name from duckdb_tables() "
-              "where database_name = 'warehouse' and schema_name = 'history'"
-          ).fetchall():
-              (n,) = con.execute(f'select count(*) from warehouse.history."{table}"').fetchone()
-              print(f"warehouse.history.{table}: {n:,} rows")
-              rows += n
-          assert rows >= restored, f"history shrank: {rows:,} rows, {restored:,} restored"
-          print(f"warehouse.history: {rows:,} rows total ({restored:,} carried forward)")
+          counts = carried_rows(con, CARRIED, database="warehouse")
+          for relation, n in counts.items():
+              print(f"warehouse.{relation}: {n:,} rows")
+          rows = sum(counts.values())
+          assert rows >= restored, (
+              f"carried state shrank: {rows:,} rows, {restored:,} restored"
+          )
+          print(f"carried forward: {rows:,} rows total ({restored:,} restored)")
           PY
 
       # The notes are the release body, so they move out of the way and

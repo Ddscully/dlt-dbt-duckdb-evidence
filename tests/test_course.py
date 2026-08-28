@@ -16,6 +16,7 @@ below reads markdown and the justfile as text.
 
 from __future__ import annotations
 
+import pathlib
 import re
 import subprocess
 
@@ -103,6 +104,23 @@ def cited_files() -> list:
     return [*course_files(), *skills()]
 
 
+def tracked_markdown() -> list[pathlib.Path]:
+    """Every markdown file git tracks.
+
+    `git ls-files` rather than a glob, for `tests/test_documented_counts.py`'s
+    reason: `docs/sessions/` is gitignored in full, so the transcripts stay
+    outside this by construction rather than by an exclude list that could drift.
+    """
+    out = subprocess.run(
+        ["git", "ls-files", "*.md"],
+        cwd=project_root(),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    return [project_root() / p for p in out]
+
+
 def _label(doc) -> str:
     """`SKILL.md` alone says nothing; name a skill by its directory."""
     return doc.parent.name if doc.name == "SKILL.md" else doc.name
@@ -130,18 +148,29 @@ def ignored(paths: set[str]) -> set[str]:
 
     Without this the guard passes on a developer's machine, where the site has
     been built, and fails in CI — the exact shape of rot it exists to catch.
+
+    Every path is asked about twice, with and without a trailing slash, because
+    `git check-ignore` is not a pure function of the .gitignore. A directory-only
+    pattern — `dbt/target/`, written with the slash — matches only a path git can
+    see is a directory, and it asks the filesystem to decide. So a cited
+    `dbt/target` was exempt on a machine that had built and exempt nowhere else:
+    green locally, red on a fresh checkout, which is this helper's own failure
+    mode arriving inside the exemption meant to prevent it. A trailing slash on
+    the probe answers the directory question without the filesystem.
     """
     if not paths:
         return set()
+    probes = {form for c in paths for form in (c.rstrip("/"), c.rstrip("/") + "/")}
     done = subprocess.run(
         ["git", "check-ignore", "--stdin"],
         cwd=project_root(),
-        input="\n".join(sorted(paths)),
+        input="\n".join(sorted(probes)),
         capture_output=True,
         text=True,
         check=False,  # exit 1 simply means nothing matched
     )
-    return {line.strip() for line in done.stdout.splitlines() if line.strip()}
+    hits = {line.strip() for line in done.stdout.splitlines() if line.strip()}
+    return {c for c in paths if c.rstrip("/") in hits or c.rstrip("/") + "/" in hits}
 
 
 @pytest.mark.parametrize("doc", cited_files(), ids=_ids(cited_files()))
@@ -190,6 +219,90 @@ def test_the_index_lists_every_module_that_exists():
     on_disk = {module.name for module in modules()}
     assert on_disk - linked == set(), (
         f"modules exist but the index doesn't link them: {sorted(on_disk - linked)}"
+    )
+
+
+# A cross-file markdown anchor, e.g. [CLAUDE.md](../CLAUDE.md#agent-skills). Only
+# links carrying a `#fragment` — a bare link to a file is already covered by the
+# citation test above, and a same-file `#anchor` cannot survive a rename anyway.
+_ANCHOR_LINK = re.compile(r"\]\((\.{0,2}[/A-Za-z0-9_.-]*\.md)#([A-Za-z0-9_-]+)\)")
+
+# Anything that is not a letter, digit, space, hyphen or underscore. GitHub's
+# slug drops it — which is why `## The lake (`lake/archive.py`)` anchors as
+# `#the-lake-lakearchivepy`, backticks, brackets and slashes all gone.
+_NOT_IN_SLUG = re.compile(r"[^a-z0-9 \-_]")
+
+# Any heading level, with its text captured. Deliberately not `_HEADING`, which
+# this module already uses for `^## .*$` in the structural checks below — the
+# second definition silently won, and `m.group(1)` then raised on a pattern with
+# no group at all. A collision, not a typo.
+_ANY_HEADING = re.compile(r"^#+\s+(.+)$", re.MULTILINE)
+
+
+def slug(heading: str) -> str:
+    """GitHub's heading anchor: lowercase, drop punctuation, spaces to hyphens."""
+    return _NOT_IN_SLUG.sub("", heading.lower()).replace(" ", "-")
+
+
+def anchor_links() -> list[tuple[pathlib.Path, pathlib.Path, str]]:
+    """Every (source, target file, fragment) in tracked markdown."""
+    out = []
+    for doc in tracked_markdown():
+        for target, fragment in _ANCHOR_LINK.findall(doc.read_text()):
+            out.append((doc, (doc.parent / target).resolve(), fragment))
+    return out
+
+
+def headings_in(path: pathlib.Path) -> set[str]:
+    """Every anchor a markdown file offers."""
+    return {slug(m.group(1).strip()) for m in _ANY_HEADING.finditer(path.read_text())}
+
+
+def test_every_cross_file_anchor_resolves():
+    """A heading that moves leaves the link green in review and dead on click.
+
+    `docs/WAREHOUSE.md` pointed at `CLAUDE.md#cbam-exposure-…` for three days
+    after that section was split out into `.claude/skills/compliance-models/`.
+    Nothing could have said so: the two citation tests above check backticked
+    *paths* and `just` recipes, and the path in a `](…)` link was still correct —
+    it was the `#fragment` after it that named a heading no longer there. Every
+    split of CLAUDE.md is a chance to do it again, and there have been two.
+    """
+    dead = []
+    for doc, target, fragment in anchor_links():
+        rel = doc.relative_to(project_root())
+        if not target.exists():
+            dead.append(f"{rel} -> {target.name}#{fragment} (no such file)")
+        elif fragment not in headings_in(target):
+            dead.append(f"{rel} -> {target.name}#{fragment}")
+    assert not dead, f"markdown anchors that resolve to no heading: {dead}"
+
+
+def test_the_anchor_scan_still_finds_anchors():
+    """The guard above passes by not looking if `_ANCHOR_LINK` stops matching.
+
+    Same failure as `_ROUTES` reachability and `seen > 35` in
+    `tests/test_documented_counts.py`: a scanner whose pattern drifts reports no
+    findings, which is indistinguishable from a clean tree.
+
+    Non-emptiness and nothing else. A floor on the *number* of anchors would go
+    red on a legitimate deletion — there are only four, and removing one is a
+    normal edit — which is a worse trade here than in
+    `tests/test_documented_counts.py`, where claims only ever accumulate.
+
+    A second assertion, that at least one anchor is written `../`-relative and
+    so exercises the `doc.parent / target` join, was written and then dropped:
+    resolving from the repo root instead fails
+    `test_every_cross_file_anchor_resolves` with "(no such file)" on both docs/
+    links, so it was never the assertion doing the catching — and it would fire
+    on a tree whose only anchors happened to sit in the root, which is a correct
+    state. A guard whose effect another test already has is not evidence either
+    way; the rule is CLAUDE.md's, applied to itself.
+    """
+    assert anchor_links(), (
+        "the anchor scan found no `](file.md#fragment)` links at all — "
+        "`_ANCHOR_LINK` has stopped matching, so `test_every_cross_file_anchor_"
+        "resolves` is now green because it is looking at nothing"
     )
 
 

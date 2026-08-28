@@ -14,7 +14,7 @@ out of them:
 * `db`            — single-row and scalar reads, without the Optional
 
 Each takes its configuration as arguments; the project modules that call them
-hold the constants and stay the entry points, so `python -m lake.archive` and
+hold the constants and stay the entry points, so `python -m lake.lakehouse` and
 friends keep working. See `docs/REUSING_THIS_STACK.md`.
 
 Importing this package pulls in none of the submodules, so it costs no Polars or

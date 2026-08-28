@@ -1046,3 +1046,42 @@ unit_tests:
         - {customer_id: "C2", returned_gbp: -50.0, return_rate_pct: 25.0}
         - {customer_id: "C3", returned_gbp: null, return_rate_pct: null}
         - {customer_id: "C4", returned_gbp: null, return_rate_pct: null}
+
+  - name: weather_year_keeps_the_two_degree_day_conventions_apart
+    model: fct_country_weather_year
+    description: >
+      The two `hdd` columns are the same shape, the same unit and the same order
+      of magnitude, so swapping them in the final SELECT is a wrong answer that
+      is entirely legal — every data test on this mart passes on it. `_marts.yml`
+      carried a comment claiming one convention is never colder than the other
+      and that a test therefore caught the swap; both halves were false, and the
+      expression under it was non-negativity that is invariant under the swap.
+      Measured against a warehouse copy: with the two swapped in the final
+      SELECT the model builds and **all 29 of `fct_country_weather_year`'s data
+      tests pass**, DEU 2022 reading 2170.55 where it should read 2177.70.
+
+      **The fixture puts the two directions on either side of it, which is the
+      part that matters.** AAA's `(max + min)/2` total lands above its mean-based
+      one and BBB's lands below, because over the real archive `hdd_minmax_total`
+      is the larger in 253 of 656 rows (38.6%) and the smaller in 403. So this
+      pins that the columns are distinguishable *without* asserting an ordering
+      between them — a test that assumed one would be red on the warehouse.
+
+      Every total in the expectation is distinct from every other within its row,
+      so a rotation of the three degree-day columns fails as loudly as a swap of
+      two, and each value is exact in binary floating point so the comparison is
+      not a tolerance question.
+    given:
+      - input: ref('stg_weather_daily')
+        rows:
+          # AAA: the midpoint convention runs warmer here (5.5 against 3.5).
+          - {country_iso3: "AAA", weather_date: "2024-01-01", hdd_c: 2.0, hdd_minmax_c: 3.0, cdd_c: 0.25, heating_base_c: 15.5, cooling_base_c: 22.0}
+          - {country_iso3: "AAA", weather_date: "2024-01-02", hdd_c: 1.5, hdd_minmax_c: 2.5, cdd_c: 0.75, heating_base_c: 15.5, cooling_base_c: 22.0}
+          # BBB: and colder here (9.5 against 12.0). Same year, so the two rows
+          # of output differ only in the direction of the gap.
+          - {country_iso3: "BBB", weather_date: "2024-01-01", hdd_c: 8.0, hdd_minmax_c: 6.0, cdd_c: 1.5, heating_base_c: 15.5, cooling_base_c: 22.0}
+          - {country_iso3: "BBB", weather_date: "2024-01-02", hdd_c: 4.0, hdd_minmax_c: 3.5, cdd_c: 0.5, heating_base_c: 15.5, cooling_base_c: 22.0}
+    expect:
+      rows:
+        - {country_iso3: "AAA", year: 2024, hdd_total: 3.5, hdd_minmax_total: 5.5, cdd_total: 1.0}
+        - {country_iso3: "BBB", year: 2024, hdd_total: 12.0, hdd_minmax_total: 9.5, cdd_total: 2.0}

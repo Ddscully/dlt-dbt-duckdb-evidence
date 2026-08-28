@@ -1,11 +1,11 @@
 """Offline fixtures for the ingest layer — this project's routes.
 
-`ingest.pipeline` fetches from six live endpoints. That makes CI a test of
-whether OWID, the World Bank and Eurostat happen to be up, which is not what a
-pull request is asking. Setting ``INGEST_FIXTURES=1`` swaps every fetch for a
-checked-in payload recorded from those same endpoints, so the *whole* pipeline —
-dlt schema inference, dbt, Polars, the asset checks — runs deterministically and
-offline.
+`ingest.pipeline` fetches from every endpoint in `_ROUTES` below. That makes CI a
+test of whether OWID, the World Bank and Eurostat happen to be up, which is not
+what a pull request is asking. Setting ``INGEST_FIXTURES=1`` swaps every fetch
+for a checked-in payload recorded from those same endpoints, so the *whole*
+pipeline — dlt schema inference, dbt, Polars, the asset checks — runs
+deterministically and offline.
 
 The fixtures are trimmed to a representative set of countries; see
 `scripts/record_fixtures.py`, which is what produced them and what re-records
@@ -15,10 +15,17 @@ discontinuity in it is something a model is tested against.
 
 The mechanism (and the reasoning behind it) lives in
 `modern_data_stack.fixtures`. What's here is the URL-to-file map, which is the
-only part that's about these five sources. The OWID fixtures are gzipped CSV
-rather than Parquet so they still go through `pl.read_csv` with
+only part that's about this project's own sources. The OWID fixtures are gzipped
+CSV rather than Parquet so they still go through `pl.read_csv` with
 `infer_schema_length=None`, and the JSON fixtures are the API's own response
 body — the parsing gotchas that bite in production are exercised in CI too.
+
+**Neither paragraph counts the sources, deliberately.** The first said "six live
+endpoints" and the third "these five sources", while `_ROUTES` holds eight routes
+across six publishers — both stale, and already stale before the source that made
+them wrong arrived. `tests/test_documented_counts.py` scans markdown and YAML and
+never a `.py` docstring, so no guard here can go red on a number; naming the list
+is what survives the next source instead.
 """
 
 from __future__ import annotations
@@ -53,6 +60,14 @@ _ROUTES: list[_fixtures.Route] = [
     # discovery and the all-text read are all exercised in CI; a bare `.xlsx`
     # here would skip the first two, and a CSV would skip all three.
     (re.compile(r"archive\.ics\.uci\.edu/static/public/502/"), "retail_online_retail_ii.zip"),
+    # No capture for the coordinates or the date window, for the same reason the
+    # FX route captures no date range: the recorded payload is one window over
+    # every location, and the resource merges on `(country_iso3, weather_date)`,
+    # so re-landing a day replaces it. It matters more here than there — a live
+    # run asks for one window per calendar year, and all of them resolve to this
+    # one file, which is exactly what keeps a fixture run from making 19 requests
+    # against a rate limit that is not being enforced against it.
+    (re.compile(r"archive-api\.open-meteo\.com/v1/archive\?"), "om_weather_daily.json.gz"),
 ]
 
 

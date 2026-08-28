@@ -24,7 +24,9 @@ from __future__ import annotations
 import duckdb
 import polars as pl
 
+from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, catalog_path, data_path
 from modern_data_stack import db, observability
+from modern_data_stack.ducklake import attach
 from modern_data_stack.paths import dbt_manifest_path, warehouse_path
 
 DUCKDB_PATH = warehouse_path()
@@ -55,12 +57,23 @@ SOURCE_TABLES = (
     "eu_elec_prices",
     "ecb_fx_rates",
     "retail_invoice_lines",
+    "om_weather_daily",
 )
 
 
-def build_sources(con: duckdb.DuckDBPyConnection) -> pl.DataFrame:
-    """Row counts, year span and load time for each dlt landing table."""
-    return observability.build_sources(con, SOURCE_TABLES)
+def build_sources(
+    con: duckdb.DuckDBPyConnection, raw_database: str | None = ATTACH_ALIAS
+) -> pl.DataFrame:
+    """Row counts, year span and load time for each dlt landing table.
+
+    Reads the **lakehouse**, not the warehouse: dlt lands in the DuckLake catalog
+    and the DuckDB file holds only what dbt builds. `con` must therefore have the
+    catalog attached — `run()` below does it, and naming the database explicitly
+    is not decoration. `information_schema` spans every attached catalog, so a
+    `raw` schema in either one would match a query that filtered on the schema
+    alone, and this project now genuinely has two catalogs open at once.
+    """
+    return observability.build_sources(con, SOURCE_TABLES, raw_database=raw_database)
 
 
 def build_tables(con: duckdb.DuckDBPyConnection) -> pl.DataFrame:
@@ -73,10 +86,24 @@ def build_tests(con: duckdb.DuckDBPyConnection, manifest_path: str = MANIFEST_PA
     return observability.build_tests(con, manifest_path)
 
 
-def run(duckdb_path: str = DUCKDB_PATH, manifest_path: str = MANIFEST_PATH) -> dict[str, int]:
+def run(
+    duckdb_path: str = DUCKDB_PATH,
+    manifest_path: str = MANIFEST_PATH,
+    lakehouse_dir: str = LAKEHOUSE_DIR,
+) -> dict[str, int]:
     """Write the three `analytics.pipeline_*` tables. Returns rows written each."""
     con = duckdb.connect(duckdb_path)
     try:
+        # `raw` is in the lakehouse, so the inventory cannot be built without
+        # it attached — the three tables describe one pipeline across two
+        # catalogs now.
+        attach(
+            con,
+            catalog_path(lakehouse_dir),
+            data_path(lakehouse_dir),
+            ATTACH_ALIAS,
+            read_only=True,
+        )
         frames = {
             "pipeline_sources": build_sources(con),
             "pipeline_tables": build_tables(con),

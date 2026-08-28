@@ -23,7 +23,7 @@ from pathlib import Path
 import duckdb
 import polars as pl
 
-from .db import row, scalar
+from .db import qualify, row, scalar
 
 DEFAULT_AUDIT_SCHEMA = "dbt_test__audit"
 
@@ -32,20 +32,49 @@ DEFAULT_AUDIT_SCHEMA = "dbt_test__audit"
 DEFAULT_FAIL_CALC = "count(*)"
 
 
-def _has_column(con: duckdb.DuckDBPyConnection, schema: str, table: str, column: str) -> bool:
+def _has_column(
+    con: duckdb.DuckDBPyConnection,
+    schema: str,
+    table: str,
+    column: str,
+    database: str | None = None,
+) -> bool:
+    """Whether `column` is on `<database>.<schema>.<table>`.
+
+    `database` is optional because most callers query the connection's own
+    catalog, and required in spirit for the one that does not: a landing schema
+    in an attached DuckLake is `lakehouse.raw`, and `information_schema.columns`
+    without the `table_catalog` filter happily matches a `raw` schema in *any*
+    attached database. Two catalogs each holding a `raw` schema is exactly this
+    project's shape.
+    """
+    params = {"schema": schema, "table": table, "column": column}
+    clause = ""
+    if database is not None:
+        # Both halves together: DuckDB rejects a named parameter the statement
+        # does not mention (`identifiers of the excess parameters: database`), so
+        # the binding cannot be passed unconditionally alongside an optional
+        # clause.
+        clause = " and table_catalog = $database"
+        params["database"] = database
     return bool(
         con.execute(
-            """
+            f"""
             select 1 from information_schema.columns
-            where table_schema = ? and table_name = ? and column_name = ?
+            where table_schema = $schema and table_name = $table
+              and column_name = $column{clause}
             """,
-            [schema, table, column],
+            params,
         ).fetchone()
     )
 
 
 def _period_span(
-    con: duckdb.DuckDBPyConnection, schema: str, table: str, column: str
+    con: duckdb.DuckDBPyConnection,
+    schema: str,
+    table: str,
+    column: str,
+    database: str | None = None,
 ) -> tuple[int | None, int | None]:
     """(min, max) of a table's period column, or (None, None) if it has none.
 
@@ -54,9 +83,11 @@ def _period_span(
     a table that has one and no rows. It read `tuple[int, int]` until ty pointed
     at the line directly below the docstring that already said otherwise.
     """
-    if not _has_column(con, schema, table, column):
+    if not _has_column(con, schema, table, column, database):
         return (None, None)
-    lo, hi = row(con, f'select min({column}), max({column}) from "{schema}"."{table}"')
+    lo, hi = row(
+        con, f"select min({column}), max({column}) from {qualify(database, schema, table)}"
+    )
     return (lo, hi)
 
 
@@ -65,6 +96,7 @@ def build_sources(
     source_tables: tuple[str, ...],
     raw_schema: str = "raw",
     period_column: str = "year",
+    raw_database: str | None = None,
 ) -> pl.DataFrame:
     """Row counts, period span and load time for each dlt landing table.
 
@@ -76,7 +108,7 @@ def build_sources(
     """
     rows = []
     for table in source_tables:
-        if not _has_column(con, raw_schema, table, "_dlt_load_id"):
+        if not _has_column(con, raw_schema, table, "_dlt_load_id", raw_database):
             continue
         n, loaded_at = row(
             con,
@@ -84,10 +116,10 @@ def build_sources(
             select
                 count(*),
                 to_timestamp(max(cast(_dlt_load_id as double)))
-            from {raw_schema}."{table}"
+            from {qualify(raw_database, raw_schema, table)}
             """,
         )
-        period_min, period_max = _period_span(con, raw_schema, table, period_column)
+        period_min, period_max = _period_span(con, raw_schema, table, period_column, raw_database)
         rows.append(
             {
                 "source_table": f"{raw_schema}.{table}",

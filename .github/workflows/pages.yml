@@ -15,7 +15,7 @@ on:
   push:
     branches: [main]
     # An allowlist of what the site is actually built from, because this job is
-    # a full ingest -> dbt -> Polars -> lake -> Evidence run against the LIVE
+    # a full ingest -> dbt -> Polars -> Evidence run against the LIVE
     # public APIs. Without it the cheapest commit in the repo costs the same
     # Actions minutes and the same API load as a data change: 23 of the 94
     # commits on main have been docs, skills or tests, and every one of them
@@ -70,6 +70,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # No INGEST_FIXTURES: see the note at the top.
+      # Absolute for the same reason, and here it is not merely tidiness: dlt
+      # writes the catalog from the repo root, so DuckLake records an *absolute*
+      # data_path, while dbt resolves profiles.yml's relative default from dbt/.
+      # DuckLake stores the path as given and compares the two as strings, so
+      # one directory under two spellings is refused — `DATA_PATH parameter
+      # "../data/lakehouse/data/" does not match existing data path`.
+      LAKEHOUSE_DIR: ${{ github.workspace }}/data/lakehouse
       DAGSTER_HOME: ${{ github.workspace }}/.dagster
     steps:
       - uses: actions/checkout@v7
@@ -113,7 +120,7 @@ jobs:
           printf '\ndeployment:\n  basePath: /%s\n' \
             '${{ github.event.repository.name }}' >> reports/evidence.config.yaml
 
-      # ingest -> dbt build + test -> Polars -> lake -> Evidence, in asset-graph
+      # ingest -> dbt build + test -> Polars -> Evidence, in asset-graph
       # order. `publish_site` is `full_refresh` plus `reports/evidence_site`,
       # which shells out to npm (install, `sources:strict`, `build`) — so the
       # site is a node in the graph here rather than three steps bolted on after

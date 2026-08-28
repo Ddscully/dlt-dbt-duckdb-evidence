@@ -5,6 +5,14 @@ These build a miniature warehouse in a tmp dir rather than reading
 real pipeline has been run. What's worth asserting is the packaging contract, not
 the numbers: which schemas ship, that the manifest describes what's on disk, and
 that the `staging` views still resolve after the database is copied.
+
+**That independence was briefly untrue and passed anyway**, which is the reason
+`lakehouse_dir` is now pinned by the fixture rather than defaulted. The second
+release asset is built from `lake.lakehouse.LAKEHOUSE_DIR`, so the exporter's
+output shape depended on whether the developer's machine had ingested: an empty
+`data/lakehouse/` gave five SHA256SUMS lines and a populated one gave six. CI
+builds from nothing, so it would never have gone red there — only on the machine
+of anyone who had run `just ingest` once.
 """
 
 from __future__ import annotations
@@ -22,6 +30,7 @@ from test_fixtures import ALL_URLS
 
 from modern_data_stack import export as _export
 from modern_data_stack.db import scalar
+from modern_data_stack.ducklake import meta_alias
 from modern_data_stack.export import storage_version
 from scripts.export_warehouse import (
     ATTRIBUTION,
@@ -34,10 +43,18 @@ from scripts.export_warehouse import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# The two load times a migrated tree really has, and they are the measured ones:
+# on this project's working copy on 2026-08-27 the lakehouse's `_dlt_loads` read
+# 16:07:52 and the `raw` left behind in `warehouse.duckdb` read 11:47:47, 4h20m
+# adrift. They are deliberately different because the defect this pins is not "no
+# timestamp" — it is a believable wrong one, which `is not None` cannot see.
+WAREHOUSE_LOADED_AT = "2026-08-27 11:47:47+00"
+LAKEHOUSE_LOADED_AT = "2026-08-27 16:07:52+00"
+
 # `raw` and `main` must not ship as Parquet; `staging`/`marts`/`analytics` must.
 # The view is written fully qualified the way dbt-duckdb writes it — that's what
 # makes the catalog name load-bearing when the database is copied.
-SETUP = """
+SETUP = f"""
 create schema raw;
 create schema staging;
 create schema marts;
@@ -46,7 +63,8 @@ create schema analytics;
 create table raw.owid_co2 as
     select * from (values ('USA', 2020, 4.7), ('FRA', 2020, 0.3)) t(iso3, year, co2);
 create table raw._dlt_loads as
-    select * from (values ('1785315112.98', now())) t(load_id, inserted_at);
+    select * from (values ('1785315112.98', timestamptz '{WAREHOUSE_LOADED_AT}'))
+        t(load_id, inserted_at);
 
 create view warehouse.staging.stg_co2 as
     select iso3 as country_iso3, year, co2 as co2_mt from warehouse.raw.owid_co2;
@@ -83,7 +101,16 @@ def export(warehouse: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     """
     monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
     out = tmp_path / "export"
-    manifest = run(str(warehouse), str(out), tag="data-1999-12-31", repo="acme/demo")
+    # An empty directory, named rather than defaulted: see the module docstring.
+    # This is the no-lakehouse shape, which is a legitimate export and the one
+    # every other test here wants to be looking at.
+    manifest = run(
+        str(warehouse),
+        str(out),
+        tag="data-1999-12-31",
+        repo="acme/demo",
+        lakehouse_dir=tmp_path / "no-lakehouse",
+    )
     manifest["out"] = out
     return manifest
 
@@ -152,7 +179,11 @@ def test_the_period_column_reaches_every_table(tmp_path: Path):
 def test_sha256sums_is_checkable(export: dict):
     """`sha256sum -c` format: hash, two spaces, bare filename."""
     lines = (export["out"] / "SHA256SUMS").read_text().splitlines()
-    assert lines[0].split("  ") == [export["warehouse"]["sha256"], "warehouse.duckdb"]
+    # Sorted by path, because the list is produced by walking the directory
+    # rather than by naming what we think we wrote — see `export()`. The
+    # warehouse is no longer first and no longer special.
+    assert f"{export['warehouse']['sha256']}  warehouse.duckdb" in lines
+    assert lines == sorted(lines, key=lambda line: line.split("  ", 1)[1])
     assert len(lines) == len(export["tables"]) + 1
 
 
@@ -171,8 +202,15 @@ def test_the_copied_warehouse_keeps_its_views_working(export: dict):
 
 def test_provenance_records_the_load_not_just_the_run(export: dict):
     """An export of a stale warehouse should look stale: `data_loaded_at` comes
-    from dlt's `_dlt_loads`, not from the clock."""
-    assert export["data_loaded_at"] is not None
+    from dlt's `_dlt_loads`, not from the clock.
+
+    The value is asserted rather than its presence. `is not None` is satisfied by
+    a clock read, by a stale read, and by the wrong catalog's read — every way of
+    getting this wrong except the one that raises. This is the no-lakehouse
+    shape, so the in-file table is the right source here and the fallback in
+    `landed_at` is what serves it.
+    """
+    assert export["data_loaded_at"] == "2026-08-27T11:47:47+00:00"
     assert export["duckdb_version"] == duckdb.__version__
 
 
@@ -322,6 +360,9 @@ PUBLISHER_FOR_FETCH_HOST = {
     "ec.europa.eu": "ec.europa.eu/eurostat",
     "api.frankfurter.dev": "frankfurter.dev",
     "archive.ics.uci.edu": "archive.ics.uci.edu/dataset/502",
+    # Fetched from the archive subdomain, credited at the bare one — the same
+    # host-is-not-publisher split as OWID and the World Bank above.
+    "archive-api.open-meteo.com": "open-meteo.com",
 }
 
 
@@ -455,3 +496,200 @@ def test_the_release_attribution_and_the_readme_agree_on_the_licences():
     assert not orphaned, (
         f"README's License section links sources the release attribution does not: {orphaned}"
     )
+
+
+# --------------------------------------------------------------------------
+# The second release asset
+#
+# `lakehouse.tar.gz` had no test at all until 2026-08-27, which is how the
+# ambient-directory bug above stayed green. It is a *published artifact*, so it
+# earns one on this repo's own terms — and the three properties below are the
+# ones a consumer or the next release actually depends on.
+# --------------------------------------------------------------------------
+
+# Two tables, and only one of them may ship. `PUBLISHED_TABLES` is an allowlist
+# rather than a denylist because a published DuckLake cannot be filtered after
+# the fact — see `test_a_table_outside_the_allowlist_is_absent_at_every_version`.
+LAKEHOUSE_SETUP = [
+    (
+        "raw.om_weather_daily",
+        """
+        select * from (values ('DEU', date '2021-12-20', 3.5, 'load_1', 'id_1'),
+                              ('FRA', date '2021-12-20', 7.1, 'load_1', 'id_2'))
+            t(country_iso3, weather_date, temperature_2m_mean, _dlt_load_id, _dlt_id)
+        """,
+    ),
+    (
+        "raw.retail_invoice_lines",
+        "select * from (values (17850, 'a-clear-customer-id')) t(customer_id, note)",
+    ),
+    # Where dlt actually stamps the load time now. It does not ship — it is not
+    # in `PUBLISHED_TABLES` — but the manifest has to be able to read it, and the
+    # `warehouse` fixture holds an older one under the same name so that a read
+    # of the wrong catalog is a wrong *answer* rather than an error.
+    (
+        "raw._dlt_loads",
+        f"""
+        select * from (values ('1785315112.98', timestamptz '{LAKEHOUSE_LOADED_AT}'))
+            t(load_id, inserted_at)
+        """,
+    ),
+]
+
+
+@pytest.fixture
+def lakehouse_dir(tmp_path: Path) -> Path:
+    """A miniature DuckLake holding one publishable table and one that is not."""
+    from modern_data_stack.ducklake import attach
+
+    lake = tmp_path / "lakehouse"
+    (lake / "data").mkdir(parents=True)
+    con = duckdb.connect()
+    attach(con, lake / "catalog.duckdb", lake / "data", alias="lh")
+    con.execute("create schema lh.raw")
+    for table, body in LAKEHOUSE_SETUP:
+        con.execute(f"create table lh.{table} as {body}")
+    con.close()
+    return lake
+
+
+@pytest.fixture
+def export_with_lakehouse(
+    warehouse: Path, lakehouse_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> dict:
+    monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
+    out = tmp_path / "export-lh"
+    manifest = run(
+        str(warehouse),
+        str(out),
+        tag="data-1999-12-31",
+        repo="acme/demo",
+        lakehouse_dir=lakehouse_dir,
+    )
+    manifest["out"] = out
+    return manifest
+
+
+def _unpack(manifest: dict, into: Path) -> Path:
+    import tarfile
+
+    with tarfile.open(manifest["out"] / manifest["lakehouse"]["file"]) as tar:
+        # `filter="data"` is the 3.14 default and a DeprecationWarning before it.
+        tar.extractall(into, filter="data")
+    return into / "lakehouse"
+
+
+def test_the_landing_zone_ships_as_a_second_asset_and_is_checksummed(
+    export_with_lakehouse: dict, tmp_path: Path
+):
+    """The tarball is a file in the release like any other, so `sha256sum -c`
+    has to cover it. It does only because SHA256SUMS is produced by *walking*
+    the export directory — a list built from what the exporter thinks it wrote
+    would have shipped the first hook-written artifact unverified."""
+    lh = export_with_lakehouse["lakehouse"]
+    assert lh["file"] == "lakehouse.tar.gz"
+    assert lh["tables"] == {"raw.om_weather_daily": 2}
+    assert lh["rows"] == 2
+
+    archive = export_with_lakehouse["out"] / lh["file"]
+    assert lh["bytes"] == archive.stat().st_size
+
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    lines = (export_with_lakehouse["out"] / "SHA256SUMS").read_text().splitlines()
+    assert f"{digest}  lakehouse.tar.gz" in lines
+    assert len(lines) == len(export_with_lakehouse["tables"]) + 2
+
+
+def test_the_published_catalog_opens_with_a_bare_attach_from_anywhere(
+    export_with_lakehouse: dict, tmp_path: Path
+):
+    """The whole reason `publish` rewrites `data_path` to a relative form.
+
+    DuckLake stores that path verbatim and refuses an attach that disagrees with
+    it, so an absolute one would force every consumer to pass
+    `OVERRIDE_DATA_PATH`. Measured here rather than assumed, including the part
+    that is easy to get wrong in the other direction: the relative path resolves
+    against the *catalog file*, not the process working directory, so unpacking
+    it anywhere and opening it from anywhere both work.
+    """
+    unpacked = _unpack(export_with_lakehouse, tmp_path / "consumer")
+
+    with duckdb.connect(str(unpacked / "catalog.duckdb")) as meta:
+        assert (
+            scalar(meta, "select value from ducklake_metadata where key = 'data_path'") == "data/"
+        )
+
+    con = duckdb.connect()
+    con.execute("install ducklake")
+    con.execute("load ducklake")
+    # No `data_path` option and no chdir — exactly what a consumer would type.
+    con.execute(f"attach 'ducklake:duckdb:{unpacked / 'catalog.duckdb'}' as lh (read_only)")
+    assert scalar(con, "select count(*) from lh.raw.om_weather_daily") == 2
+    con.close()
+
+
+def test_a_table_outside_the_allowlist_is_absent_at_every_version(
+    export_with_lakehouse: dict, tmp_path: Path
+):
+    """The privacy property, and it is why the catalog is *built* rather than
+    copied-and-pruned.
+
+    DuckLake keeps dropped tables in earlier snapshots: `select * from
+    lh.raw.secret at (version => 2)` returns the rows after a `drop table`, and
+    when this was measured on the real landing zone it returned a customer id.
+    So "ship the catalog, then drop what should not be in it" is not a
+    mitigation at all, and the assertion that matters is over *every* snapshot
+    rather than the current one.
+    """
+    unpacked = _unpack(export_with_lakehouse, tmp_path / "consumer")
+
+    con = duckdb.connect()
+    con.execute("install ducklake")
+    con.execute("load ducklake")
+    con.execute(f"attach 'ducklake:duckdb:{unpacked / 'catalog.duckdb'}' as lh (read_only)")
+
+    # DuckLake attaches its catalog as a sibling *database*, not a schema inside
+    # the lake — `meta_alias` is the one place that name is written down.
+    meta = meta_alias("lh")
+    names = [r[0] for r in con.execute(f"select table_name from {meta}.ducklake_table").fetchall()]
+    assert names == ["om_weather_daily"], f"published catalog holds {names}"
+
+    for snapshot in [
+        r[0] for r in con.execute("select snapshot_id from lh.snapshots()").fetchall()
+    ]:
+        with pytest.raises(duckdb.Error):
+            con.execute(
+                f"select * from lh.raw.retail_invoice_lines at (version => {snapshot})"
+            ).fetchall()
+    con.close()
+
+
+def test_data_loaded_at_is_read_from_the_catalog_not_the_copy_left_beside_it(
+    export_with_lakehouse: dict,
+):
+    """The regression the DuckLake move shipped, and it was silent twice over.
+
+    `loaded_at` read an unqualified `raw._dlt_loads` off the published copy. On a
+    fresh or CI tree that raises `Catalog Error`, the `except` swallows it, and
+    every release body renders "Data last landed: unknown." On a tree migrated in
+    place — which still holds the pre-move `raw` — it returns the *stale* copy's
+    timestamp instead, believable and wrong.
+
+    The fixture is built as that second tree on purpose: both `_dlt_loads` tables
+    exist and they disagree, so this asserts which one was read rather than that
+    something was. Point `landed_at` back at the file and it fails with the
+    warehouse's 11:47 against the catalog's 16:07 — the same 4h20m the working
+    copy showed.
+    """
+    assert export_with_lakehouse["data_loaded_at"] == "2026-08-27T16:07:52+00:00"
+
+
+def test_the_release_notes_say_when_the_data_landed(export_with_lakehouse: dict):
+    """`release_notes` is where a null actually reaches a reader, and it renders
+    the failure as prose rather than as a missing field: `manifest.get(...) or
+    "unknown"` turns both failure modes into a sentence that looks written."""
+    notes = release_notes(export_with_lakehouse, "acme/demo", "data-1999-12-31")
+    assert "**Data last landed:** 2026-08-27T16:07:52+00:00." in notes
+    # The failure branch by name, not a bare `"unknown" not in notes` — the word
+    # is free to appear in the prose around it without meaning this went wrong.
+    assert "**Data last landed:** unknown" not in notes

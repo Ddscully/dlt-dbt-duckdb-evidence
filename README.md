@@ -77,7 +77,7 @@ dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 | [**dbt**](https://docs.getdbt.com/) (`dbt-duckdb`) | T: staging + marts, tests, docs |
 | [**Dagster**](https://dagster.io/) | orchestration: every layer as a software-defined asset |
 | [**Polars**](https://pola.rs/) | heavy columnar transforms / window logic in Python |
-| **Parquet** | hive-partitioned archive of the warehouse in `data/lake/`: pruning, portability, a diffable raw layer |
+| [**DuckLake**](https://ducklake.select/) | where `raw` lands: Parquet under a catalog in `data/lakehouse/`, with snapshot lineage you can diff |
 | [**Evidence**](https://evidence.dev/) | BI-as-code dashboard, deployable to GitHub Pages |
 | [**sqlfluff**](https://sqlfluff.com/) + pre-commit | SQL linting / CI rigor |
 | [**pytest**](https://docs.pytest.org/) | unit tests over the ingest/transform logic |
@@ -96,14 +96,14 @@ The README is the tour. The detail lives in six files:
 |---|---|
 | [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the schemas they land in, and the Parquet lake beside them |
 | [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the Dagster asset graph, the three jobs, backfills and freshness policies |
-| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 395 dbt tests, the mart contracts, and the groups, exposures and model versions around them |
+| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 424 dbt tests, the mart contracts, and the groups, exposures and model versions around them |
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
 | [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | SLA, run cost, what breaks at 1000×, what I'd do differently |
 
 And [`docs/course/`](./docs/course/) teaches the same warehouse as material for
 analytics engineers, built around the failures that stay green — a one-word join
-edit that drops two thirds of the countries with all 369 tests still passing, a
+edit that drops two thirds of the countries with all 424 tests still passing, a
 cross-section that silently loses 115 of 205 countries. Modules 00–04 are
 written; 05–10 are outlined in the course index. It has its own sandbox
 (`just course-sandbox`) so the exercises can break things.
@@ -156,7 +156,7 @@ jobs and the partitioned WDI backfill.
 ```
 .
 ├── src/modern_data_stack/ # the domain-neutral half: paths, fixtures, lake,
-│                      #   observability, export, snapshot carry-forward
+│                      #   ducklake, observability, export, carry-forward
 ├── ingest/            # dlt pipeline: sources -> DuckDB (schema `raw`)
 ├── orchestration/     # Dagster: the pipeline as an asset graph + schedule
 ├── dbt/               # dbt-duckdb project
@@ -165,7 +165,8 @@ jobs and the partitioned WDI backfill.
 │   ├── snapshots/     # SCD2 history: CO2 estimates + grid factors (schema `history`)
 │   └── macros/        # generate_schema_name -> clean schema names
 ├── transform/         # Polars: derived metrics -> schema `analytics`
-├── lake/              # DuckDB -> hive-partitioned Parquet in data/lake/
+├── lake/              # the DuckLake landing zone in data/lakehouse/:
+│                      #   where it is, and how to diff two snapshots
 ├── tests/             # pytest + the recorded API fixtures CI runs against
 ├── scripts/           # record_fixtures.py, export_warehouse.py (the release)
 ├── reports/           # Evidence dashboard (BI as code)
@@ -264,7 +265,7 @@ the live endpoints and opens an issue when a source has moved, which is the cue
 to fix the pipeline and `just record-fixtures`. Details in
 [`tests/README.md`](./tests/README.md).
 
-Alongside them, `just dbt-build` runs 395 tests — 369 data tests and 26 unit
+Alongside them, `just dbt-build` runs 451 tests — 424 data tests and 27 unit
 tests — and enforces a schema contract on all 17 marts. What each gate catches,
 and the groups, exposures and model versions built around them, are in
 [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md).
@@ -289,7 +290,7 @@ year for all of them.
 | **Country Explorer** | The same data with a year selector on it, for checking a specific country or year yourself instead of reading a conclusion. |
 | **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. |
-| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 369 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
+| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 424 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
 
 `.github/workflows/pages.yml` builds it as a single `publish_site` job. The site
 is a node in the asset graph (`reports/evidence_site`), so the workflow
@@ -327,8 +328,18 @@ CBAM default values are EU law, reusable under
 [Decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj), the
 euro reference rates are the ECB's, under its
 [reuse policy](https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html),
-and [UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
-(Chen, D., 2019) is CC BY 4.0.
+[UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
+(Chen, D., 2019) is CC BY 4.0, and the daily capital-city weather comes from
+[Open-Meteo](https://open-meteo.com/) under CC BY 4.0, generated using Copernicus
+Climate Change Service information (ECMWF ERA5).
+
+**Open-Meteo's data licence and its API terms are separate, and only one of them
+restricts you.** The CC BY 4.0 above governs the numbers, so the release
+redistributes them like every other source here. The *free API tier* is
+additionally limited to non-commercial use and to 10,000 calls a day — that
+binds this pipeline, which is why `raw.om_weather_daily` is paced and carried
+forward between releases rather than refetched, and it does not follow anyone
+who downloads the result.
 
 **One source was deliberately left out on licence grounds.** Annexes II and III
 of the CBAM regulation, the country electricity emission factors, are IEA data

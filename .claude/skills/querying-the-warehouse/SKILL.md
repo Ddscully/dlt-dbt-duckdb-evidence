@@ -85,24 +85,38 @@ group by d.country_name
 order by missing_years desc;
 ```
 
-## Querying the lake instead
+## Querying the landing tables
 
-`just lake` mirrors the year-keyed tables into `data/lake/` as hive-partitioned
-Parquet, which is the better target for a one-off aggregate over a single year —
-and it needs no connection to the warehouse at all, so it works while the pipeline
-holds the writer lock:
+`raw` is **not in the warehouse file.** dlt lands it in the DuckLake catalog under
+`data/lakehouse/`, and the DuckDB file holds only what dbt builds. So a query
+against `raw` needs the catalog attached, and this also works while the pipeline
+holds the warehouse's writer lock, because it never opens the warehouse:
 
 ```bash
-uv run python -c "import duckdb; \
-  print(duckdb.sql(\"select sum(co2) from \
-    read_parquet('data/lake/raw_owid_co2/**/*.parquet', hive_partitioning=1) \
-    where year = 2020\"))"
+uv run python -c "
+from lake.lakehouse import read_only_connection
+con = read_only_connection()
+print(con.execute('select sum(co2) from lakehouse.raw.owid_co2 where year = 2020').fetchone())
+"
 ```
 
-Directory names are the table names with the dot flattened (`raw.owid_co2` →
-`raw_owid_co2`), and `hive_partitioning=1` is what turns the `year=` path segment
-back into a column. The archive is regenerated from the warehouse, so if it looks
-stale, it is — run `just lake`.
+**Do not reach for `read_parquet` over `data/lakehouse/data/`.** It looks like a
+hive archive and it is not the table: DuckLake writes positional delete files
+that only the catalog applies, so a glob either fails on the schema mismatch or
+returns superseded rows alongside current ones. The catalog is the table.
+
+To ask *what changed* rather than what is there, diff two snapshots — dlt rewrites
+`_dlt_id`/`_dlt_load_id` on every merged row, so DuckLake's own change feed
+reports a routine reload as a full-table revision and `revisions()` projects
+those columns away:
+
+```bash
+uv run python -c "
+from lake.lakehouse import WEATHER_TABLE, revisions, versions
+v = versions(WEATHER_TABLE)
+print(len(revisions(WEATHER_TABLE, v[-2], v[-1])), 'rows genuinely restated') if len(v) > 1 else print('first load')
+"
+```
 
 ## `history` is not rebuildable
 

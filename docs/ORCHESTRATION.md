@@ -7,12 +7,14 @@ models the same pipeline as one asset graph:
 ```
 raw/owid_co2      ─┐                   ┌─▶ marts/dim_country_year ─▶ marts/fct_emissions_energy ─┬─▶ analytics/co2_intensity
 raw/owid_energy   ─┤                   │           (dbt)                       (dbt)                │       (Polars)
-raw/wb_country    ─┼─▶ staging/stg_* ──┤                                                            └─▶ lake/parquet_archive
-raw/wb_wdi        ─┤       (dbt)       └─▶ history/snap_co2_estimates ─▶ marts/fct_co2_estimate_versions  (DuckDB → Parquet)
+raw/wb_country    ─┼─▶ staging/stg_* ──┤
+raw/wb_wdi        ─┤       (dbt)       └─▶ history/snap_co2_estimates ─▶ marts/fct_co2_estimate_versions
 raw/eu_elec_prices─┘                            (dbt snapshot)                       (dbt)
-      (dlt)
+  (dlt → DuckLake)
                     ...and history/snap_grid_emission_factors ─▶ marts/dim_grid_emission_factors
                        (the same shape again) ─▶ marts/fct_example_scope2_emissions
+
+  raw/om_weather_daily ─▶ staging/stg_weather_daily ─▶ marts/fct_country_weather_year
 
   raw/ecb_fx_rates ─▶ staging/stg_fx_rates ─▶ the four marts/dim_date + fct_fx_rates_* tables
   raw/retail_invoice_lines ─▶ staging/stg_retail_lines ─▶ the five retail marts
@@ -21,6 +23,11 @@ raw/eu_elec_prices─┘                            (dbt snapshot)              
   ...and every mart + both analytics tables + analytics/pipeline_status
                     └─▶ reports/evidence_site   (Evidence → static HTML)
 ```
+
+Everything under `raw/` is written by dlt into the DuckLake catalog at
+`data/lakehouse/`; everything downstream of `staging/` is built by dbt into
+`data/warehouse.duckdb`. There is no separate file-layer asset — the Parquet is
+what the ingest assets already wrote.
 
 Nothing declares that order by hand. The dlt resources are keyed `raw/<resource>`
 to match the source keys dagster-dbt derives from `_sources.yml`; the
