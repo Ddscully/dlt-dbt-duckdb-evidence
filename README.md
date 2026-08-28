@@ -57,14 +57,15 @@ differently.</sub>
 
 ---
 
-The stack is deliberately **lightweight**. Everything runs locally with `uv`
-against a single DuckDB file: no cloud warehouse, no credentials, no bill.
+The stack is deliberately **lightweight**. Everything runs locally with `uv`:
+raw lands as Parquet in a DuckLake catalog, and dbt builds into a single DuckDB
+file — no cloud warehouse, no credentials, no bill.
 
 ```
-dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
- EL      store     stg/marts   heavy T     BI-as-code
-└──────────────── Dagster ─────────────────┘
-        one asset graph, scheduled
+dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
+ EL     raw Parquet   stg/marts   heavy T     BI-as-code
+└──────────────────── Dagster ─────────────────────┘
+             one asset graph, scheduled
 ```
 
 ## Stack
@@ -72,8 +73,8 @@ dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 | Tool | Role |
 |------|------|
 | [**uv**](https://docs.astral.sh/uv/) | project & environment manager |
-| [**dlt**](https://dlthub.com/) | EL: API/CSV ingestion into DuckDB w/ schema inference |
-| [**DuckDB**](https://duckdb.org/) | in-process analytical warehouse (a single file) |
+| [**dlt**](https://dlthub.com/) | EL: API/CSV ingestion into DuckLake w/ schema inference |
+| [**DuckDB**](https://duckdb.org/) | in-process analytical warehouse: what dbt builds, in a single file |
 | [**dbt**](https://docs.getdbt.com/) (`dbt-duckdb`) | T: staging + marts, tests, docs |
 | [**Dagster**](https://dagster.io/) | orchestration: every layer as a software-defined asset |
 | [**Polars**](https://pola.rs/) | heavy columnar transforms / window logic in Python |
@@ -122,9 +123,12 @@ published half-year grain; the ECB's daily euro reference rates back to 1999; an
 one UK wholesaler's complete 1.07M-line transaction log, which is the only source
 here below country grain.
 
-Everything lands in one DuckDB file across five schemas: `raw` (dlt), `staging`
-and `marts` (dbt), `history` (dbt snapshots, the only tables a rebuild can't
-reproduce) and `analytics` (Polars). Full detail in
+`raw` lands as Parquet in the DuckLake catalog under `data/lakehouse/`. The
+other four schemas live in one DuckDB file: `staging` and `marts` (dbt),
+`history` (dbt snapshots) and `analytics` (Polars). Two things there no rebuild
+can reproduce — the snapshots in `history`, and `raw.om_weather_daily`, which
+costs more than a day of Open-Meteo's allowance — so both are carried forward
+from the previous release. Full detail in
 [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md).
 
 The facts hang off an explicit country-year spine, `dim_country_year`, and not
@@ -157,7 +161,7 @@ jobs and the partitioned WDI backfill.
 .
 ├── src/modern_data_stack/ # the domain-neutral half: paths, fixtures, lake,
 │                      #   ducklake, observability, export, carry-forward
-├── ingest/            # dlt pipeline: sources -> DuckDB (schema `raw`)
+├── ingest/            # dlt pipeline: sources -> DuckLake (schema `raw`)
 ├── orchestration/     # Dagster: the pipeline as an asset graph + schedule
 ├── dbt/               # dbt-duckdb project
 │   ├── models/staging # 1:1 cleaned source views (stg_*)
@@ -312,8 +316,9 @@ Setting this up yourself takes three things nobody tells you about; they're in
 
 The dashboard is one consumer of the warehouse. The warehouse itself is published
 monthly, so you can use the joined data without running any of this: the whole
-DuckDB file, a Parquet per modelled table, row counts and checksums. DuckDB will
-query it over HTTPS where it sits, without downloading anything.
+DuckDB file, the DuckLake landing zone beside it, a Parquet per modelled table,
+row counts and checksums. DuckDB will query it over HTTPS where it sits, without
+downloading anything.
 
 [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) has the queries and the four
 things worth knowing before you build on it.
