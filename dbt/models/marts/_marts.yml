@@ -535,14 +535,29 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [country_iso3, year]
-      # The (max + min)/2 convention runs warmer than the mean-based one wherever
-      # a day is asymmetric, and it is never colder. That is the one relationship
-      # between the two totals that holds by construction, so it is the one that
-      # catches them being swapped — which no range test on either could see,
-      # since both are plausible degree-day totals.
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "hdd_minmax_total >= 0 and hdd_total >= 0"
+      # **`hdd_total` and `hdd_minmax_total` being swapped is not catchable by a
+      # data test here.** A comment in this spot used to claim it was — that the
+      # (max + min)/2 convention "runs warmer than the mean-based one, never
+      # colder", by construction — and it was wrong twice over. The expression
+      # underneath it was `hdd_minmax_total >= 0 and hdd_total >= 0`: pure
+      # non-negativity, already carried by `not_null` and the two
+      # `accepted_range {min_value: 0}` below, and *invariant* under the swap it
+      # claimed to catch. And the ordering does not hold. Over the full archive
+      # (656 rows, 41 capitals x 16 years) `hdd_minmax_total` is the larger in
+      # 253 rows (38.6%) and the smaller in 403, gaps running -153.0 to +96.2 —
+      # whether the midpoint sits above or below the true daily mean depends on
+      # the day's diurnal shape, and both directions occur. So encoding the
+      # claim would redden the build on reality rather than on a bug.
+      #
+      # Two plausible totals, both in a legal range, differing by an amount with
+      # no fixed sign, is a wrong answer that is also a legal one — which is a
+      # unit test's job, not a data test's. Measured against a warehouse copy:
+      # swap the two columns in the model's final SELECT and **all 29 of
+      # `fct_country_weather_year`'s data tests pass**, with DEU 2022 reading
+      # 2170.55 where it should read 2177.70.
+      # `weather_year_keeps_the_two_degree_day_conventions_apart` is what fails
+      # on it.
+
       # A country cannot need heating and cooling on the same day at these bases,
       # so no year can max out both. Stated as a ceiling on the sum rather than on
       # either one, because that is what a base-temperature mix-up would break.

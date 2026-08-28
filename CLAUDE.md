@@ -82,7 +82,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (28 models, 2 snapshots, 6 seeds + 425 data tests + 26 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (28 models, 2 snapshots, 6 seeds + 424 data tests + 27 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -610,7 +610,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are twenty-six unit tests, over eight models, and they exist because a data
+- **There are twenty-seven unit tests, over nine models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -622,7 +622,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  twenty-six cost 4.0s. A broken fiscal calendar should stop `release-data.yml`,
+  twenty-seven cost 4.2s. A broken fiscal calendar should stop `release-data.yml`,
   not ride along in it. `just dbt-unit-test` is the ~4s inner loop.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.
@@ -768,7 +768,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 393 of the 425 tests use the default. `severity` comes across
+  is what dbt does; 422 of the 424 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the

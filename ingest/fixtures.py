@@ -1,11 +1,11 @@
 """Offline fixtures for the ingest layer — this project's routes.
 
-`ingest.pipeline` fetches from six live endpoints. That makes CI a test of
-whether OWID, the World Bank and Eurostat happen to be up, which is not what a
-pull request is asking. Setting ``INGEST_FIXTURES=1`` swaps every fetch for a
-checked-in payload recorded from those same endpoints, so the *whole* pipeline —
-dlt schema inference, dbt, Polars, the asset checks — runs deterministically and
-offline.
+`ingest.pipeline` fetches from every endpoint in `_ROUTES` below. That makes CI a
+test of whether OWID, the World Bank and Eurostat happen to be up, which is not
+what a pull request is asking. Setting ``INGEST_FIXTURES=1`` swaps every fetch
+for a checked-in payload recorded from those same endpoints, so the *whole*
+pipeline — dlt schema inference, dbt, Polars, the asset checks — runs
+deterministically and offline.
 
 The fixtures are trimmed to a representative set of countries; see
 `scripts/record_fixtures.py`, which is what produced them and what re-records
@@ -15,10 +15,17 @@ discontinuity in it is something a model is tested against.
 
 The mechanism (and the reasoning behind it) lives in
 `modern_data_stack.fixtures`. What's here is the URL-to-file map, which is the
-only part that's about these five sources. The OWID fixtures are gzipped CSV
-rather than Parquet so they still go through `pl.read_csv` with
+only part that's about this project's own sources. The OWID fixtures are gzipped
+CSV rather than Parquet so they still go through `pl.read_csv` with
 `infer_schema_length=None`, and the JSON fixtures are the API's own response
 body — the parsing gotchas that bite in production are exercised in CI too.
+
+**Neither paragraph counts the sources, deliberately.** The first said "six live
+endpoints" and the third "these five sources", while `_ROUTES` holds eight routes
+across six publishers — both stale, and already stale before the source that made
+them wrong arrived. `tests/test_documented_counts.py` scans markdown and YAML and
+never a `.py` docstring, so no guard here can go red on a number; naming the list
+is what survives the next source instead.
 """
 
 from __future__ import annotations

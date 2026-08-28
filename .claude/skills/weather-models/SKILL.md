@@ -179,6 +179,23 @@ its first source with a *finite budget*.
   every row, for `dim_date.fiscal_year_start_month`'s reason exactly: it is a
   policy, the warehouse builds one value of it, and every other value it claims
   to support is untested by construction.
+  - **"Disagree" is the whole of it — there is no ordering between them, and
+    `_marts.yml` asserted one for three weeks.** A comment there claimed the
+    midpoint convention "runs warmer than the mean-based one, never colder", by
+    construction. Measured over the full archive (656 rows, 41 capitals x 16
+    years): `hdd_minmax_total` is the **larger in 253 rows (38.6%)** and the
+    smaller in 403, gaps running -153.0 to +96.2. Whether the midpoint sits
+    above or below the true daily mean depends on the day's diurnal shape. So
+    the claim is not merely unproven, it is false, and writing it into a data
+    test turns the build red on reality — do not "fix" the comment by encoding
+    it.
+  - **The two being swapped is therefore uncatchable by a data test**, which is
+    what the vacuous expression under that comment was pretending to do: swap
+    them in the mart's final SELECT and all 29 of `fct_country_weather_year`'s
+    data tests pass. It is a
+    unit test now — `weather_year_keeps_the_two_degree_day_conventions_apart`,
+    whose fixture deliberately puts one country on each side of the gap. See
+    `unit-testing-dbt-models`.
 - **The payoff is a negative result, which is the kind this warehouse could not
   previously reach.** Heating degree days for six EU capitals, 2021 against 2022:
   every one milder, inside a 6.5-point band (Germany -13.5%, Spain -10.2%,

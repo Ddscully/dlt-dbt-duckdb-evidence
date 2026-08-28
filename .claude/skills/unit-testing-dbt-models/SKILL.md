@@ -1,11 +1,11 @@
 ---
 name: unit-testing-dbt-models
-description: The eight dbt models that carry unit tests and what mutating each one proved — the method (break the model against a warehouse copy, record what moves), the fixtures that separate an ordering from its permutations, and the defects the data tests could not see. Use when adding or changing a dbt unit test, judging whether a model's data tests are adequate, or investigating a model that is not reproducible between builds.
+description: The nine dbt models that carry unit tests and what mutating each one proved — the method (break the model against a warehouse copy, record what moves), the fixtures that separate an ordering from its permutations, and the defects the data tests could not see. Use when adding or changing a dbt unit test, judging whether a model's data tests are adequate, or investigating a model that is not reproducible between builds.
 ---
 
 # Unit testing the models (`dbt/models/**/_unit_tests.yml`)
 
-Twenty-six unit tests over eight models. They exist because a data test cannot
+Twenty-seven unit tests over nine models. They exist because a data test cannot
 see a wrong answer that is a legal one, and every one of them was written after
 mutating the model and watching its data tests stay green. This file is the
 record of those mutations — what moved, what did not, and which fixture shapes
@@ -34,9 +34,9 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     tree is dirty by definition; `git checkout` is a revert to HEAD, not an
     undo, and it destroyed a round of uncommitted edits to three files.
 
-## The eight models, and what mutating each one proved
+## The nine models, and what mutating each one proved
 
-- **There are twenty-six unit tests, over eight models, and they exist because a data
+- **There are twenty-seven unit tests, over nine models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -291,6 +291,37 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     swapping them passed. A column needs an input where the candidate
     implementations *disagree*, which is the same lesson as the FX partitioning
     fixture and `lake_matches_warehouse`' two drift cases.
+- **`fct_country_weather_year` is the ninth, and it is the only one so far where
+  the *test's own premise* was the defect.** `_marts.yml` carried a
+  `dbt_utils.expression_is_true` under a comment claiming the `(max + min)/2`
+  degree-day convention "runs warmer than the mean-based one, never colder", by
+  construction, and that this was therefore the one test catching the two totals
+  being swapped. The expression was actually `hdd_minmax_total >= 0 and
+  hdd_total >= 0` — non-negativity already carried by `not_null` and two
+  `accepted_range {min_value: 0}`, and **invariant under the swap it claimed to
+  catch**. Swapping the columns in the final SELECT builds cleanly and **all 29
+  of `fct_country_weather_year`'s data tests pass**, with DEU 2022 reading
+  2170.55 for 2177.70.
+  - **The ordering it asserted is false, so the "obvious" fix reddens the
+    build.** Over the full archive — 656 rows, 41 capitals x 16 years —
+    `hdd_minmax_total` is the *larger* in 253 rows (38.6%) and the smaller in
+    403, gaps running -153.0 to +96.2. Whether the midpoint sits above or below
+    the true daily mean depends on the day's diurnal shape and both directions
+    occur. Encoding the comment as an expression is the one repair to avoid.
+  - **So the fixture puts a country on each side of it.** AAA's midpoint total
+    lands above its mean-based one, BBB's below, which pins that the columns are
+    distinguishable *without* asserting an order between them. This is the
+    `fct_fx_rates_daily` partitioning lesson in a new shape: there the symmetric
+    fixture was green against a broken model, here a fixture with both gaps
+    pointing the same way would quietly license the false claim.
+  - **A comment is a claim, and this repo's own rule found it late.**
+    `fct_cbam_exposure`'s route defect is filed above as "read the comments as
+    claims to check, not as documentation" — that was a rule the SQL never
+    implemented. This is the same failure one level up: prose asserting a
+    physical relationship, sitting directly on top of a test that did not
+    encode it, so nothing could notice the relationship was false. The
+    verification is one query, and it was never run.
+
 - **`expect` is full-set equality, so a model that generates its own rows needs a
   fixture file.** `dim_date` expands its bounds to whole calendar years, so any
   mocked `stg_fx_rates` inside one year yields 366 rows and all 366 must be
