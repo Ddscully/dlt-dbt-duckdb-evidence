@@ -37,11 +37,11 @@ def test_an_explicit_root_wins(monkeypatch, tmp_path):
     has to be out of the way.
     """
     monkeypatch.delenv(paths.WAREHOUSE_ENV_VAR, raising=False)
-    monkeypatch.delenv(paths.LAKE_ENV_VAR, raising=False)
+    monkeypatch.delenv(paths.LAKEHOUSE_ENV_VAR, raising=False)
     monkeypatch.setenv(paths.ROOT_ENV_VAR, str(tmp_path))
     assert paths.project_root() == tmp_path.resolve()
     assert paths.warehouse_path() == str(tmp_path / "data" / "warehouse.duckdb")
-    assert paths.lake_dir() == str(tmp_path / "data" / "lake")
+    assert paths.lakehouse_dir() == str(tmp_path / "data" / "lakehouse")
     assert paths.dbt_dir() == tmp_path / "dbt"
 
 
@@ -76,14 +76,22 @@ def test_exhausting_the_search_raises_rather_than_using_the_cwd(monkeypatch, tmp
 
 
 def test_the_overrides_do_not_need_a_root_at_all(monkeypatch, tmp_path):
-    """`WAREHOUSE_PATH`/`LAKE_DIR` are absolute by contract, so they answer
+    """`WAREHOUSE_PATH`/`LAKEHOUSE_DIR` are absolute by contract, so they answer
     without consulting the root — which is what keeps `just test-pipeline`
-    working from anywhere."""
+    working from anywhere.
+
+    The second override used to be `LAKE_DIR`, for the hive-partitioned Parquet
+    archive that DuckLake replaced. `lake_dir()` outlived every reader of it by
+    a whole PR and this test is why it stayed green — an env var nothing sets
+    and a function nothing calls still answer perfectly when a test asks them
+    directly. The live override goes here instead, which is also the only place
+    `lakehouse_dir` is covered at all.
+    """
     monkeypatch.delenv(paths.ROOT_ENV_VAR, raising=False)
     monkeypatch.setattr(paths, "_looks_like_root", lambda path: False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(paths.WAREHOUSE_ENV_VAR, "/tmp/wh.duckdb")
-    monkeypatch.setenv(paths.LAKE_ENV_VAR, "/tmp/lake")
+    monkeypatch.setenv(paths.LAKEHOUSE_ENV_VAR, "/tmp/lakehouse")
 
     assert paths.warehouse_path() == "/tmp/wh.duckdb"
-    assert paths.lake_dir() == "/tmp/lake"
+    assert paths.lakehouse_dir() == "/tmp/lakehouse"

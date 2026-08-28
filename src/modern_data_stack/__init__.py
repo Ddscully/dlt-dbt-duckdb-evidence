@@ -5,12 +5,15 @@ The project layers (`ingest/`, `dbt/`, `transform/`, `lake/`, `reports/`,
 data for ~200 countries. This package is what's left when you take the dataset
 out of them:
 
-* `paths`         — where the project root, the warehouse and the lake are
+* `paths`         — where the project root, the warehouse and the lakehouse are
 * `fixtures`      — serving recorded payloads instead of live endpoints
-* `lake`          — hive-partitioned Parquet archive of warehouse tables
+* `ducklake`      — attaching, publishing and relocating a DuckLake catalog
 * `observability` — dlt/dbt/DuckDB metadata as queryable tables
 * `export`        — packaging a warehouse as a publishable artifact
 * `history`       — carrying a dbt snapshot forward between builds
+* `privacy`       — pseudonymising an identifier at the publication boundary
+* `ratelimit`     — a sliding-window budget for an API that charges by volume
+* `workbook`      — reading a spreadsheet source without loading it whole
 * `db`            — single-row and scalar reads, without the Optional
 
 Each takes its configuration as arguments; the project modules that call them
