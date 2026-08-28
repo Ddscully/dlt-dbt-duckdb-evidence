@@ -57,7 +57,7 @@ from pathlib import Path
 import duckdb
 
 from modern_data_stack import privacy
-from modern_data_stack.export import default_tag, export
+from modern_data_stack.export import default_tag, export, loaded_at
 from modern_data_stack.paths import dbt_manifest_path, warehouse_path
 
 DUCKDB_PATH = warehouse_path()
@@ -77,6 +77,7 @@ __all__ = [
     "PUBLISHED_SCHEMAS",
     "SALT_ENV",
     "default_tag",
+    "landed_at",
     "main",
     "prepare_published_copy",
     "pseudonymise",
@@ -357,6 +358,40 @@ def solidify_staging(con: duckdb.DuckDBPyConnection) -> dict:
         if needs_catalog:
             con.execute(f"detach {ATTACH_ALIAS}")
     return {"staging_views_materialised": views}
+
+
+def landed_at(
+    con: duckdb.DuckDBPyConnection, lakehouse_dir: str | Path | None = None
+) -> str | None:
+    """`data_loaded_at` for the manifest, read from wherever `raw` actually is.
+
+    dlt lands in the DuckLake catalog, so `raw._dlt_loads` is not in the file
+    being packaged and the unqualified read that used to answer this now cannot.
+    It did not start failing, which is the whole reason this exists: it raised
+    `Catalog Error`, `loaded_at`'s `except` returned `None`, and every release
+    body said "Data last landed: unknown." A tree migrated in place did worse and
+    said something believable — see `loaded_at`.
+
+    Attached read-only and only when there is a catalog to attach, which mirrors
+    `solidify_staging` above and for the same reason: whether a lakehouse is
+    involved is a property of the artifact, not an assumption this exporter gets
+    to make. A warehouse that carries its own `raw` — `tests/test_export.py`
+    builds one, and it is a perfectly legitimate thing to publish — still reads
+    the in-file table. Where both exist the catalog wins, because on a migrated
+    tree the in-file copy is the stale one.
+    """
+    from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, catalog_path, data_path, is_catalog
+    from modern_data_stack.ducklake import attach
+
+    lake_dir = LAKEHOUSE_DIR if lakehouse_dir is None else Path(lakehouse_dir)
+    if not is_catalog(lake_dir):
+        return loaded_at(con)
+
+    attach(con, catalog_path(lake_dir), data_path(lake_dir), ATTACH_ALIAS, read_only=True)
+    try:
+        return loaded_at(con, raw_database=ATTACH_ALIAS)
+    finally:
+        con.execute(f"detach {ATTACH_ALIAS}")
 
 
 def pseudonymise(
@@ -684,7 +719,12 @@ def run(
 
     `lakehouse_dir` defaults to the project's, and exists so a caller packaging a
     database from somewhere else — or a test — can say which landing zone goes
-    with it instead of picking up whichever one happens to be on the machine.
+    with it instead of picking up whichever one happens to be on the machine. It
+    now decides two things rather than one: which catalog ships as the second
+    asset, and which one `data_loaded_at` is read from. Both used to reach for
+    the module constant, and the first one's test passed for the wrong reason
+    because of it (see the module docstring) — so the second is threaded from
+    here rather than defaulted inside `landed_at`.
     """
     if not Path(duckdb_path).exists():
         raise FileNotFoundError(f"no warehouse at {duckdb_path} — run `just run` first")
@@ -698,6 +738,7 @@ def run(
         repo=repo,
         grain="(country_iso3, year)",
         extra_manifest=lambda con: {"history": _history(con)},
+        read_loaded_at=lambda con: landed_at(con, lakehouse_dir),
         prepare_copy=prepare_published_copy,
         extra_artifacts=lambda dest: publish_lakehouse(dest, lakehouse_dir),
         max_storage_version=MAX_PUBLISHED_STORAGE_VERSION,

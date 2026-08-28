@@ -40,7 +40,7 @@ from pathlib import Path
 
 import duckdb
 
-from .db import row, scalar
+from .db import qualify, row, scalar
 
 
 def sha256(path: Path) -> str:
@@ -136,11 +136,30 @@ def published_tables(
     return [(schema, table) for schema, table in rows]
 
 
-def loaded_at(con: duckdb.DuckDBPyConnection) -> str | None:
+def loaded_at(
+    con: duckdb.DuckDBPyConnection,
+    raw_schema: str = "raw",
+    raw_database: str | None = None,
+) -> str | None:
     """When the pipeline last landed data, which is not when this ran: an export
-    of a stale warehouse should look stale."""
+    of a stale warehouse should look stale.
+
+    **`raw_database` is what keeps that promise once the landing zone leaves the
+    file.** A project whose `raw` moved into an attached catalog — DuckLake here —
+    has to name it, and the two ways of not naming it fail in opposite
+    directions, both silently. On a warehouse that never held `raw`, the
+    unqualified read raises, the `except` returns `None`, and every release ships
+    `data_loaded_at: null`. On a warehouse *migrated in place*, which still holds
+    the pre-move `raw` beside the catalog, it returns a **plausible timestamp
+    that is simply wrong** — measured at 4h20m adrift on this project's own
+    working copy. The second is worse, and only the qualified read can tell them
+    apart: `con` must have the catalog attached, and `raw_database` says which of
+    the two the answer came from.
+    """
     try:
-        row = con.execute("select max(inserted_at) from raw._dlt_loads").fetchone()
+        row = con.execute(
+            f"select max(inserted_at) from {qualify(raw_database, raw_schema, '_dlt_loads')}"
+        ).fetchone()
     except duckdb.Error:
         return None
     return row[0].astimezone(UTC).isoformat() if row and row[0] else None
@@ -210,6 +229,7 @@ def export(
     extra_manifest: Callable[[duckdb.DuckDBPyConnection], dict] | None = None,
     prepare_copy: Callable[[duckdb.DuckDBPyConnection], dict] | None = None,
     extra_artifacts: Callable[[Path], dict] | None = None,
+    read_loaded_at: Callable[[duckdb.DuckDBPyConnection], str | None] | None = None,
     period_column: str = "year",
     max_storage_version: int | None = None,
 ) -> dict:
@@ -227,6 +247,15 @@ def export(
     views recompute from whatever `prepare_copy` left behind, and the checksums,
     the row counts and the Parquet all describe the result rather than the
     input.
+
+    `read_loaded_at` overrides how `data_loaded_at` is read, and exists because
+    *where* the landing tables live is the project's business rather than this
+    module's. The default reads `raw._dlt_loads` out of the copy, which is right
+    for a warehouse that holds its own landing zone and wrong for one whose `raw`
+    sits in an attached catalog — so a project that moved it passes a reader that
+    attaches the catalog first. It is the same division as `extra_artifacts`,
+    which is how the DuckLake tarball is published without this module knowing
+    what a DuckLake is.
 
     `period_column` is the column whose min/max becomes each table's coverage
     bounds; a table without it is described without them. It's threaded through
@@ -310,7 +339,7 @@ def export(
         manifest = {
             "tag": tag,
             "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "data_loaded_at": loaded_at(con),
+            "data_loaded_at": (read_loaded_at or loaded_at)(con),
             **prepared,
             **(extra_artifacts(dest_dir) if extra_artifacts else {}),
             **(extra_manifest(con) if extra_manifest else {}),

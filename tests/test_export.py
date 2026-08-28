@@ -43,10 +43,18 @@ from scripts.export_warehouse import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# The two load times a migrated tree really has, and they are the measured ones:
+# on this project's working copy on 2026-08-27 the lakehouse's `_dlt_loads` read
+# 16:07:52 and the `raw` left behind in `warehouse.duckdb` read 11:47:47, 4h20m
+# adrift. They are deliberately different because the defect this pins is not "no
+# timestamp" — it is a believable wrong one, which `is not None` cannot see.
+WAREHOUSE_LOADED_AT = "2026-08-27 11:47:47+00"
+LAKEHOUSE_LOADED_AT = "2026-08-27 16:07:52+00"
+
 # `raw` and `main` must not ship as Parquet; `staging`/`marts`/`analytics` must.
 # The view is written fully qualified the way dbt-duckdb writes it — that's what
 # makes the catalog name load-bearing when the database is copied.
-SETUP = """
+SETUP = f"""
 create schema raw;
 create schema staging;
 create schema marts;
@@ -55,7 +63,8 @@ create schema analytics;
 create table raw.owid_co2 as
     select * from (values ('USA', 2020, 4.7), ('FRA', 2020, 0.3)) t(iso3, year, co2);
 create table raw._dlt_loads as
-    select * from (values ('1785315112.98', now())) t(load_id, inserted_at);
+    select * from (values ('1785315112.98', timestamptz '{WAREHOUSE_LOADED_AT}'))
+        t(load_id, inserted_at);
 
 create view warehouse.staging.stg_co2 as
     select iso3 as country_iso3, year, co2 as co2_mt from warehouse.raw.owid_co2;
@@ -193,8 +202,15 @@ def test_the_copied_warehouse_keeps_its_views_working(export: dict):
 
 def test_provenance_records_the_load_not_just_the_run(export: dict):
     """An export of a stale warehouse should look stale: `data_loaded_at` comes
-    from dlt's `_dlt_loads`, not from the clock."""
-    assert export["data_loaded_at"] is not None
+    from dlt's `_dlt_loads`, not from the clock.
+
+    The value is asserted rather than its presence. `is not None` is satisfied by
+    a clock read, by a stale read, and by the wrong catalog's read — every way of
+    getting this wrong except the one that raises. This is the no-lakehouse
+    shape, so the in-file table is the right source here and the fallback in
+    `landed_at` is what serves it.
+    """
+    assert export["data_loaded_at"] == "2026-08-27T11:47:47+00:00"
     assert export["duckdb_version"] == duckdb.__version__
 
 
@@ -507,6 +523,17 @@ LAKEHOUSE_SETUP = [
         "raw.retail_invoice_lines",
         "select * from (values (17850, 'a-clear-customer-id')) t(customer_id, note)",
     ),
+    # Where dlt actually stamps the load time now. It does not ship — it is not
+    # in `PUBLISHED_TABLES` — but the manifest has to be able to read it, and the
+    # `warehouse` fixture holds an older one under the same name so that a read
+    # of the wrong catalog is a wrong *answer* rather than an error.
+    (
+        "raw._dlt_loads",
+        f"""
+        select * from (values ('1785315112.98', timestamptz '{LAKEHOUSE_LOADED_AT}'))
+            t(load_id, inserted_at)
+        """,
+    ),
 ]
 
 
@@ -635,3 +662,34 @@ def test_a_table_outside_the_allowlist_is_absent_at_every_version(
                 f"select * from lh.raw.retail_invoice_lines at (version => {snapshot})"
             ).fetchall()
     con.close()
+
+
+def test_data_loaded_at_is_read_from_the_catalog_not_the_copy_left_beside_it(
+    export_with_lakehouse: dict,
+):
+    """The regression the DuckLake move shipped, and it was silent twice over.
+
+    `loaded_at` read an unqualified `raw._dlt_loads` off the published copy. On a
+    fresh or CI tree that raises `Catalog Error`, the `except` swallows it, and
+    every release body renders "Data last landed: unknown." On a tree migrated in
+    place — which still holds the pre-move `raw` — it returns the *stale* copy's
+    timestamp instead, believable and wrong.
+
+    The fixture is built as that second tree on purpose: both `_dlt_loads` tables
+    exist and they disagree, so this asserts which one was read rather than that
+    something was. Point `landed_at` back at the file and it fails with the
+    warehouse's 11:47 against the catalog's 16:07 — the same 4h20m the working
+    copy showed.
+    """
+    assert export_with_lakehouse["data_loaded_at"] == "2026-08-27T16:07:52+00:00"
+
+
+def test_the_release_notes_say_when_the_data_landed(export_with_lakehouse: dict):
+    """`release_notes` is where a null actually reaches a reader, and it renders
+    the failure as prose rather than as a missing field: `manifest.get(...) or
+    "unknown"` turns both failure modes into a sentence that looks written."""
+    notes = release_notes(export_with_lakehouse, "acme/demo", "data-1999-12-31")
+    assert "**Data last landed:** 2026-08-27T16:07:52+00:00." in notes
+    # The failure branch by name, not a bare `"unknown" not in notes` — the word
+    # is free to appear in the prose around it without meaning this went wrong.
+    assert "**Data last landed:** unknown" not in notes

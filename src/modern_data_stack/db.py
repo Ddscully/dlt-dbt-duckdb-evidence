@@ -17,6 +17,11 @@ that unexpectedly returns nothing raises `TypeError: 'NoneType' object is not
 subscriptable` from whichever line happened to touch it; `scalar()` raises
 naming the query.
 
+`qualify` is here for the same reason as `write_frames` below, one module
+later: naming a relation across an *attached* catalog stopped being one module's
+business the day this project started keeping two catalogs open at once, and a
+three-line helper copied into the second caller is the shape the rule is about.
+
 `write_frames` is here for a different reason: it is the one write shape this
 project repeats — register a Polars frame, `create or replace`, unregister — and
 it lived in `observability` because that is where it was first needed. Writing a
@@ -32,6 +37,20 @@ from typing import Any
 
 import duckdb
 import polars as pl
+
+
+def qualify(database: str | None, schema: str, table: str) -> str:
+    """`"db"."schema"."table"`, or `"schema"."table"` when `database` is None.
+
+    The database half is not decoration and not always optional.
+    `information_schema` spans every attached catalog, so a query filtered on the
+    schema alone matches a `raw` in *either* one — and since raw landed in
+    DuckLake this project genuinely runs with two catalogs attached, one of which
+    may still hold a stale `raw` from before the move. Naming the catalog is what
+    makes the read say which one it meant.
+    """
+    prefix = "" if database is None else f'"{database}".'
+    return f'{prefix}"{schema}"."{table}"'
 
 
 def row(

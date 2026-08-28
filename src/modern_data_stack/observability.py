@@ -23,7 +23,7 @@ from pathlib import Path
 import duckdb
 import polars as pl
 
-from .db import row, scalar
+from .db import qualify, row, scalar
 
 DEFAULT_AUDIT_SCHEMA = "dbt_test__audit"
 
@@ -86,14 +86,9 @@ def _period_span(
     if not _has_column(con, schema, table, column, database):
         return (None, None)
     lo, hi = row(
-        con, f"select min({column}), max({column}) from {_qualify(database, schema, table)}"
+        con, f"select min({column}), max({column}) from {qualify(database, schema, table)}"
     )
     return (lo, hi)
-
-
-def _qualify(database: str | None, schema: str, table: str) -> str:
-    prefix = "" if database is None else f'"{database}".'
-    return f'{prefix}"{schema}"."{table}"'
 
 
 def build_sources(
@@ -121,7 +116,7 @@ def build_sources(
             select
                 count(*),
                 to_timestamp(max(cast(_dlt_load_id as double)))
-            from {_qualify(raw_database, raw_schema, table)}
+            from {qualify(raw_database, raw_schema, table)}
             """,
         )
         period_min, period_max = _period_span(con, raw_schema, table, period_column, raw_database)

@@ -986,6 +986,27 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
 - **`raw` and `history` ship in the DuckDB file but not as Parquet.** The flat
   files are the modelled layers only (`PUBLISHED_SCHEMAS`); anyone who wants
   dlt's landing tables or the snapshot downloads the database.
+- **`data_loaded_at` has to name the catalog, and getting it wrong is silent in
+  two directions.** `loaded_at` read an unqualified `raw._dlt_loads` off the
+  copy, which stopped being where dlt writes when the landing zone moved into
+  DuckLake. On a fresh or CI tree that raises, the `except duckdb.Error` returns
+  `None`, and every release body says *"Data last landed: unknown."* On a tree
+  migrated in place — still holding the pre-move `raw` — it returns the stale
+  copy's timestamp instead: measured 4h20m adrift here, and a believable wrong
+  answer is the worse of the two. `transform/pipeline_status.py` was migrated for
+  exactly this and documents the hazard; `export.py` was missed, and the test
+  fixture hid it by building `raw._dlt_loads` *inside* the warehouse, the shape
+  production no longer produces.
+  - **The reader is a project hook, not a package parameter.** `export()` takes
+    `read_loaded_at` the way it already takes `extra_artifacts` for the tarball,
+    so the package still knows nothing about DuckLake; `scripts/export_warehouse.py`
+    supplies `landed_at`, which attaches read-only **only when there is a
+    catalog** — the same test `solidify_staging` makes, so a warehouse carrying
+    its own `raw` is still exportable. Where both exist the catalog wins.
+  - **The fixture now holds both tables with different timestamps**, because
+    `assert data_loaded_at is not None` passes on a clock read, a stale read and
+    the wrong catalog's read — every way of being wrong except the one that
+    raises. Asserting the value is what makes the mutation red.
 - **The published file's storage format is not its writer's version, and the
   manifest carries both.** `duckdb_version` answers "who wrote this";
   `storage_version` answers "can I open it", which is the only question a
