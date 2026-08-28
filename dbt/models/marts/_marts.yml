@@ -558,15 +558,35 @@ models:
       # `weather_year_keeps_the_two_degree_day_conventions_apart` is what fails
       # on it.
 
-      # A country cannot need heating and cooling on the same day at these bases,
-      # so no year can max out both. Stated as a ceiling on the sum rather than on
-      # either one, because that is what a base-temperature mix-up would break.
+      # **Two tests stood here that could not fail, and they are worth recording
+      # rather than just deleting.**
+      #
+      # `cdd_total < hdd_total + 5000` claimed to catch a base-temperature
+      # mix-up. It does not. Rebuilding the model against a warehouse copy with
+      # the two vars swapped raised heating totals 89% and cooling totals 336%,
+      # and `max(cdd_total - hdd_total)` went 637.5 to 975.2 — still five times
+      # under the bound, with **all 55 data tests on the two models passing**. A
+      # swap moves both totals the same way, so a ceiling on their difference is
+      # structurally the wrong instrument, and the annual grain has already
+      # summed away the thing that breaks. The base ordering is now asserted at
+      # the daily grain in `_staging.yml`, where it fails on 52,253 rows of that
+      # same mutation.
+      #
+      # `frost_days <= n_days` was true by construction — `count(*) filter (…)`
+      # against `count(*)` in the same `group by` — so no data could break it and
+      # no build ever would. Real slack was 153 days at its tightest.
+      #
+      # What replaces the second is the *biconditional* between two aggregates
+      # this model computes independently: a year has a frost day exactly when
+      # its coldest daily minimum is below zero. Measured over the 656 rows, by
+      # recomputing `frost_days` three plausible wrong ways: the wrong column
+      # (`temp_mean_c`) fails 60 rows, the wrong extreme (`temp_max_c`) fails
+      # 138, and the correct model fails none. The boundary mutation `<=` for `<`
+      # is **not** caught and is stated rather than hidden — it needs a daily
+      # minimum of exactly 0.0, which no double in this archive is.
       - dbt_utils.expression_is_true:
           arguments:
-            expression: "cdd_total < hdd_total + 5000"
-      - dbt_utils.expression_is_true:
-          arguments:
-            expression: "frost_days <= n_days"
+            expression: "(frost_days > 0) = (temp_min_c < 0)"
     columns:
       - name: country_iso3
         data_type: VARCHAR

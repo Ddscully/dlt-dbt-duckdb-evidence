@@ -387,6 +387,29 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "temp_min_c <= temp_mean_c and temp_mean_c <= temp_max_c"
+      # **No day can need heating and cooling at once**, because the heating base
+      # (15.5) is below the cooling base (22.0): a mean temperature under 15.5
+      # gives a positive `hdd_c` and one over 22.0 a positive `cdd_c`, and no
+      # number is both. It is the base *ordering* written down, and it is the
+      # only place that ordering is checkable at all.
+      #
+      # It replaces a ceiling that used to sit on the mart above
+      # (`cdd_total < hdd_total + 5000`) whose comment said it was there to catch
+      # "a base-temperature mix-up". Measured, by rebuilding the model against a
+      # warehouse copy with the two vars swapped: heating totals rose 89% and
+      # cooling totals 336% — a comprehensively wrong warehouse — and
+      # `max(cdd_total - hdd_total)` moved from 637.5 to 975.2, still five times
+      # under the 5,000 bound. **All 55 data tests on the two models passed.** A
+      # ceiling on the difference cannot see it because a swap moves *both*
+      # totals the same way; the annual grain has already summed away the thing
+      # that breaks. This expression fails on 52,253 days of the same mutation.
+      #
+      # `coalesce` because a degree day is null when its temperature is (see
+      # `stg_weather_daily.sql`), and `where not(expression)` treats a null as a
+      # pass — so an unguarded null here would be silently green rather than red.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "coalesce(hdd_c, 0) = 0 or coalesce(cdd_c, 0) = 0"
     columns:
       - name: country_iso3
         description: ISO3, carried from the request rather than joined back on.
