@@ -329,10 +329,51 @@ def test_refuses_to_restore_the_lakehouse_when_dlt_has_local_state(tmp_path, mon
     state = tmp_path / "dlt" / "pipelines" / "modern_data_stack"
     monkeypatch.setattr(lakehouse, "_local_pipeline_state", lambda: state)
 
+    dest = tmp_path / "wh" / "warehouse.duckdb"
     with pytest.raises(RuntimeError, match="_dlt_version"):
-        run(source, tmp_path / "wh" / "warehouse.duckdb", lakehouse_dir=tmp_path / "lh")
+        run(source, dest, lakehouse_dir=tmp_path / "lh")
 
     assert not (tmp_path / "lh").exists(), "refused after writing"
+    # **And the snapshot half, which is the one that used to slip through.**
+    # `run` writes two artifacts. The refusal lived inside the second, so the
+    # first had already happened by the time it fired: the destination's
+    # `history` schema replaced by the previous release's, the landing zone
+    # untouched, and a `RuntimeError` claiming nothing had been done. A refusal
+    # is a promise about what did *not* happen, so it has to be asked before the
+    # first write, not before the second.
+    assert not dest.exists(), "history was restored before the refusal fired"
+
+
+def test_the_refusal_leaves_existing_history_untouched(tmp_path, monkeypatch):
+    """The same defect where it costs something rather than merely being untidy.
+
+    A destination that already holds local snapshot history is the case
+    `--force` exists to guard, and the partial restore drove straight through it:
+    `history.restore` ran first, saw no reason to stop (the *source* is a
+    legitimate release), and overwrote months of local revisions with last
+    month's — then the lakehouse step refused, so the operator saw an error and
+    had no reason to think anything had been written.
+    """
+    source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT)
+    _published_lakehouse(tmp_path / "prev")
+    dest = _db(
+        tmp_path / "wh" / "warehouse.duckdb",
+        SNAPSHOT.replace("'DEU-2019'", "'LOCAL-2019'"),
+    )
+    state = tmp_path / "dlt" / "pipelines" / "modern_data_stack"
+    monkeypatch.setattr(lakehouse, "_local_pipeline_state", lambda: state)
+
+    with pytest.raises(RuntimeError, match="_dlt_version"):
+        run(source, dest, force=True, lakehouse_dir=tmp_path / "lh")
+
+    con = duckdb.connect(str(dest), read_only=True)
+    try:
+        held = scalar(
+            con, "select count(*) from history.snap_co2_estimates where country_year = 'LOCAL-2019'"
+        )
+    finally:
+        con.close()
+    assert held == 1, "the local history was overwritten by a restore that then refused"
 
 
 def _published_lakehouse(release_dir: Path) -> None:

@@ -269,7 +269,7 @@ the live endpoints and opens an issue when a source has moved, which is the cue
 to fix the pipeline and `just record-fixtures`. Details in
 [`tests/README.md`](./tests/README.md).
 
-Alongside them, `just dbt-build` runs 451 tests — 424 data tests and 27 unit
+Alongside them, `just dbt-build` runs 452 tests — 424 data tests and 28 unit
 tests — and enforces a schema contract on all 17 marts. What each gate catches,
 and the groups, exposures and model versions built around them, are in
 [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md).

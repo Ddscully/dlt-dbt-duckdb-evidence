@@ -327,7 +327,9 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
     }
 
 
-def prepare_published_copy(con: duckdb.DuckDBPyConnection) -> dict:
+def prepare_published_copy(
+    con: duckdb.DuckDBPyConnection, lakehouse_dir: str | Path | None = None
+) -> dict:
     """Everything the copy needs before it is read: stand alone, then anonymise.
 
     One hook because `export()` takes one, and the order is not interchangeable.
@@ -336,11 +338,17 @@ def prepare_published_copy(con: duckdb.DuckDBPyConnection) -> dict:
     rewrite first would leave those eight untouched, and the copy would ship a
     `staging` layer that disagrees with the `marts` beside it about who a
     customer is, with matching row counts and no error anywhere.
+
+    `lakehouse_dir` is threaded through for the reason `landed_at` already
+    documents: the hook is bound in `run()`, where the caller's choice of landing
+    zone is known, rather than defaulted three frames down where it is not.
     """
-    return {**solidify_staging(con), **pseudonymise(con)}
+    return {**solidify_staging(con, lakehouse_dir), **pseudonymise(con)}
 
 
-def solidify_staging(con: duckdb.DuckDBPyConnection) -> dict:
+def solidify_staging(
+    con: duckdb.DuckDBPyConnection, lakehouse_dir: str | Path | None = None
+) -> dict:
     """Turn the `staging` views into tables so the published file stands alone.
 
     `raw` lives in the DuckLake catalog, not in the DuckDB file, so dbt writes
@@ -371,6 +379,15 @@ def solidify_staging(con: duckdb.DuckDBPyConnection) -> dict:
     from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, catalog_path, data_path
     from modern_data_stack.ducklake import attach
 
+    # The caller's landing zone, not the module constant. Reading `LAKEHOUSE_DIR`
+    # here made the catalog this attaches independent of the database being
+    # packaged: `export(duckdb_path=other, lakehouse_dir=other_lake)` solidified
+    # `other`'s staging views against whichever lakehouse happened to be at
+    # `./data/lakehouse` — the wrong rows where one existed, and an `IOException`
+    # naming a path the caller never mentioned where it did not. The same defect
+    # `landed_at` was fixed for, in the one call site that was missed.
+    lake_dir = LAKEHOUSE_DIR if lakehouse_dir is None else Path(lakehouse_dir)
+
     defined = con.execute(
         "select view_name, sql from duckdb_views() where schema_name = 'staging' order by 1"
     ).fetchall()
@@ -388,9 +405,7 @@ def solidify_staging(con: duckdb.DuckDBPyConnection) -> dict:
     # caller never mentioned.
     needs_catalog = any(f"{ATTACH_ALIAS}." in (sql or "") for _, sql in defined)
     if needs_catalog:
-        attach(
-            con, catalog_path(LAKEHOUSE_DIR), data_path(LAKEHOUSE_DIR), ATTACH_ALIAS, read_only=True
-        )
+        attach(con, catalog_path(lake_dir), data_path(lake_dir), ATTACH_ALIAS, read_only=True)
     try:
         for name in views:
             # Two statements: DuckDB will not `create or replace table` over a
@@ -782,11 +797,14 @@ def run(
     `lakehouse_dir` defaults to the project's, and exists so a caller packaging a
     database from somewhere else — or a test — can say which landing zone goes
     with it instead of picking up whichever one happens to be on the machine. It
-    now decides two things rather than one: which catalog ships as the second
-    asset, and which one `data_loaded_at` is read from. Both used to reach for
-    the module constant, and the first one's test passed for the wrong reason
-    because of it (see the module docstring) — so the second is threaded from
-    here rather than defaulted inside `landed_at`.
+    now decides three things rather than one: which catalog ships as the second
+    asset, which one `data_loaded_at` is read from, and which one the `staging`
+    views are materialised against. All three used to reach for the module
+    constant, and the first one's test passed for the wrong reason because of it
+    (see the module docstring) — so each is bound *here*, where the caller's
+    choice is known, rather than defaulted inside the function that uses it.
+    `solidify_staging` was the last one still reading the constant, and it is the
+    one that decides what the published `staging` layer actually contains.
     """
     if not Path(duckdb_path).exists():
         raise FileNotFoundError(f"no warehouse at {duckdb_path} — run `just run` first")
@@ -801,7 +819,7 @@ def run(
         grain="(country_iso3, year)",
         extra_manifest=lambda con: {"history": _history(con)},
         read_loaded_at=lambda con: landed_at(con, lakehouse_dir),
-        prepare_copy=prepare_published_copy,
+        prepare_copy=lambda con: prepare_published_copy(con, lakehouse_dir),
         extra_artifacts=lambda dest: publish_lakehouse(dest, lakehouse_dir),
         max_storage_version=MAX_PUBLISHED_STORAGE_VERSION,
     )

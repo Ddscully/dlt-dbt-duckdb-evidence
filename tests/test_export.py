@@ -572,6 +572,119 @@ def export_with_lakehouse(
     return manifest
 
 
+@pytest.fixture
+def decoy_lakehouse(tmp_path: Path) -> Path:
+    """A second, *wrong* catalog holding the same table with different rows.
+
+    Stands in for whatever happens to sit at `lake.lakehouse.LAKEHOUSE_DIR` on
+    the machine running the export. Its rows differ from `lakehouse_dir`'s so
+    that reading the wrong one is a wrong *answer* rather than an error — the
+    same reasoning as the two `_dlt_loads` timestamps above, and the same reason
+    `assert ... is not None` was not enough there either.
+    """
+    from modern_data_stack.ducklake import attach
+
+    lake = tmp_path / "decoy-lakehouse"
+    (lake / "data").mkdir(parents=True)
+    con = duckdb.connect()
+    attach(con, lake / "catalog.duckdb", lake / "data", alias="lh")
+    con.execute("create schema lh.raw")
+    con.execute(
+        "create table lh.raw.om_weather_daily as select * from (values "
+        "('ZZZ', date '1900-01-01', -99.0, 'load_0', 'id_0')) "
+        "t(country_iso3, weather_date, temperature_2m_mean, _dlt_load_id, _dlt_id)"
+    )
+    con.close()
+    return lake
+
+
+@pytest.fixture
+def warehouse_on_a_catalog(tmp_path: Path, lakehouse_dir: Path) -> Path:
+    """The production shape: `raw` lives in a DuckLake and `staging` is views
+    over it, written fully qualified the way dbt-duckdb writes them.
+
+    The `warehouse` fixture above deliberately carries its own in-file `raw` —
+    a legitimate thing to publish, and the case `solidify_staging`'s
+    `needs_catalog` test exists for. It is also why that fixture could never see
+    which catalog gets attached: it never attaches one.
+    """
+    from modern_data_stack.ducklake import attach
+
+    path = tmp_path / "src-on-lake" / "warehouse.duckdb"
+    path.parent.mkdir()
+    con = duckdb.connect(str(path))
+    attach(
+        con,
+        lakehouse_dir / "catalog.duckdb",
+        lakehouse_dir / "data",
+        alias="lakehouse",
+        read_only=True,
+    )
+    con.execute("create schema staging")
+    con.execute("create schema marts")
+    con.execute("create schema analytics")
+    con.execute(
+        "create view warehouse.staging.stg_weather_daily as "
+        "select country_iso3, temperature_2m_mean from lakehouse.raw.om_weather_daily"
+    )
+    con.execute("create table marts.fct_weather as select * from staging.stg_weather_daily")
+    con.execute(
+        "create table analytics.weather_check as select country_iso3 from staging.stg_weather_daily"
+    )
+    con.execute("detach lakehouse")
+    con.close()
+    return path
+
+
+def test_the_staging_views_are_solidified_against_the_catalog_the_caller_named(
+    warehouse_on_a_catalog: Path,
+    lakehouse_dir: Path,
+    decoy_lakehouse: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """`solidify_staging` decides what the published `staging` layer contains,
+    and it was the last thing in the exporter still reading the module constant.
+
+    `run()` threads `lakehouse_dir` to the tarball and to `data_loaded_at`; this
+    third reader kept picking up whichever landing zone happened to be at
+    `./data/lakehouse`. Packaging a database from somewhere else therefore
+    materialised its staging views against an unrelated catalog — the wrong rows
+    where one existed, and an `IOException` naming a path the caller never
+    mentioned where one did not.
+
+    The constant is pointed at a catalog that *works* and holds different rows,
+    so the failure is a wrong answer rather than a crash. That is the shape this
+    defect actually had.
+    """
+    from lake import lakehouse as lake_module
+
+    monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
+    monkeypatch.setattr(lake_module, "LAKEHOUSE_DIR", decoy_lakehouse)
+
+    out = tmp_path / "export-on-lake"
+    run(
+        str(warehouse_on_a_catalog),
+        str(out),
+        tag="data-1999-12-31",
+        repo="acme/demo",
+        lakehouse_dir=lakehouse_dir,
+    )
+
+    con = duckdb.connect(str(out / "warehouse.duckdb"), read_only=True)
+    try:
+        landed = [
+            r[0]
+            for r in con.execute(
+                "select country_iso3 from staging.stg_weather_daily order by 1"
+            ).fetchall()
+        ]
+    finally:
+        con.close()
+
+    assert landed == ["DEU", "FRA"], "solidified against the module constant, not the argument"
+
+
 def _unpack(manifest: dict, into: Path) -> Path:
     import tarfile
 

@@ -124,6 +124,7 @@ __all__ = [
     "dlt_credentials",
     "is_catalog",
     "main",
+    "preflight",
     "publish",
     "read_only_connection",
     "restore",
@@ -290,6 +291,38 @@ def publish(
         con.close()
 
 
+def preflight(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> None:
+    """Every reason a restore would refuse, asked before anything is written.
+
+    Split out of `restore` so a caller that mutates something *else* first can
+    ask up front. `scripts/restore_history.py` is that caller and is the reason
+    this exists: its `run()` replaces the warehouse's `history` schema and *then*
+    carries the landing zone in, so a refusal raised from inside the second step
+    had already let the first one happen — last month's snapshots copied over the
+    local ones, the lakehouse untouched, and both that module's docstring and
+    CLAUDE.md saying `run()` *refuses* in exactly this situation.
+
+    A refusal is a promise about what did not happen, and a check that runs after
+    the first write cannot make it. Both refusals move rather than only the
+    warm-state one: a destination that already holds carried rows is the same
+    shape of half-applied restore, and it costs the same archive.
+    """
+    state = _local_pipeline_state()
+    if state is not None:
+        _refuse_warm_state(state)
+
+    dest = Path(lakehouse_dir)
+    if is_catalog(dest):
+        held = sum(rows(t, dest) for t in PUBLISHED_TABLES if _has_table(dest, t))
+        if held:
+            raise ValueError(
+                f"{catalog_path(dest)} already holds {held:,} rows in {len(PUBLISHED_TABLES)} "
+                "carried table(s) — refusing to overwrite an archive that costs days of "
+                "API budget to refetch. Delete it first if replacing it is really what "
+                "you want."
+            )
+
+
 def restore(source_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> dict[str, int]:
     """Copy a published lakehouse into `lakehouse_dir` before the graph runs.
 
@@ -307,20 +340,9 @@ def restore(source_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -
     if not is_catalog(source):
         raise FileNotFoundError(f"no published lakehouse at {source / CATALOG_NAME}")
 
-    state = _local_pipeline_state()
-    if state is not None:
-        _refuse_warm_state(state)
+    preflight(lakehouse_dir)
 
     dest = Path(lakehouse_dir)
-    if is_catalog(dest):
-        held = sum(rows(t, dest) for t in PUBLISHED_TABLES if _has_table(dest, t))
-        if held:
-            raise ValueError(
-                f"{catalog_path(dest)} already holds {held:,} rows in {len(PUBLISHED_TABLES)} "
-                "carried table(s) — refusing to overwrite an archive that costs days of "
-                "API budget to refetch. Delete it first if replacing it is really what "
-                "you want."
-            )
     if dest.exists():
         # An empty directory is the normal state here, not an anomaly: importing
         # the orchestration layer creates one (see `dlt_credentials`). Only a

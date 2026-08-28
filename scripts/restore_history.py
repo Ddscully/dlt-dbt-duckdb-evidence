@@ -130,9 +130,25 @@ def run(
 
     **Refuses when a landing table would be carried and dlt already has local
     state**, because the two together do not work — see `_refuse_warm_state`.
+    That refusal is asked *first*, before the snapshot is touched: this function
+    writes two artifacts and only one of them can be rolled back by not writing
+    it. Raising from inside the second step used to leave the `history` schema
+    already replaced by the previous release's — a partial restore that both this
+    docstring and CLAUDE.md described as a refusal.
     """
-    summary = restore(source, duckdb_path, carry=CARRIED, force=force)
-    summary["lakehouse"] = _restore_lakehouse(Path(source), lakehouse_dir)
+    src = Path(source)
+    archive = src.parent / LAKEHOUSE_ASSET
+    if archive.exists():
+        # Only when there is a landing zone in the release. A history-only
+        # restore never creates the `raw` schema, so dlt's local state is not
+        # contradicted and must not be refused over — the recipe that already
+        # worked has to keep working, which `tests/test_restore_history.py` pins.
+        from lake import lakehouse
+
+        lakehouse.preflight(lakehouse.LAKEHOUSE_DIR if lakehouse_dir is None else lakehouse_dir)
+
+    summary = restore(src, duckdb_path, carry=CARRIED, force=force)
+    summary["lakehouse"] = _restore_lakehouse(src, lakehouse_dir)
     return summary
 
 
@@ -148,6 +164,11 @@ def _restore_lakehouse(source: Path, lakehouse_dir: str | Path | None) -> dict[s
 
     A release that predates the lakehouse asset simply has no directory, which is
     the same "restoring nothing is a normal outcome" rule the snapshot follows.
+
+    `run()` has already asked `lakehouse.preflight` about this same archive, so
+    by the time this is reached the refusals have passed. `lakehouse.restore`
+    asks again — it is a public entry point in its own right and cannot assume a
+    caller checked — and the second answer costs a `stat` and a row count.
     """
     import tarfile
     import tempfile

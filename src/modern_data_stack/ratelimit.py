@@ -38,6 +38,20 @@ from collections.abc import Callable, Sequence
 
 __all__ = ["WeightedWindowLimiter"]
 
+# Slack on the "has enough drained out yet?" comparison in `_window_delay`.
+#
+# `spent_within` sums the window's charges oldest-first and `_window_delay`
+# subtracts them back off in the same order, so a fully drained window should
+# leave exactly zero — and in binary floating point it does not: `(0.1 + 0.2)
+# - 0.1 - 0.2` is 4.16e-17, not 0.0. Without slack the final subtraction misses
+# `outstanding <= target`, the loop falls off its end and returns 0.0, which
+# means "spend it now" — the one answer that branch exists to avoid giving.
+#
+# Sized to be far below any unit this can be asked about (the smallest real
+# charge for the caller it was built for is ~0.4) and far above the residual of
+# summing a window's worth of them.
+_DRAIN_TOLERANCE = 1e-9
+
 
 class WeightedWindowLimiter:
     """Enforce several ``(window_seconds, max_units)`` budgets simultaneously."""
@@ -130,8 +144,12 @@ class WeightedWindowLimiter:
                 # deque legitimately holds these.
                 continue
             outstanding -= charged
-            if outstanding <= target:
+            if outstanding <= target + _DRAIN_TOLERANCE:
                 return max(0.0, when + window - now)
+        # Only reachable if the deque held no entry inside this window, in which
+        # case `spent` was 0 and the caller already returned above. The tolerance
+        # is what makes that true: without it, a drained window that did not
+        # subtract back to exactly zero arrived here and answered "no wait".
         return 0.0
 
     def charge(self, units: float, now: float | None = None) -> None:

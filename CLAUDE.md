@@ -82,7 +82,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (28 models, 2 snapshots, 6 seeds + 424 data tests + 27 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (28 models, 2 snapshots, 6 seeds + 424 data tests + 28 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -360,7 +360,7 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 - **`currency-and-calendar`** — the ECB rates, `dim_date`, and spot vs average.
 - **`weather-models`** — Open-Meteo's weighted budget, ERA5, the positional
   multi-location response, and the two degree-day conventions.
-- **`unit-testing-dbt-models`** — the eight models that carry unit tests, and
+- **`unit-testing-dbt-models`** — the ten models that carry unit tests, and
   what mutating each one proved the data tests could not see.
 - **`repo-guards`** — the hand-maintained lists, the tests that hold them to the
   tree, and the offline fixture dispatch table.
@@ -640,19 +640,19 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are twenty-seven unit tests, over nine models, and they exist because a data
+- **There are twenty-eight unit tests, over ten models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
   and every fiscal quarter in the warehouse is wrong while **all 19 data tests on
   the model pass** — measured, not argued. Its three unit tests fail on it.
-  **Which eight models, what mutating each one proved, and the fixture shapes
+  **Which ten models, what mutating each one proved, and the fixture shapes
   strong enough to catch it are the `unit-testing-dbt-models` skill**, together
   with the mutation method that produced all of it.
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  twenty-seven cost 4.2s. A broken fiscal calendar should stop `release-data.yml`,
+  twenty-eight cost 4.2s. A broken fiscal calendar should stop `release-data.yml`,
   not ride along in it. `just dbt-unit-test` is the ~4s inner loop.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.

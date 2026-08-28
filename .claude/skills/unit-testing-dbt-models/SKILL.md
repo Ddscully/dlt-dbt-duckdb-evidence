@@ -5,7 +5,7 @@ description: The nine dbt models that carry unit tests and what mutating each on
 
 # Unit testing the models (`dbt/models/**/_unit_tests.yml`)
 
-Twenty-seven unit tests over nine models. They exist because a data test cannot
+Twenty-eight unit tests over ten models. They exist because a data test cannot
 see a wrong answer that is a legal one, and every one of them was written after
 mutating the model and watching its data tests stay green. This file is the
 record of those mutations — what moved, what did not, and which fixture shapes
@@ -34,9 +34,9 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     tree is dirty by definition; `git checkout` is a revert to HEAD, not an
     undo, and it destroyed a round of uncommitted edits to three files.
 
-## The nine models, and what mutating each one proved
+## The ten models, and what mutating each one proved
 
-- **There are twenty-seven unit tests, over nine models, and they exist because a data
+- **There are twenty-eight unit tests, over ten models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
