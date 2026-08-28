@@ -23,9 +23,11 @@ then merge), every dbt model, seed, snapshot and test, and the Polars layer all
 execute — offline and deterministically. This is what `.github/workflows/ci.yml`
 runs (via the Dagster asset graph, so the asset checks are evaluated too).
 
-It sets `WAREHOUSE_PATH` to a temp file, and `LAKE_DIR` to a temp directory
+It sets `WAREHOUSE_PATH` to a temp file, and `LAKEHOUSE_DIR` to a temp directory
 beside it. Don't drop either: without them a fixture run overwrites
-`data/warehouse.duckdb` and `data/lakehouse/` with the 17-country slice.
+`data/warehouse.duckdb` and `data/lakehouse/` with the 17-country slice — and
+the second is not an optimisation, because dlt *lands* in the lakehouse, over a
+weather archive no rebuild can afford to refetch.
 
 ## `just coverage` — line and branch coverage of the first tier, ~17s
 

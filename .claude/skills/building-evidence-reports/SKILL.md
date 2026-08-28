@@ -48,6 +48,32 @@ Nothing recorded yet — and here's why that's expected.
 {/if}
 ````
 
+## A page query may not read another page query
+
+**Query chaining does not work here, and the half that fails silently is the
+chart half.** Writing `from <name-of-an-earlier-block>` in a SQL block looks like
+it should work — the blocks are named and later ones are compiled after earlier
+ones — and it resolves to nothing at all:
+
+| Chained block feeds | Build log | Built HTML | In a browser |
+|---|---|---|---|
+| `<Value>` (prerendered) | `Error in Query! Catalog Error: Table with name X does not exist!` | carries the error | `Loading...` forever |
+| `<BarChart>`, `<DataTable>` | **nothing** | carries the error | a grey skeleton box, forever |
+
+The build exits 0 and writes the page either way, so a chart built this way is a
+page that deploys, passes `site_pages_all_rendered` (the HTML is full size) and
+renders an empty box. Only the grep in *Verify a build actually succeeded* below
+and an actual browser can see it — which is why that grep is worth running even
+when the build log is clean. Measured with a scratch page carrying one chained
+query per component type.
+
+**The fix is a source query, not a longer block.** Move the shared computation
+into `sources/warehouse/<name>.sql` and have every block read it. That is what
+`weather_price_pairs.sql` is: the year-over-year join the weather page needs in
+six places, computed once. It is also faster — the window functions run at build
+time rather than in every visitor's browser — and it puts the SQL somewhere
+`build_report.page_tables()` can see, so the exposure test covers it.
+
 ## How it's wired
 
 | Path | Role |
@@ -130,6 +156,18 @@ where year = ${inputs.year.value}
 - Charts and `<BigValue>` need explicit `fmt=` for anything that isn't a plain
   number; percentages in this warehouse are stored 0–100, so `fmt='0.0"%"'`, not
   a percent format that multiplies by 100.
+- **`sort` on a chart means two different things, and the year cast above flips
+  which one you get.** `_Chart.svelte` sorts by *x* when the x column is a value
+  or a time, and by **y, descending** when it is a category. So
+  `cast(cast(year as integer) as varchar)` — the fix for the `2,024` symptom
+  above — turns the axis into a category and silently reorders it by value: a
+  correlation-by-year bar chart came out `2020 2018 2014 2019 …`, which reads as
+  a rendering glitch rather than a sort. Pass `sort=false` on any chart whose x
+  is a cast year, and let the query's `order by` stand.
+- **A literal `+` in a format string is not a sign.** `fmt='+0.0"%"'` on a column
+  that holds negatives renders them `-+18.2%`, because the `+` is copied through
+  as text rather than being read as a positive-sign directive. Use `'0.0"%"'` and
+  let the minus speak; a signed column reads fine without a plus on the positives.
 - **A `*_pct` column with no explicit format is multiplied by 100.** Evidence
   infers a format from the column *name*: `lookupColumnFormat` takes everything
   after the last underscore and matches it against the built-in format tags, and
@@ -179,6 +217,11 @@ chromium --headless=old --no-sandbox --disable-gpu --window-size=1400,2100 \
   --virtual-time-budget=60000 --screenshot=/tmp/page.png http://localhost:3000/
 ```
 
+- **Snap chromium can only write the screenshot under a non-hidden `$HOME`
+  path.** `--screenshot=/tmp/...` fails `No such file or directory` and
+  `$HOME/.cache/...` fails `Permission denied`, both from confinement rather than
+  from the flag — so the scratchpad directory is not usable here. `~/shots/` is
+  where this repo's page screenshots have accumulated; use it.
 - Use `--headless=old`. On this machine snap chromium's *new* headless mode
   silently produces nothing — no DOM, no screenshot, no stderr, exit 0. Same for
   `--dump-dom` and `--enable-logging=stderr` in either mode.

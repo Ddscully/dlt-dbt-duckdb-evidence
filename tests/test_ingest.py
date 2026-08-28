@@ -1152,11 +1152,157 @@ def test_weather_rows_cover_every_declared_column():
     assert set(rows[0]) == set(pipeline.WEATHER_COLUMNS)
 
 
+def test_a_day_the_archive_has_not_finished_with_is_not_landed_at_all():
+    """ERA5T answers a day it is still working on as a present `time` entry whose
+    variables are all null, and this resource `merge`s on
+    `(country_iso3, weather_date)` over a 90-day lookback re-asked every run.
+
+    So an all-null row is not an empty row — it is a *replacement* for whatever
+    is already stored at that key. Landing it takes a complete day out of the
+    archive and puts nulls in its place, with no error and no range test to fail.
+    """
+    entry = _weather_entry(["2022-01-01", "2022-01-02"], [10.8, -1.5])
+    for name in pipeline.WEATHER_DAILY_VARIABLES:
+        entry["daily"][name] = [entry["daily"][name][0], None]
+
+    rows = list(pipeline._weather_rows(entry, [("DEU", 1.0, 2.0)]))
+
+    assert [r["weather_date"] for r in rows] == ["2022-01-01"]
+
+
+def test_a_day_missing_only_some_variables_is_still_landed():
+    """The other side of the same boundary. Dropping a day because one variable
+    is late would throw away five that arrived, and the null columns are what
+    `stg_weather_daily`'s `not_null` tests are for."""
+    entry = _weather_entry(["2022-01-01"], [10.8])
+    entry["daily"]["precipitation_sum"] = [None]
+
+    rows = list(pipeline._weather_rows(entry, [("DEU", 1.0, 2.0)]))
+
+    assert len(rows) == 1
+    assert rows[0]["temperature_2m_mean"] == 10.8
+    assert rows[0]["precipitation_sum"] is None
+
+
 def test_weather_retry_reads_the_window_off_the_429_message():
     """The response carries no `Retry-After`, only a sentence naming the window,
     and the three windows want waits three orders of magnitude apart."""
     assert pipeline.weather_retry_after("Minutely API request limit exceeded.") == 65.0
     assert pipeline.weather_retry_after("Hourly API request limit exceeded.") == 660.0
+
+
+class _FakeResponse:
+    """Just enough of `requests.Response` for `_get_weather_json`."""
+
+    def __init__(self, status_code: int, payload=None, text: str = "") -> None:
+        self.status_code = status_code
+        self.text = text
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code}", response=self)
+
+    def json(self):
+        return self._payload
+
+
+def _weather_fetch(monkeypatch, responses):
+    """Drive `_get_weather_json` over a scripted sequence of outcomes.
+
+    Each element is either a `_FakeResponse` or an exception instance to raise.
+    Returns `(result_or_error, attempts, sleeps)`.
+    """
+    calls, sleeps = [], []
+    remaining = list(responses)
+
+    def fake_get(url, **kwargs):
+        outcome = remaining.pop(0)
+        calls.append(url)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(pipeline.requests, "get", fake_get)
+    monkeypatch.setattr(pipeline.time, "sleep", sleeps.append)
+    monkeypatch.setattr(pipeline.fixtures, "enabled", lambda: False)
+
+    limiter = pipeline.WeightedWindowLimiter(
+        pipeline.WEATHER_RATE_LIMITS, clock=lambda: 0.0, sleep=lambda _: None
+    )
+    try:
+        return pipeline._get_weather_json("https://example/archive", limiter, 1.0), calls, sleeps
+    except Exception as exc:  # noqa: BLE001 - the test decides whether this is the point
+        return exc, calls, sleeps
+
+
+def test_a_transient_weather_failure_is_retried_like_every_other_source(monkeypatch):
+    """The class `_get_json` has always retried for the other six sources, and
+    which weather did not: a timeout, a reset connection, a 5xx.
+
+    Weather is the one source whose load cannot simply be re-run for free — a
+    backfill is paced against a daily budget — so a single hiccup killing the
+    whole load was the most expensive place in the project to not retry.
+    """
+    result, calls, sleeps = _weather_fetch(
+        monkeypatch,
+        [
+            requests.Timeout("read timed out"),
+            _FakeResponse(503, text="upstream busy"),
+            _FakeResponse(200, payload={"daily": {"time": []}}),
+        ],
+    )
+
+    assert result == {"daily": {"time": []}}
+    assert len(calls) == 3
+    # The plain backoff, not the minute-long wait a 429 earns: neither failure
+    # had anything to do with the budget.
+    assert sleeps == [pipeline.WEATHER_BACKOFF_SECONDS, pipeline.WEATHER_BACKOFF_SECONDS * 2]
+
+
+def test_a_client_error_is_raised_at_once_rather_than_retried(monkeypatch):
+    """A 4xx that is not a 429 says *this request* is wrong, and the next
+    identical one is wrong identically — while costing the same units against a
+    shared daily budget.
+
+    The live example is Open-Meteo's archive end trailing real time by more than
+    `WEATHER_END_LAG_DAYS`, which answers `400 Parameter 'end_date' is out of
+    allowed range`. That wants the constant moved, not six retries.
+    """
+    result, calls, sleeps = _weather_fetch(
+        monkeypatch, [_FakeResponse(400, text="end_date is out of allowed range")]
+    )
+
+    assert isinstance(result, requests.HTTPError)
+    assert len(calls) == 1, "a deterministic rejection must not be paid for six times"
+    assert sleeps == []
+
+
+def test_every_attempt_is_charged_including_the_one_that_never_answered(monkeypatch):
+    """The limiter paces what this process has spent, and a connection that died
+    on our side says nothing about whether the API served and counted the
+    request. An uncertain spend counts — being optimistic here is what earns the
+    429 the limiter exists to prevent."""
+    calls, charged = [], []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        raise requests.ConnectionError("reset by peer")
+
+    monkeypatch.setattr(pipeline.requests, "get", fake_get)
+    monkeypatch.setattr(pipeline.time, "sleep", lambda _: None)
+    monkeypatch.setattr(pipeline.fixtures, "enabled", lambda: False)
+
+    limiter = pipeline.WeightedWindowLimiter(
+        pipeline.WEATHER_RATE_LIMITS, clock=lambda: 0.0, sleep=lambda _: None
+    )
+    monkeypatch.setattr(limiter, "charge", lambda units, now=None: charged.append(units))
+
+    with pytest.raises(RuntimeError, match="failed to fetch weather"):
+        pipeline._get_weather_json("https://example/archive", limiter, 7.0)
+
+    assert charged == [7.0] * pipeline.WEATHER_RETRIES
+    assert len(calls) == pipeline.WEATHER_RETRIES
 
 
 def test_a_spent_daily_budget_raises_rather_than_sleeping_through_a_day():

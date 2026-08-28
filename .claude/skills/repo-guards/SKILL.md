@@ -137,7 +137,7 @@ is in the `unit-testing-dbt-models` skill.
   in `just test-pipeline` instead of in the `just test` loop.
   `AssetChecksDefinition` is callable and none of the seven take a `context`, so
   no execution harness is needed — point the module's `DUCKDB_PATH` (or
-  `LAKE_DIR`, or `page_routes`) at a throwaway, call the check, read the
+  `LAKEHOUSE_DIR`, or `page_routes`) at a throwaway, call the check, read the
   `AssetCheckResult`. **Anything under `tests/` importing the orchestration layer
   needs the dlt teardown fixture**, and `test_asset_checks.py` shipped an
   identical copy of it alongside `test_definitions.py`'s rather than sharing

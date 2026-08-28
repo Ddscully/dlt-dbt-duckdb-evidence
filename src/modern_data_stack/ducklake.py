@@ -48,6 +48,7 @@ __all__ = [
     "row_count",
     "set_data_path",
     "snapshots",
+    "spec_version",
     "table_versions",
 ]
 
@@ -221,6 +222,7 @@ def publish(
     tables: tuple[str, ...],
     data_dirname: str,
     catalog_name: str,
+    max_spec_version: str | None = None,
 ) -> dict[str, int]:
     """Build a **relocatable** DuckLake at `dest_dir` holding only `tables`.
 
@@ -241,6 +243,11 @@ def publish(
     the process's working directory, not the file's — so it is created absolute
     and the single `ducklake_metadata` row is rewritten afterwards. The per-file
     paths were relative all along.
+
+    `max_spec_version` is the DuckLake spec the published catalog may not exceed.
+    It has **no default**, for `export`'s reason: a ceiling is a promise to
+    consumers this module knows nothing about, and it only means anything beside
+    the reader floor a project states.
     """
     dest = Path(dest_dir)
     (dest / data_dirname).mkdir(parents=True, exist_ok=True)
@@ -270,7 +277,83 @@ def publish(
         con.execute("detach _publish")
 
     set_data_path(catalog, f"{data_dirname}/")
+
+    # Measured on the catalog that was just *built*, which is the point: this is
+    # the artifact that ships, written by whatever DuckLake the machine has, and
+    # it is not the same question as what the source lakehouse was written
+    # against. `>`, not `>=` — publishing at the ceiling is the ordinary case.
+    #
+    # Raised after the build rather than before it, matching `export`: the
+    # directory is deliberately left for inspection, and what a refusal
+    # guarantees is that nothing was assembled around it.
+    published = spec_version(catalog)
+    if max_spec_version is not None and version_key(published) > version_key(max_spec_version):
+        raise ValueError(
+            f"refusing to publish {catalog.name}: DuckLake spec version "
+            f"{published}, above the {max_spec_version} this project promises. "
+            "The extension that wrote it is a binary from extensions.duckdb.org "
+            "that no lockfile can name, so nothing else in this repo can notice "
+            "the format moving. Raising the ceiling strands every consumer whose "
+            "ducklake is older than the new spec."
+        )
     return copied
+
+
+def catalog_metadata(catalog_path: str | Path) -> dict[str, str]:
+    """Everything `ducklake_metadata` records about a catalog, as a map.
+
+    The whole table rather than one key, because the two rows a release cares
+    about are read together and answer different questions — `version` is the
+    spec a consumer needs to open it, `created_by` is the DuckDB build that wrote
+    it. That is `storage_version` against `duckdb_version` exactly, and returning
+    one of them here would leave the second caller opening the file again.
+
+    Read read-only and by connecting to the catalog *file*, not through an
+    attached lake: the point is to describe an artifact, which may be a tarball
+    somebody just unpacked rather than a lakehouse this process can attach.
+    """
+    path = Path(catalog_path)
+    try:
+        con = duckdb.connect(str(path), read_only=True)
+    except duckdb.Error as exc:  # not a database at all
+        raise ValueError(f"not a DuckLake catalog: {path}") from exc
+    try:
+        rows = con.execute("select key, value from ducklake_metadata").fetchall()
+    except duckdb.Error as exc:  # a DuckDB file, but not a catalog
+        raise ValueError(f"not a DuckLake catalog: {path}") from exc
+    finally:
+        con.close()
+    return {str(key): str(value) for key, value in rows}
+
+
+def spec_version(catalog_path: str | Path) -> str:
+    """The DuckLake spec version a catalog was written against.
+
+    The landing zone's answer to `export.storage_version`, and the same question
+    in an easier place to ask it: not *who wrote this* but *can a consumer open
+    it*, which is the whole promise a published catalog makes. DuckLake records
+    it in a table rather than a file header, so this is a query where the DuckDB
+    half needed a struct unpack.
+
+    Returned as the string the catalog holds (`1.0`) rather than parsed, because
+    that is what a manifest should carry and what a person reads. `version_key`
+    is what orders two of them.
+    """
+    meta = catalog_metadata(catalog_path)
+    if "version" not in meta:
+        raise ValueError(f"DuckLake catalog with no recorded version: {catalog_path}")
+    return meta["version"]
+
+
+def version_key(version: str) -> tuple[int, ...]:
+    """`1.10` sorts above `1.9`, which string comparison gets backwards.
+
+    Trivial, and it exists because the DuckDB side of this pair needs no such
+    thing: a storage version is an integer and callers compare it directly. A
+    spec version is dotted, so *something* has to say what ordering means, and
+    leaving each caller to decide is how one of them ends up comparing strings.
+    """
+    return tuple(int(part) for part in version.split("."))
 
 
 def set_data_path(catalog_path: str | Path, data_path: str) -> None:

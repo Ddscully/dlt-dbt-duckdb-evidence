@@ -162,6 +162,28 @@ exposures:
       name: Daniel Scully
       email: danieldscully@gmail.com
 
+  # Reads `dim_country_year` as well as the weather mart, because the fact is
+  # keyed on ISO3 and carries no country name — the source query joins the
+  # dimension in for chart labels. A page that reads a model only for its labels
+  # still breaks when that model changes, so it is declared like any other.
+  - name: evidence_weather
+    label: Dashboard — Weather
+    type: dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/weather/
+    description: >
+      Capital-city degree days as a control variable: whether a year was colder,
+      tested against what electricity prices did in the same year and found to
+      explain none of it. Also carries the two degree-day conventions, the
+      capital-as-proxy distance, and why the current year is filtered out of
+      every comparison.
+    depends_on:
+      - ref('dim_country_year')
+      - ref('fct_country_weather_year')
+      - ref('fct_eu_electricity_prices_semiannual')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
   - name: evidence_retail
     label: Dashboard — Retail
     type: dashboard

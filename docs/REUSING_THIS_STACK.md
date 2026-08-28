@@ -23,17 +23,21 @@ project modules that call it hold the constants.
 
 ### The package — `src/modern_data_stack/`
 
-Six modules, no mention of emissions in any of them. Copy the directory, or
+Ten modules, no mention of emissions in any of them. Copy the directory, or
 depend on it and write only the layers below.
 
 | Module | What it does | Configured by |
 |--------|--------------|---------------|
-| `paths` | project root, warehouse file, lake dir, dbt manifest | `PROJECT_ROOT`, `WAREHOUSE_PATH`, `LAKE_DIR` |
+| `paths` | project root, warehouse file, lakehouse dir, dbt manifest | `PROJECT_ROOT`, `WAREHOUSE_PATH`, `LAKEHOUSE_DIR` |
 | `fixtures` | serve recorded payloads instead of live endpoints | a list of `(url pattern, filename)` routes |
-| `lake` | hive-partitioned Parquet archive of warehouse tables | a table tuple and a partition column |
+| `ducklake` | attach, publish and relocate a DuckLake catalog | an alias, a data path and a spec ceiling |
 | `observability` | dlt/dbt/DuckDB metadata as queryable tables | landing-table and layer names |
 | `export` | package a warehouse as a publishable artifact | schemas, attribution, a notes renderer |
-| `history` | carry a dbt snapshot forward between builds | the snapshot schema name |
+| `history` | carry unreproducible relations forward between builds | a tuple of `Carry` rules |
+| `privacy` | pseudonymise an identifier at the publication boundary | the classified columns and a salt |
+| `ratelimit` | a sliding-window budget for an API that charges by volume | `(seconds, units)` limits |
+| `workbook` | read a spreadsheet source without loading it whole | a URL and a batch size |
+| `db` | single-row and scalar reads, without the `Optional` | nothing |
 
 Each project module keeps the entry point, so `python -m lake.lakehouse`, the
 justfile recipes and the asset graph all still call the same names.
@@ -82,7 +86,7 @@ justfile recipes and the asset graph all still call the same names.
   with it, since that is what stops the allowlist drifting from your tree.
 - `reports/sources/warehouse/connection.yaml` — the relative path to the DuckDB
   file, nothing else.
-- `tests/test_lake.py`, `test_export.py`, `test_report.py` — structural tests over
+- `tests/test_lakehouse.py`, `test_export.py`, `test_report.py` — structural tests over
   the plumbing, not over the numbers. `test_ingest.py` and `test_transform.py` are
   yours.
 
@@ -129,7 +133,7 @@ name once, and pin it with a test if you publish the file.
 
 Here it's `(country_iso3, year)`, and most of the warehouse follows from it: the
 `unique_combination_of_columns` contract on every fact-shaped model, the spine,
-the lake's partition column, the join key in every mart.
+the join key in every mart.
 
 Write yours down as `(entity, period)` in the style guide before you build the
 first staging model. Then hold every staging model to it. When a source publishes
@@ -188,7 +192,8 @@ anything built this way:
   warehouses and no error. Every layer here gets the answer from
   `modern_data_stack.paths` so they can't disagree — it used to come from a
   `REPO_ROOT` in `ingest/pipeline.py` that meant "the parent of `ingest/`", which
-  made the lake and the exporter depend on where the *ingestion* layer sat.
+  made the landing zone and the exporter depend on where the *ingestion* layer
+  sat.
 - **`dbt deps` before `dbt build`, `dbt parse` *or* `sqlfluff`.** `dbt_packages/`
   and `target/` are gitignored, and `prepare_if_dev()` only fires under
   `dagster dev`. Every workflow has to run it explicitly.
@@ -245,10 +250,16 @@ Each step leaves the repo runnable, so a failure has one plausible cause.
 
 ## 7. What to drop if you want less
 
-Five layers are optional, and independent of each other:
+Four layers are optional, and independent of each other. **The landing zone
+(`lake/`) is no longer one of them** — it used to be a hive-partitioned Parquet
+archive written *beside* the warehouse, droppable for anyone who did not want
+cross-run diffability, and it is now the DuckLake catalog `raw` actually lives
+in. dbt attaches it and every staging model reads through it, so dropping it is
+a decision about where dlt lands rather than a layer you leave out. The
+diffability argument went with the old format too: DuckLake content-addresses
+its files, so a diff of the *files* no longer means anything and `revisions()`
+compares two snapshots instead.
 
-- **The lake** (`lake/`) — drop it unless you want cross-run diffability or you
-  intend to move to object storage. It's the cheapest to add later.
 - **Snapshots** (`dbt/snapshots/`, `scripts/restore_history.py`) — only if your
   publishers restate. If they don't, this layer records nothing.
 - **Publishing** (`scripts/export_warehouse.py`, `release-data.yml`) — only if

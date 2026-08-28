@@ -119,6 +119,40 @@ def test_a_request_larger_than_the_whole_window_drains_it_rather_than_hanging():
     assert limiter.delay_for(673) == 0.0
 
 
+def test_an_oversized_request_still_drains_when_the_charges_do_not_sum_back_to_zero():
+    """The same policy as the test above, against charges that are *not* exactly
+    representable — which is the case the test above cannot see.
+
+    `spent_within` sums the window's charges and `_window_delay` subtracts them
+    back off one at a time, so a fully drained window should reach exactly zero.
+    In binary floating point it often does not, and the shortfall is not exotic:
+    of the 3,481 (days, days) pairs a two-request window could hold at this
+    project's 41 locations, 870 — a quarter — leave a positive residual.
+
+    Without the tolerance the final subtraction misses `outstanding <= target`,
+    the loop falls off its end and `_window_delay` returns 0.0. That reads as
+    "spend it now", which is the one answer this branch exists to avoid: the
+    caller spends against a window it has not waited for and earns the 429.
+
+    The single charge in the test above sums back to zero exactly, which is why
+    it stayed green through all of this.
+    """
+    one_day = 1.757142857142857  # weather_call_units(41, 1)
+    nine_days = 15.814285714285715  # weather_call_units(41, 9)
+    assert (one_day + nine_days) - one_day - nine_days > 0.0, "no residual, so nothing to test"
+
+    limiter, clock = make(((60.0, 600.0),))
+    limiter.charge(one_day)
+    clock.advance(10)
+    limiter.charge(nine_days)
+    clock.advance(5)
+
+    # 673 units is more than the whole 600-unit window, so the answer is "wait
+    # for it to empty" — 60s after the *newest* charge landed, which is at 1010
+    # against a clock now reading 1015.
+    assert limiter.delay_for(673) == pytest.approx(55.0)
+
+
 def test_an_oversized_request_leaves_the_window_in_debt_and_the_next_call_pays():
     limiter, _ = make(((60.0, 600.0),))
     limiter.charge(900)  # served, but 300 over budget

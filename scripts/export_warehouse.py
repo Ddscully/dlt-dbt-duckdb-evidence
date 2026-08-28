@@ -57,6 +57,7 @@ from pathlib import Path
 import duckdb
 
 from modern_data_stack import privacy
+from modern_data_stack.ducklake import catalog_metadata
 from modern_data_stack.export import default_tag, export, loaded_at
 from modern_data_stack.paths import dbt_manifest_path, warehouse_path
 
@@ -72,6 +73,7 @@ __all__ = [
     "EXTRA_CLASSIFICATIONS",
     "LAKEHOUSE_ASSET",
     "MASKED_LABELS",
+    "MAX_PUBLISHED_LAKE_VERSION",
     "MAX_PUBLISHED_STORAGE_VERSION",
     "MIN_READER_VERSION",
     "PUBLISHED_SCHEMAS",
@@ -127,6 +129,26 @@ PUBLISHED_SCHEMAS = ("staging", "marts", "analytics")
 # along.
 MAX_PUBLISHED_STORAGE_VERSION = 64
 MIN_READER_VERSION = "0.10.0"
+
+# The same promise for the *other* published artifact, and the reason it needs
+# its own is that the two versions move for different reasons and are noticed at
+# different moments.
+#
+# `warehouse.duckdb`'s format is decided by the `duckdb` in `uv.lock`, so its
+# tripwire fires on a Dependabot PR — before the bump merges, with a person
+# already reading the diff. The DuckLake spec is decided by a 36 MB binary from
+# extensions.duckdb.org that no lockfile can name (`duckdb_extensions()` reports
+# its version as a git hash), so **there is no PR to fail**: the extension can
+# start writing a newer catalog schema with nothing in this repo changing at
+# all. What notices is `just test` on the next CI run, which is why the
+# toolchain half of this guard matters more here than it does for the file.
+#
+# 1.0 is what the installed extension writes today, so like the storage ceiling
+# this costs nothing now and is a tripwire rather than a constraint. dlt's own
+# `automatic_migration` defaults to False, so a catalog *we* write is safe by
+# refusal; this covers the half dlt cannot see — a consumer meeting a tarball
+# written against a spec their ducklake does not know.
+MAX_PUBLISHED_LAKE_VERSION = "1.0"
 
 ATTRIBUTION = """\
 # Data attribution
@@ -248,11 +270,19 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
     # which gives `release-data.yml` something to assert on. An absent key can
     # only be checked by code that remembers to look for it.
     if not lakehouse.is_catalog(lake_dir):
-        return {"lakehouse": {"file": None, "tables": {}, "rows": 0}}
+        return {
+            "lakehouse": {
+                "file": None,
+                "spec_version": None,
+                "created_by": None,
+                "tables": {},
+                "rows": 0,
+            }
+        }
 
     with tempfile.TemporaryDirectory() as staging:
         built = Path(staging) / "lakehouse"
-        copied = lakehouse.publish(built, lake_dir)
+        copied = lakehouse.publish(built, lake_dir, MAX_PUBLISHED_LAKE_VERSION)
         # **A catalog holding none of the published tables is absent, not empty.**
         # dbt's `ATTACH IF NOT EXISTS` creates a real DuckLake — metadata table
         # and all — on any build that runs before the first ingest, so
@@ -260,7 +290,22 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
         # Shipping that would put a tarball of nothing in the release and let the
         # workflow's "was the landing zone published" assertion pass on it.
         if not copied:
-            return {"lakehouse": {"file": None, "tables": {}, "rows": 0}}
+            return {
+                "lakehouse": {
+                    "file": None,
+                    "spec_version": None,
+                    "created_by": None,
+                    "tables": {},
+                    "rows": 0,
+                }
+            }
+
+        # Off the built catalog, before it is tarred: the manifest should
+        # describe the artifact that shipped, not the lakehouse it came from.
+        # `created_by` is a DuckDB git hash and answers "who wrote this";
+        # `spec_version` is the one a consumer is actually asking about — the
+        # same split as `duckdb_version` against `storage_version` above.
+        catalog = catalog_metadata(built / lakehouse.CATALOG_NAME)
 
         archive = dest_dir / LAKEHOUSE_ASSET
         with tarfile.open(archive, "w:gz") as tar:
@@ -273,6 +318,8 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
         "lakehouse": {
             "file": LAKEHOUSE_ASSET,
             "catalog": lakehouse.CATALOG_NAME,
+            "spec_version": catalog["version"],
+            "created_by": catalog["created_by"],
             "bytes": archive.stat().st_size,
             "tables": copied,
             "rows": sum(copied.values()),
@@ -280,7 +327,9 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
     }
 
 
-def prepare_published_copy(con: duckdb.DuckDBPyConnection) -> dict:
+def prepare_published_copy(
+    con: duckdb.DuckDBPyConnection, lakehouse_dir: str | Path | None = None
+) -> dict:
     """Everything the copy needs before it is read: stand alone, then anonymise.
 
     One hook because `export()` takes one, and the order is not interchangeable.
@@ -289,11 +338,17 @@ def prepare_published_copy(con: duckdb.DuckDBPyConnection) -> dict:
     rewrite first would leave those eight untouched, and the copy would ship a
     `staging` layer that disagrees with the `marts` beside it about who a
     customer is, with matching row counts and no error anywhere.
+
+    `lakehouse_dir` is threaded through for the reason `landed_at` already
+    documents: the hook is bound in `run()`, where the caller's choice of landing
+    zone is known, rather than defaulted three frames down where it is not.
     """
-    return {**solidify_staging(con), **pseudonymise(con)}
+    return {**solidify_staging(con, lakehouse_dir), **pseudonymise(con)}
 
 
-def solidify_staging(con: duckdb.DuckDBPyConnection) -> dict:
+def solidify_staging(
+    con: duckdb.DuckDBPyConnection, lakehouse_dir: str | Path | None = None
+) -> dict:
     """Turn the `staging` views into tables so the published file stands alone.
 
     `raw` lives in the DuckLake catalog, not in the DuckDB file, so dbt writes
@@ -324,6 +379,15 @@ def solidify_staging(con: duckdb.DuckDBPyConnection) -> dict:
     from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, catalog_path, data_path
     from modern_data_stack.ducklake import attach
 
+    # The caller's landing zone, not the module constant. Reading `LAKEHOUSE_DIR`
+    # here made the catalog this attaches independent of the database being
+    # packaged: `export(duckdb_path=other, lakehouse_dir=other_lake)` solidified
+    # `other`'s staging views against whichever lakehouse happened to be at
+    # `./data/lakehouse` — the wrong rows where one existed, and an `IOException`
+    # naming a path the caller never mentioned where it did not. The same defect
+    # `landed_at` was fixed for, in the one call site that was missed.
+    lake_dir = LAKEHOUSE_DIR if lakehouse_dir is None else Path(lakehouse_dir)
+
     defined = con.execute(
         "select view_name, sql from duckdb_views() where schema_name = 'staging' order by 1"
     ).fetchall()
@@ -341,9 +405,7 @@ def solidify_staging(con: duckdb.DuckDBPyConnection) -> dict:
     # caller never mentioned.
     needs_catalog = any(f"{ATTACH_ALIAS}." in (sql or "") for _, sql in defined)
     if needs_catalog:
-        attach(
-            con, catalog_path(LAKEHOUSE_DIR), data_path(LAKEHOUSE_DIR), ATTACH_ALIAS, read_only=True
-        )
+        attach(con, catalog_path(lake_dir), data_path(lake_dir), ATTACH_ALIAS, read_only=True)
     try:
         for name in views:
             # Two statements: DuckDB will not `create or replace table` over a
@@ -517,6 +579,21 @@ def release_notes(manifest: dict, repo: str, tag: str) -> str:
     def size(n: int) -> str:
         return f"{n / 1e6:.1f} MB" if n >= 1e6 else f"{n / 1e3:.0f} kB"
 
+    # Conditional for `history_note`'s reason: a release without a landing zone
+    # is legitimate (the exporter records `file: None` rather than omitting the
+    # key), and a bullet reading "spec None" is worse than no bullet.
+    lake = manifest["lakehouse"]
+    lake_version_note = (
+        f"- **The landing zone has its own version, and it is not that one.** "
+        f"`{LAKEHOUSE_ASSET}` is a DuckLake catalog written against **spec "
+        f"{lake['spec_version']}** by {lake['created_by']}; what has to be new enough to open "
+        f"it is your `ducklake` extension, not your DuckDB. `INSTALL ducklake` fetches the "
+        f"build matching whatever DuckDB you are running, so in practice this only bites a "
+        f"client pinned to an older extension.\n"
+        if lake["file"]
+        else ""
+    )
+
     # The snapshot is the one table a rebuild can't reproduce, so say plainly how
     # much of it there is — including when the answer is "none yet".
     history = manifest.get("history")
@@ -681,7 +758,7 @@ select count(*) from lakehouse.raw.om_weather_daily;
   format is, and this file is format {manifest["storage_version"]}, the oldest DuckDB still writes. If that
   ever rises the minimum reader version rises with it and this line will say so. The
   Parquet files carry no such constraint either way.
-- **Data last landed:** {manifest.get("data_loaded_at") or "unknown"}.
+{lake_version_note}- **Data last landed:** {manifest.get("data_loaded_at") or "unknown"}.
 - **Revision history (CO₂ estimates):** {history_note}. OWID restates published
   years; `history.snap_co2_estimates` (in the DuckDB file, not the Parquet) keeps
   every version it has served and `marts.fct_co2_estimate_versions` summarises
@@ -720,11 +797,14 @@ def run(
     `lakehouse_dir` defaults to the project's, and exists so a caller packaging a
     database from somewhere else — or a test — can say which landing zone goes
     with it instead of picking up whichever one happens to be on the machine. It
-    now decides two things rather than one: which catalog ships as the second
-    asset, and which one `data_loaded_at` is read from. Both used to reach for
-    the module constant, and the first one's test passed for the wrong reason
-    because of it (see the module docstring) — so the second is threaded from
-    here rather than defaulted inside `landed_at`.
+    now decides three things rather than one: which catalog ships as the second
+    asset, which one `data_loaded_at` is read from, and which one the `staging`
+    views are materialised against. All three used to reach for the module
+    constant, and the first one's test passed for the wrong reason because of it
+    (see the module docstring) — so each is bound *here*, where the caller's
+    choice is known, rather than defaulted inside the function that uses it.
+    `solidify_staging` was the last one still reading the constant, and it is the
+    one that decides what the published `staging` layer actually contains.
     """
     if not Path(duckdb_path).exists():
         raise FileNotFoundError(f"no warehouse at {duckdb_path} — run `just run` first")
@@ -739,7 +819,7 @@ def run(
         grain="(country_iso3, year)",
         extra_manifest=lambda con: {"history": _history(con)},
         read_loaded_at=lambda con: landed_at(con, lakehouse_dir),
-        prepare_copy=prepare_published_copy,
+        prepare_copy=lambda con: prepare_published_copy(con, lakehouse_dir),
         extra_artifacts=lambda dest: publish_lakehouse(dest, lakehouse_dir),
         max_storage_version=MAX_PUBLISHED_STORAGE_VERSION,
     )

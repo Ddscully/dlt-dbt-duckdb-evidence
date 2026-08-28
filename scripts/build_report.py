@@ -97,6 +97,7 @@ TABLE_TO_DBT_MODEL = {
     "marts.dim_retail_customer": "dim_retail_customer",
     "marts.fct_cbam_exposure": "fct_cbam_exposure",
     "marts.fct_co2_estimate_versions": "fct_co2_estimate_versions",
+    "marts.fct_country_weather_year": "fct_country_weather_year",
     "marts.fct_emissions_energy": "fct_emissions_energy",
     "marts.fct_eu_electricity_prices_semiannual": "fct_eu_electricity_prices_semiannual",
     "marts.fct_example_scope2_emissions": "fct_example_scope2_emissions",

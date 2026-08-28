@@ -57,14 +57,15 @@ differently.</sub>
 
 ---
 
-The stack is deliberately **lightweight**. Everything runs locally with `uv`
-against a single DuckDB file: no cloud warehouse, no credentials, no bill.
+The stack is deliberately **lightweight**. Everything runs locally with `uv`:
+raw lands as Parquet in a DuckLake catalog, and dbt builds into a single DuckDB
+file — no cloud warehouse, no credentials, no bill.
 
 ```
-dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
- EL      store     stg/marts   heavy T     BI-as-code
-└──────────────── Dagster ─────────────────┘
-        one asset graph, scheduled
+dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
+ EL     raw Parquet   stg/marts   heavy T     BI-as-code
+└──────────────────── Dagster ─────────────────────┘
+             one asset graph, scheduled
 ```
 
 ## Stack
@@ -72,8 +73,8 @@ dlt  ─▶  DuckDB  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 | Tool | Role |
 |------|------|
 | [**uv**](https://docs.astral.sh/uv/) | project & environment manager |
-| [**dlt**](https://dlthub.com/) | EL: API/CSV ingestion into DuckDB w/ schema inference |
-| [**DuckDB**](https://duckdb.org/) | in-process analytical warehouse (a single file) |
+| [**dlt**](https://dlthub.com/) | EL: API/CSV ingestion into DuckLake w/ schema inference |
+| [**DuckDB**](https://duckdb.org/) | in-process analytical warehouse: what dbt builds, in a single file |
 | [**dbt**](https://docs.getdbt.com/) (`dbt-duckdb`) | T: staging + marts, tests, docs |
 | [**Dagster**](https://dagster.io/) | orchestration: every layer as a software-defined asset |
 | [**Polars**](https://pola.rs/) | heavy columnar transforms / window logic in Python |
@@ -122,9 +123,12 @@ published half-year grain; the ECB's daily euro reference rates back to 1999; an
 one UK wholesaler's complete 1.07M-line transaction log, which is the only source
 here below country grain.
 
-Everything lands in one DuckDB file across five schemas: `raw` (dlt), `staging`
-and `marts` (dbt), `history` (dbt snapshots, the only tables a rebuild can't
-reproduce) and `analytics` (Polars). Full detail in
+`raw` lands as Parquet in the DuckLake catalog under `data/lakehouse/`. The
+other four schemas live in one DuckDB file: `staging` and `marts` (dbt),
+`history` (dbt snapshots) and `analytics` (Polars). Two things there no rebuild
+can reproduce — the snapshots in `history`, and `raw.om_weather_daily`, which
+costs more than a day of Open-Meteo's allowance — so both are carried forward
+from the previous release. Full detail in
 [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md).
 
 The facts hang off an explicit country-year spine, `dim_country_year`, and not
@@ -157,7 +161,7 @@ jobs and the partitioned WDI backfill.
 .
 ├── src/modern_data_stack/ # the domain-neutral half: paths, fixtures, lake,
 │                      #   ducklake, observability, export, carry-forward
-├── ingest/            # dlt pipeline: sources -> DuckDB (schema `raw`)
+├── ingest/            # dlt pipeline: sources -> DuckLake (schema `raw`)
 ├── orchestration/     # Dagster: the pipeline as an asset graph + schedule
 ├── dbt/               # dbt-duckdb project
 │   ├── models/staging # 1:1 cleaned source views (stg_*)
@@ -265,7 +269,7 @@ the live endpoints and opens an issue when a source has moved, which is the cue
 to fix the pipeline and `just record-fixtures`. Details in
 [`tests/README.md`](./tests/README.md).
 
-Alongside them, `just dbt-build` runs 451 tests — 424 data tests and 27 unit
+Alongside them, `just dbt-build` runs 452 tests — 424 data tests and 28 unit
 tests — and enforces a schema contract on all 17 marts. What each gate catches,
 and the groups, exposures and model versions built around them, are in
 [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md).
@@ -274,7 +278,7 @@ and the groups, exposures and model versions built around them, are in
 
 ### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-Ten pages, built from the modelled layers. No year is hardcoded: every page reads
+Eleven pages, built from the modelled layers. No year is hardcoded: every page reads
 the latest year each metric family can actually populate from
 `sources/warehouse/latest_years.sql`, because coverage doesn't end in the same
 year for all of them.
@@ -286,6 +290,7 @@ year for all of them.
 | **Scope 2 Factors** | The same grid carbon-intensity series read as what it also is: the location-based Scope 2 emission factor a company multiplies its metered kWh by for a CSRD, SECR or CDP disclosure. `marts.dim_grid_emission_factors` as a reference table with its vintage and lineage, a worked example over twelve *invented* sites, and the three caveats a practitioner checks first. |
 | **Retail Transactions** | One retailer's 1.07M invoice lines, the only page here below country grain. What counts as revenue when a negative quantity on a sale invoice is a stock write-off and not a return, cohort retention read as a triangle, what a customer's first order predicts about their lifetime value, RFM segmentation where SQL's `ntile` would split 3,227 customers away from their identical peers, and returns matched to their sale by inference. |
 | **Currency** | The ECB's daily euro reference rates, and the three problems an annual warehouse never has to answer. 30% of calendar days carry no rate, so the daily table carries the last fixing forward, capped, because the two interior gaps in the series are the Icelandic króna after 2008 and the Argentine peso in 2002, not long weekends. Spot against average, and what it changes about a number already on the site: EU household electricity rose 35% or 13.5% from 2021-S1 to 2022-S2 depending only on whether you counted in euros or dollars. |
+| **Weather** | Capital-city degree days as a control variable: "was it just a colder year" is the cheapest competing explanation for any energy or emissions movement, and this is the page that rules it in or out. Across 499 country-years of EU/EEA capitals the year-over-year change in heating demand explains 0.0% of the year-over-year change in household electricity price, and never more than 11.1% in any single year. Also: the two degree-day conventions disagreeing by up to 18.7%, the capital-as-proxy distance carried as a number, and why the current year is filtered out of every comparison. |
 | **Eight Findings** | Eight write-ups on the joined data: when each country's emissions peaked, that the cleanup happened in electricity and coal is most of it, real-terms decoupling, whether it's just offshoring (it isn't, mostly), emissions tracking income rather than headcount, cumulative vs. current responsibility, carbon intensity falling while absolute tonnes rise, and the gap between the cleanest and dirtiest grids refusing to close. |
 | **Country Explorer** | The same data with a year selector on it, for checking a specific country or year yourself instead of reading a conclusion. |
 | **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
@@ -311,8 +316,9 @@ Setting this up yourself takes three things nobody tells you about; they're in
 
 The dashboard is one consumer of the warehouse. The warehouse itself is published
 monthly, so you can use the joined data without running any of this: the whole
-DuckDB file, a Parquet per modelled table, row counts and checksums. DuckDB will
-query it over HTTPS where it sits, without downloading anything.
+DuckDB file, the DuckLake landing zone beside it, a Parquet per modelled table,
+row counts and checksums. DuckDB will query it over HTTPS where it sits, without
+downloading anything.
 
 [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) has the queries and the four
 things worth knowing before you build on it.

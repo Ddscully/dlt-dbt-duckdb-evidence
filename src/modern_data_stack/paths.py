@@ -1,16 +1,17 @@
 """Where the project's files live.
 
-Every layer needs the same three answers — where the project root is, which
-DuckDB file to open, where the lake goes — and they have to agree, because dbt
-resolves its copy of the warehouse path from `dbt/` while the Python layers
-resolve theirs from the root.
+Every layer needs the same few answers — where the project root is, which
+DuckDB file to open, where the landing zone goes — and they have to agree,
+because dbt resolves its copy of the warehouse path from `dbt/` while the Python
+layers resolve theirs from the root.
 
 They agree by all asking here. The alternative, which this repo ran on for a
 while, is one layer computing the root from its own location and the rest
 importing it: `REPO_ROOT` lived in `ingest/pipeline.py` and meant "the parent of
-`ingest/`", so the lake, the observability tables, the exporter and the report
-builder all took their sense of where the project was from the ingestion layer.
-Moving any one of those directories would have repointed the others, silently.
+`ingest/`", so the landing zone, the observability tables, the exporter and the
+report builder all took their sense of where the project was from the ingestion
+layer. Moving any one of those directories would have repointed the others,
+silently.
 
 ## Resolution order for the root
 
@@ -43,7 +44,6 @@ ROOT_MARKER = "pyproject.toml"
 
 ROOT_ENV_VAR = "PROJECT_ROOT"
 WAREHOUSE_ENV_VAR = "WAREHOUSE_PATH"
-LAKE_ENV_VAR = "LAKE_DIR"
 LAKEHOUSE_ENV_VAR = "LAKEHOUSE_DIR"
 CACHE_ENV_VAR = "INGEST_CACHE_DIR"
 
@@ -91,17 +91,15 @@ def warehouse_path() -> str:
     return os.environ.get(WAREHOUSE_ENV_VAR) or str(project_root() / "data" / "warehouse.duckdb")
 
 
-def lake_dir() -> str:
-    """The Parquet archive's destination. ``LAKE_DIR`` overrides it, as above."""
-    return os.environ.get(LAKE_ENV_VAR) or str(project_root() / "data" / "lake")
-
-
 def lakehouse_dir() -> str:
     """The DuckLake lakehouse — catalog and data files. ``LAKEHOUSE_DIR`` overrides.
 
-    Separate from ``lake_dir`` rather than a subdirectory of it, because they are
-    two artifacts answering the same question two ways and a fixture run has to
-    be able to point them at different throwaway directories independently.
+    **Absolute when set, and here that is not the convention it is for
+    ``WAREHOUSE_PATH``.** DuckLake records the data path it was created with and
+    compares it as a *string* on every attach, so the same directory under two
+    spellings is refused outright — dlt writes the catalog from the project root
+    and dbt resolves its own copy from ``dbt/``, one level down. A plain DuckDB
+    file keeps no such record and forgives the difference; this does not.
     """
     return os.environ.get(LAKEHOUSE_ENV_VAR) or str(project_root() / "data" / "lakehouse")
 

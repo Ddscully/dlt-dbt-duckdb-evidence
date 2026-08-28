@@ -64,13 +64,41 @@ daily as (
         *,
         -- The two conventions, both clamped at zero: a day warmer than the base
         -- contributes no heating demand, it does not contribute negative demand.
-        -- `greatest(…, 0)` rather than a `case`, so a null temperature stays null
-        -- instead of becoming a zero that sums silently into an annual total.
-        greatest({{ var('heating_degree_day_base_c') }} - temp_mean_c, 0) as hdd_c,
-        greatest(
-            {{ var('heating_degree_day_base_c') }} - (temp_max_c + temp_min_c) / 2, 0
-        ) as hdd_minmax_c,
-        greatest(temp_mean_c - {{ var('cooling_degree_day_base_c') }}, 0) as cdd_c
+        --
+        -- **The clamp is a `case` around the `greatest`, and not the `greatest`
+        -- alone, because DuckDB's `greatest` ignores nulls rather than
+        -- propagating them.** `greatest(15.5 - null, 0)` is `0` — measured on
+        -- 1.5.5, and the same in Postgres; it is Oracle that propagates. This
+        -- comment used to claim the opposite and the code was written to match
+        -- the claim, so a day whose mean temperature ERA5T had not published yet
+        -- scored a heating demand of exactly zero, passed both `not_null` and
+        -- `accepted_range {min_value: 0}` — the two tests named here as the
+        -- backstop — and summed into `fct_country_weather_year.hdd_total` as a
+        -- day that needed no heating. Those days exist: the ingest layer re-asks
+        -- for the last 90 days on every run, which is precisely the preliminary
+        -- tail where a variable can come back null.
+        --
+        -- Nulling the whole expression puts the gap in front of this column's own
+        -- `not_null`, next to the one on `temp_mean_c` that was already the only
+        -- thing reddening. `sum()` still skips it downstream, so the annual total
+        -- is short either way — the difference is that it is now short *and* the
+        -- build says which column and which day.
+        case
+            when temp_mean_c is null then null
+            else greatest({{ var('heating_degree_day_base_c') }} - temp_mean_c, 0)
+        end as hdd_c,
+        -- Both operands, because the average of a known max and an unknown min is
+        -- not a half-known degree day, it is an unknown one.
+        case
+            when temp_max_c is null or temp_min_c is null then null
+            else greatest(
+                {{ var('heating_degree_day_base_c') }} - (temp_max_c + temp_min_c) / 2, 0
+            )
+        end as hdd_minmax_c,
+        case
+            when temp_mean_c is null then null
+            else greatest(temp_mean_c - {{ var('cooling_degree_day_base_c') }}, 0)
+        end as cdd_c
     from renamed
 ),
 

@@ -18,9 +18,29 @@ export LAKEHOUSE_DIR := env("LAKEHOUSE_DIR", justfile_directory() / "data/lakeho
 default:
     @just --list
 
-# One-time: install runtime + dev deps into the uv-managed venv
+# DuckLake is a 36 MB binary from extensions.duckdb.org, not a Python package —
+# nothing in `pyproject.toml` or `uv.lock` can name it, and its own version is a
+# git hash rather than a number. DuckDB autoloads it on first use, so this is not
+# what makes the lake work; what it buys is *where* the download happens. Without
+# it the first network failure lands inside a `dbt build` in a Dagster op,
+# several layers from the cause.
+#
+# The version is right by construction and needs no pinning: DuckDB asks the
+# repository for its own build, so running this through `uv run` fetches the one
+# matching `uv.lock`, into `~/.duckdb/extensions/v<duckdb>/<platform>/`. A
+# mismatched extension cannot even load — it refuses by version, naming both.
+# That path is keyed on the DuckDB version, so a bump re-fetches on the next
+# `just setup` rather than going stale, and `duckdb-cli` reads the same
+# directory, so this one install serves `just sql` too.
+#
+# `install`, not `force install`: the only case the no-op misses is the
+# repository republishing a build for an unchanged DuckDB version, and that is
+# not worth 36 MB on every setup.
+# (`just --list` renders only the line directly above a recipe.)
+# One-time: install runtime + dev deps into the uv-managed venv, and the DuckLake extension
 setup:
     uv sync --group dev --group orchestration
+    uv run python -c "import duckdb; duckdb.connect().execute('install ducklake')"
 
 # EL: pull public sources into DuckDB
 ingest:

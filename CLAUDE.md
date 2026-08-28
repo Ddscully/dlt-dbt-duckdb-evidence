@@ -77,12 +77,12 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 
 | Command | What it does |
 |---------|--------------|
-| `just setup` | `uv sync --group dev --group orchestration` |
+| `just setup` | `uv sync --group dev --group orchestration`, then `install ducklake` — the extension is a binary from extensions.duckdb.org that no lockfile can name, so it is fetched rather than pinned (DuckDB asks for its own build, so it matches `uv.lock` by construction) |
 | `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (28 models, 2 snapshots, 6 seeds + 424 data tests + 27 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (28 models, 2 snapshots, 6 seeds + 424 data tests + 28 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -265,8 +265,6 @@ knowledge.
 | `dbt@dbt-agent-marketplace` | [dbt Labs' skills](https://github.com/dbt-labs/dbt-agent-skills) — models, tests, docs, debugging |
 | `dagster-expert@dagster` | [Dagster's skills](https://github.com/dagster-io/skills) — assets, automation, CLI |
 | `polars@polars` | [Polars' skill](https://github.com/polars-inc/skills) — idiomatic lazy-API Polars |
-| `duckdb-skills@duckdb-skills` | [DuckDB's skills](https://github.com/duckdb/duckdb-skills) — querying, file formats, docs search |
-| `astral@astral-sh` | [Astral's skills](https://github.com/astral-sh/claude-code-plugins) — uv, ruff and ty, the three tools this repo's Python half is built on |
 | `skill-creator@claude-plugins-official` | authoring and evaluating the project skills below — the one entry here that is about the repo's own tooling rather than a layer of the stack |
 
 Not enabled, but worth knowing about: `dbt-migration@dbt-agent-marketplace`
@@ -293,26 +291,58 @@ project declaration re-registers it on the next session, because the source is
 right there in the tree. Removing a `github` one (`astral-sh`) *uninstalls its
 plugins*, and the project declaration does **not** silently bring it back: a
 re-register needs a clone, which a non-interactive session will not do. The
-cache directory survives, so the only symptom is `Total LSP servers loaded: 1`
+cache directory survives, so the only symptom was `Total LSP servers loaded: 1`
 in the debug log and three skills quietly missing. The user-level entry for a
 github marketplace is therefore not duplication of the project one — leave it.
 
-**`ty-lsp` must stay above `astral` in `enabledPlugins`, and the reason is
-invisible.** Both declare a language server for `.py`, and the first one loaded
-wins — the loser is a `[WARN]` in `~/.claude/debug/latest` that nothing surfaces.
-Astral's runs `uvx ty@latest server`, the newest published ty on every launch,
-against a `just typecheck` that runs the version in `uv.lock`; ty is 0.0.x and
-its diagnostics move between patch releases, so letting theirs win means the
-editor showing findings the recipe cannot reproduce. Order in a JSON object is
-not a thing anyone expects to matter and `astral` sorts first, so alphabetising
-that block — the obvious tidy-up — silently hands `.py` to the unpinned server.
-`tests/test_plugin_settings.py` holds it, because JSON has nowhere to put a
-comment. Check by hand with `claude --debug -p ok` then
-`grep 'already handled by' ~/.claude/debug/latest`.
+**That symptom has since inverted, which is worth knowing before reading an old
+debug log.** `Total LSP servers loaded: 1` used to mean the `astral-sh`
+marketplace had gone missing; it is the *correct* state now that `astral` is
+deliberately not enabled, and it is `2` that would mean something changed. The
+line to grep is `already handled by`, not the count — no output is passing.
 
-Their ty skill also says to add an ignore comment only when the user asks for
-one. This repo carries two, both with the reason written next to them (see the
-ty bullets under *Style guide*); that is a considered disagreement, not drift.
+**`astral@astral-sh` and `duckdb-skills@duckdb-skills` were enabled and are
+not any more, and the measurement is the whole reason.** Across 187 transcripts
+(2026-07-29 to 2026-08-27) neither was invoked once: `duckdb-skills` cost ~670
+tokens of always-loaded descriptions for nine skills about ad-hoc file querying,
+S3 and spatial joins, none of which this project does — `querying-the-warehouse`
+covers DuckDB *in this warehouse*, lock and all. `astral` is the more
+interesting one, because it was doing worse than nothing.
+
+- **It lost the `.py` claim by design, and that made it dead by
+  construction.** `astral` and `ty-lsp` both declare a `ty` language server for
+  `.py`/`.pyi`; the first loaded wins, so `ty-lsp` had to be declared above it,
+  and the loser is two `[WARN]` lines in `~/.claude/debug/latest` that nothing
+  surfaces. The ordering rule worked for as long as it was the invariant. What
+  it also did was leave `astral` with no reachable surface at all: its LSP
+  declares those two extensions and nothing else, and its three skills (ruff,
+  ty, uv) were never once invoked. A plugin whose every surface is unreachable
+  is two warnings.
+- **Which server would have won is still why `ty-lsp` is the survivor.**
+  Astral's runs `uvx ty@latest server`, the newest published ty on every launch,
+  against a `just typecheck` that runs the version in `uv.lock`. ty is 0.0.x and
+  its diagnostics move between patch releases, so letting theirs win means the
+  editor showing findings the recipe cannot reproduce — the sqlfluff 3.3.0/4.2.2
+  split in a new outfit.
+- **The `astral-sh` marketplace stays registered, and `duckdb-skills`' does
+  not.** Removing a `github` marketplace *uninstalls its plugins*, and the
+  project declaration does **not** silently bring it back: a re-register needs a
+  clone, which a non-interactive session will not do. Astral is one line from
+  being re-enabled and is left that way; duckdb-skills is a decision, so its
+  marketplace goes too.
+- **`tests/test_plugin_settings.py` carries the invariant forward as an
+  *absence*.** It used to assert `ty-lsp` sorts before `astral`; it now asserts
+  `astral` is not enabled at all, with the ordering rule in the failure message
+  for whoever re-adds it. JSON has nowhere to put a comment, which is why either
+  version has to be a test. Check by hand with `claude --debug -p ok` then
+  `grep 'already handled by' ~/.claude/debug/latest` — **no output is the
+  passing state now.**
+
+Astral's ty skill said to add an ignore comment only when the user asks for one,
+and this repo carries two with the reason written next to them (see the ty
+bullets under *Style guide*). That was a considered disagreement rather than
+drift while the skill was loaded, and it is worth keeping written down: the
+suppressions outlive the plugin that would have argued about them.
 
 Project skills in `.claude/skills/` cover the seams the vendor skills can't know:
 
@@ -330,7 +360,7 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 - **`currency-and-calendar`** — the ECB rates, `dim_date`, and spot vs average.
 - **`weather-models`** — Open-Meteo's weighted budget, ERA5, the positional
   multi-location response, and the two degree-day conventions.
-- **`unit-testing-dbt-models`** — the eight models that carry unit tests, and
+- **`unit-testing-dbt-models`** — the ten models that carry unit tests, and
   what mutating each one proved the data tests could not see.
 - **`repo-guards`** — the hand-maintained lists, the tests that hold them to the
   tree, and the offline fixture dispatch table.
@@ -610,19 +640,19 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are twenty-seven unit tests, over nine models, and they exist because a data
+- **There are twenty-eight unit tests, over ten models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
   and every fiscal quarter in the warehouse is wrong while **all 19 data tests on
   the model pass** — measured, not argued. Its three unit tests fail on it.
-  **Which eight models, what mutating each one proved, and the fixture shapes
+  **Which ten models, what mutating each one proved, and the fixture shapes
   strong enough to catch it are the `unit-testing-dbt-models` skill**, together
   with the mutation method that produced all of it.
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  twenty-seven cost 4.2s. A broken fiscal calendar should stop `release-data.yml`,
+  twenty-eight cost 4.2s. A broken fiscal calendar should stop `release-data.yml`,
   not ride along in it. `just dbt-unit-test` is the ~4s inner loop.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.
@@ -675,7 +705,7 @@ the point of the layer is that none of it is a comment.
     inferred from data could have differed. `just test-pipeline` was run to check
     it rather than assumed — all 17 contracts hold on the slice.
 - **Exposures are per *page*, not per site, and they are checked.**
-  `dbt/models/_exposures.yml` declares eight Evidence pages and the monthly data
+  `dbt/models/_exposures.yml` declares nine Evidence pages and the monthly data
   release, so `dbt ls --select +exposure:evidence_retail` answers "what breaks if
   I change this" for one page. `scripts/build_report.py` gained `page_tables()`
   (page → source query → warehouse table) and `tests/test_exposures.py` fails if
@@ -944,6 +974,29 @@ survives a format that content-addresses its files and prunes on statistics.
     is absent **at every snapshot**, not merely the current one — which is the
     assertion that matters, because time travel is what makes
     copy-then-drop useless as a mitigation.
+  - **The DuckLake extension is the one version in this stack that nothing can
+    pin, and it is not the coupling people expect.** It cannot drift against
+    `duckdb`: builds are served per DuckDB version and one built for another
+    refuses to load, naming both versions. What is unpinnable is the extension
+    *itself* — it is a 36 MB binary from extensions.duckdb.org with no PyPI
+    package, and `duckdb_extensions()` reports its version as a git hash
+    (`d8a1881e`) where `parquet` reports `v1.5.5`. That is the "unpinned binary
+    no lockfile here can see" shape that lost pyright to ty and keeps `uvx dg`
+    out, except here there is no lockfile-visible alternative to choose.
+    - **`just setup` installs it, and that is a download location rather than a
+      pin.** DuckDB autoloads it on first use, so the lake works without this;
+      what it buys is that a network failure surfaces at setup instead of inside
+      a `dbt build` in a Dagster op. The version is right by construction — the
+      extension directory is keyed on the DuckDB version, so a bump re-fetches
+      rather than going stale, and `duckdb-cli` reads the same directory, so one
+      install serves `just sql`. Plain `install` and not `force install`: the
+      only case the no-op misses is a rebuild republished for an unchanged
+      DuckDB version.
+    - **So the catalog's own spec version is guarded instead** —
+      `ducklake_metadata` holds `version` (`1.0` today) and `created_by`, the
+      direct analogue of `storage_version` and `duckdb_version`, and both now
+      ship in `manifest.json` and the release notes. See *Publishing* for the
+      shape, which is the storage-version guard's with one part working harder.
   - **dbt's `ATTACH IF NOT EXISTS` leaves an empty DuckDB file** at the catalog
     path on any build that runs before the first ingest, and a read-only attach
     of *that* fails with `Existing DuckLake … does not exist - and creating a new
@@ -1048,6 +1101,36 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
     unrelated fix in 2.x to guard one property; the tripwire lets the bump land
     and makes a person decide the format question with a red test naming it.
     `dagster<3.15` therefore remains the only hard upper bound in the tree.
+- **The landing zone has its own format version, and its tripwire has to work
+  harder than the file's.** `ducklake_metadata.version` (`1.0`) is what decides
+  whether a consumer's `ducklake` can open `lakehouse.tar.gz`, exactly as
+  `storage_version` decides it for `warehouse.duckdb`;
+  `MAX_PUBLISHED_LAKE_VERSION` is the ceiling and `ducklake.publish` refuses
+  above it. What differs is the *moment*, and it is the whole reason this needed
+  building rather than copying.
+  - **There is no PR to fail.** DuckDB's format moves when `uv.lock` moves, so
+    that tripwire fires on a Dependabot PR with a person already reading the
+    diff. The DuckLake spec moves when extensions.duckdb.org republishes, and
+    nothing in this repo changes — see the extension bullet under *The
+    lakehouse*. `test_the_installed_ducklake_still_writes_the_spec_the_release_promises`
+    on the next CI run is the only thing that can say so, which makes the
+    toolchain half load-bearing here rather than merely thorough.
+  - **A ceiling that exists is not a ceiling that is applied**, and the two need
+    separate tests. `test_the_lakehouse_ceiling_is_inclusive` proves `publish`
+    enforces a limit it is handed — from both sides, for the `>` against `>=`
+    reason — while `test_the_release_path_applies_the_lakehouse_ceiling` drives
+    `run()` with an impossible one. Deleting the constant from
+    `publish_lakehouse`'s call fails only the second: the manifest assertions
+    keep passing, because the spec is still under the ceiling nobody checked.
+    Verified by mutation, as was each other half.
+  - **`created_by` is a DuckDB git hash and answers a different question.** It
+    ships beside the spec for `duckdb_version`'s reason — who wrote this, against
+    can I open it — and `catalog_metadata` returns the whole map so the two are
+    one read rather than two.
+  - dlt's own `automatic_migration` defaults to **False**, so a catalog *we*
+    write is safe by refusal if the spec ever moves under us. This guards the
+    half dlt cannot see: a consumer meeting a tarball written against a spec
+    their extension does not know.
 - **Each release carries the previous one's unreproducible tables forward**
   (`scripts/restore_history.py`), which is what makes the published snapshot
   accumulate a real revision log instead of holding one version per row forever,
@@ -1092,6 +1175,22 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
     what was carried in. `pages.yml` runs the same step `continue-on-error`,
     because there the snapshot is a read-only display and a missing release
     should cost one section of one page, not the deploy.
+  - **A release is two assets and a workflow that downloads one of them fails
+    silently, which `pages.yml` did until 2026-08-27.** It asked for
+    `warehouse.duckdb` alone; `restore_history` finds the lakehouse *beside* the
+    database rather than being told where it is, so it got a directory with no
+    tarball in it — which is the "restoring nothing is normal" path, not an
+    error. The cost lands a layer down and is a *depth*, not a failure: every
+    workflow rebuilds the marts from `raw`, `raw` is in the DuckLake catalog now,
+    so the published database carries no weather rows at all —
+    `weather_watermark()` reads null, the ingest cold-starts at
+    `WEATHER_COLD_START_YEARS`, and `marts.fct_country_weather_year` builds three
+    years deep against the release's fifteen. The Weather page then renders
+    perfectly off a thin mart. Green build, green checks, right shape, wrong
+    depth, and no line anywhere saying so. This is the "no workflow goes through
+    `just`, so all four needed the same line" shape again, one asset further on;
+    `tests/test_workflows.py` now derives which workflows restore and asserts each
+    downloads every asset, with the names read from the code rather than retyped.
   - **It refuses to overwrite a destination that already holds carried state**,
     so running it against the real warehouse can't destroy months of local
     versions — `--force` if that is genuinely what you want. It also rejects a
@@ -1425,7 +1524,7 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 - **`site_pages_all_rendered` is blocking, and it checks file *size*.**
   `evidence build` exits 0 for a site missing a page, and nothing downstream reads
   `reports/build/` — so a route that emitted only the SvelteKit shell would
-  materialise green and deploy. The ten pages render at 19–92 kB; the floor is
+  materialise green and deploy. The eleven pages render at 19–92 kB; the floor is
   8 kB. The two smallest are the ones carrying the least SQL — the routing front
   page (19 kB) and Restatements (20 kB) — so it is prose-only pages, not chart
   pages, that would ever bring the floor into play.
@@ -1559,11 +1658,26 @@ Gotchas:
 - **No routine command evaluates an asset check body, which is how one can read
   the wrong database for a week.** `just test-pipeline` runs the four modules in
   shell order and never calls `dagster job execute`, so it evaluates none of
-  them. `tests/test_asset_checks.py` calls them directly, but skips itself
-  wherever `dbt/target/manifest.json` is absent — which is CI's unit-test step,
-  and the parse step after it re-runs `tests/test_definitions.py` *by name*
-  rather than the suite, so in CI that file never runs at all. What is left is a
-  full materialize and a developer's own `just test` after a `dbt parse`.
+  them. `tests/test_asset_checks.py` calls them directly, and now runs in CI —
+  see the next bullet for why that took correcting. What no test replaces is a
+  real materialize: these bodies meet the actual warehouse and catalog only
+  there.
+- **A test file that skips itself in CI's first step and is not named in its
+  second runs *nowhere* in CI, and the skip is the honest-looking half.**
+  `ci.yml` runs a bare `uv run pytest` before `dbt deps && dbt parse`, so the
+  three files gated on `dbt/target/manifest.json` skip; the step after the parse
+  then re-runs them *by name*, and it named only `tests/test_definitions.py`.
+  So `test_asset_checks.py` and `test_documented_counts.py` ran on no pull
+  request at all — the asset-check bodies and every count cited in the docs —
+  and **both files' own headers said CI re-ran them**. The 30 skips were visible
+  in every build log and read as normal, because 30 skips *is* normal there.
+  `tests/test_workflows.py` compares the gated set against what the workflow
+  names, both directions, so a fourth gated file cannot join in silence.
+  - **A guard that reads test source as text has to say where it is looking.**
+    The first detector searched for `pytestmark` and `manifest_path.exists()`
+    anywhere in a file and flagged *itself* — the module writes both strings, in
+    the code doing the searching. It is anchored at column 0 now, which is the
+    difference between a module-level mark and a mention of one.
   - **Patching the database under a check proves its logic and never its
     wiring**, which is the half that broke: `wdi_indicators_all_present` went on
     reading `data/warehouse.duckdb` after the landing zone moved into DuckLake,

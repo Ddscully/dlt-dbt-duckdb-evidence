@@ -1,6 +1,6 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 451 tests alongside the models — 424 data tests and 27 unit
+`just dbt-build` runs 452 tests alongside the models — 424 data tests and 28 unit
 tests. Dagster surfaces the data tests as asset checks on the models they guard.
 For the pytest side, see [`tests/README.md`](../tests/README.md).
 
@@ -27,9 +27,10 @@ happily pass a threshold the full 200+ would break.
 
 ## Unit tests
 
-Twenty-six of those tests are dbt *unit* tests, over eight models — `dim_date`,
-`stg_retail_lines`, `fct_cbam_exposure`, `fct_fx_rates_daily`,
-`fct_fx_rates_periods`, `fct_retail_returns`, `fct_retail_customer_cohorts` and
+Twenty-eight of those tests are dbt *unit* tests, over ten models — `dim_date`,
+`stg_retail_lines`, `stg_weather_daily`, `fct_cbam_exposure`,
+`fct_country_weather_year`, `fct_fx_rates_daily`, `fct_fx_rates_periods`,
+`fct_retail_returns`, `fct_retail_customer_cohorts` and
 `dim_retail_customer`. They run a model against fixed input rows and compare the
 entire output, rather than asserting a property of whatever the warehouse happens
 to hold — which is what lets them reach two things a data test structurally
@@ -80,7 +81,7 @@ warehouse holds three distinct values of it that all print as `10.0`.
 They run inside `dbt build` rather than being excluded from it. dbt Labs
 recommends keeping unit tests out of production runs to save warehouse spend;
 that argument is about a cloud warehouse, and this is a local DuckDB build where
-all twenty-seven cost 4.2 seconds. `just dbt-unit-test` is the inner loop.
+all twenty-eight cost 4.2 seconds. `just dbt-unit-test` is the inner loop.
 
 ## Who it's for
 

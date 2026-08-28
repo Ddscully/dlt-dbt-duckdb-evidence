@@ -180,3 +180,54 @@ unit_tests:
         - {line_number: 5, customer_id: "17850", description: "WHITE HANGING HEART", country: "United Kingdom"}
         - {line_number: 6, customer_id: "17850", description: null,                  country: "United Kingdom"}
         - {line_number: 7, customer_id: "17850", description: null,                  country: "United Kingdom"}
+
+  # ---------------------------------------------------------------------------
+  # `stg_weather_daily` — the degree-day clamp.
+  #
+  # The clamp used to be a bare `greatest(base - temp, 0)`, with a comment saying
+  # a null temperature would stay null. DuckDB's `greatest` *ignores* nulls
+  # rather than propagating them, so `greatest(15.5 - null, 0)` is `0` — the day
+  # scored a confident "needed no heating" and summed into
+  # `fct_country_weather_year.hdd_total` as one.
+  #
+  # No data test on either model can see it, which is the whole reason this is
+  # here. Measured against the built warehouse: `hdd_c` carries `not_null` and
+  # `accepted_range {min_value: 0}` — the two the old comment named as the
+  # backstop — and a fabricated zero passes both, because zero is a legal
+  # heating-degree-day. Every data test on this model and on the mart above it
+  # passes identically before and after the fix, and the annual totals over
+  # today's 234,315-row archive are byte-identical, because that archive happens
+  # to hold no null yet. The ingest
+  # layer re-asks for the last 90 days on every run, which is exactly the
+  # preliminary ERA5T window where one appears.
+  #
+  # The two conventions null independently, and rows 2 and 3 pin that: `hdd_c`
+  # and `cdd_c` need the daily mean, `hdd_minmax_c` needs both extremes. The
+  # average of a known max and an unknown min is not a half-known degree day.
+  - name: stg_weather_daily_nulls_a_degree_day_it_cannot_compute
+    model: stg_weather_daily
+    description: >
+      A day whose temperature the archive has not published yet must produce a
+      null degree day, not a zero. `greatest()` ignores nulls in DuckDB, so the
+      clamp has to be a `case` — and the failure mode of getting it wrong is a
+      silent under-count of heating demand that every data test on both models
+      accepts.
+    given:
+      - input: source('raw', 'om_weather_daily')
+        rows:
+          # A complete day: 15.5 - 3.5 = 12.0 heating, no cooling.
+          - {country_iso3: "DEU", weather_date: "2024-01-01", temperature_2m_mean: 3.5, temperature_2m_max: 5.5, temperature_2m_min: 1.5, grid_latitude: 52.5, grid_longitude: 13.4, elevation_m: 38.0}
+          # The mean is missing, the extremes are not. Only the mean-based pair
+          # goes null; the (max + min)/2 convention is still computable.
+          - {country_iso3: "DEU", weather_date: "2024-01-02", temperature_2m_mean: null, temperature_2m_max: 5.5, temperature_2m_min: 1.5, grid_latitude: 52.5, grid_longitude: 13.4, elevation_m: 38.0}
+          # And the mirror image: one extreme missing nulls only the convention
+          # that reads it.
+          - {country_iso3: "DEU", weather_date: "2024-01-03", temperature_2m_mean: 25.0, temperature_2m_max: null, temperature_2m_min: 20.0, grid_latitude: 52.5, grid_longitude: 13.4, elevation_m: 38.0}
+      - input: ref('stg_country')
+        rows:
+          - {country_iso3: "DEU", latitude: 52.5235, longitude: 13.4115}
+    expect:
+      rows:
+        - {weather_date: "2024-01-01", hdd_c: 12.0,  hdd_minmax_c: 12.0, cdd_c: 0.0}
+        - {weather_date: "2024-01-02", hdd_c: null,  hdd_minmax_c: 12.0, cdd_c: null}
+        - {weather_date: "2024-01-03", hdd_c: 0.0,   hdd_minmax_c: null, cdd_c: 3.0}

@@ -907,6 +907,12 @@ WEATHER_RETRY_AFTER_SECONDS = {"minutely": 65.0, "hourly": 660.0}
 WEATHER_DEFAULT_RETRY_AFTER_SECONDS = 65.0
 WEATHER_RETRIES = 6
 
+# The wait for a failure that is *not* a rate limit — a 5xx, a reset connection,
+# a truncated body. `_get_json`'s own backoff, deliberately: those failures have
+# nothing to do with the budget, so they should not inherit the minute-long wait
+# a 429 earns. Only the 429 path reads `WEATHER_RETRY_AFTER_SECONDS`.
+WEATHER_BACKOFF_SECONDS = 1.5
+
 # Declared rather than inferred, for the third time in this file and the same
 # reason: a merge resource keeps dlt's persisted schema, which only widens. The
 # six measurements are the ones that matter — a window that happened to hold only
@@ -1179,6 +1185,13 @@ def _get_weather_json(url: str, limiter: WeightedWindowLimiter, units: float) ->
     The units are charged whether or not the response was useful. The API counted
     the request, so this has to as well; charging only on success would make the
     limiter optimistic exactly when it is already behind.
+
+    **Three outcomes, and only one of them is the rate limit.** A 429 waits what
+    the message says. A 5xx, a timeout, a reset or an unparseable body is the
+    transient class every other source here already retries through `_get_json`,
+    and gets `WEATHER_BACKOFF_SECONDS`. Any other 4xx is raised immediately,
+    because it is deterministic — a retry buys the same rejection three more
+    times and spends the budget doing it.
     """
     if fixtures.enabled():
         return _get_json(url)
@@ -1186,14 +1199,48 @@ def _get_weather_json(url: str, limiter: WeightedWindowLimiter, units: float) ->
     last: Exception | None = None
     for attempt in range(WEATHER_RETRIES):
         limiter.acquire(units)
-        resp = requests.get(url, timeout=300)
-        limiter.charge(units)
-        if resp.status_code != 429:
-            resp.raise_for_status()
-            return resp.json()
-        last = RuntimeError(f"rate limited: {resp.text[:200]}")
-        if attempt < WEATHER_RETRIES - 1:
-            time.sleep(weather_retry_after(resp.text))
+        wait = WEATHER_BACKOFF_SECONDS * (attempt + 1)
+        try:
+            try:
+                resp = requests.get(url, timeout=300)
+            finally:
+                # Charged once per attempt, in a `finally` so a timeout or a
+                # reset counts too. The API bills what it served, and a
+                # connection that died on our side says nothing about whether it
+                # served — so an uncertain spend counts, for the same reason the
+                # docstring gives for charging a useless response.
+                limiter.charge(units)
+
+            if resp.status_code == 429:
+                # `weather_retry_after` raises for the daily window rather than
+                # returning a wait, and that raise is meant to escape this loop.
+                wait = weather_retry_after(resp.text)
+                last = RuntimeError(f"rate limited: {resp.text[:200]}")
+            else:
+                resp.raise_for_status()
+                return resp.json()
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 0
+            if status < 500:
+                # A 4xx that is not a 429 is the server rejecting *this request*,
+                # and the next identical one is rejected identically while costing
+                # the same units. The live example is the archive's end trailing
+                # real time by more than `WEATHER_END_LAG_DAYS`, which answers
+                # `400 Parameter 'end_date' is out of allowed range`: that wants
+                # the constant moved, not six retries and six charges against a
+                # shared budget. Raising here says which request was wrong.
+                raise
+            last = exc
+        except (requests.RequestException, ValueError) as exc:  # ValueError = JSONDecodeError
+            # The class every other source in this file already retries through
+            # `_get_json` — a timeout, a reset, an error page that is not JSON.
+            # Weather did not, so one transient failure anywhere in a backfill
+            # killed the whole load and lost the windows already paid for.
+            last = exc
+
+        if attempt == WEATHER_RETRIES - 1:
+            break
+        time.sleep(wait)
     raise RuntimeError(f"failed to fetch weather from {url[:120]}…: {last}")
 
 
@@ -1228,16 +1275,35 @@ def _weather_rows(
         days = daily.get("time") or []
         columns = {name: daily.get(name) or [] for name in WEATHER_DAILY_VARIABLES}
         for index, day in enumerate(days):
-            row = {
+            measured = {
+                name: (values[index] if index < len(values) else None)
+                for name, values in columns.items()
+            }
+            # **A day with nothing measured on it is dropped, and the disposition
+            # is why.** This resource `merge`s on `(country_iso3, weather_date)`
+            # and the ingest layer re-asks for the last 90 days on every run, so
+            # a row here does not add to what is stored — it *replaces* the row
+            # already at that key. The preliminary ERA5T tail answers a day it
+            # has not finished with as a present `time` entry whose variables are
+            # all null, so emitting it would overwrite a day that landed complete
+            # on an earlier run with a row of nulls. No error, no range test to
+            # fail: the archive would simply get shallower in places, and only
+            # the `not_null` tests in `stg_weather_daily` would say so.
+            #
+            # The residual is worth stating rather than papering over: dlt merges
+            # whole rows, so a *partially* null day still replaces a fuller one.
+            # There is no column-level merge to reach for. What this rules out is
+            # the case that costs everything for nothing.
+            if all(value is None for value in measured.values()):
+                continue
+            yield {
                 "country_iso3": country_iso3,
                 "weather_date": day,
                 "grid_latitude": entry.get("latitude"),
                 "grid_longitude": entry.get("longitude"),
                 "elevation_m": entry.get("elevation"),
+                **measured,
             }
-            for name, values in columns.items():
-                row[name] = values[index] if index < len(values) else None
-            yield row
 
 
 @dlt.resource(

@@ -20,6 +20,7 @@ test asking someone to decide, which is the whole point.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -28,6 +29,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PAGES_WORKFLOW = REPO_ROOT / ".github/workflows/pages.yml"
+CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
 
 # Tracked paths the published site is *not* built from. Every one of these has
 # a reason, and the reason is never "it is markdown" — `reports/pages/*.md` is
@@ -153,3 +155,124 @@ def test_no_pattern_has_outlived_the_path_it_named(side):
     tracked = tracked_files()
     orphaned = [p for p in patterns if not any(_matches(f, p) for f in tracked)]
     assert not orphaned, f"{side} patterns matching no tracked file: {orphaned}"
+
+
+# --------------------------------------------------------------------------- #
+# ci.yml re-runs the manifest-gated tests, and that list is hand-maintained too
+# --------------------------------------------------------------------------- #
+
+
+# Anchored at column 0, so it matches a real module-level `pytestmark` and not a
+# file that merely *mentions* one. The first draft searched for the two strings
+# anywhere and flagged this module — which writes both, in the code below — as
+# gated. A guard that reads source as text has to say where it is looking.
+_GATED = re.compile(
+    r"^pytestmark\s*=\s*pytest\.mark\.skipif\((?:.|\n)*?manifest_path", re.MULTILINE
+)
+
+
+def manifest_gated() -> set[str]:
+    """Test files that skip themselves when `dbt/target/manifest.json` is absent."""
+    return {
+        path.name
+        for path in (REPO_ROOT / "tests").glob("test_*.py")
+        if _GATED.search(path.read_text())
+    }
+
+
+def re_run_after_parse() -> set[str]:
+    """The files `ci.yml` names once the manifest exists.
+
+    The unit-test step is a bare `uv run pytest` with nothing after it, so it
+    contributes nothing here — which is the point: that is the run where these
+    files skip.
+    """
+    named = re.findall(r"uv run pytest ([^\n]+)", CI_WORKFLOW.read_text())
+    return {Path(arg).name for line in named for arg in line.split()}
+
+
+def test_every_manifest_gated_test_file_is_re_run_after_dbt_parse():
+    """A file that skips itself in CI's first step and is not named in its second
+    runs **nowhere** in CI, and nothing says so.
+
+    That is not hypothetical: `ci.yml` named only `test_definitions.py` while
+    `test_asset_checks.py` and `test_documented_counts.py` carried the same
+    skipif, so the asset-check bodies and every count cited in the docs went
+    unchecked on every pull request — and both files' own headers claimed CI
+    re-ran them. The skip is the loud-looking part and it is the honest half; the
+    silence is in the step that was supposed to pick them back up.
+
+    Compared as a set both ways, so adding a gated file without adding it here
+    fails, and removing one from the workflow while it still skips fails too.
+    """
+    gated, re_run = manifest_gated(), re_run_after_parse()
+    assert gated == re_run, (
+        "ci.yml's post-parse pytest step and the manifest-gated test files disagree.\n"
+        f"  gated but never re-run (they run nowhere in CI): {sorted(gated - re_run)}\n"
+        f"  re-run but not gated (harmless, but the list is now wrong): {sorted(re_run - gated)}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# A release is two assets, and a workflow that restores one must download both
+# --------------------------------------------------------------------------- #
+
+
+WORKFLOWS_DIR = REPO_ROOT / ".github/workflows"
+
+
+def release_restoring_workflows() -> dict[str, str]:
+    """`{"pages.yml": "<text>", …}` — the workflows that carry a release forward."""
+    return {
+        path.name: path.read_text()
+        for path in sorted(WORKFLOWS_DIR.glob("*.yml"))
+        if "scripts.restore_history" in path.read_text()
+    }
+
+
+def downloaded_assets(text: str) -> set[str]:
+    """Every `--pattern <asset>` a workflow asks `gh release download` for."""
+    return set(re.findall(r"--pattern\s+(\S+)", text))
+
+
+def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
+    """A release is a database *and* a landing zone, and taking only the first is silent.
+
+    `restore_history` finds the lakehouse beside the database rather than being
+    told where it is, so a workflow that downloads `warehouse.duckdb` alone hands
+    it a directory with no tarball in it — which is the module's documented
+    "restoring nothing is a normal outcome" path, not an error. Nothing fails.
+
+    What it costs is measured one layer down. Every workflow here rebuilds the
+    marts from `raw`, and since `raw` moved into the DuckLake catalog the
+    published database carries no weather rows at all — so the archive is not
+    carried, `weather_watermark()` reads null, the ingest cold-starts at
+    `WEATHER_COLD_START_YEARS`, and `marts.fct_country_weather_year` is built
+    three years deep instead of the release's fifteen. The Weather page then
+    renders correctly off a thin mart: green build, green checks, right shape,
+    wrong depth. `pages.yml` shipped exactly that between the DuckLake move and
+    2026-08-27.
+
+    The asset names come from the code rather than from string literals here, so
+    renaming either one fails this instead of quietly matching nothing.
+    """
+    from scripts import restore_history
+
+    required = {Path(restore_history.DUCKDB_PATH).name, restore_history.LAKEHOUSE_ASSET}
+    workflows = release_restoring_workflows()
+
+    # The scan reads workflow text, so it has to be shown to find something —
+    # rename the module and an empty result would pass every assertion below.
+    assert {"pages.yml", "release-data.yml"} <= set(workflows), (
+        f"the restore scan found {sorted(workflows)}; both of those restore a release"
+    )
+
+    missing = {
+        name: sorted(required - downloaded_assets(text))
+        for name, text in workflows.items()
+        if not required <= downloaded_assets(text)
+    }
+    assert not missing, (
+        "workflows that restore a release but do not download all of it: "
+        f"{missing}\nEach asset needs its own `gh release download --pattern` line."
+    )

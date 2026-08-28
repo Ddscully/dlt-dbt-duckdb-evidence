@@ -1,7 +1,7 @@
 ---
 title: Country Explorer
 description: CO₂, energy mix and human development across countries, built from OWID and World Bank data.
-sidebar_position: 6
+sidebar_position: 7
 ---
 
 Emissions, energy mix, electricity prices and living standards for every country,

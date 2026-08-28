@@ -1,7 +1,7 @@
 ---
 title: Eight Findings
 description: Eight patterns in the warehouse data on emissions, energy, growth and trade.
-sidebar_position: 5
+sidebar_position: 6
 ---
 
 Eight patterns in six decades of national emissions, energy and economic data.
