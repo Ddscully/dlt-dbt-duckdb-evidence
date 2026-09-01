@@ -20,7 +20,7 @@ constraints that must not depend on this skill loading are in `CLAUDE.md`'s
 ## What the manifest tells a consumer they cannot see
 
 - **`manifest.json` carries an `additivity` map, and it exists because a Parquet
-  file has types and nothing else.** 224 published mart columns are labelled
+  file has types and nothing else.** 280 published columns are labelled
   `additive` / `semi_additive` / `non_additive` / `not_a_measure`, and about half
   are non-additive — `sum(renewables_share_pct)` is nonsense that returns a
   number, with no error anywhere for a consumer who cannot be paged.
@@ -28,9 +28,30 @@ constraints that must not depend on this skill loading are in `CLAUDE.md`'s
   manifest through the `extra_manifest` hook, so nothing in
   `modern_data_stack.export` had to learn about them.
   - **It degrades to `None`, not to `{}`, when `dbt/target/manifest.json` is
-    absent** — the same shape as `classifications()`, and the distinction is
-    load-bearing: `None` says nobody asked dbt, `{}` would say dbt was asked and
-    knows of no labelled column. Only the first can be true by accident.
+    absent**, and the distinction is load-bearing: `None` says nobody asked dbt,
+    `{}` would say dbt was asked and knows of no labelled column. Only the first
+    can be true by accident.
+    - **This is where it parts company with `classifications()`, which degrades
+      to `EXTRA_CLASSIFICATIONS` instead.** That one may publish a partial
+      answer because a partial answer still masks every identifier it names —
+      it fails *safe*. A partial additivity map fails the other way: a consumer
+      seeing `analytics` labelled and `marts` missing cannot read the gap as
+      "nobody asked" rather than "nothing to say", and the default reading of a
+      missing label is the wrong one. So `EXTRA_ADDITIVITY` is dropped on that
+      path too.
+  - **The 56 `analytics` labels are `EXTRA_ADDITIVITY`, and 37 of them are
+    copies of the mart's.** `analytics.co2_intensity` is
+    `select * from marts.fct_emissions_energy` plus `co2_per_gdp_const_usd` and
+    `co2_intensity_rank`, so its labels *are* the mart's — and they are stated
+    rather than inherited at runtime because inheriting fails open: rename a
+    column in the mart and a derived copy loses its label with nothing to say
+    so. `test_a_copied_column_keeps_the_label_the_mart_gave_it` compares the
+    column set as well as the values, and was mutation-proven from both sides.
+    `analytics.retail_rfm` cannot be matched by name at all — `frequency` is
+    `dim_retail_customer.n_orders` and `monetary_gbp` is its `net_revenue_gbp`,
+    the same renaming that makes `EXTRA_CLASSIFICATIONS` name `monetary_gbp` by
+    hand — so its coverage is asserted against the frame `build_retail_rfm`
+    emits rather than against a list.
   - **Keyed by `schema.alias`**, so it names the relations the release actually
     ships. The versioned model appears twice — `marts.fct_emissions_energy` and
     `marts.fct_emissions_energy_v1` — which is what the Parquet files are called,

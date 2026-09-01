@@ -8,8 +8,9 @@ carries the whole DuckDB file plus a Parquet per modelled table, `manifest.json`
 (row counts, year coverage, SHA-256 per asset) and `SHA256SUMS`.
 
 **`manifest.json` also says which columns may be summed.** Its `additivity` map
-labels every numeric mart column `additive`, `semi_additive`, `non_additive` or
-`not_a_measure` — half of them are non-additive, and a Parquet file has no way
+labels all 280 numeric columns of every published `marts` and `analytics` table
+`additive`, `semi_additive`, `non_additive` or `not_a_measure` — half of them
+are non-additive, and a Parquet file has no way
 of telling you that `sum(renewables_share_pct)` is nonsense that returns a
 number. Where a column is `semi_additive` its description says which direction
 fails: `population` adds across countries and gives person-years across years,

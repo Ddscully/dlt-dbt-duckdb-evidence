@@ -31,14 +31,17 @@ countries is nothing at all.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 from modern_data_stack.paths import dbt_manifest_path
-from publish.export_warehouse import additivity
+from publish.export_warehouse import EXTRA_ADDITIVITY, additivity
+from transform.retail_rfm import build_retail_rfm
 
 # Same reason as `tests/test_definitions.py`: `just test` runs before
 # `dbt deps && dbt parse` in ci.yml, so the manifest is not there yet. ci.yml
@@ -89,6 +92,19 @@ def labelled() -> dict[tuple[str, str], str]:
     return out
 
 
+def extras() -> dict[tuple[str, str], str]:
+    """`EXTRA_ADDITIVITY`, rekeyed to match `labelled()`."""
+    return {
+        (f"{schema}.{table}", column): label
+        for (schema, table, column), label in EXTRA_ADDITIVITY.items()
+    }
+
+
+def everything() -> dict[tuple[str, str], str]:
+    """Every label the release publishes — dbt's and the Polars layer's."""
+    return labelled() | extras()
+
+
 def numeric() -> dict[tuple[str, str], dict]:
     return {
         key: spec
@@ -100,12 +116,12 @@ def numeric() -> dict[tuple[str, str], dict]:
 def test_every_numeric_mart_column_carries_an_additivity_label():
     """The exhaustive half. A new measure with no label is the failure mode.
 
-    Scoped to `marts` on purpose, and the boundary is a decision rather than
-    where the work stopped: marts are the published interface and the layer
-    where "measure" means something. `staging` is a cleaning copy of a source
-    whose measures are declared one layer up, and `analytics` is written by
-    Polars and invisible to dbt — the same gap `EXTRA_CLASSIFICATIONS` fills for
-    `pii`, and it is open here.
+    This one is scoped to `marts`, which is what dbt can describe. The
+    `analytics` tables are written by Polars and invisible to dbt, so they are
+    declared in `EXTRA_ADDITIVITY` and held by the two tests below — the same
+    split `EXTRA_CLASSIFICATIONS` makes for `pii`. `staging` is outside both on
+    purpose: it is a cleaning copy of a source whose measures are declared one
+    layer up.
     """
     missing = sorted(key for key in numeric() if key not in labelled())
     assert not missing, (
@@ -117,7 +133,7 @@ def test_the_label_vocabulary_is_closed():
     """Four labels, and a typo is a fifth. Same rule as the `pii` vocabulary:
     a label nobody chose deliberately is how a classification becomes
     decoration."""
-    assert set(labelled().values()) == LABELS
+    assert set(everything().values()) == LABELS
 
 
 def test_only_numeric_columns_are_labelled():
@@ -146,7 +162,7 @@ def test_a_ratio_shaped_name_is_never_summable():
     """
     summable = sorted(
         (relation, column, label)
-        for (relation, column), label in labelled().items()
+        for (relation, column), label in everything().items()
         if RATIO_SHAPED.search(column) and label in {"additive", "semi_additive"}
     )
     assert not summable, f"named like a ratio but declared summable: {summable}"
@@ -185,4 +201,84 @@ def test_the_labels_reach_the_release_manifest():
         for relation, columns in shipped.items()
         for column, label in columns.items()
     }
-    assert flat == labelled()
+    assert flat == everything()
+
+
+def test_a_copied_column_keeps_the_label_the_mart_gave_it():
+    """`analytics.co2_intensity` is `select * from marts.fct_emissions_energy`
+    plus two derived columns, so its labels are the mart's labels — and the
+    reason they are copied into `EXTRA_ADDITIVITY` rather than inherited at
+    runtime is that inheriting fails *open*.
+
+    Rename or relabel a column in the mart and a derived map would follow it
+    silently, publishing a `co2_intensity` that has quietly lost a label or
+    gained a wrong one. Stated and asserted, the same rename fails here, naming
+    both sides. Which is the general rule this repo already applies to every
+    hand-maintained list: assert against the authority rather than derive from
+    it, and take the restatement as the price.
+
+    The set is checked as well as the values. A mart column added without a
+    matching entry would otherwise leave one published column of a `select *`
+    table unlabelled while every declared one still agreed.
+    """
+    mart = {
+        column: label
+        for (relation, column), label in labelled().items()
+        if relation == "marts.fct_emissions_energy"
+    }
+    copy = {
+        column: label
+        for (relation, column), label in extras().items()
+        if relation == "analytics.co2_intensity"
+    }
+    derived = {"co2_per_gdp_const_usd", "co2_intensity_rank"}
+
+    assert set(copy) - derived == set(mart), (
+        "`co2_intensity` is `select *` off the mart plus "
+        f"{sorted(derived)}, so the two column sets must agree"
+    )
+    disagree = {c: (mart[c], copy[c]) for c in mart if mart[c] != copy[c]}
+    assert not disagree, f"labelled differently in the mart and its copy: {disagree}"
+
+
+def test_the_polars_output_is_labelled_where_dbt_cannot_see_it():
+    """`analytics.retail_rfm` renames on the way in, which is what makes it the
+    hard one: `frequency` is `dim_retail_customer.n_orders` and `monetary_gbp`
+    is its `net_revenue_gbp`, so no rule that matches on column *name* can reach
+    them from the mart — exactly the reason `EXTRA_CLASSIFICATIONS` names
+    `monetary_gbp` by hand for `pii`.
+
+    Coverage is checked against the frame the transform actually builds rather
+    than against a list, so a column added to the RFM projection arrives here as
+    a failure instead of as an unlabelled column in the release.
+    """
+    as_of = dt.date(2011, 12, 9)
+    customers = pl.DataFrame(
+        [
+            {
+                "customer_id": f"C{i}",
+                "country": "United Kingdom",
+                "country_iso3": "GBR",
+                "cohort_month": "2010-01",
+                "first_order_date": dt.date(2010, 1, 1),
+                "last_order_date": dt.date(2011, 1, i + 1),
+                "n_orders": i + 1,
+                "net_revenue_gbp": 100.0 * (i + 1),
+                "avg_order_value_gbp": 100.0,
+                "n_distinct_products": 3 * (i + 1),
+                "return_rate_pct": 0.0,
+                "is_left_censored_cohort": False,
+            }
+            for i in range(10)
+        ]
+    )
+    built = build_retail_rfm(customers, as_of)
+    numeric_out = {column for column, dtype in built.schema.items() if dtype.is_numeric()}
+    declared = {column for (relation, column) in extras() if relation == "analytics.retail_rfm"}
+    assert numeric_out == declared, (
+        "every numeric column the RFM transform emits must carry a label: "
+        f"missing {sorted(numeric_out - declared)}, stale {sorted(declared - numeric_out)}"
+    )
+    assert extras()[("analytics.retail_rfm", "monetary_gbp")] == "additive", (
+        "`monetary_gbp` is `dim_retail_customer.net_revenue_gbp` under another name"
+    )

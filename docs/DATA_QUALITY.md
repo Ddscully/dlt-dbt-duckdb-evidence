@@ -114,10 +114,19 @@ vocabulary is closed, no column named like a ratio (`_pct`, `_per_`, `share`,
 `rate`, `intensity`, `median_`, `avg_`, `price`) is declared summable — that
 holds across the whole tree with no exceptions — and the labels reach
 `manifest.json` in the release, because a label with no consequence is
-decoration. `staging` and `analytics` are deliberately outside it: staging is a
-cleaning copy whose measures are declared one layer up, and the Polars outputs
-are invisible to dbt, the same gap `EXTRA_CLASSIFICATIONS` fills for personal
-data.
+decoration.
+
+The five `analytics` tables are written by Polars and invisible to dbt, so their
+56 labels are declared in `EXTRA_ADDITIVITY` beside `EXTRA_CLASSIFICATIONS` —
+the same split personal data already makes, for the same reason. Two tests hold
+them to their authorities rather than to a list: `co2_intensity` is
+`select * from marts.fct_emissions_energy` plus two derived columns, so every
+copied label must equal the mart's, and `retail_rfm`'s coverage is checked
+against the frame the transform actually builds. The copies are *stated* rather
+than inherited at runtime, which is the more typing and the safer failure:
+inheriting means a mart rename silently takes the copy's label with it.
+`staging` stays outside on purpose — it is a cleaning copy of a source whose
+measures are declared one layer up.
 
 ## Who it's for
 

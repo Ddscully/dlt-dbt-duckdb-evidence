@@ -70,6 +70,7 @@ __all__ = [
     "ATTRIBUTION",
     "DUCKDB_PATH",
     "EXPORT_DIR",
+    "EXTRA_ADDITIVITY",
     "EXTRA_CLASSIFICATIONS",
     "LAKEHOUSE_ASSET",
     "MASKED_LABELS",
@@ -215,6 +216,89 @@ EXTRA_CLASSIFICATIONS: dict[tuple[str, str, str], str] = {
 }
 
 
+# The additivity labels dbt cannot see, in exactly the shape and for exactly the
+# reason `EXTRA_CLASSIFICATIONS` above has: the `analytics` tables are written by
+# Polars, downstream of dbt and invisible to it, and they ship in the release
+# beside the marts. Without these the map would stop at the layer boundary and a
+# consumer would find five published tables with no labels at all.
+#
+# **Copied, not inherited at runtime, and that is the point.** Deriving
+# `co2_intensity`'s 37 shared labels from `marts.fct_emissions_energy` would be
+# less typing and would fail *open*: rename a column in the mart and the copy
+# quietly loses its label with nothing to say so. Stated here, the same rename
+# fails `test_a_copied_column_keeps_the_label_the_mart_gave_it`. Asserting rather
+# than deriving is what every other hand-maintained list here does.
+EXTRA_ADDITIVITY: dict[tuple[str, str, str], str] = {
+    # `co2_intensity` is `select * from marts.fct_emissions_energy` plus two
+    # derived columns, so its labels are the mart's plus two.
+    ("analytics", "co2_intensity", "year"): "not_a_measure",
+    ("analytics", "co2_intensity", "co2_mt"): "additive",
+    ("analytics", "co2_intensity", "co2_per_capita"): "non_additive",
+    ("analytics", "co2_intensity", "co2_kg_per_gdp_ppp_2011"): "non_additive",
+    ("analytics", "co2_intensity", "share_global_co2"): "non_additive",
+    ("analytics", "co2_intensity", "coal_co2"): "additive",
+    ("analytics", "co2_intensity", "oil_co2"): "additive",
+    ("analytics", "co2_intensity", "gas_co2"): "additive",
+    ("analytics", "co2_intensity", "consumption_co2"): "additive",
+    ("analytics", "co2_intensity", "consumption_co2_per_capita"): "non_additive",
+    ("analytics", "co2_intensity", "trade_co2"): "additive",
+    ("analytics", "co2_intensity", "trade_co2_share"): "non_additive",
+    ("analytics", "co2_intensity", "cumulative_co2"): "semi_additive",
+    ("analytics", "co2_intensity", "share_global_cumulative_co2"): "non_additive",
+    ("analytics", "co2_intensity", "primary_energy_twh"): "additive",
+    ("analytics", "co2_intensity", "renewables_share_pct"): "non_additive",
+    ("analytics", "co2_intensity", "fossil_share_pct"): "non_additive",
+    ("analytics", "co2_intensity", "electricity_generation_twh"): "additive",
+    ("analytics", "co2_intensity", "carbon_intensity_elec_g_kwh"): "non_additive",
+    ("analytics", "co2_intensity", "low_carbon_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "solar_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "wind_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "nuclear_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "coal_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "gas_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "gdp_per_capita_usd"): "non_additive",
+    ("analytics", "co2_intensity", "gdp_usd"): "semi_additive",
+    ("analytics", "co2_intensity", "gdp_constant_usd"): "additive",
+    ("analytics", "co2_intensity", "life_expectancy"): "non_additive",
+    ("analytics", "co2_intensity", "population"): "semi_additive",
+    ("analytics", "co2_intensity", "poverty_rate"): "non_additive",
+    ("analytics", "co2_intensity", "internet_users_pct"): "non_additive",
+    ("analytics", "co2_intensity", "urban_pop_pct"): "non_additive",
+    ("analytics", "co2_intensity", "forest_area_pct"): "non_additive",
+    ("analytics", "co2_intensity", "renew_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "energy_imports_pct"): "non_additive",
+    ("analytics", "co2_intensity", "electricity_price_eur_kwh"): "non_additive",
+    # The two the Polars step adds. A dense rank is ordinal — summing ranks is
+    # the classic way to turn an ordering into a number that means nothing.
+    ("analytics", "co2_intensity", "co2_per_gdp_const_usd"): "non_additive",
+    ("analytics", "co2_intensity", "co2_intensity_rank"): "non_additive",
+    # `retail_rfm` renames on the way in, which is why these are stated by hand
+    # rather than found by name: `frequency` is `dim_retail_customer.n_orders`
+    # and `monetary_gbp` is its `net_revenue_gbp` — both additive, and neither
+    # reachable from the mart by name. The three scores are quintiles: ordinal,
+    # so `rfm_total` is a sum of ordinals and is still ordinal.
+    ("analytics", "retail_rfm", "frequency"): "additive",
+    ("analytics", "retail_rfm", "monetary_gbp"): "additive",
+    ("analytics", "retail_rfm", "recency_days"): "non_additive",
+    ("analytics", "retail_rfm", "recency_score"): "non_additive",
+    ("analytics", "retail_rfm", "frequency_score"): "non_additive",
+    ("analytics", "retail_rfm", "monetary_score"): "non_additive",
+    ("analytics", "retail_rfm", "rfm_total"): "non_additive",
+    ("analytics", "retail_rfm", "avg_order_value_gbp"): "non_additive",
+    ("analytics", "retail_rfm", "n_distinct_products"): "non_additive",
+    ("analytics", "retail_rfm", "return_rate_pct"): "non_additive",
+    # The observability tables. `year_min`/`year_max` are calendar bounds and not
+    # measures, the same answer `year` gets everywhere else.
+    ("analytics", "pipeline_sources", "rows"): "additive",
+    ("analytics", "pipeline_sources", "year_min"): "not_a_measure",
+    ("analytics", "pipeline_sources", "year_max"): "not_a_measure",
+    ("analytics", "pipeline_tables", "rows"): "additive",
+    ("analytics", "pipeline_tables", "year_min"): "not_a_measure",
+    ("analytics", "pipeline_tables", "year_max"): "not_a_measure",
+    ("analytics", "pipeline_tests", "failing_rows"): "additive",
+}
+
+
 def classifications(manifest_path: str = MANIFEST_PATH) -> dict[tuple[str, str, str], str]:
     """Every classified column in the warehouse: dbt's, plus `analytics`.
 
@@ -250,11 +334,18 @@ def additivity(manifest_path: str = MANIFEST_PATH) -> dict[str, dict[str, str]] 
     ships: the versioned model appears as both `marts.fct_emissions_energy` and
     `marts.fct_emissions_energy_v1`, which is what the Parquet files are called.
 
-    **Degrades to `None` when the manifest is absent**, the same way
-    `classifications` does and for the same reason — `dbt/target/` is gitignored.
-    `None` and `{}` are different answers here: the first says nobody asked dbt,
-    the second would say dbt was asked and knows of no labelled column. Only the
-    first can be true by accident.
+    **Degrades to `None` when the manifest is absent** — `dbt/target/` is
+    gitignored, so a fresh clone has none. `None` and `{}` are different answers
+    here: the first says nobody asked dbt, the second would say dbt was asked and
+    knows of no labelled column. Only the first can be true by accident.
+
+    It drops `EXTRA_ADDITIVITY` on that path rather than publishing it alone,
+    which is where this parts company with `classifications` — that one degrades
+    to the extras *because* a partial answer still masks every identifier it
+    names. Here a partial map is the more dangerous artifact: a consumer seeing
+    `analytics` labelled and `marts` missing has no way to read the gap as
+    "nobody asked" rather than as "nothing to say", and the default reading of a
+    missing label is the wrong one.
     """
     path = Path(manifest_path)
     if not path.exists():
@@ -271,8 +362,10 @@ def additivity(manifest_path: str = MANIFEST_PATH) -> dict[str, dict[str, str]] 
                 labels[column] = label
         if labels:
             relation = f"{node['schema']}.{node.get('alias') or node['name']}"
-            out[relation] = dict(sorted(labels.items()))
-    return dict(sorted(out.items()))
+            out[relation] = labels
+    for (schema, table, column), label in EXTRA_ADDITIVITY.items():
+        out.setdefault(f"{schema}.{table}", {})[column] = label
+    return {relation: dict(sorted(cols.items())) for relation, cols in sorted(out.items())}
 
 
 def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -> dict:
@@ -715,7 +808,8 @@ it for `{base}/download/{tag}/…`.
 `SHA256SUMS` is `sha256sum -c`-compatible.
 
 **`manifest.json` also says which columns may be summed.** Its `additivity` map
-labels every numeric column of every mart: `additive` (sum it in any direction),
+labels every numeric column of every `marts` and `analytics` table published
+here — 280 of them: `additive` (sum it in any direction),
 `semi_additive` (summable some ways and not others — the column's own
 description says which), `non_additive` (a ratio, rate, price, average or
 extremum: recompute it from its components rather than aggregating it) and

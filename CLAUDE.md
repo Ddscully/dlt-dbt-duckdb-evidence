@@ -973,12 +973,22 @@ the point of the layer is that none of it is a comment.
   - **`gdp_usd` is `semi_additive` and `gdp_constant_usd` is `additive`**, which
     is the current-vs-constant-dollar gotcha under *Conventions & gotchas*
     expressed as metadata rather than as prose somebody has to have read.
-  - **The labels ship**, in `manifest.json`'s `additivity` map, for the reason
-    `direct_identifier` is real: a label with no consequence is decoration, and
-    a Parquet consumer has the types and nothing else. `staging` and `analytics`
-    are outside the rule on purpose — staging's measures are declared one layer
-    up, and the Polars outputs are invisible to dbt, which is the same gap
-    `EXTRA_CLASSIFICATIONS` fills for `pii` and is still open here.
+  - **The labels ship**, in `manifest.json`'s `additivity` map — 280 columns
+    across 24 relations — for the reason `direct_identifier` is real: a label
+    with no consequence is decoration, and a Parquet consumer has the types and
+    nothing else. The five `analytics` tables are invisible to dbt, so their 56
+    are `EXTRA_ADDITIVITY`, beside `EXTRA_CLASSIFICATIONS` and for its reason.
+    `staging` stays outside: its measures are declared one layer up.
+  - **The `analytics` copies are stated, not inherited, and that is the whole
+    of the choice.** `co2_intensity` is `select *` off `fct_emissions_energy`
+    plus two derived columns, so 37 of its labels are the mart's — deriving
+    them at runtime is less typing and fails *open*, because a mart rename would
+    take the copy's label with it silently. Stated, the same rename fails
+    `test_a_copied_column_keeps_the_label_the_mart_gave_it`, which checks the
+    column *set* as well as the values and was mutation-proven from both sides.
+    `retail_rfm` cannot be reached by name at all — `frequency` is
+    `n_orders` and `monetary_gbp` is `net_revenue_gbp` — so its coverage is
+    asserted against the frame `build_retail_rfm` actually emits.
   - **Inserting 188 labels line-wise found the duplicate-key trap twice.** A
     `meta:` block can sit *below* a comment block or a `description:`, so a
     lookahead that only skipped comments wrote a second `meta:` key — which
