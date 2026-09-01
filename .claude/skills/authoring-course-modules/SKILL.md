@@ -52,7 +52,7 @@ countries on a 17-country slice. Three different numbers, none of them 17.
 
 **Every number in the material was measured, including the drill's.** Module
 01's drill (`left join co2` -> `inner join co2` in
-`dbt/models/marts/fct_emissions_energy_v2.sql`) was run: the mart goes 4,096 ->
+`dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`) was run: the mart goes 4,096 ->
 3,487 rows and **52 -> 17 countries**, EU price rows 701 -> 104, and `dbt build`
 reports `PASS=402 WARN=0 ERROR=0` either way. Don't quote a drill's numbers
 without seeding it — the whole claim of the course is that the verdict doesn't
@@ -162,7 +162,7 @@ silently skips its nulls. On `fct_emissions_energy` that means each of the
 fourteen range tests examines between **1.6%** (`electricity_price_eur_kwh`, 701
 of 43,138) and **54%** (`co2_mt`) of the fact — except `year`, the one column
 that is never null, at 100%. 162 of the 367 `marts` columns carry any test at
-all, against every mart under a type contract: two different guarantees, and
+all, against every mart model under a type contract: two different guarantees, and
 worth being able to say which one you have. The audit schema is measurable too —
 **391 tables against 440 tests**, i.e. 22 orphans, which is the stale-audit-table
 bullet in `CLAUDE.md` showing up as a number.

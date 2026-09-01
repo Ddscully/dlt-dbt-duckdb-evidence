@@ -113,7 +113,7 @@ uv run --group orchestration dagster definitions validate
 
 then open `just dagster` and confirm the new asset has an edge into `staging`.
 
-## 5. Mart column — `dbt/models/marts/fct_emissions_energy_v2.sql`
+## 5. Mart column — `dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`
 
 **The mart is versioned**, so the file is `_v2.sql` while the relation stays
 `marts.fct_emissions_energy` (v2 is aliased back to the bare name). You do not

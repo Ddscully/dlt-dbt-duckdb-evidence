@@ -127,7 +127,11 @@ def test_the_release_exposure_names_every_mart():
     # exposure names the model, and `ref()` without a `v=` resolves to the latest
     # version. Both relations ship in the release, and both are covered by the one
     # declaration.
-    marts = {re.sub(r"_v\d+$", "", sql.stem) for sql in MARTS_DIR.glob("*.sql")}
+    # `rglob`, because the marts layer is one folder per dbt group. A flat glob
+    # matched nothing after that move and this test went red on an empty set —
+    # the right outcome, and the reason it compares in both directions rather
+    # than only asserting "nothing undeclared".
+    marts = {re.sub(r"_v\d+$", "", sql.stem) for sql in MARTS_DIR.rglob("*.sql")}
     assert marts - declared == set(), "mart published by the release but not declared"
     # `stg_country` is the one non-mart in the list — see the comment in the yml.
     assert declared - marts == {"stg_country"}

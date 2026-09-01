@@ -5,7 +5,6 @@ models:
     config:
       contract:
         enforced: true
-      group: compliance
     description: >
       Grid emission factors as a reference product: one row per
       (country_iso3, year) that has a published factor, with the vintage and the
@@ -145,7 +144,6 @@ models:
     config:
       contract:
         enforced: true
-      group: compliance
     description: >
       The worked example for `dim_grid_emission_factors`: metered MWh x factor
       -> tonnes CO2e, per site, which is the whole of location-based Scope 2
@@ -235,7 +233,6 @@ models:
     config:
       contract:
         enforced: true
-      group: compliance
     description: >
       What a tonne of an imported CBAM good costs at the EU border, by where it
       was made: Annex I's default values resolved against the annex's own

@@ -5,7 +5,6 @@ models:
     config:
       contract:
         enforced: true
-      group: reference
     description: >
       The calendar: one row per day, 1999-01-01 to the end of the year the FX
       series reaches, dense and gapless by construction. 10,227 rows today, and
@@ -154,7 +153,6 @@ models:
     config:
       contract:
         enforced: true
-      group: reference
     description: >
       One row per currency the ECB series has ever quoted, joining the
       `currencies` seed to the series' own evidence of when each code was live.
@@ -245,7 +243,6 @@ models:
     config:
       contract:
         enforced: true
-      group: reference
     description: >
       Every ECB euro reference rate as published, one row per (rate_date,
       quote_currency). 265,035 rows over 7,066 publication days and 46
@@ -309,7 +306,6 @@ models:
     config:
       contract:
         enforced: true
-      group: reference
     description: >
       The reference rates on every calendar day within each currency's quoted
       lifetime, gap-filled. Grain: one row per (date_day, currency_code).
@@ -411,7 +407,6 @@ models:
     config:
       contract:
         enforced: true
-      group: reference
     description: >
       Rates aggregated to month, quarter, half and year. Grain: one row per
       (period_type, period_start_date, currency_code).

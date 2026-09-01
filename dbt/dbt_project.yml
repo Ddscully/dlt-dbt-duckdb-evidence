@@ -114,6 +114,21 @@ models:
       # monthly data release ships every one of them as a standalone Parquet
       # file, so a consumer outside this project is not hypothetical.
       +access: public
+      # One folder per *mart* in the BI sense — the subject area a reader works
+      # with — which is what `marts/` is the layer name for, not a synonym for.
+      # The four match `_groups.yml` exactly, so `+group:` is stated once here
+      # instead of the eighteen times it was repeated across the group ymls, in
+      # files whose own names already said it. `+schema: marts` above is
+      # inherited by all four, so the relations, the release layout and the
+      # Dagster asset keys are unchanged by the nesting.
+      country_stats:
+        +group: country_stats
+      reference:
+        +group: reference
+      compliance:
+        +group: compliance
+      retail:
+        +group: retail
 
 seeds:
   modern_data_stack:

@@ -26,8 +26,8 @@ is what makes coverage answerable — left-join a fact onto the spine and a gap
 comes back as a row you can count, rather than as an absence you have to guess
 at. The spine is ~63k rows against the mart's ~43k, and eleven small territories
 reach the mart with World Bank data and no OWID emissions at all.
-→ [`dbt/models/marts/dim_country_year.sql`](../dbt/models/marts/dim_country_year.sql),
-[`fct_emissions_energy_v2.sql`](../dbt/models/marts/fct_emissions_energy_v2.sql)
+→ [`dbt/models/marts/country_stats/dim_country_year.sql`](../dbt/models/marts/country_stats/dim_country_year.sql),
+[`fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql)
 
 **Model the grain the publisher used, and only then aggregate.** Eurostat
 publishes electricity prices every half-year. Averaging that to a year is not
@@ -36,7 +36,7 @@ against 3–4% through the 2010s, and the Netherlands went from €0.034/kWh in
 2022-S1 to €0.142 in S2 as that year's energy-tax cuts landed. The annual
 average, €0.088, is a price nobody paid. Both grains are modelled, and the
 annual one exists to join prices to emissions — not to chart.
-→ [`fct_eu_electricity_prices_semiannual.sql`](../dbt/models/marts/fct_eu_electricity_prices_semiannual.sql)
+→ [`fct_eu_electricity_prices_semiannual.sql`](../dbt/models/marts/country_stats/fct_eu_electricity_prices_semiannual.sql)
 
 **Where two answers are both correct, ship both and name them.** Converting a
 balance uses the closing rate; converting revenue uses the period average. Using
@@ -45,8 +45,8 @@ a plausible number comes out either way. So the warehouse publishes both, and
 carries a column measuring the gap: for EUR/USD it reaches +11.7% in 2003, and
 across every currency the worst complete year is the Icelandic króna in 2008 at
 +98%.
-→ [`fct_fx_rates_daily.sql`](../dbt/models/marts/fct_fx_rates_daily.sql),
-[`fct_fx_rates_periods.sql`](../dbt/models/marts/fct_fx_rates_periods.sql)
+→ [`fct_fx_rates_daily.sql`](../dbt/models/marts/reference/fct_fx_rates_daily.sql),
+[`fct_fx_rates_periods.sql`](../dbt/models/marts/reference/fct_fx_rates_periods.sql)
 
 **A figure in a chart should be derived, not typed.** Coverage does not end in
 the same year for every metric, so no page hardcodes a "latest year": each reads
@@ -58,23 +58,34 @@ holds 214 countries into the latest year where `primary_energy_twh` collapses to
 
 ## 2. Make a table promise something
 
-All four of these are declarative, and all four are enforced by something that
+**First, a word this repo uses precisely.** In the BI sense a *mart* is the
+subject area a reader works with, and there are **four**:  `country_stats`,
+`reference`, `retail` and `compliance`. `marts/` is dbt's name for the presentation
+*layer*, one folder per mart, and the 19 relations inside it are **mart models**.
+Getting that backwards is easy and this repo did it — it counted models and
+called them marts, so a stale figure sat in five files through two additions to
+the layer.
+
+The boundary between the four is not a folder convention. `access` is enforced at
+**parse** time, so a cross-mart dependency fails before anything builds, and the
+folders exist so the four are visible in the tree as well as in the ymls.
+
+All four gates below are declarative, and all four are enforced by something that
 fails — the point of the layer is that none of it is a comment.
 
 **Declare the grain as a test.** Every fact-shaped model carries
 `unique_combination_of_columns` on its key. It has been holding the grain since
 the start.
-→ [`dbt/models/marts/_country_stats.yml`](../dbt/models/marts/_country_stats.yml)
+→ [`dbt/models/marts/country_stats/_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
 
-**Enforce a schema contract on everything that leaves.** All 19 mart relations
-are contract-enforced, across 385 declared columns each carrying a `data_type`.
+**Enforce a schema contract on everything that leaves.** All 19 mart models are
+contract-enforced, across 385 declared columns each carrying a `data_type`.
 The grain test and the schema contract catch different things: the contract is
 what sees a column change type under a consumer. Verified by declaring `year` as
 `VARCHAR` — the build fails with a per-column mismatch table *before writing
 anything*.
-→ [`dbt/models/marts/`](../dbt/models/marts/) (`_country_stats.yml`,
-`_reference.yml`, `_retail.yml`, `_compliance.yml` — one file per domain, so the
-boundary is the one dbt itself can check)
+→ [`dbt/models/marts/`](../dbt/models/marts/) — one folder and one yml per mart,
+so the boundary is the one dbt itself can check rather than a filing convention
 
 **Say who owns a model and who may depend on it.** Four groups by *domain*, not
 by layer — a staging/marts split would put every staging model in one group and
@@ -93,7 +104,7 @@ versioned model renames a column whose old name gave neither unit nor basis. v1
 is a *view* over v2 with the one column put back — not a second copy of the
 logic or of the 43k rows — and it carries a deprecation date that also appears in
 the release notes, because the consumers who need it never read a dbt log.
-→ [`fct_emissions_energy_v1.sql`](../dbt/models/marts/fct_emissions_energy_v1.sql)
+→ [`fct_emissions_energy_v1.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v1.sql)
 
 ## 3. Write tests that can see a wrong answer
 

@@ -518,7 +518,9 @@ done in the skills; scanning this file would need that ambiguity resolved first.
   fallback rule, separately true so separately testable) and
   `int_retail_return_matches` (the returns-to-purchase inference). `private` and
   uncontracted, like staging; they do not ship as Parquet
-- `marts` — dbt tables: `dim_country_year` (the country-year spine),
+- `marts` — dbt tables, **one folder per mart**: `country_stats/` (6),
+  `reference/` (5), `retail/` (5), `compliance/` (3). The models are:
+  `dim_country_year` (the country-year spine),
   `fct_emissions_energy` (the wide join, built on the spine, and **the one
   versioned model** — `fct_emissions_energy_v1` is a compatibility view live
   until 2026-11-01),
@@ -542,6 +544,35 @@ done in the skills; scanning this file would need that ambiguity resolved first.
 - `analytics` — Polars output: `co2_intensity` and `retail_rfm`, plus
   `pipeline_sources` / `pipeline_tables` / `pipeline_tests` (see *Pipeline
   observability* below)
+
+**"Mart" means the subject area, not the file, and this repo used the word both
+ways until 2026-09-01.** In the BI sense a mart is the view a department works
+with — so there are **four** here, and they are `dbt/models/_groups.yml`:
+`country_stats`, `reference`, `retail`, `compliance`. `marts/` is dbt's name for
+the *layer*, and the 19 relations inside it (18 models, one of them versioned)
+are **mart models**. The docs counted models and called them marts, which is how
+a stale count of 17 survived two additions to the layer;
+`tests/test_documented_counts.py` guards the number now and the folders make the
+four visible in the tree. (Quoting the old claim in its original wording here
+failed that guard, which cannot tell a quotation from an assertion and should
+not try — the same trap as the pytest-count phrasing under *Testing*.)
+
+- **The folders are one per group, and `+group:` is set on the folder** in
+  `dbt_project.yml` rather than on each model — it was restated 18 times in files
+  whose own names said it. `+schema: marts` is inherited by all four, so the
+  relation names, the release layout and the Dagster asset keys are untouched by
+  the nesting.
+- **Consolidating the models was considered and measured against.** Three pairs
+  share a grain within a group, and every one is sparse against its partner:
+  `fct_retail_returns` is 18,286 rows against `fct_retail_order_line`'s
+  1,067,371 (1.7%), and `fct_country_weather_year` covers 41 countries against
+  `fct_emissions_energy`'s 228. Merging either would mean columns null on 98% of
+  the rows. One fact table per business *process*, not per grain.
+- **The near-miss is `fct_fx_rates_published`**, which `fct_fx_rates_daily` is a
+  strict superset of (`where is_published_rate` recovers it). It stays a mart
+  model because it is the project's only incremental model and the site reads it
+  directly, but it is the one relation here that is arguably an intermediate
+  concern in the presentation layer.
 
 Grain of every *country* fact/staging model is **`(country_iso3, year)`**; joins
 are on ISO3 country code + year. The country dimension (`stg_country`) supplies
@@ -847,8 +878,8 @@ the point of the layer is that none of it is a comment.
 - **Marts are `public` because the release makes them so.** Every mart ships as a
   standalone Parquet file to people who cannot be paged; `access` is a statement
   about that, not about the repo.
-- **Contracts are enforced on every mart — 19 relations (18 models, one of them
-  versioned) and 385 columns, each with a `data_type`.** The ymls documented 179 of those columns before, so the list was
+- **Contracts are enforced on every mart model — 19 relations (18 models, one of
+  them versioned) and 385 columns, each with a `data_type`.** The ymls documented 179 of those columns before, so the list was
   *generated* from the built warehouse's `information_schema` and inserted
   line-wise, reordering the existing entries into SQL order and keeping every
   description untouched. A PyYAML round-trip would have reflowed 1,246 lines of
@@ -861,7 +892,7 @@ the point of the layer is that none of it is a comment.
   model, so the boundary had to come from somewhere — and `_groups.yml` already
   declares exactly four domains with enforced `access` between them, which makes
   the split the one dbt itself can check. A layer-shaped split would have put
-  every mart in one file and changed nothing.
+  every mart model in one file and changed nothing.
   - **The move was line-slicing, and the guard was a manifest diff.** Blocks
     were relocated as bytes and asserted byte-identical afterwards; then a
     fingerprint of every marts node in `manifest.json` — group, access, alias,

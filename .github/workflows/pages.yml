@@ -128,7 +128,7 @@ jobs:
       # one here means the page shows what OWID has actually restated since.
       #
       # **Both release assets, and the second one is not a nicety.** This job
-      # rebuilds every mart from `raw`, so a mart is only ever as deep as the
+      # rebuilds every mart model from `raw`, so one is only ever as deep as the
       # landing table under it — and since `raw` moved into the DuckLake catalog,
       # `warehouse.duckdb` carries no weather rows at all. Download the database
       # alone and `weather_watermark()` reads null, the ingest cold-starts at

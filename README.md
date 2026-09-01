@@ -116,7 +116,7 @@ The README is the tour. The detail lives here:
 | [`docs/PRACTICES.md`](./docs/PRACTICES.md) | **the practices this repo demonstrates, and where each one is in the code** |
 | [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the schemas they land in, and the Parquet lake beside them |
 | [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the Dagster asset graph, the three jobs, backfills and freshness policies |
-| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 440 dbt tests, the mart contracts, and the groups, exposures and model versions around them |
+| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 440 dbt tests, the mart-model contracts, and the groups, exposures and model versions around them |
 | [`docs/DASHBOARD.md`](./docs/DASHBOARD.md) | the eleven dashboard pages, what each is for, and how the site is deployed |
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
@@ -188,7 +188,7 @@ CI runs the same hooks over every file. Details in
 [`tests/README.md`](./tests/README.md).
 
 Alongside them, `just dbt-build` runs 469 tests — 440 data tests and 29 unit
-tests — and enforces a schema contract on every mart. What each gate catches is
+tests — and enforces a schema contract on every mart model. What each gate catches is
 [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md); why the gates are shaped that
 way is [`docs/PRACTICES.md`](./docs/PRACTICES.md).
 

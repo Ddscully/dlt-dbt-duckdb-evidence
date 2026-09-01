@@ -103,7 +103,7 @@ Every 🔧 exercise runs the same four steps:
 
 ```bash
 # 1. seed the bug — the drill gives you the edit
-$EDITOR dbt/models/marts/fct_emissions_energy_v2.sql
+$EDITOR dbt/models/marts/country_stats/fct_emissions_energy_v2.sql
 
 # 2. rebuild
 just course-rebuild
@@ -112,7 +112,7 @@ just course-rebuild
 just course-query 'select count(*) from marts.fct_emissions_energy'
 
 # 4. get back to green
-git checkout dbt/models/marts/fct_emissions_energy_v2.sql
+git checkout dbt/models/marts/country_stats/fct_emissions_energy_v2.sql
 just course-rebuild
 ```
 

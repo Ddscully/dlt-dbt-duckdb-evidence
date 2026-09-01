@@ -5,7 +5,6 @@ models:
     config:
       contract:
         enforced: true
-      group: country_stats
     description: >
       Country-year spine: `stg_country` crossed with every year the warehouse
       covers (the span is read from the sources, so both ends move with the
@@ -49,7 +48,6 @@ models:
     config:
       contract:
         enforced: true
-      group: country_stats
     description: >
       Version history of OWID's CO2 estimates, summarised off the
       `snap_co2_estimates` SCD2 snapshot: how many versions of each country-year
@@ -151,7 +149,6 @@ models:
     config:
       contract:
         enforced: true
-      group: country_stats
     description: >
       Country-year fact combining OWID emissions & energy, World Bank WDI
       (GDP, life expectancy, population, poverty, internet, urbanisation, forest,
@@ -371,7 +368,6 @@ models:
     config:
       contract:
         enforced: true
-      group: country_stats
     description: >
       Capital-city weather aggregated to (country_iso3, year), for the 41 EU/EEA
       countries Eurostat publishes an electricity price for. The warehouse's
@@ -573,7 +569,6 @@ models:
     config:
       contract:
         enforced: true
-      group: country_stats
     description: >
       EU/EEA household electricity prices at Eurostat's published grain: one row
       per (country_iso3, year, half), 2007 onwards. The only non-annual fact in

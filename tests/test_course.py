@@ -55,7 +55,7 @@ CITABLE_ROOTS = (
     "transform",
 )
 
-# A backticked path, e.g. `dbt/models/marts/dim_country_year.sql`. Anchored on the
+# A backticked path, e.g. `dbt/models/marts/country_stats/dim_country_year.sql`. Anchored on the
 # citable roots so prose like `country_iso3` and `PASS=402` can't match.
 _CITED_PATH = re.compile(
     r"`((?:" + "|".join(CITABLE_ROOTS) + r")/[A-Za-z0-9_./*-]+)`",

@@ -142,7 +142,7 @@ name once, and pin it with a test if you publish the file.
 
 Here it's `(country_iso3, year)`, and most of the warehouse follows from it: the
 `unique_combination_of_columns` contract on every fact-shaped model, the spine,
-the join key in every mart.
+the join key in every mart model.
 
 Write yours down as `(entity, period)` in the style guide before you build the
 first staging model. Then hold every staging model to it. When a source publishes

@@ -203,7 +203,7 @@ exposures:
 
   # Not a page — the monthly GitHub release, which is the consumer nobody can see
   # from inside the repo and the only one that is genuinely *outside* this
-  # project. It is also why every mart is `access: public` rather than
+  # project. It is also why every mart model is `access: public` rather than
   # `protected`: those files land on somebody else's disk.
   #
   # `stg_country` is in the list because the release notes point a reader at

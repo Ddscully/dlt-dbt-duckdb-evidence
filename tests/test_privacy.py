@@ -247,9 +247,17 @@ def marts_ymls() -> list[Path]:
     leaves a coverage test reading three quarters of the tree while still
     passing. A fifth group file has to be seen without anyone remembering to add
     it here. `_unit_tests.yml` carries no `models:` key and drops out on its own.
+
+    **Recursive, because the flat version went blind and the guard below caught
+    it.** The group ymls moved into `marts/<group>/` when the marts layer was
+    subdivided one folder per dbt group; `glob("*.yml")` then matched nothing but
+    `_unit_tests.yml`, which has no `models:` key — so `declared()` came back
+    empty and the two coverage tests that assert an *absence* both passed on it.
+    That is the case `test_the_yml_scan_finds_every_mart_it_should` names in its
+    own docstring as hypothetical. It arrived.
     """
     return sorted(
-        p for p in MARTS_DIR.glob("*.yml") if (yaml.safe_load(p.read_text()) or {}).get("models")
+        p for p in MARTS_DIR.rglob("*.yml") if (yaml.safe_load(p.read_text()) or {}).get("models")
     )
 
 
@@ -278,11 +286,17 @@ def test_the_yml_scan_finds_every_mart_it_should():
     files means a model whose yml block went missing in a move is a failure
     rather than a silence.
 
+    The subfolder case stopped being hypothetical when the marts layer was
+    subdivided one folder per dbt group. Both globs above are `rglob` now, and
+    this test is what said so — it went red on a tree where `dbt parse`,
+    `dbt build` and every other test were green, because dbt does not care which
+    file declares a model and only this one reads the files as files.
+
     `fct_emissions_energy` is the one collapse: `_v1.sql` and `_v2.sql` are two
     files under one `versions:` entry, so the suffix comes off before comparing.
     """
     declared_models = set(merged(yml_columns))
-    on_disk = {re.sub(r"_v\d+$", "", p.stem) for p in MARTS_DIR.glob("*.sql")}
+    on_disk = {re.sub(r"_v\d+$", "", p.stem) for p in MARTS_DIR.rglob("*.sql")}
 
     assert len(marts_ymls()) >= 2, "the marts glob collapsed back to a single file"
     assert on_disk - declared_models == set(), (

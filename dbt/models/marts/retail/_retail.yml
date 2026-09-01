@@ -5,7 +5,6 @@ models:
     config:
       contract:
         enforced: true
-      group: retail
     description: >
       Order lines priced in GBP, EUR and USD and joined to `dim_date`, at
       (invoice, line_number). The warehouse's finest grain and the first fact in
@@ -125,7 +124,6 @@ models:
     config:
       contract:
         enforced: true
-      group: retail
     description: >
       One row per stock code (5,131), with a survivorship-picked description.
       1,192 codes carry more than one label across their lines and one carries
@@ -214,7 +212,6 @@ models:
     config:
       contract:
         enforced: true
-      group: retail
     description: >
       One row per identified customer (5,881 of the 5,942 ids that appear; the
       other 61 never made a purchase). Covers 86.2% of net revenue — the rest is
@@ -341,7 +338,6 @@ models:
     config:
       contract:
         enforced: true
-      group: retail
     description: >
       Returns matched back to the sale they reverse, one row per return line
       (18,286). The source carries no link between the two — no order reference,
@@ -445,7 +441,6 @@ models:
     config:
       contract:
         enforced: true
-      group: retail
     description: >
       Monthly acquisition cohorts and their retention, at
       (cohort_month, months_since_first_order). Ragged on purpose: a cohort only
