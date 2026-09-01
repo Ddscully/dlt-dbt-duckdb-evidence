@@ -82,7 +82,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (28 models, 2 snapshots, 6 seeds + 424 data tests + 28 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (31 models, 2 snapshots, 6 seeds + 440 data tests + 29 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -136,13 +136,18 @@ one whose entry is `just lint`).
   dependency. This is the one failure mode here that is loud rather than green.
 - CI lints via the same venv, so it agrees on rules, and over the same paths
   (`models snapshots`) — a narrower set there would mean CI passing SQL a
-  contributor's commit hook rejects.
+  contributor's commit hook rejects. **`ci.yml` runs `just lint` rather than
+  `sqlfluff` directly**, so those paths are stated once instead of in the
+  workflow and the recipe both.
 - **The `just lint` hook means CI has to install `just`.** `ci.yml` runs
   `pre-commit run --all-files`, and a `local` hook whose entry is a recipe fails
   with "Executable `just` not found" on a runner that hasn't got it — which is how
   the hook shipped green locally and red on the first push (`uv tool install
   rust-just` + `$GITHUB_PATH` is the fix). Anything else moved into a `local` hook
-  inherits the same requirement.
+  inherits the same requirement. **`.github/actions/setup` does that install for
+  all four workflows now**, which is also what made routing the pipeline itself
+  through recipes free — the requirement this bullet describes had already paid
+  for the tool.
 
 The Python half is ruff, configured in `pyproject.toml` and run only through
 pre-commit (`ruff-check` with `--fix`, then `ruff-format`).
@@ -360,7 +365,7 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 - **`currency-and-calendar`** — the ECB rates, `dim_date`, and spot vs average.
 - **`weather-models`** — Open-Meteo's weighted budget, ERA5, the positional
   multi-location response, and the two degree-day conventions.
-- **`unit-testing-dbt-models`** — the ten models that carry unit tests, and
+- **`unit-testing-dbt-models`** — the twelve models that carry unit tests, and
   what mutating each one proved the data tests could not see.
 - **`repo-guards`** — the hand-maintained lists, the tests that hold them to the
   tree, and the offline fixture dispatch table.
@@ -396,6 +401,14 @@ is now a test too.
   except `stg_fx_rates`, which is `(rate_date, quote_currency)`,
   `stg_retail_lines`, which is `(invoice, line_number)`, and
   `stg_weather_daily`, which is `(country_iso3, weather_date)`
+- `intermediate` — dbt views, `int_*`, and the layer with the fewest models on
+  purpose: three, each earning its place by removing a specific cost rather than
+  by completing a diagram. `int_country_year_observed` (the country-years the
+  four country-stats sources report — derived twice, in `dim_country_year` and
+  `fct_emissions_energy`, until it wasn't), `int_cbam_default_factors` (Annex I's
+  fallback rule, separately true so separately testable) and
+  `int_retail_return_matches` (the returns-to-purchase inference). `private` and
+  uncontracted, like staging; they do not ship as Parquet
 - `marts` — dbt tables: `dim_country_year` (the country-year spine),
   `fct_emissions_energy` (the wide join, built on the spine, and **the one
   versioned model** — `fct_emissions_energy_v1` is a compatibility view live
@@ -640,19 +653,42 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are twenty-eight unit tests, over ten models, and they exist because a data
+- **There are twenty-nine unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
   and every fiscal quarter in the warehouse is wrong while **all 19 data tests on
   the model pass** — measured, not argued. Its three unit tests fail on it.
-  **Which ten models, what mutating each one proved, and the fixture shapes
+  **Which twelve models, what mutating each one proved, and the fixture shapes
   strong enough to catch it are the `unit-testing-dbt-models` skill**, together
   with the mutation method that produced all of it.
+- **A unit test that has to mock five inputs is telling you a model is two
+  models.** `cbam_exposure_takes_the_fallback_row_whole_or_not_at_all` checked
+  one rule — the annex fallback is row-level, not column-level — and posed a
+  markup schedule, a country dimension and an empty `dim_grid_emission_factors`
+  to reach it, then asserted on a `certificates_*` column computed downstream of
+  the rule. Two of those inputs were inert; one carried a comment explaining why
+  an unrelated table was in the fixture at all. Against
+  `int_cbam_default_factors` it mocks one input and asserts four columns. **The
+  fixture size was the signal, and it was visible for months** — `_unit_tests.yml`
+  averaged 45 lines a test. That is the argument for the intermediate layer here,
+  and it is why there are three `int_*` models and not one per mart: the other
+  two removed a duplication and named an inference, and nothing else qualified.
+- **Moving a test proves nothing until you re-run its mutation, and one of these
+  did not survive the check — from before the move.**
+  `retail_returns_breaks_a_tied_purchase_the_same_way_every_build` passes with
+  the `qualify` tie-break deleted, and it passed that way at HEAD too, verified
+  in a scratch worktree rather than argued. The fixture *can* separate the two
+  (a plain DuckDB table gives 700/5 without the tie-break and 700/3 with it), but
+  dbt's mocked input arrives in an order that makes the un-tie-broken `asof join`
+  land on the same row anyway. So the test pins the *answer* and not the
+  *mechanism*, and the determinism it exists to guard is unguarded. Fixing it
+  needs a second tie group whose correct answer sits at a different position, so
+  no positional bias satisfies both.
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  twenty-eight cost 4.2s. A broken fiscal calendar should stop `release-data.yml`,
+  twenty-nine cost 4.0s. A broken fiscal calendar should stop `release-data.yml`,
   not ride along in it. `just dbt-unit-test` is the ~4s inner loop.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.
@@ -798,7 +834,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 422 of the 424 tests use the default. `severity` comes across
+  is what dbt does; 438 of the 440 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the
@@ -811,7 +847,7 @@ leave the other free to land after the inventory meant to count it.
   bare names.
 - **It excludes its own output from the inventory.** Otherwise the table count
   jumps by three on every build after the first, for no change in the warehouse
-  (30 tables today, not 33).
+  (35 tables today, not 38).
 - **It must run after `dbt build`** — it reads `dbt_test__audit` and the
   manifest, neither of which exists before one.
 
@@ -938,18 +974,32 @@ survives a format that content-addresses its files and prunes on statistics.
     catalog recording `../data/lakehouse/data/`, which `lake.lakehouse` then
     could not open — and the error names a path nobody typed. `WAREHOUSE_PATH`
     gets away with a relative default because a plain file keeps no such record.
-    - **No workflow goes through `just`, so all four needed the same line, and
-      the DuckLake move shipped without it.** They run `uv run dagster job
-      execute` directly, and only `ci.yml` set any path at all (`WAREHOUSE_PATH`,
-      absolute, for the reason above). dlt writes the catalog from the repo root
-      and records an absolute `data_path`; dbt then resolves `profiles.yml`'s
-      relative default from `dbt/`, and DuckLake compares the two **as strings**
-      — so *the same directory under two spellings* is refused with `DATA_PATH
-      parameter "../data/lakehouse/data/" does not match existing data path`.
-      The failure is in `dbt build`, one layer downstream of the layer that
-      chose the spelling. It cannot be reproduced by any recipe, because every
-      recipe exports the variable that hides it: a faithful run has to unset
-      `LAKEHOUSE_DIR` and work in a clone, or it proves nothing.
+    - **The workflows go through `just` now, and this is the defect that made
+      them.** Until 2026-09-01 they ran `uv run dagster job execute` directly and
+      each set the paths itself — so all four needed the same new line when the
+      landing zone moved into DuckLake, and none of them got it. dlt writes the
+      catalog from the repo root and records an absolute `data_path`; dbt then
+      resolves `profiles.yml`'s relative default from `dbt/`, and DuckLake
+      compares the two **as strings** — so *the same directory under two
+      spellings* is refused with `DATA_PATH parameter
+      "../data/lakehouse/data/" does not match existing data path`. The failure
+      is in `dbt build`, one layer downstream of the layer that chose the
+      spelling, and **no recipe could reproduce it because every recipe exported
+      the variable that hid it**: a faithful run had to unset `LAKEHOUSE_DIR` and
+      work in a clone.
+      - **`.github/actions/setup` is the one definition now** — uv, the venv,
+        `just`, and all three paths absolute. `WAREHOUSE_PATH` was previously set
+        in `ci.yml` alone; it is set everywhere, which is a no-op in value and
+        removes a `paths.py` fallback from the question. Three tests in
+        `tests/test_workflows.py` hold it: the action must export all three (the
+        vacuity guard — the other two assert an *absence* and would both pass if
+        nothing set them at all), no workflow may define one itself, and every
+        workflow running the pipeline must use the action.
+      - **`just` respects a pre-set `LAKEHOUSE_DIR` and used to override
+        `DAGSTER_HOME`.** `env("LAKEHOUSE_DIR", …)` against a bare assignment —
+        the two agreed in CI, since `$GITHUB_WORKSPACE` *is* `justfile_directory()`
+        there, which is exactly what would have made a disagreement invisible
+        until the day they differed. Both take `env()` now.
   - **A tarball rather than loose files**, because a GitHub release asset is a
     file and a DuckLake is a directory. One asset also means one line in
     `SHA256SUMS`, so `sha256sum -c` still covers the whole release.

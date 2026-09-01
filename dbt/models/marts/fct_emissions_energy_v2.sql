@@ -24,26 +24,13 @@ eu_prices as (
 -- cross join, so without this the fact would carry an all-null row for
 -- (Kosovo, 1750) and ~20k of its friends; `dim_country_year` is where you go
 -- looking for those gaps.
+--
+-- Shared with the spine, which sizes its calendar off the same set. It was a
+-- union of the four staging models here and a second one in `dim_country_year`
+-- until both moved into `int_country_year_observed`; that model's header has
+-- what keeping two copies in step was worth.
 observed as (
-    select
-        country_iso3,
-        year
-    from co2
-    union
-    select
-        country_iso3,
-        year
-    from energy
-    union
-    select
-        country_iso3,
-        year
-    from wdi
-    union
-    select
-        country_iso3,
-        year
-    from eu_prices
+    select * from {{ ref('int_country_year_observed') }}
 )
 
 select

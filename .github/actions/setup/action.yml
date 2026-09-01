@@ -1,0 +1,83 @@
+name: Set up the pipeline
+description: >
+  uv, the project venv, `just`, and the three paths every layer resolves itself
+  from. The single definition of the CI environment: before this existed all
+  four workflows restated it, and two of them restated it wrongly.
+
+# What this replaces, and why it is an action rather than four copies:
+#
+# `LAKEHOUSE_DIR` and `DAGSTER_HOME` were set in every workflow behind an
+# identical six-line comment, maintained in four places. `WAREHOUSE_PATH` was set
+# in `ci.yml` **only** — the other three fell through to `profiles.yml`'s
+# relative default, which happens to resolve to the same file and is one
+# `paths.py` fallback away from not doing.
+#
+# Both halves of that have already cost this repo a release. Nothing here goes
+# through `just` by default, so when the DuckLake move needed an absolute
+# `LAKEHOUSE_DIR` all four workflows needed the same new line and none of them
+# got it; and `pages.yml` downloaded one of the release's two assets for weeks.
+# A hand-maintained list in four files is the shape both of those had.
+#
+# `tests/test_workflows.py` now asserts no workflow defines these itself.
+
+inputs:
+  groups:
+    description: >
+      Dependency groups to sync, as flags. `ci.yml` and `nightly.yml` need
+      `dev` for pytest and sqlfluff; `pages.yml` and `release-data.yml` only
+      run the graph.
+    required: false
+    default: "--group orchestration"
+
+runs:
+  using: composite
+  steps:
+    # Pinned to the exact patch: setup-uv stopped publishing moving major/minor
+    # tags at v8, so `@v9` does not resolve. Bump it by hand.
+    - name: Install uv
+      uses: astral-sh/setup-uv@v9.0.0
+      with:
+        enable-cache: true
+
+    - name: Sync deps
+      shell: bash
+      run: uv sync ${{ inputs.groups }}
+
+    # Every workflow runs the pipeline through a `just` recipe, so the recipe is
+    # the one definition of what the pipeline *is* — the four copies of
+    # `mkdir -p "$DAGSTER_HOME"` plus two `dagster job execute` lines are gone
+    # with it. `pre-commit`'s `sqlfluff-lint` hook is a `local` hook whose entry
+    # is `just lint`, so `ci.yml` needed this on PATH regardless: without it
+    # every pre-commit run fails with "Executable `just` not found" and the SQL
+    # is never linted by the hook at all.
+    - name: Install just
+      shell: bash
+      run: |
+        uv tool install rust-just
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    # **Absolute, all three, and `LAKEHOUSE_DIR` is not merely tidiness.** A
+    # DuckLake catalog stores its `data_path` exactly as given and checks it as a
+    # *string* on every attach. dlt writes the catalog from the repo root and dbt
+    # resolves `profiles.yml`'s relative default from `dbt/`, so the same
+    # directory under two spellings is refused outright — `DATA_PATH parameter
+    # "../data/lakehouse/data/" does not match existing data path`, thrown by
+    # `dbt build`, one layer downstream of the layer that chose the spelling.
+    #
+    # `WAREHOUSE_PATH` gets away with a relative default because a plain DuckDB
+    # file keeps no such record. It is set anyway: `paths.project_root()`
+    # resolves through three fallbacks and an explicit absolute path removes the
+    # question, which is worth more than the line costs.
+    #
+    # `$GITHUB_WORKSPACE` is the checkout directory, which is also
+    # `justfile_directory()` for any recipe run from it — so these agree with
+    # what `just` would export on its own, and the recipes take an already-set
+    # value rather than fighting it.
+    - name: Export the pipeline paths
+      shell: bash
+      run: |
+        {
+          echo "WAREHOUSE_PATH=$GITHUB_WORKSPACE/data/warehouse.duckdb"
+          echo "LAKEHOUSE_DIR=$GITHUB_WORKSPACE/data/lakehouse"
+          echo "DAGSTER_HOME=$GITHUB_WORKSPACE/.dagster"
+        } >> "$GITHUB_ENV"

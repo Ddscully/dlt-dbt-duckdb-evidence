@@ -1,0 +1,122 @@
+version: 2
+
+# The layer between a source's cleaning model and a consumer's fact table.
+#
+# Three models, and each one is here because leaving it inside a mart cost
+# something specific rather than because a three-layer diagram says so:
+#
+#   * `int_country_year_observed` — two marts were deriving the same set from
+#     the same four staging models, so adding a country-stats source meant the
+#     identical edit twice and missing either was a green build with fewer rows.
+#   * `int_cbam_default_factors` — the annex's fallback rule is separately true,
+#     so it should be separately testable. Its two unit tests had to pose a
+#     markup schedule, a country dimension and an empty grid-factor table to
+#     reach a rule that touches none of them.
+#   * `int_retail_return_matches` — the returns-to-purchase inference is the
+#     hard part of the retail domain and had no name; its unit tests could only
+#     assert on it through the mart's presentation columns.
+#
+# **No contracts here, deliberately**, matching `staging` and unlike `marts`. A
+# contract is a promise to a consumer the project cannot see, and these have no
+# such consumer — `access: private` in `dbt_project.yml` is the whole promise,
+# and dbt enforces it at parse time. What they do carry is the grain, for the
+# same reason every fact-shaped staging model does: a duplicate row here fans
+# out a join downstream and nothing else would notice.
+models:
+  - name: int_country_year_observed
+    config:
+      group: country_stats
+    description: >
+      The distinct (country_iso3, year) pairs that OWID CO2, OWID energy, World
+      Bank WDI or Eurostat prices actually report. `dim_country_year` reduces it
+      to its year bounds to size the spine; `fct_emissions_energy` joins it to
+      the spine to cut the full cross join back to country-years something was
+      published for.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+    columns:
+      - name: country_iso3
+        description: >
+          Nullable, unlike everywhere downstream. A source row with no country
+          still carries a year, and the year bounds are computed over all of
+          them; the fact's inner join drops it.
+      - name: year
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1750, max_value: 2030}
+
+  - name: int_cbam_default_factors
+    config:
+      group: compliance
+    description: >
+      Annex I's default carbon intensities per (country or territory, good),
+      with the regulation's row-level fallback rule applied — where a country is
+      unlisted, or listed with no total for a good, all three tonnage columns
+      and the production route come from the "Other countries and territories"
+      row. The 4-digit CN headings that carry no value in any country are
+      dropped here rather than in the seed, which is a transcription.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_or_territory, good_key]
+    columns:
+      - name: country_or_territory
+        description: The annex's own label, which is the legally meaningful one.
+        data_tests: [not_null]
+      - name: good_key
+        data_tests: [not_null]
+      - name: is_fallback_table
+        description: >
+          This row *is* the "Other countries and territories" line, rather than
+          a country that fell back to it.
+        data_tests: [not_null]
+      - name: is_country_specific
+        description: >
+          The numbers are the country's own. False means they came from the
+          fallback row, which estimates the worst-covered part of the world.
+        data_tests: [not_null]
+      - name: total_t_co2e_per_t
+        description: Embedded emissions per tonne, before any mark-up.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: direct_t_co2e_per_t
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: indirect_t_co2e_per_t
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+
+  - name: int_retail_return_matches
+    config:
+      group: retail
+    description: >
+      Every return line with the sale it most likely reverses, inferred by an
+      `asof join` on the same customer's most recent prior purchase of the same
+      product. Unmatched lines are kept with a null match — dropping them would
+      improve the match rate by removing the hardest cases. Classifying the
+      result is `fct_retail_returns`.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [invoice, line_number]
+    columns:
+      - name: invoice
+        data_tests: [not_null]
+      - name: line_number
+        data_tests: [not_null]
+      - name: quantity_returned
+        description: >
+          Positive, flipped from the source's negative quantity. The signed
+          money column stays signed.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: original_invoice
+        description: Null where the rule found no prior purchase in the window.

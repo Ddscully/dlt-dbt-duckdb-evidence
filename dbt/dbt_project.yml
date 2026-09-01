@@ -93,6 +93,20 @@ models:
       # point — they are the only places one domain reaches into another's
       # cleaning layer, so they are visible instead of implied.
       +access: private
+    intermediate:
+      # `view`, not `ephemeral`, and the reason is testability rather than
+      # storage: an ephemeral model is inlined into its consumer and has no
+      # relation of its own, so it cannot carry a unit test — which is the whole
+      # reason these three exist. A DuckDB view costs nothing, and `just sql` can
+      # read one.
+      +materialized: view
+      +schema: intermediate
+      # Same rule as staging, and here it needs no exception at all: each of
+      # these is consumed only inside its own group. That is what makes the
+      # layer cheap — the groups are by *domain*, so a derivation shared between
+      # two models of one domain never crosses a boundary. A layer-shaped group
+      # split would have made every one of these `protected`.
+      +access: private
     marts:
       +materialized: table
       +schema: marts

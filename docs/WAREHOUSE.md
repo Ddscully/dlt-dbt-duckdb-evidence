@@ -76,8 +76,9 @@ One DuckDB file, `data/warehouse.duckdb`:
 
 | Schema | Written by | Contents |
 |--------|-----------|----------|
-| `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`) |
+| `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`, `om_weather_daily`) |
 | `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain, except `stg_eu_electricity_prices_semiannual` (Eurostat's half-years), `stg_fx_rates` (`(rate_date, quote_currency)`) and `stg_retail_lines` (`(invoice, line_number)`) |
+| `intermediate` | dbt (views) | `int_*`, the derivations two models share or one model should be tested apart from: `int_country_year_observed` (the country-years the four country-stats sources report, read by both the spine and the wide fact), `int_cbam_default_factors` (Annex I's row-level fallback rule) and `int_retail_return_matches` (the returns-to-purchase inference). `private`, uncontracted, and not published as Parquet |
 | `marts` | dbt (tables) | `dim_country_year`, the country-year spine; `fct_emissions_energy`, the wide joined fact; `dim_grid_emission_factors`, grid factors packaged as a Scope 2 reference table; `fct_co2_estimate_versions`, revision history; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain; `fct_example_scope2_emissions`, the worked example over twelve invented sites; `fct_cbam_exposure`, the CBAM border cost per tonne by sourcing country; the FX and calendar tables (`dim_date`, `dim_currency`, `fct_fx_rates_*`); and the five retail models (`fct_retail_order_line`, `dim_retail_product`, `dim_retail_customer`, `fct_retail_returns`, `fct_retail_customer_cohorts`) |
 | `history` | dbt (snapshots) | `snap_co2_estimates` and `snap_grid_emission_factors`, SCD2 versions of OWID's CO₂ numbers and of the Scope 2 factors. The two tables a rebuild can't reproduce |
 | `analytics` | Polars | derived metrics (`co2_intensity`, `retail_rfm`) and the `pipeline_*` observability tables |
@@ -92,8 +93,8 @@ grain.
 **This is where `raw` lives.** dlt lands the eight source tables into a
 [DuckLake](https://ducklake.select) catalog — plain Parquet under
 `data/lakehouse/data/`, plus a catalog database holding schema, snapshot lineage
-and per-file statistics. dbt attaches it and builds `staging`, `marts` and
-`history` into `data/warehouse.duckdb`, which is the only thing the release
+and per-file statistics. dbt attaches it and builds `staging`,
+`intermediate`, `marts` and `history` into `data/warehouse.duckdb`, which is the only thing the release
 publishes. `just lakehouse` reports what the catalog holds; `just ingest` fills
 it.
 

@@ -1,11 +1,11 @@
 ---
 name: unit-testing-dbt-models
-description: The nine dbt models that carry unit tests and what mutating each one proved — the method (break the model against a warehouse copy, record what moves), the fixtures that separate an ordering from its permutations, and the defects the data tests could not see. Use when adding or changing a dbt unit test, judging whether a model's data tests are adequate, or investigating a model that is not reproducible between builds.
+description: The twelve dbt models that carry unit tests and what mutating each one proved — the method (break the model against a warehouse copy, record what moves), the fixtures that separate an ordering from its permutations, and the defects the data tests could not see. Use when adding or changing a dbt unit test, judging whether a model's data tests are adequate, or investigating a model that is not reproducible between builds.
 ---
 
 # Unit testing the models (`dbt/models/**/_unit_tests.yml`)
 
-Twenty-eight unit tests over ten models. They exist because a data test cannot
+Twenty-nine unit tests over twelve models. They exist because a data test cannot
 see a wrong answer that is a legal one, and every one of them was written after
 mutating the model and watching its data tests stay green. This file is the
 record of those mutations — what moved, what did not, and which fixture shapes
@@ -34,9 +34,9 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     tree is dirty by definition; `git checkout` is a revert to HEAD, not an
     undo, and it destroyed a round of uncommitted edits to three files.
 
-## The ten models, and what mutating each one proved
+## The twelve models, and what mutating each one proved
 
-- **There are twenty-eight unit tests, over ten models, and they exist because a data
+- **There are twenty-nine unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`

@@ -52,34 +52,15 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      # No INGEST_FIXTURES: see the note at the top.
-      # Absolute for the same reason, and here it is not merely tidiness: dlt
-      # writes the catalog from the repo root, so DuckLake records an *absolute*
-      # data_path, while dbt resolves profiles.yml's relative default from dbt/.
-      # DuckLake stores the path as given and compares the two as strings, so
-      # one directory under two spellings is refused — `DATA_PATH parameter
-      # "../data/lakehouse/data/" does not match existing data path`.
-      LAKEHOUSE_DIR: ${{ github.workspace }}/data/lakehouse
-      DAGSTER_HOME: ${{ github.workspace }}/.dagster
+      # The only variable this workflow owns; every `gh` call below reads it.
+      # No INGEST_FIXTURES: see the note at the top. The three paths, and the
+      # `dbt parse` the graph cannot load without, come from the setup action and
+      # `just materialize`'s own dependency chain.
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
 
-      # Pinned to the exact patch: setup-uv stopped publishing moving major/minor
-      # tags at v8, so `@v9` does not resolve. Bump it by hand.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
-        with:
-          enable-cache: true
-
-      - name: Sync deps
-        run: uv sync --group orchestration
-
-      # dbt/dbt_packages/ and dbt/target/ are gitignored, and `prepare_if_dev`
-      # only fires under `dagster dev` — so outside the UI the manifest has to
-      # be built explicitly before the asset graph can load.
-      - name: Install dbt packages and parse the project
-        run: cd dbt && uv run dbt deps && uv run dbt parse
+      - uses: ./.github/actions/setup
 
       # Two kinds of state cannot be rebuilt, for two different reasons, and they
       # now live in two different artifacts. The `history` schema is state *in
@@ -164,13 +145,7 @@ jobs:
       # restored. That's fine for dlt: it keys "fresh destination" on its own
       # bookkeeping inside `raw`, which a history-only file doesn't have.
       - name: Build the warehouse from live sources
-        run: |
-          mkdir -p "$DAGSTER_HOME"
-          # Two jobs: an asset job takes one partitions definition, and the retail
-          # ingest is monthly where wb_wdi is yearly. dbt reads the retail table, so
-          # this one goes first (see orchestration/definitions.py).
-          uv run dagster job execute -m orchestration.definitions -j load_retail
-          uv run dagster job execute -m orchestration.definitions -j full_refresh
+        run: just materialize
 
       # Writes data/export/: the DuckDB copy, a Parquet per modelled table,
       # manifest.json, SHA256SUMS, ATTRIBUTION.md and the release body.

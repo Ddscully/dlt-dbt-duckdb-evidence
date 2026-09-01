@@ -1,0 +1,180 @@
+# One `unit_tests:` key in this file, and it stays that way. dbt *merges* a
+# second block rather than letting the last win, warning
+# `DuplicateYAMLKeysDeprecation` — nothing red, nothing missing, and gone in
+# Fusion.
+#
+# Five tests, and all five moved here from `marts/_unit_tests.yml` rather than
+# being written fresh. That is the layer paying for itself: each was already
+# testing a rule that now has a model of its own, and each had to reach that
+# rule through a mart's inputs and output columns to do it.
+unit_tests:
+  # --- int_cbam_default_factors ---------------------------------------------
+  #
+  # Both of these mocked **five** inputs before the split — the two seeds they
+  # need, plus a markup schedule, a country dimension and an empty grid-factor
+  # table, none of which the fallback rule touches. The empty grid input even
+  # carried a comment explaining why an unrelated table was in the fixture. They
+  # mock one input now, and assert the columns the rule actually decides.
+
+  - name: cbam_defaults_take_the_fallback_row_whole_or_not_at_all
+    model: int_cbam_default_factors
+    description: >
+      The fallback is a row-level rule, not a column-level one. Where a listed
+      country has no total for a good, the regulation sends the whole line to the
+      "Other countries and territories" table — so direct, indirect and total
+      must all come from that one row. Picking each column from whichever source
+      happens to hold it produces a line that exists nowhere in the regulation,
+      which is what a per-column `coalesce` once did to Chile's line pipe. That
+      row was corrected out of the annex in July 2026 and **no row in the current
+      source can reach this branch**: zero of the 12,540 seed rows have a null
+      total beside a non-null direct or indirect. Chile is posed here for that
+      reason. `production_route_code` follows the rule too, and the fixture is
+      built to prove it rather than to record it: Chile carries a route of its
+      own ("B") and the fallback carries a different one ("F"), so the only way
+      to expect "F" is to read the route off the row the tonnages came from. It
+      did not follow the rule until 2026-08-24 — 202 warehouse rows showed a
+      blank route beside a tonnage whose fallback row had one.
+    given:
+      - input: ref('cbam_default_values')
+        rows:
+          # The annex's catch-all. Its own `country_iso3` is null, which is what
+          # makes it the fallback, and it is `is_country_specific` because the
+          # number on it is its own.
+          - {country_or_territory: "Other countries and territories", country_iso3: null,  good_key: "7601-unwrought-aluminium", default_direct_t_co2e_per_t: 3.0, default_indirect_t_co2e_per_t: 7.0, default_total_t_co2e_per_t: 10.0, production_route_code: "F"}
+          # A listed country with a value of its own: keeps all three columns.
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "7601-unwrought-aluminium", default_direct_t_co2e_per_t: 1.5, default_indirect_t_co2e_per_t: 3.5, default_total_t_co2e_per_t: 5.0, production_route_code: "A"}
+          # The trap. Direct and indirect published, total absent, route
+          # present *and different from the fallback's*. Under the rule this
+          # line is the fallback's 3.0 / 7.0 / 10.0 on route F — never its own
+          # 4.0 / 6.0 with someone else's total, and never route B.
+          - {country_or_territory: "Chile", country_iso3: "CHL", good_key: "7601-unwrought-aluminium", default_direct_t_co2e_per_t: 4.0, default_indirect_t_co2e_per_t: 6.0, default_total_t_co2e_per_t: null, production_route_code: "B"}
+    expect:
+      rows:
+        - {country_or_territory: "Other countries and territories", is_fallback_table: true,  is_country_specific: true,  production_route_code: "F", direct_t_co2e_per_t: 3.0, indirect_t_co2e_per_t: 7.0, total_t_co2e_per_t: 10.0}
+        - {country_or_territory: "Norway", is_fallback_table: false, is_country_specific: true,  production_route_code: "A", direct_t_co2e_per_t: 1.5, indirect_t_co2e_per_t: 3.5, total_t_co2e_per_t: 5.0}
+        - {country_or_territory: "Chile",  is_fallback_table: false, is_country_specific: false, production_route_code: "F", direct_t_co2e_per_t: 3.0, indirect_t_co2e_per_t: 7.0, total_t_co2e_per_t: 10.0}
+
+  - name: cbam_defaults_drop_the_headings_that_no_country_prices
+    model: int_cbam_default_factors
+    description: >
+      23 of the annex's 283 goods carry a description and no value anywhere, not
+      even in the fallback table: they are 4-digit CN headings printed above the
+      subheadings that hold the numbers, and two of them say "see below" where a
+      value would go. They belong in the seed, which is a transcription, and not
+      in a table of carbon intensities, where they could only ever be null. The
+      filter is `having count(<total>) > 0` and the `count` is over the column
+      rather than `count(*)` — the distinction is the entire test, because a
+      heading has plenty of rows and no values. Asserted on which rows exist
+      rather than on any number, since a heading's whole failure mode is being
+      present.
+    given:
+      - input: ref('cbam_default_values')
+        rows:
+          # CN heading 3102: rows in every country, a value in none of them.
+          - {country_or_territory: "Other countries and territories", country_iso3: null,  good_key: "3102-mineral-or-chemical-fertilisers-nitrogenous", default_direct_t_co2e_per_t: null, default_indirect_t_co2e_per_t: null, default_total_t_co2e_per_t: null, production_route_code: null}
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "3102-mineral-or-chemical-fertilisers-nitrogenous", default_direct_t_co2e_per_t: null, default_indirect_t_co2e_per_t: null, default_total_t_co2e_per_t: null, production_route_code: null}
+          # The subheading beneath it, which is where the numbers actually are.
+          - {country_or_territory: "Other countries and territories", country_iso3: null,  good_key: "3102100000-urea", default_direct_t_co2e_per_t: 40.0, default_indirect_t_co2e_per_t: 10.0, default_total_t_co2e_per_t: 50.0, production_route_code: null}
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "3102100000-urea", default_direct_t_co2e_per_t: 40.0, default_indirect_t_co2e_per_t: 10.0, default_total_t_co2e_per_t: 50.0, production_route_code: "A"}
+    expect:
+      rows:
+        - {country_or_territory: "Other countries and territories", good_key: "3102100000-urea", total_t_co2e_per_t: 50.0}
+        - {country_or_territory: "Norway", good_key: "3102100000-urea", total_t_co2e_per_t: 50.0}
+
+  # --- int_retail_return_matches --------------------------------------------
+  #
+  # These asserted through `fct_retail_returns`' presentation columns before the
+  # split — `match_status`, `quantity_is_consistent`, `price_differs_from_original`
+  # — to prove things about an `asof join`. They asserted the join's own output
+  # now. The third one is new *as a test* and not as coverage: it is the half of
+  # `retail_returns_names_each_miss_by_the_reason_it_missed` that stopped being
+  # reachable from the mart once the mart mocked this model. Leaving it behind
+  # would have deleted the only check on the `>=` boundary and on the non-product
+  # filter, which is how a refactor quietly costs you a test.
+
+  - name: return_matches_take_the_latest_purchase_before_the_return_and_no_other
+    model: int_retail_return_matches
+    description: >
+      The asof join is "most recent prior", and all three words carry weight.
+      Three purchases of the same product by the same customer: an earlier one,
+      the one that should win, and one *after* the return that must never be
+      reachable. `original_quantity` is the tell — 10 would mean the join took
+      the first, 99 would mean it looked forward.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          - {invoice: "500", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 10, unit_price: 2.0, line_amount_gbp: 20.0, invoice_ts: "2024-01-01 09:00:00", invoice_date: "2024-01-01"}
+          - {invoice: "501", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 5,  unit_price: 2.0, line_amount_gbp: 10.0, invoice_ts: "2024-01-05 09:00:00", invoice_date: "2024-01-05"}
+          # After the return. Reachable only by a join that looks forward.
+          - {invoice: "502", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 99, unit_price: 2.0, line_amount_gbp: 198.0, invoice_ts: "2024-01-20 09:00:00", invoice_date: "2024-01-20"}
+          # Exactly what invoice 501 sold: a complete return, five days later.
+          - {invoice: "C601", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -5, unit_price: 2.0, line_amount_gbp: -10.0, invoice_ts: "2024-01-10 09:00:00", invoice_date: "2024-01-10"}
+    expect:
+      rows:
+        - {invoice: "C601", quantity_returned: 5, original_invoice: "501", original_quantity: 5, original_invoice_date: "2024-01-05", original_unit_price: 2.0}
+
+  - name: return_matches_break_a_tied_purchase_the_same_way_every_build
+    model: int_retail_return_matches
+    description: >
+      An `asof join` with several rows tied on its inequality key picks one
+      arbitrarily, and 33,518 groups in the purchase universe are tied — 70,174
+      of 802,716 lines, 8.7%. 604 return lines land on one. Until 2026-08-24 the
+      model was therefore not reproducible: three runs against byte-identical
+      sources gave 16,031 / 16,032 / 16,030 clean matches. `purchases` now keeps
+      the lowest invoice then the lowest line number at each (customer, product,
+      instant), so the choice is stated instead of emergent. Three lines of the
+      same product at one instant, deliberately given out of order and with
+      different quantities, so which one wins is visible in `original_quantity`
+      and not only in `original_line_number`. Nothing asserts the chosen line is
+      the *better* match — only that it is always the same one.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          # All three at the identical instant, and the lowest *line number* is
+          # deliberately on the highest *invoice*: ordering by line first would
+          # pick 701/1, so the fixture separates `(invoice, line_number)` from
+          # `(line_number, invoice)` instead of passing under both. Listed out
+          # of order so a fixture-order dependency would show as 700/5 winning.
+          - {invoice: "700", line_number: 5, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 9, unit_price: 1.0, line_amount_gbp: 9.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
+          - {invoice: "701", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 7, unit_price: 1.0, line_amount_gbp: 7.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
+          - {invoice: "700", line_number: 3, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 2, unit_price: 1.0, line_amount_gbp: 2.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
+          - {invoice: "C700", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -4, unit_price: 1.0, line_amount_gbp: -4.0, invoice_ts: "2024-02-05 09:00:00", invoice_date: "2024-02-05"}
+    expect:
+      rows:
+        # Invoice 700 line 3 wins: lowest invoice, then lowest line within it.
+        # Its quantity is 2, so the return of 4 exceeds it — the artefact the
+        # model comment quantifies. 56 of the warehouse's 366 rows in that bucket
+        # would be plain matches if tied lines were summed instead of chosen
+        # between. That is a separate decision and this test pins today's.
+        - {invoice: "C700", original_invoice: "700", original_line_number: 3, original_quantity: 2, quantity_returned: 4}
+
+  - name: return_matches_admit_a_same_instant_reversal_and_exclude_non_product_lines
+    model: int_retail_return_matches
+    description: >
+      Two rules about which rows reach the join at all, both of which used to be
+      checked from the mart. The POST cancellation is here to stay out: without
+      `item_type = 'product'` on the `returns` filter the warehouse gains 1,207
+      rows and reports returning things nobody buys. The last pair is bought and
+      returned in the same instant, which the asof condition admits because it is
+      `>=` — and that boundary is worth more than it looks: 88 matches in the
+      warehouse share their purchase's instant, so tightening it to `>` costs 2
+      of them a match and silently re-points the other 86 at an older sale,
+      rewriting five columns with no change to the row count. Asserted on the
+      rows that exist as well as on the match, because the POST line's whole
+      failure mode is being present.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          - {invoice: "500", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 5, unit_price: 2.0, line_amount_gbp: 10.0, invoice_ts: "2024-01-05 10:00:00", invoice_date: "2024-01-05"}
+          - {invoice: "C601", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -3, unit_price: 2.0, line_amount_gbp: -6.0, invoice_ts: "2024-01-10 10:00:00", invoice_date: "2024-01-10"}
+          # A cancelled postage line. A correction, not a return: must not appear.
+          - {invoice: "C605", line_number: 1, customer_id: "C1", stock_code: "POST", invoice_type: "cancellation", item_type: "shipping", quantity: -1, unit_price: 18.0, line_amount_gbp: -18.0, invoice_ts: "2024-01-13 10:00:00", invoice_date: "2024-01-13"}
+          # Bought and sent back in the same instant. The asof condition is `>=`
+          # rather than `>` so this matches — only 2 rows in the warehouse, but
+          # the alternative silently calls a same-batch reversal unmatchable.
+          - {invoice: "503", line_number: 1, customer_id: "C3", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 4, unit_price: 3.0, line_amount_gbp: 12.0, invoice_ts: "2024-01-06 12:00:00", invoice_date: "2024-01-06"}
+          - {invoice: "C606", line_number: 1, customer_id: "C3", stock_code: "SKU3", invoice_type: "cancellation", item_type: "product", quantity: -2, unit_price: 3.0, line_amount_gbp: -6.0, invoice_ts: "2024-01-06 12:00:00", invoice_date: "2024-01-06"}
+    expect:
+      rows:
+        - {invoice: "C601", quantity_returned: 3, original_invoice: "500", original_quantity: 5}
+        - {invoice: "C606", quantity_returned: 2, original_invoice: "503", original_quantity: 4}

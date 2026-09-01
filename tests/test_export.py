@@ -59,6 +59,7 @@ LAKEHOUSE_LOADED_AT = "2026-08-27 16:07:52+00"
 SETUP = f"""
 create schema raw;
 create schema staging;
+create schema intermediate;
 create schema marts;
 create schema analytics;
 
@@ -73,7 +74,13 @@ create view warehouse.staging.stg_co2 as
 create view warehouse.staging.stg_country as
     select * from (values ('USA', 'North America'), ('FRA', 'Europe & Central Asia'))
     t(country_iso3, region);
-create table marts.fct_emissions_energy as select * from staging.stg_co2;
+-- A *chained* view: intermediate over staging over raw. The staging views
+-- above are one hop from a table, so they would survive a copy that broke the
+-- second hop; this is the shape the intermediate layer actually ships.
+create view warehouse.intermediate.int_country_year_observed as
+    select country_iso3, year from warehouse.staging.stg_co2;
+create table marts.fct_emissions_energy as
+    select * from intermediate.int_country_year_observed;
 create table analytics.co2_intensity as select country_iso3, year, 1.0 as intensity
     from staging.stg_co2;
 """
@@ -198,6 +205,13 @@ def test_the_copied_warehouse_keeps_its_views_working(export: dict):
     con = duckdb.connect()
     con.execute(f"attach '{export['out'] / 'warehouse.duckdb'}' as warehouse (read_only)")
     assert con.execute("select count(*) from warehouse.staging.stg_co2").fetchone() == (2,)
+    # And a view over a view: `intermediate` sits on `staging`. This fixture
+    # carries its own in-file `raw`, so both hops resolve here whatever the
+    # exporter does — the version of this that can actually fail is on the
+    # catalog-backed warehouse below.
+    assert con.execute(
+        "select count(*) from warehouse.intermediate.int_country_year_observed"
+    ).fetchone() == (2,)
     # raw survives the copy too — the DuckDB file is the complete artifact.
     assert con.execute("select count(*) from warehouse.raw.owid_co2").fetchone() == (2,)
 
@@ -621,11 +635,16 @@ def warehouse_on_a_catalog(tmp_path: Path, lakehouse_dir: Path) -> Path:
         read_only=True,
     )
     con.execute("create schema staging")
+    con.execute("create schema intermediate")
     con.execute("create schema marts")
     con.execute("create schema analytics")
     con.execute(
         "create view warehouse.staging.stg_weather_daily as "
         "select country_iso3, temperature_2m_mean from lakehouse.raw.om_weather_daily"
+    )
+    con.execute(
+        "create view warehouse.intermediate.int_weather as "
+        "select country_iso3 from warehouse.staging.stg_weather_daily"
     )
     con.execute("create table marts.fct_weather as select * from staging.stg_weather_daily")
     con.execute(
@@ -683,6 +702,45 @@ def test_the_staging_views_are_solidified_against_the_catalog_the_caller_named(
         con.close()
 
     assert landed == ["DEU", "FRA"], "solidified against the module constant, not the argument"
+
+
+def test_an_intermediate_view_still_resolves_with_no_catalog_attached(
+    warehouse_on_a_catalog: Path,
+    lakehouse_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """`intermediate` is the first layer that is a view over a view, and only the
+    second hop is solidified.
+
+    `solidify_staging` materialises `staging` because those views read
+    `lakehouse.raw`, which the consumer has not attached. An `int_*` view reads
+    *staging*, so it is carried across as a view and inherits whatever staging
+    became. If staging ever shipped unsolidified — or if a future intermediate
+    read the catalog directly — this raises `Catalog "lakehouse" does not exist`
+    on the consumer's machine and nowhere before it, which is the same trap
+    `just sql` exists to work around, one layer up.
+
+    Opened with a bare read-only connect and no ATTACH, deliberately: that is the
+    consumer's position, and attaching the catalog here would hide the defect.
+    """
+    monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
+    out = tmp_path / "export-chained"
+    run(
+        str(warehouse_on_a_catalog),
+        str(out),
+        tag="data-1999-12-31",
+        repo="acme/demo",
+        lakehouse_dir=lakehouse_dir,
+    )
+
+    con = duckdb.connect(str(out / "warehouse.duckdb"), read_only=True)
+    try:
+        assert con.execute(
+            "select country_iso3 from intermediate.int_weather order by 1"
+        ).fetchall() == [("DEU",), ("FRA",)]
+    finally:
+        con.close()
 
 
 def _unpack(manifest: dict, into: Path) -> Path:

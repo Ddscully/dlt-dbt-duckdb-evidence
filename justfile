@@ -4,7 +4,14 @@
 set dotenv-load := true
 
 # Dagster keeps its run/event storage here (gitignored except dagster.yaml).
-export DAGSTER_HOME := justfile_directory() / ".dagster"
+#
+# `env(...)` rather than a bare assignment, matching `LAKEHOUSE_DIR` below: a
+# recipe called from a context that already set this — CI does, from
+# `.github/actions/setup` — must take the caller's value rather than silently
+# substituting its own. The two agree in CI (`$GITHUB_WORKSPACE` *is*
+# `justfile_directory()` there), which is exactly why an override that quietly
+# won would be invisible until the day they differed.
+export DAGSTER_HOME := env("DAGSTER_HOME", justfile_directory() / ".dagster")
 
 # **Absolute, and exported for every recipe — this one is not a convenience.**
 # A DuckLake catalog stores its `data_path` exactly as given and checks it on
@@ -91,8 +98,9 @@ dbt-build: dbt-deps
 # so on a fresh clone the graph raises DagsterDbtManifestNotFoundError before a
 # single asset runs. `just dagster` gets it for free (dbt_project.prepare_if_dev()
 # fires under the dev CLI, which sets DAGSTER_IS_DEV_CLI); `dagster job execute`
-# and `dagster asset` do not, which is why all four workflows run this same pair
-# by hand.
+# and `dagster asset` do not. All four workflows used to run this same pair by
+# hand; they call `just materialize` now, so the dependency below is the only
+# place the requirement is stated.
 # (`just --list` renders only the line directly above a recipe.)
 # Write dbt/target/manifest.json — the Dagster graph won't load without it
 dbt-parse: dbt-deps
