@@ -108,14 +108,24 @@ Warehouse contents: 344,242 staging rows, 808,787 mart rows (43,138 of them the
 wide fact and 646k the three FX tables), 9,821 snapshot rows across the two
 `history` tables.
 
-CI, from the repo's own run history (median of successful runs):
+CI, from the repo's own run history — median of the successful runs in the last
+40, re-measured 2026-09-01:
 
-| Workflow | Median | What it does |
-|----------|--------|--------------|
-| `ci` | **92 s** | pytest + the whole asset graph against fixtures, offline |
-| `nightly` | **154 s** | the same graph against live sources |
-| `pages` | **199 s** | live build + the Evidence site + deploy |
-| `release-data` | **178 s** | live build + export + a dated GitHub release |
+| Workflow | Median | Range | n | What it does |
+|----------|--------|-------|---|--------------|
+| `ci` | **153 s** | 136–187 | 37 | pytest + the whole asset graph against fixtures, offline |
+| `nightly` | **173 s** | 89–985 | 32 | the same graph against live sources |
+| `pages` | **273 s** | 174–712 | 36 | live build + the Evidence site + deploy |
+| `release-data` | **154 s** | 109–247 | 5 | live build + export + a dated GitHub release |
+
+**Every one of those was stale, and `ci` was stale by 66%** — it read 92 s,
+measured before the retail source, the weather source and the DuckLake move.
+Nothing could have said so: `tests/test_documented_counts.py` guards counts by
+scanning integers in front of a *test*-noun, and a **timing** has no such
+anchor. The range and `n` ship beside the median for that reason — a single
+number invites exactly the quiet decay that produced the 92 s, and the two live
+workflows' spread (`nightly` reaching 985 s, `pages` 712 s) is a property of the
+public APIs rather than noise to be averaged away.
 
 **The dollar cost is zero**, and I'd rather say that plainly than dress it up:
 GitHub Actions' free tier, no cloud warehouse, no credentials, no bill. That is a
