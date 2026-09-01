@@ -9,7 +9,7 @@ Produces `data/export/`:
   ATTRIBUTION.md                    who owns the data (it isn't us)
   RELEASE_NOTES.md                  the GitHub release body
 
-Run:  uv run python -m scripts.export_warehouse            (or `just export`)
+Run:  uv run python -m publish.export_warehouse            (or `just export`)
 
 `.github/workflows/release-data.yml` runs this after materializing the asset graph
 against the live sources and uploads the directory as a dated GitHub release, so
@@ -533,7 +533,7 @@ def _history(con: duckdb.DuckDBPyConnection) -> dict | None:
     """How much revision history the published snapshot carries.
 
     `release-data.yml` restores `history` from the previous release before it
-    builds (see `scripts/restore_history.py`), so this grows release over
+    builds (see `publish/restore_history.py`), so this grows release over
     release. `None` when there is no snapshot to describe at all — an export of
     a warehouse whose mart wasn't built, rather than one that has simply never
     seen a revision, which reports zero.

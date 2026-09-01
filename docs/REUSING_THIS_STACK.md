@@ -48,9 +48,9 @@ justfile recipes and the asset graph all still call the same names.
 - `lake/lakehouse.py` — where the DuckLake landing zone lives, `PUBLISHED_TABLES`
   and the merge keys.
 - `transform/pipeline_status.py` — `SOURCE_TABLES` and `LAYERS`.
-- `scripts/export_warehouse.py` — `PUBLISHED_SCHEMAS`, `ATTRIBUTION`, the release
+- `publish/export_warehouse.py` — `PUBLISHED_SCHEMAS`, `ATTRIBUTION`, the release
   notes and whatever your manifest wants that the generic one can't know.
-- `scripts/restore_history.py` — the schema name and the CLI.
+- `publish/restore_history.py` — the schema name and the CLI.
 
 ### Copy verbatim — the tooling
 
@@ -78,7 +78,7 @@ justfile recipes and the asset graph all still call the same names.
 
 ### Adapt — the structure holds, the specifics don't
 
-- `scripts/build_report.py` — `TABLE_TO_DBT_MODEL` and `TABLE_TO_ASSET_KEY`, the
+- `publish/build_report.py` — `TABLE_TO_DBT_MODEL` and `TABLE_TO_ASSET_KEY`, the
   two maps that give the Evidence site one dependency per table it reads.
 - `scripts/record_fixtures.py`.
 - `orchestration/assets.py` — the asset shapes carry over almost unchanged, and
@@ -98,8 +98,11 @@ justfile recipes and the asset graph all still call the same names.
 
 ### Delete — this is the example, not the framework
 
-`ingest/pipeline.py` (keep `_get_json`, `load_groups`, `build_pipeline` and the
-`REFRESH` constant; everything else is six sources), all of `dbt/models`,
+All of `ingest/sources/` — that is one module per publisher and every one of
+them is this example's domain. Keep `ingest/http.py` and, in
+`ingest/pipeline.py`, `load_groups`, `build_pipeline`, `pipeline_name` and the
+`REFRESH` constant: that file is coordination, and what it coordinates is the
+list you are replacing. Then all of `dbt/models`,
 `dbt/seeds` and `dbt/snapshots`, `transform/co2_intensity.py`, all of
 `reports/pages` and `reports/sources/warehouse/*.sql`, `tests/fixtures/`,
 and roughly half of `CLAUDE.md`.
@@ -112,7 +115,7 @@ or stale.
 
 | Name | Set in | Must match |
 |------|--------|------------|
-| dlt resource `name=` | `ingest/pipeline.py` | the `raw` table name, and the dbt source's `name:` |
+| dlt resource `name=` | `ingest/sources/<source>.py` | the `raw` table name, and the dbt source's `name:` |
 | dbt source `name:` | `dbt/models/staging/_sources.yml` | the dlt resource name |
 | Dagster key `raw/<resource>` | `RawSchemaDltTranslator` | the key `dagster-dbt` derives from `_sources.yml` |
 | mart table name | `dbt/models/marts/*.sql` | the `<schema>.<table>` in the Evidence source queries |
@@ -181,7 +184,7 @@ all five of:
 If any part of your warehouse can't be recomputed from the sources — a dbt
 snapshot is the usual case — decide on day one how it survives. Every workflow
 builds from an empty file, so without a carry-forward step every published copy
-holds one version per row forever and looks broken. `scripts/restore_history.py`
+holds one version per row forever and looks broken. `publish/restore_history.py`
 is the shape: download the previous release, copy the schema in *before* the graph
 runs, and verify the result is no smaller than what went in.
 
@@ -266,9 +269,9 @@ diffability argument went with the old format too: DuckLake content-addresses
 its files, so a diff of the *files* no longer means anything and `revisions()`
 compares two snapshots instead.
 
-- **Snapshots** (`dbt/snapshots/`, `scripts/restore_history.py`) — only if your
+- **Snapshots** (`dbt/snapshots/`, `publish/restore_history.py`) — only if your
   publishers restate. If they don't, this layer records nothing.
-- **Publishing** (`scripts/export_warehouse.py`, `release-data.yml`) — only if
+- **Publishing** (`publish/export_warehouse.py`, `release-data.yml`) — only if
   someone consumes the data without running the pipeline. Note that it turns
   "we use public data" into "we redistribute public data", which is an attribution
   obligation.

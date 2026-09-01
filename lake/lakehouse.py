@@ -254,7 +254,7 @@ def rows(table: str, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> int:
 def carried_rows(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> int:
     """Rows here that a rebuild cannot afford to fetch again.
 
-    The landing-zone counterpart of `scripts/restore_history.irreplaceable_rows`,
+    The landing-zone counterpart of `publish/restore_history.irreplaceable_rows`,
     and separate from it on purpose: that one counts relations inside the DuckDB
     file and this state is not in it. Both the release workflow's "what did we
     carry in" and its "did it shrink" read this, so a table added to
@@ -295,7 +295,7 @@ def preflight(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> None:
     """Every reason a restore would refuse, asked before anything is written.
 
     Split out of `restore` so a caller that mutates something *else* first can
-    ask up front. `scripts/restore_history.py` is that caller and is the reason
+    ask up front. `publish/restore_history.py` is that caller and is the reason
     this exists: its `run()` replaces the warehouse's `history` schema and *then*
     carries the landing zone in, so a refusal raised from inside the second step
     had already let the first one happen — last month's snapshots copied over the
@@ -326,7 +326,7 @@ def preflight(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> None:
 def restore(source_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> dict[str, int]:
     """Copy a published lakehouse into `lakehouse_dir` before the graph runs.
 
-    The landing-zone analogue of `scripts/restore_history.py`, and simpler than
+    The landing-zone analogue of `publish/restore_history.py`, and simpler than
     it: a DuckLake is a directory, so this is a copy rather than a schema-aware
     `create or replace`. It **refuses a destination that already holds rows**, for
     the reason that module states — the weather archive is no easier to get back
@@ -378,7 +378,7 @@ def _refuse_warm_state(state: Path) -> None:
     """Stop before a restore that dlt's local state would make fail.
 
     This guard moved here with the landing zone; it used to live in
-    `scripts/restore_history.py`, back when a *table* was carried into the
+    `publish/restore_history.py`, back when a *table* was carried into the
     warehouse's `raw` schema. The mechanism changed completely — a directory copy
     rather than a `create or replace` — and the failure did not change at all,
     which is worth knowing before assuming a new implementation escapes an old

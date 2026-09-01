@@ -70,7 +70,7 @@ jobs:
         env:
           PII_SALT: ci-not-a-release-salt
         run: |
-          uv run python -m scripts.export_warehouse
+          uv run python -m publish.export_warehouse
           cd data/export && sha256sum -c SHA256SUMS
 
       # The recipe, not a bare sqlfluff call: the paths (`models snapshots`) and

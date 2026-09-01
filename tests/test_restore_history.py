@@ -1,5 +1,5 @@
 """Unit tests for the release-to-release history carry-forward
-(`scripts/restore_history.py`).
+(`publish/restore_history.py`).
 
 Miniature DuckDB files in a tmp dir, like `test_export.py` — what matters here is
 the contract, not the numbers: history lands in the destination, an empty source
@@ -18,8 +18,8 @@ from lake import lakehouse
 from modern_data_stack import history
 from modern_data_stack.db import scalar
 from modern_data_stack.history import DLT_COLUMNS, SCD2_COLUMNS, Carry
-from scripts import restore_history
-from scripts.restore_history import irreplaceable_rows, run
+from publish import restore_history
+from publish.restore_history import irreplaceable_rows, run
 
 # Captured before the autouse fixture below replaces it, so the one test that
 # exercises the real lookup can still reach it.
@@ -459,7 +459,7 @@ def test_the_release_layout_is_the_one_the_export_writes():
     being told where it is, so the two modules agree on one asset name by
     convention. A rename on either side makes the restore find nothing and
     cold-start the weather archive, with nothing going red."""
-    from scripts.export_warehouse import LAKEHOUSE_ASSET as EXPORTED
+    from publish.export_warehouse import LAKEHOUSE_ASSET as EXPORTED
 
     assert restore_history.LAKEHOUSE_ASSET == EXPORTED
 

@@ -78,7 +78,7 @@ its first source with a *finite budget*.
 - **Carrying the archive forward is what makes it deepen, and it now travels as
   its own release asset.** `raw` lives in the DuckLake catalog under
   `data/lakehouse/`, not in `data/warehouse.duckdb`, so the release publishes
-  `lakehouse.tar.gz` beside the database and `scripts/restore_history.py`
+  `lakehouse.tar.gz` beside the database and `publish/restore_history.py`
   restores both. Verified end to end: restore a release into an empty tree and
   `weather_watermark()` reads the last day it carried, so the next ingest asks
   for a 90-day lookback rather than a three-year cold start.
@@ -105,7 +105,7 @@ its first source with a *finite budget*.
     `Table with name _dlt_version does not exist!`. Carrying dlt's bookkeeping
     along is worse, not better: dlt then expects every table the schema
     describes, and `ecb_fx_rates` is the one that fails. `sync_destination()`
-    does not help. `scripts/restore_history.py` refuses when both conditions
+    does not help. `publish/restore_history.py` refuses when both conditions
     hold and names `rm -rf ~/.dlt/pipelines/modern_data_stack` as the fix.
 - **The 90-day lookback is why weather is the table a revision log is about.**
   Nothing else in this warehouse restates: FX is append-only, retail is frozen at

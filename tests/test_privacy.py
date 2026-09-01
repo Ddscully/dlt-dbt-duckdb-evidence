@@ -26,7 +26,7 @@ import yaml
 
 from modern_data_stack import privacy
 from modern_data_stack.paths import project_root
-from scripts.export_warehouse import EXTRA_CLASSIFICATIONS, MASKED_LABELS, SALT_ENV, pseudonymise
+from publish.export_warehouse import EXTRA_CLASSIFICATIONS, MASKED_LABELS, SALT_ENV, pseudonymise
 
 LABELS = {"direct_identifier", "quasi_identifier", "non_personal"}
 
@@ -379,7 +379,7 @@ def test_an_empty_classified_set_is_refused_at_the_boundary(warehouse, monkeypat
     """The one path that would otherwise be fail-*open*: nothing classified reads
     exactly like nothing to classify, and publishes every identifier in the clear
     while the manifest records that a policy was applied."""
-    monkeypatch.setattr("scripts.export_warehouse.EXTRA_CLASSIFICATIONS", {})
+    monkeypatch.setattr("publish.export_warehouse.EXTRA_CLASSIFICATIONS", {})
     with pytest.raises(privacy.PolicyError, match="refusing to publish"):
         pseudonymise(warehouse, manifest_path="/nonexistent/manifest.json", salt="s")
 
@@ -391,7 +391,7 @@ def test_a_missing_manifest_degrades_instead_of_raising(warehouse, monkeypatch):
     `EXTRA_CLASSIFICATIONS` still names `customer_id`, so every copy of it is
     still found."""
     monkeypatch.setattr(
-        "scripts.export_warehouse.EXTRA_CLASSIFICATIONS",
+        "publish.export_warehouse.EXTRA_CLASSIFICATIONS",
         {("marts", "dim_customer", "customer_id"): "direct_identifier"},
     )
     provenance = pseudonymise(warehouse, manifest_path="/nonexistent/manifest.json", salt="s")

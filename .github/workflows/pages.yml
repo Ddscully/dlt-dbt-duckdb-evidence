@@ -38,7 +38,11 @@ on:
       - "lake/**"
       - "orchestration/**"
       - "src/**"
-      - "scripts/**"
+      # `publish/**`, not `scripts/**`: this job runs `publish.restore_history`
+      # and `publish.build_report`. What is left in `scripts/` is one-off work
+      # whose *output* is checked in (the CBAM seeds), so the site moves when
+      # `dbt/**` does, not when the generator does.
+      - "publish/**"
       - "dbt/**"
       - "reports/**"
       # DAGSTER_HOME is the checked-out .dagster/, so the instance config the
@@ -157,7 +161,7 @@ jobs:
           # follows, and the same line release-data.yml uses.
           gh release download "$prev" --pattern lakehouse.tar.gz \
             --dir prev-release || true
-          uv run python -m scripts.restore_history prev-release/warehouse.duckdb
+          uv run python -m publish.restore_history prev-release/warehouse.duckdb
           rm -rf prev-release
 
       # `materialize-site`, not `materialize`: this is the one workflow whose job

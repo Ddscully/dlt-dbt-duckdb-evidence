@@ -223,7 +223,7 @@ test-pipeline:
 # Package data/export/ for publishing: DuckDB copy, Parquet, checksums, notes
 export-data:
     PII_SALT="${PII_SALT:-$(uv run python -c 'import secrets; print(secrets.token_hex(32))')}" \
-        uv run python -m scripts.export_warehouse
+        uv run python -m publish.export_warehouse
 
 # Prints the table in docs/DATA_PROTECTION.md from the warehouse, so it can be
 # re-checked when the models move. Read-only.
@@ -239,7 +239,7 @@ disclosure-risk:
 #   gh release download --pattern warehouse.duckdb --dir prev
 #   just restore-history prev/warehouse.duckdb
 restore-history from: where
-    uv run python -m scripts.restore_history {{ from }}
+    uv run python -m publish.restore_history {{ from }}
 
 # Re-record the fixtures from the live APIs (hits the network; commit the diff)
 record-fixtures:
@@ -330,7 +330,7 @@ backfill-wdi start end='': where dbt-parse
 # days rather than rounding the range up.
 #
 # The rows are carried forward into the next release, which is what makes this
-# worth doing once rather than every run — see `scripts/restore_history.py`.
+# worth doing once rather than every run — see `publish/restore_history.py`.
 # Follow with `just dbt-build` or `just materialize`.
 backfill-weather start end='': where dbt-parse
     #!/usr/bin/env bash
@@ -392,13 +392,13 @@ typecheck:
 # Wraps the same module the `reports/evidence_site` asset calls, so the recipe and
 # the asset graph can't run different builds.
 report:
-    uv run python -m scripts.build_report
+    uv run python -m publish.build_report
 
 # Evidence caches each source's schema keyed on the source SQL, so a `select *`
 # that gains columns looks unchanged and validation fails against the stale schema.
 # Nuke the cache + reprocess sources, then build. Use after mart columns change.
 report-clean:
-    uv run python -m scripts.build_report --clean
+    uv run python -m publish.build_report --clean
 
 # ---------------------------------------------------------------------------
 # Course (docs/course/) — the sandbox the exercises break on purpose
@@ -494,7 +494,7 @@ clean scope="safe" force="":
     # used to still take the whole safe tier with it on the way to saying no,
     # which is a poor thing for a command that refused to do.
     #
-    # Mirrors `scripts/restore_history.py`: the gate is not "is this scary", it
+    # Mirrors `publish/restore_history.py`: the gate is not "is this scary", it
     # is "is there anything here a rebuild cannot make again". A warehouse with
     # no snapshots and no carried landing tables (a fresh clone, or one built
     # but never snapshotted) goes without ceremony. Anything else stops it until
@@ -514,7 +514,7 @@ clean scope="safe" force="":
         # The path is passed explicitly rather than left to `warehouse_path()`:
         # the deletion below names `data/warehouse.duckdb`, so the gate has to
         # count that file and not whatever `WAREHOUSE_PATH` currently points at.
-        count='from scripts.restore_history import irreplaceable_rows; print(irreplaceable_rows("data/warehouse.duckdb"))'
+        count='from publish.restore_history import irreplaceable_rows; print(irreplaceable_rows("data/warehouse.duckdb"))'
         held=$(uv run python -c "$count") || held=""
         # An unreadable count must refuse, not fall through. `[ "" -gt 0 ]` is an
         # error, but inside an `if` that reads as *false* and `set -e` does not

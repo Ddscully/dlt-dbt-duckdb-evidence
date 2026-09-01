@@ -1,6 +1,6 @@
 """Carry this warehouse's unreproducible tables forward from a published release.
 
-Run:  uv run python -m scripts.restore_history <previous warehouse.duckdb>
+Run:  uv run python -m publish.restore_history <previous warehouse.duckdb>
       (or `just restore-history prev/warehouse.duckdb`)
 
 Every workflow builds from an empty file, so `history.snap_co2_estimates` held
@@ -61,7 +61,7 @@ HISTORY_SCHEMA = "history"
 RAW_SCHEMA = "raw"
 
 # The published landing zone, as it is named in the release.
-# `scripts/export_warehouse.LAKEHOUSE_ASSET` is the other half; a test holds them
+# `publish/export_warehouse.LAKEHOUSE_ASSET` is the other half; a test holds them
 # together, because a rename here would make the restore silently find nothing
 # and cold-start the weather archive with nothing going red.
 LAKEHOUSE_ASSET = "lakehouse.tar.gz"

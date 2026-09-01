@@ -35,25 +35,33 @@ from pathlib import Path
 import polars as pl
 
 from ingest.fixtures import FIXTURE_DIR, path_for
-from ingest.pipeline import (
-    EU_ELEC_PRICES_API,
+from ingest.http import get_json
+from ingest.sources.ecb import (
     FX_FIRST_DATE,
+    fx_url,
+)
+from ingest.sources.eurostat import EU_ELEC_PRICES_API
+from ingest.sources.owid import (
     OWID_CO2,
     OWID_ENERGY,
+)
+from ingest.sources.retail import (
     RETAIL_ARCHIVE,
     RETAIL_WORKBOOK_NAME,
-    WB_COUNTRY_API,
-    WB_WDI_INDICATORS,
-    WEATHER_RATE_LIMITS,
-    _get_json,
-    _get_weather_json,
-    fx_url,
     retail_sql,
     retail_workbook,
-    wdi_url,
+)
+from ingest.sources.weather import (
+    WEATHER_RATE_LIMITS,
+    get_weather_json,
     weather_call_units,
     weather_locations,
     weather_url,
+)
+from ingest.sources.worldbank import (
+    WB_COUNTRY_API,
+    WB_WDI_INDICATORS,
+    wdi_url,
 )
 from modern_data_stack import workbook
 from modern_data_stack.db import scalar
@@ -114,7 +122,7 @@ def record_owid(url: str) -> None:
 def record_wb_country() -> None:
     """The full country dimension — ~300 rows, and the overrides seed is
     defined as 'the ISO3 codes this endpoint doesn't return'."""
-    _write(path_for(WB_COUNTRY_API), json.dumps(_get_json(WB_COUNTRY_API, timeout=60)))
+    _write(path_for(WB_COUNTRY_API), json.dumps(get_json(WB_COUNTRY_API, timeout=60)))
 
 
 def record_wdi() -> None:
@@ -128,7 +136,7 @@ def record_wdi() -> None:
         rows: list[dict] = []
         page = 1
         while True:
-            payload = _get_json(wdi_url(code, page))
+            payload = get_json(wdi_url(code, page))
             # World Bank returns [metadata, [records...]]; anything else is an
             # error object served with a 200 (e.g. a retired indicator code).
             if not (isinstance(payload, list) and len(payload) == 2):
@@ -154,7 +162,7 @@ def record_eurostat() -> None:
     """The whole JSON-stat cube. It's already filtered server-side to one
     category per dimension bar geo × time, and subsetting geo would mean
     rebuilding the dimension index the pipeline walks."""
-    _write(path_for(EU_ELEC_PRICES_API), json.dumps(_get_json(EU_ELEC_PRICES_API)))
+    _write(path_for(EU_ELEC_PRICES_API), json.dumps(get_json(EU_ELEC_PRICES_API)))
 
 
 def record_fx() -> None:
@@ -168,7 +176,7 @@ def record_fx() -> None:
     things CI should be exercising. 3.6 MB whole, 831 kB compressed.
     """
     url = fx_url(FX_FIRST_DATE)
-    payload = json.dumps(_get_json(url))
+    payload = json.dumps(get_json(url))
     _write(path_for(url), gzip.compress(payload.encode()))
 
 
@@ -191,11 +199,11 @@ def record_weather() -> None:
     a price attached — see `weather_call_units`. Recording is therefore not free
     to repeat, and a re-record that fails partway costs the budget anyway.
 
-    **Fetched through the paced path, not `_get_json`.** That is not defensive
+    **Fetched through the paced path, not `http.get_json`.** That is not defensive
     tidying: this call is the single largest weather request the repo ever makes,
     and it is typically made right after someone has been exploring the API by
     hand, so it is the *most* likely of all of them to meet a 429. Going through
-    `_get_json` — as this did in its first draft — gives it three retries over
+    `http.get_json` — as this did in its first draft — gives it three retries over
     4.5 seconds against a limit that wants a minute or an hour, and the recorder
     then fails having spent the budget it needed.
     """
@@ -205,7 +213,7 @@ def record_weather() -> None:
         date.fromisoformat(WEATHER_FIXTURE_LAST_DAY) - date.fromisoformat(WEATHER_FIXTURE_FIRST_DAY)
     ).days + 1
     payload = json.dumps(
-        _get_weather_json(
+        get_weather_json(
             url,
             WeightedWindowLimiter(WEATHER_RATE_LIMITS),
             weather_call_units(len(locations), days),

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts import build_report
+from publish import build_report
 
 
 def test_every_source_table_has_a_declared_owner():

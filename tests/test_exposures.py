@@ -19,7 +19,7 @@ import re
 import yaml
 
 from modern_data_stack.paths import project_root
-from scripts import build_report
+from publish import build_report
 
 EXPOSURES_YML = project_root() / "dbt" / "models" / "_exposures.yml"
 MARTS_DIR = project_root() / "dbt" / "models" / "marts"
@@ -117,7 +117,7 @@ def test_the_tables_no_exposure_can_name_are_exactly_the_polars_outputs():
 def test_the_release_exposure_names_every_mart():
     """The data release ships every table in `marts`, so the exposure has to list them all.
 
-    `scripts/export_warehouse.py` iterates the schema rather than a table list, so a
+    `publish/export_warehouse.py` iterates the schema rather than a table list, so a
     new mart is published the moment it is built — silently, to consumers outside
     this repo who cannot be paged. That is the one dependency here nobody can
     discover by reading the site, which is why it is asserted rather than described.

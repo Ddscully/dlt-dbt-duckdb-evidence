@@ -31,13 +31,69 @@ column and what the release does to it) and
 start duplicating each other. A change to how a layer works usually needs an edit
 in `docs/` **and** here.
 
+## The layers, and what each directory is for
+
+```
+ingest/     dlt — `sources/` is one module per publisher; `pipeline.py` is
+            coordination (which resources exist, how they group, the pipeline)
+lake/       the DuckLake landing zone
+dbt/        staging → intermediate → marts
+transform/  the Polars derived metrics
+orchestration/  the Dagster asset graph over all of the above
+publish/    the boundary outward: the Evidence site, the release, and the
+            previous release's carried state
+scripts/    genuinely one-off: seed transcription, fixture recording, a
+            disclosure measurement
+src/modern_data_stack/   the domain-neutral mechanisms every layer calls
+```
+
+Two of those moved on 2026-09-01 and the reasons are worth keeping.
+
+- **`ingest/` is six source modules plus a coordination layer**, where it was one
+  1,540-line namespace holding 8 resources, 45 module constants, 5 URL builders,
+  3 watermark functions, the rate limiter and `main()`. Measured by *statements*
+  no function was oversized (the largest is 24), which is why an earlier review
+  filed the split as a decoy — it was measuring complexity, and the defect was
+  cohesion. The dependency closure partitioned almost perfectly: 26 names
+  exclusive to weather, 11 to the World Bank, 10 each to the ECB and retail, and
+  **only five shared**.
+  - **It made one real dependency visible.** `weather_locations` reads capital
+    coordinates from the World Bank's country endpoint, so
+    `ingest/sources/weather.py` now says `from ingest.sources import worldbank`
+    where the flat file made it look like a local helper.
+  - **The four coordination tuples deliberately did *not* become per-source
+    metadata**, which is the half of the finding that was wrong.
+    `PARTITIONED_RESOURCES` carries a comment arguing the rule across all four
+    candidates *comparatively* — "`ecb_fx_rates` merges for the same reason WDI
+    does and is deliberately not partitioned" cannot be read if the two facts
+    live in different files. Deriving the tuples would have filed a comparison
+    in six places.
+  - **Shared helpers are reached as `http.get_json(...)`, never imported by
+    name.** `tests/test_ingest.py` monkeypatches that function in ten places via
+    a *string literal* (`setattr(http, "get_json", …)`), which no reference
+    rewrite can see. Binding the name into each source would leave those patches
+    pointing at something nothing looks up — green tests against the live fetch
+    path. The same trap is why the split refused a re-export facade in
+    `ingest/pipeline.py`: without one the stale patches raise `AttributeError`,
+    which is how they were found.
+- **`publish/` exists because `orchestration/assets.py` imported the top of its
+  own dependency graph out of `scripts/`.** `export_warehouse.py` is 853 lines
+  and *is* the publication boundary — the personal-data policy, the storage
+  ceiling, attribution — in a directory whose name said "helper". The three
+  load-bearing modules moved; the three genuinely one-off ones stayed.
+  - **It also made `pages.yml`'s allowlist accurate.** `scripts/**` was a
+    trigger path only because the directory was mixed; it is now on the
+    not-an-input side, and `publish/**` is the trigger. The guard in
+    `tests/test_workflows.py` caught the move and made the classification a
+    decision rather than an oversight.
+
 ## The package (`src/modern_data_stack/`)
 
 The domain-neutral mechanisms live here — `paths`, `fixtures`, `ducklake`,
 `observability`, `export`, `history`, `db` — and take their configuration as
 arguments. The project modules that call them (`ingest/fixtures.py`,
-`lake/lakehouse.py`, `transform/pipeline_status.py`, `scripts/export_warehouse.py`,
-`scripts/restore_history.py`) hold this project's constants and stay the entry
+`lake/lakehouse.py`, `transform/pipeline_status.py`, `publish/export_warehouse.py`,
+`publish/restore_history.py`) hold this project's constants and stay the entry
 points, so `python -m lake.lakehouse`, the justfile recipes and the asset keys are
 all unchanged.
 
@@ -482,7 +538,7 @@ this is the only place a revision leaves a trace.
   destroys the history for good. Every other table here is disposable — this one
   isn't, which is also why it's narrow (two columns, 1990+) rather than the whole
   fact.
-- **The published history is carried, not rebuilt** (`scripts/restore_history.py`,
+- **The published history is carried, not rebuilt** (`publish/restore_history.py`,
   `just restore-history`). Every workflow builds from an empty file, so the
   release and the site used to hold one version per row forever.
   `release-data.yml` now downloads the previous `data-*` release and copies its
@@ -537,7 +593,7 @@ ones at a grain below a country. Weather's is one line up, in the `raw` bullet:
 `om_weather_daily` is the second table a rebuild cannot reproduce, and the three
 places that guard the first one have to name it too.
 
-## Personal data (`meta: {pii: …}`, `scripts/export_warehouse.py`)
+## Personal data (`meta: {pii: …}`, `publish/export_warehouse.py`)
 
 One column identifies a person — `dim_retail_customer.customer_id`, UCI's own
 pseudonym for a shopper. It is classified in the ymls, pseudonymised at the
@@ -784,7 +840,7 @@ the point of the layer is that none of it is a comment.
 - **Exposures are per *page*, not per site, and they are checked.**
   `dbt/models/_exposures.yml` declares nine Evidence pages and the monthly data
   release, so `dbt ls --select +exposure:evidence_retail` answers "what breaks if
-  I change this" for one page. `scripts/build_report.py` gained `page_tables()`
+  I change this" for one page. `publish/build_report.py` gained `page_tables()`
   (page → source query → warehouse table) and `tests/test_exposures.py` fails if
   a declaration and the SQL disagree.
   - **They do not replace `TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY`, and the
@@ -988,7 +1044,7 @@ survives a format that content-addresses its files and prunes on statistics.
 - **The landing zone is published as a second release asset**, `lakehouse.tar.gz`,
   and that is what keeps the weather archive deepening instead of cold-starting
   every month. `CARRIED` names `history` alone now — the weather rows are not in
-  the database to carry — so `scripts/restore_history.py` restores the tarball
+  the database to carry — so `publish/restore_history.py` restores the tarball
   beside it and one command still carries both. Verified end to end: restore a
   release into an empty tree and `weather_watermark()` reads 2022-12-31, so the
   next ingest asks for a 90-day lookback rather than three years.
@@ -1100,7 +1156,7 @@ survives a format that content-addresses its files and prunes on statistics.
     mechanism does not escape an old trap by being new.
 
 
-## Publishing (`scripts/export_warehouse.py`)
+## Publishing (`publish/export_warehouse.py`)
 
 `just export-data` packages the built warehouse into `data/export/` (gitignored):
 a `COPY FROM DATABASE` copy of the DuckDB file, a zstd Parquet per table in
@@ -1143,7 +1199,7 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   production no longer produces.
   - **The reader is a project hook, not a package parameter.** `export()` takes
     `read_loaded_at` the way it already takes `extra_artifacts` for the tarball,
-    so the package still knows nothing about DuckLake; `scripts/export_warehouse.py`
+    so the package still knows nothing about DuckLake; `publish/export_warehouse.py`
     supplies `landed_at`, which attaches read-only **only when there is a
     catalog** — the same test `solidify_staging` makes, so a warehouse carrying
     its own `raw` is still exportable. Where both exist the catalog wins.
@@ -1184,7 +1240,7 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
     on `db.write_frames`. A ceiling is a compatibility promise to consumers the
     package knows nothing about, and it is only meaningful beside the minimum
     reader version a project states — `MAX_PUBLISHED_STORAGE_VERSION` and
-    `MIN_READER_VERSION` live in `scripts/export_warehouse.py` together.
+    `MIN_READER_VERSION` live in `publish/export_warehouse.py` together.
   - **The ceiling is tested from both sides**, because `>` against `>=` is the
     slip and a one-sided test passes under either — the same lesson as
     the export ceiling's two sides and the FX partitioning fixture.
@@ -1223,7 +1279,7 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
     half dlt cannot see: a consumer meeting a tarball written against a spec
     their extension does not know.
 - **Each release carries the previous one's unreproducible tables forward**
-  (`scripts/restore_history.py`), which is what makes the published snapshot
+  (`publish/restore_history.py`), which is what makes the published snapshot
   accumulate a real revision log instead of holding one version per row forever,
   and what keeps the weather archive deepening instead of resetting to a
   three-year cold start every month. The restore runs *before* the graph, so dlt
@@ -1612,7 +1668,7 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
     repository with name 'ingest_retail'` naming `__ASSET_JOB`.
 - **The Evidence site is an asset, and it's the asset excluded from
   `full_refresh` for a reason that isn't partitioning.** `reports/evidence_site`
-  shells out to npm via `scripts/build_report.py`; `ci.yml`, `nightly.yml` and
+  shells out to npm via `publish/build_report.py`; `ci.yml`, `nightly.yml` and
   `release-data.yml` all run `full_refresh` on a bare uv checkout with no Node, so
   a site in that job would break three workflows to serve one. `pages.yml` runs
   `publish_site` — one job instead of the three npm steps that used to sit after
@@ -1629,7 +1685,7 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
   deactivates the pipeline on teardown; anything else under `tests/` that imports
   the orchestration layer has to do the same.
 - **The site's deps are one per table it reads, not the single ordering edge.**
-  `scripts.build_report.TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY` map the 20
+  `publish.build_report.TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY` map the 20
   tables the source queries read to the assets that write them, and
   `tests/test_report.py` parses `reports/sources/**/*.sql` and fails if the two
   disagree. Without it, adding a source query on a new mart would leave the site

@@ -5,7 +5,7 @@ version: 2
 # `dbt ls --select +exposure:evidence_retail` now answers "what breaks if I
 # change this model" for one page, and `dbt ls --select +exposure:*` for every
 # consumer at once. Before this file, that dependency existed only as
-# `TABLE_TO_DBT_MODEL` in `scripts/build_report.py` — a hand-maintained Python
+# `TABLE_TO_DBT_MODEL` in `publish/build_report.py` — a hand-maintained Python
 # dict that exists because the site→mart edge was invisible to dbt.
 #
 # The two are not duplicates and neither replaces the other, which is the useful

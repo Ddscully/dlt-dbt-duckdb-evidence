@@ -23,7 +23,7 @@ every test in a repo passes such a bump: they all write and read with the same
 binary.
 
 Which schemas ship, who the data belongs to, and what the release notes say are
-all the project's to answer; see `scripts/export_warehouse.py`.
+all the project's to answer; see `publish/export_warehouse.py`.
 """
 
 from __future__ import annotations

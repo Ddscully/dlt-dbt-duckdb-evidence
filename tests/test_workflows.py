@@ -68,6 +68,13 @@ NOT_A_SITE_INPUT = (
     ".github/workflows/ci.yml",
     ".github/workflows/nightly.yml",
     ".github/workflows/release-data.yml",
+    # `scripts/**` crossed to this side on 2026-09-01, when the three
+    # load-bearing modules left it for `publish/`. What remains is one-off:
+    # `build_cbam_seeds.py` (its output is the checked-in seeds, so the site
+    # moves when `dbt/**` does), `record_fixtures.py` (this job runs live) and
+    # `measure_disclosure_risk.py` (read-only). The allowlist was coarse only
+    # because the directory was mixed.
+    "scripts/**",
 )
 
 
@@ -234,7 +241,7 @@ def release_restoring_workflows() -> dict[str, str]:
     return {
         path.name: path.read_text()
         for path in sorted(WORKFLOWS_DIR.glob("*.yml"))
-        if "scripts.restore_history" in path.read_text()
+        if "publish.restore_history" in path.read_text()
     }
 
 
@@ -264,7 +271,7 @@ def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
     The asset names come from the code rather than from string literals here, so
     renaming either one fails this instead of quietly matching nothing.
     """
-    from scripts import restore_history
+    from publish import restore_history
 
     required = {Path(restore_history.DUCKDB_PATH).name, restore_history.LAKEHOUSE_ASSET}
     workflows = release_restoring_workflows()
@@ -483,7 +490,7 @@ JUSTFILE = REPO_ROOT / "justfile"
 WRITING_COMMANDS = (
     "python -m ingest.pipeline",
     "python -m transform.",
-    "python -m scripts.restore_history",
+    "python -m publish.restore_history",
     "dbt build",
     "dagster job execute",
     "dagster asset materialize",

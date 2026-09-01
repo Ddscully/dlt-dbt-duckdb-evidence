@@ -27,7 +27,7 @@ SELECT * FROM read_parquet('https://github.com/Ddscully/dlt-dbt-duckdb-evidence/
 ```
 
 `.github/workflows/release-data.yml` builds it from the live sources monthly (the
-publishers update annually) or on demand, and `scripts/export_warehouse.py`
+publishers update annually) or on demand, and `publish/export_warehouse.py`
 packages it. `just export-data` does the same thing locally, into `data/export/`.
 Tags are dated, `data-YYYY-MM-DD`; `releases/latest/download/…` always resolves
 to the newest one, so the URLs above never go stale.
@@ -85,7 +85,7 @@ The Parquet files carry no such constraint, which is why both ship.
 from scratch each time. The two SCD2 snapshots — OWID's CO₂ estimates and the
 grid emission factors — can't be, since a revision only leaves a trace if you
 were holding the previous number. Each release downloads its predecessor and
-copies `history` in before it builds (`scripts/restore_history.py`), so the
+copies `history` in before it builds (`publish/restore_history.py`), so the
 releases accumulate a genuine revision log. `manifest.json` reports how much of
 one.
 
@@ -94,5 +94,5 @@ one.
 Releases redistribute upstream data, which the repository itself doesn't. All the
 sources permit it with attribution, so every release ships an `ATTRIBUTION.md`
 naming the publisher and licence per source, and the release notes repeat it.
-`ATTRIBUTION` in `scripts/export_warehouse.py` is the single source of truth for
+`ATTRIBUTION` in `publish/export_warehouse.py` is the single source of truth for
 both. Keep it in step with the README's licence section when a source is added.

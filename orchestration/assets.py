@@ -13,7 +13,7 @@ The layers are wired by *asset key*, not by ordering:
   own `ref()` graph;
 * the Polars asset declares `deps=[marts/fct_emissions_energy]`;
 * the Evidence site declares one dep per table its source queries actually read,
-  from the maps in `scripts/build_report.py`.
+  from the maps in `publish/build_report.py`.
 
 The upshot: changing a `ref()` or adding a source table moves the graph, and
 there is no shell script to keep in sync.
@@ -37,13 +37,17 @@ from ingest.pipeline import (
     FULL_REFRESH_RESOURCES,
     INCREMENTAL_RESOURCES,
     PARTITIONED_RESOURCES,
-    RETAIL_FIRST_MONTH,
-    RETAIL_LAST_MONTH,
-    WB_WDI_INDICATORS,
-    WDI_FIRST_YEAR,
     build_pipeline,
     load_groups,
     public_indicators,
+)
+from ingest.sources.retail import (
+    RETAIL_FIRST_MONTH,
+    RETAIL_LAST_MONTH,
+)
+from ingest.sources.worldbank import (
+    WB_WDI_INDICATORS,
+    WDI_FIRST_YEAR,
 )
 from lake.lakehouse import (
     ATTACH_ALIAS,
@@ -56,7 +60,7 @@ from lake.lakehouse import (
 )
 from modern_data_stack.db import row, scalar
 from orchestration.resources import dbt_project
-from scripts.build_report import (
+from publish.build_report import (
     BUILD_DIR,
     TABLE_TO_ASSET_KEY,
     TABLE_TO_DBT_MODEL,
@@ -565,7 +569,7 @@ EVIDENCE_SITE = dg.AssetKey(["reports", "evidence_site"])
 # would be enough to order this last. The lake gets away with `deps=[the mart]`
 # because it archives one table list; the site reads ten tables across two
 # layers, and a graph that showed it hanging off only the mart would be wrong
-# about what a stale dashboard means. `scripts.build_report` owns the mapping and
+# about what a stale dashboard means. `publish.build_report` owns the mapping and
 # `tests/test_report.py` holds it to the SQL.
 SITE_DEPS = [
     *(

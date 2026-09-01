@@ -6,8 +6,8 @@ Wraps the two npm commands the dashboard needs, in the order it needs them:
     npm run sources[:strict]      warehouse tables -> reports/.evidence/ parquet
     npm run build                 parquet + markdown -> reports/build/ (static)
 
-Run:  uv run python -m scripts.build_report            (or `just report`)
-      uv run python -m scripts.build_report --clean    (or `just report-clean`)
+Run:  uv run python -m publish.build_report            (or `just report`)
+      uv run python -m publish.build_report --clean    (or `just report-clean`)
 
 This exists so the site is reachable from the asset graph
 (`reports/evidence_site` in `orchestration/assets.py`) rather than only from a
