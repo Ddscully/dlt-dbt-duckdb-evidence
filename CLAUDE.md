@@ -674,17 +674,29 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   averaged 45 lines a test. That is the argument for the intermediate layer here,
   and it is why there are three `int_*` models and not one per mart: the other
   two removed a duplication and named an inference, and nothing else qualified.
-- **Moving a test proves nothing until you re-run its mutation, and one of these
-  did not survive the check — from before the move.**
-  `retail_returns_breaks_a_tied_purchase_the_same_way_every_build` passes with
-  the `qualify` tie-break deleted, and it passed that way at HEAD too, verified
-  in a scratch worktree rather than argued. The fixture *can* separate the two
-  (a plain DuckDB table gives 700/5 without the tie-break and 700/3 with it), but
-  dbt's mocked input arrives in an order that makes the un-tie-broken `asof join`
-  land on the same row anyway. So the test pins the *answer* and not the
-  *mechanism*, and the determinism it exists to guard is unguarded. Fixing it
-  needs a second tie group whose correct answer sits at a different position, so
-  no positional bias satisfies both.
+- **A determinism guard has to be mutated *repeatedly*, and this one was flaky
+  rather than blind.** `return_matches_break_a_tied_purchase_the_same_way_every_build`
+  pins the `qualify` tie-break that made `int_retail_return_matches` reproducible,
+  and it passed with that `qualify` deleted — at HEAD and at the commit before
+  the test moved, so it was its own blind spot. The first diagnosis was that
+  dbt's mocked input arrives in an order that lands the un-tie-broken `asof
+  join` on the same row anyway; **that is wrong**. DuckDB's *parallel* asof join
+  draws a different tied row each run — 300 runs of the compiled SQL returned
+  all three, 135/86/79 — so the old test passed a broken model **28.7% of the
+  time**, and the two spot-checks that called it broken-but-stable were unlucky
+  draws. `threads=1` is deterministic and takes the first-listed row.
+  - **No fixture makes it certain**: the mutated model returns *some* member of
+    the tie group and the tie-break's answer is always a member of it, and the
+    row count is 1 either way. Four independent tie groups take the false pass
+    to **1.1%** (22/2,000) and to 0% single-threaded; the healthy model is stable
+    at 1, 2, 4 and 8 threads, so nothing is flaky in CI. Extra returns into one
+    group buy nothing — the arbitrary pick is made once per group (300/300
+    identical), so it is *groups* that multiply.
+  - The winner is never listed first (first is what the broken join takes) and
+    sits at a different non-first position in each group. Group 1 is unchanged:
+    reordering it would pin today's arbitrary pick, which is the bug wearing the
+    fix's clothes. `dim_retail_customer` had already learned this and the lesson
+    had not been carried across — see the `unit-testing-dbt-models` skill.
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all

@@ -238,31 +238,60 @@ reasoning behind each is in `compliance-models`, `retail-models` and
       lowest line number, so `order by line_number, invoice` passed it too. It
       now puts the lowest line number on the highest invoice, and all three
       permutations fail.
-    - **…and that is still not enough: the test does not catch the tie-break
-      being deleted outright.** Separating the three *orderings* says nothing
-      about separating "ordered" from "not ordered at all". Delete the `qualify`
-      and `return_matches_break_a_tied_purchase_the_same_way_every_build` passes
-      — measured 2026-09-01, and measured at the commit *before* the test moved
-      to `int_retail_return_matches`, in a scratch `git worktree`, so it is the
-      test's own blind spot and not something the move introduced.
-      - The fixture is not the problem; the *harness* is. Loaded into a plain
-        DuckDB table the same four rows separate the cases cleanly — 700/5
-        without the tie-break, 700/3 with it — but dbt builds a mocked input as
-        a `union all` of literal selects, and in that shape the un-tie-broken
-        `asof join` happens to land on 700/3 anyway. So the test pins the
-        *answer* and not the *mechanism*, and the determinism it exists to guard
-        is unguarded.
-      - **The fix is a second tie group whose correct answer sits at a different
-        position** — first in one group, last in the other — so no single
-        positional bias can satisfy both, whatever order the harness feeds them
-        in. Do not "fix" it by reordering the existing rows: that pins the
-        current arbitrary pick, which is the bug wearing the fix's clothes.
+    - **…and that was still not enough: for a week the test did not catch the
+      tie-break being deleted outright.** Separating the three *orderings* says
+      nothing about separating "ordered" from "not ordered at all". Delete the
+      `qualify` and `return_matches_break_a_tied_purchase_the_same_way_every_build`
+      passed — measured 2026-09-01, and measured at the commit *before* the test
+      moved to `int_retail_return_matches`, so it was the test's own blind spot
+      and not something the move introduced. **Fixed the same day**, and the
+      repair is worth more than the defect, because the first diagnosis was wrong.
+      - **The mechanism is DuckDB's *parallel* asof join, not a deterministic
+        reordering.** The first reading was that dbt's `union all` of literal
+        selects fed the join in an order that made it land on the tie-break's
+        row anyway. It does not: over 300 runs of the compiled unit-test SQL the
+        un-tie-broken join returned **all three** tied rows — 135 / 86 / 79. At
+        `threads=1` it is deterministic and takes the first-listed row; at 2, 4
+        and 8 it spreads. So the old test was not blind, it was **flaky against
+        its own mutation**, passing 28.7% of runs (287/1,000) — which is how it
+        passed the two spot-checks that pronounced it broken-but-stable.
+      - **No fixture can make this certain, and that is a property of the bug.**
+        The mutated model returns *some* member of the tie group and the
+        tie-break's answer is always a member of that group, so every possible
+        expectation is reachable by luck. Row count cannot separate them either:
+        an `asof join` returns exactly one row per left row with or without the
+        `qualify` (50/50 runs, both ways). The test can only make a false pass
+        unlikely, and must say by how much.
+      - **Tie groups draw independently; extra probes into one group do not.**
+        Three return lines matching the *same* tied group gave identical picks
+        in 300/300 runs — the arbitrary choice is made once per group, so a
+        second return buys nothing and a second *group* multiplies. Four groups
+        take the false pass from 28.7% to **1.1%** (22/2,000), and to **0%**
+        single-threaded. The healthy model stays deterministic at 1, 2, 4 and 8
+        threads (100/100 each), so the strengthened test is never flaky in CI:
+        the nondeterminism exists only while the model is already broken.
+      - **Never list the winner first.** `dim_retail_customer`'s fixture below
+        puts its three winners last, first and in the middle, to defeat a
+        *positional rule* — right for a mutation that deterministically takes
+        one position (there, the first-listed row 92.5% of the time). Against a
+        random draw a winner-first group contributes almost nothing, because
+        first is exactly what the broken join picks. Vary the winner's position
+        among the **non-first** ones: 3rd of 3, 2nd of 3, 4th of 5, 2nd of 3.
+      - **The fix was already written on this page, for another model.** The
+        `dim_retail_customer` bullet below records "a test for a
+        non-determinism bug can itself be flaky" and the three-tied-customers
+        repair — learned there, and never carried across to the model whose
+        precedent it *was*. A lesson filed under one model is not a lesson
+        applied to the tree.
+      - Do not "fix" it by reordering the existing rows: that pins the current
+        arbitrary pick, which is the bug wearing the fix's clothes. Group 1 is
+        unchanged for exactly that reason; the other three were appended.
       - The general lesson is the one this whole page is built on, one turn
         further round: a mutation that a test survives is a finding about the
-        *test*. Run the mutation against the fixture's own data first — if the
-        model's real inputs separate the cases and the mocked ones do not, the
-        gap is the harness and no amount of fixture rows in the same shape will
-        close it.
+        *test* — and **a mutation it survives only sometimes is a finding about
+        what a single run can observe.** Re-run any mutation on a determinism
+        guard tens of times, not once; a single green run cannot tell a blind
+        test from a flaky one, and those need different repairs.
 - **`fct_retail_customer_cohorts` is the seventh, and the two things that define
   the triangle's *edge* were both untested.** Six mutations against its 11 data
   tests: `<=` to `<` on the ragged bound deletes the newest diagonal of every
