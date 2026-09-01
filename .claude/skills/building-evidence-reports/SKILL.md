@@ -246,3 +246,33 @@ chromium --headless=old --no-sandbox --disable-gpu --window-size=1400,2100 \
 This is the one layer that isn't Python. It needs Node; `npm install` runs from
 `reports/`. `reports/node_modules/` and `reports/build/` are gitignored, as is
 `reports/.evidence/`.
+
+## Where the site meets the asset graph
+
+Three facts that lived in `CLAUDE.md`'s *Orchestration* section until they were
+filed here, because all three are about the site rather than about Dagster.
+
+- **The site's deps are one per table it reads, not the single ordering edge.**
+  `publish.build_report.TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY` map the 20
+  tables the source queries read to the assets that write them, and
+  `tests/test_report.py` parses `reports/sources/**/*.sql` and fails if the two
+  disagree. Without it, adding a source query on a new mart would leave the site
+  building from a stale copy of it while the graph still showed complete lineage —
+  no error, just an old number. The maps live in `scripts/` rather than beside the
+  asset because `just test` runs before `dbt parse` in CI and so can't import
+  anything that needs the dbt manifest.
+- **`site_pages_all_rendered` is blocking, and it checks file *size*.**
+  `evidence build` exits 0 for a site missing a page, and nothing downstream reads
+  `reports/build/` — so a route that emitted only the SvelteKit shell would
+  materialise green and deploy. The eleven pages render at 19–92 kB; the floor is
+  8 kB. The two smallest are the ones carrying the least SQL — the routing front
+  page (19 kB) and Restatements (20 kB) — so it is prose-only pages, not chart
+  pages, that would ever bring the floor into play.
+- **`explore`, `settings` and `api` are reserved route names.** Evidence's own
+  template ships `pages/explore/` (the SQL console and schema browser) and
+  `pages/settings/`, so an `explore.md` added under `reports/pages/` is silently *not* copied into
+  `.evidence/template/src/pages/` and the build dies on
+  `Internal Error /api/[...route]/evidencemeta.json … /api/explore/… status 500`
+  — a message that names neither the page nor the collision. `just report-clean`
+  does not help, because nothing is stale. The country explorer is
+  `pages/countries.md` for exactly this reason.

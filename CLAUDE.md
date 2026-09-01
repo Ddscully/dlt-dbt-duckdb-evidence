@@ -428,20 +428,62 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
   tree, and the offline fixture dispatch table.
 - **`dependency-versions`** — what pins what, and the three versions nothing
   watches.
+- **`country-stats-models`** — the country-year domain: coverage that thins per
+  column, current against constant dollars, and the World Bank and Eurostat
+  shapes.
+- **`the-lakehouse`** — the DuckLake catalog: the change feed dlt destroys, the
+  `data_path` that decides portability, and what `lakehouse.tar.gz` may hold.
+- **`publishing-a-release`** — the export boundary: the two format ceilings and
+  what carries forward between releases.
+- **`dagster-graph-and-jobs`** — partitions, registration, the three jobs, and
+  the `dg`/declarative-automation decisions.
 
-Seven of the eleven were split out of this file rather than written fresh: domain
-or task reasoning that only one session in ten needs, against a file loaded in
-full before every one. Two splits so far — 2026-08-24 (1,805 → 1,151 lines) and
-2026-08-27 (2,309 → 1,460) — and the second was needed because the first was
-allowed to grow back past its own starting point. **A new section here is a
-question about where it belongs, not only about what it says.**
+Eleven of the fifteen were split out of this file rather than written fresh:
+domain or task reasoning that only one session in ten needs, against a file
+loaded in full before every one. **A new section here is a question about where
+it belongs, not only about what it says.**
 
+Three splits so far, and the shape of them is the argument for the rule:
+
+| Date | CLAUDE.md, at that commit | Skills after | What forced it |
+|------|---------------------------|--------------|----------------|
+| 2026-08-24 | 1,805 → 1,151 | 8 | the first attempt |
+| 2026-08-27 | 2,309 → 1,460 | 11 | it grew back past its own starting point |
+| 2026-09-01 | 1,961 → 1,441 | 15 | caught before the ceiling rather than at it |
+
+**The first two rows are working-tree measurements and `git show` does not
+reproduce them** — both splits shipped inside a commit that also added a feature
+(the course, then weather), so the committed endpoints are 1,652 → 1,206 and
+2,159 → 1,675. The third row is git-checkable because that split is its own
+commit, which is the cheap fix and the reason to keep doing it that way.
+
+**Growth is the number that matters, and the third split is the first one that
+did not wait for it.** The file gained 953 lines in the two days after the first
+split (476/day) and 286 in the four days after the second (72/day) — so it grew
+back six times *slower* and was still split sooner, at 1,961 rather than 2,309.
+It does not drift upward, it accretes in bursts behind feature work, which is
+why the check belongs at the end of anything large rather than on a schedule.
 `tests/test_course.py` globs `.claude/skills/*/SKILL.md` rather than listing
 them, so every path and `just` recipe a skill cites is checked whether or not
 anyone remembers the guard exists. **What it does not check is a markdown
 anchor**: `docs/WAREHOUSE.md` linked at `CLAUDE.md#cbam-exposure-…` for three
 days after that heading became a skill, green in review and dead on click. That
 is now a test too.
+
+**It does not scan this file, and the third split is what proved that matters.**
+Moving prose into a skill subjects it to a check the original never had, and two
+of the four blocks moved failed it immediately. Applying the same rule to
+`CLAUDE.md` by hand: of 51 backticked paths it cited, **four pointed at nothing**
+— and none of the four was rot, which is the reason extending the scan is not
+free. Two named things that are *deliberately* gone or absent (the deleted hive
+archive; the `explore.md` that must never exist under `reports/pages/`, because
+Evidence reserves the route), and two were **Dagster asset keys that share a
+path's shape** — `lake/parquet_archive` and `reports/evidence_site`. The second
+pair is the blocker: `reports/evidence_site` is a current, correct citation of a
+live asset, and the guard has no way to tell it from a dead file. Asset keys
+elsewhere collide with nothing (`raw/`, `analytics/`, `marts/` are not directories
+in this tree); it is only `lake/` and `reports/` that are both. The rewording is
+done in the skills; scanning this file would need that ambiguity resolved first.
 
 ## Warehouse schemas (one DuckDB file: `data/warehouse.duckdb`)
 
@@ -496,8 +538,9 @@ are on ISO3 country code + year. The country dimension (`stg_country`) supplies
 `region` and `income_group`. Two of those models are Eurostat prices at their
 published `(country_iso3, year, half)` grain —
 `stg_eu_electricity_prices_semiannual` and the mart off it — and they are the
-exception on purpose, not a model waiting to be flattened; see the Eurostat bullet
-under *Conventions & gotchas*.
+exception on purpose, not a model waiting to be flattened; the `country-stats-models`
+skill has the half-over-half movement that makes the annual average a price nobody
+paid.
 
 **That sentence used to say "every model", and it stopped being true twice.**
 `fct_cbam_exposure` has no year (a regulatory schedule, not a time series) and
@@ -574,12 +617,16 @@ this is the only place a revision leaves a trace.
 
 ## Domain models with their own skills
 
-Four domains carry enough hard-won detail to be worth loading on demand rather
+Five domains carry enough hard-won detail to be worth loading on demand rather
 than in every session. The models are listed under *Warehouse schemas* above;
-the reasoning lives in `.claude/skills/`.
+the reasoning lives in `.claude/skills/`. **The table is one row per dbt group
+plus the two sources that cut across them** — which is what makes a missing row
+visible: `country_stats` was the last group with no skill, and its knowledge sat
+loose in *Conventions & gotchas* until 2026-09-01 for exactly that reason.
 
 | Domain | Skill | What is in it |
 |--------|-------|---------------|
+| OWID, the World Bank and Eurostat (the `country_stats` group) | `country-stats-models` | coverage that thins per column, current against constant dollars, territorial against consumption emissions, the WDI window and its restatements, and Eurostat's semi-annual grain |
 | Scope 2 factors and CBAM (the dbt `compliance` group) | `compliance-models` | the vintage filter that cannot be a year literal, the fabricated worked example, the annex transcription policy, the 2026/1740 migration, and why Annexes II–IV are left out |
 | Retail transactions (the `retail` group) | `retail-models` | the three cleaning decisions whose wrong answers are plausible, the returns inference, the ragged cohort triangle, and why `ntile(5)` is wrong for RFM |
 | ECB rates and the calendar | `currency-and-calendar` | the 7-day carry-forward cap, spot against average, ISO year against calendar year, and the project's one incremental model |
@@ -591,7 +638,9 @@ fabricated data in the warehouse and it ships in the public release,
 `fct_cbam_exposure` has no year in its grain, and the retail models are the only
 ones at a grain below a country. Weather's is one line up, in the `raw` bullet:
 `om_weather_daily` is the second table a rebuild cannot reproduce, and the three
-places that guard the first one have to name it too.
+places that guard the first one have to name it too. Country stats has four, in
+*Conventions & gotchas*, because they change what a query *means* rather than
+merely how to write it.
 
 ## Personal data (`meta: {pii: …}`, `publish/export_warehouse.py`)
 
@@ -955,207 +1004,42 @@ file holds only what dbt builds.** dbt attaches the catalog (`profiles.yml`'s
 `attach:`, `_sources.yml`'s `database: lakehouse`) and writes `staging`, `marts`,
 `history` into `data/warehouse.duckdb`, which is the whole of what the release
 publishes. `just lakehouse` *reports* the catalog; `just ingest` is what fills it.
+It replaced a hand-written hive archive (`lake/archive.py`, `data/lake/`), which
+was a second copy of the warehouse maintained by hand.
 
-**The hive archive is gone with it** — `lake/archive.py`, `data/lake/`,
-`ARCHIVED_TABLES`, the `lake/parquet_archive` asset and `lake_matches_warehouse`.
-It was a second copy of the warehouse written by hand, and DuckLake writes the
-same Parquet with a catalog on top. Two of its lessons died with it and are worth
-knowing were once true: the archive's output was byte-identical run to run (so a
-diff of the *files* was meaningful), and its 275 partitions averaging ~47 kB were
-the repo's worked example of partitions far too small for a real lake. Neither
-survives a format that content-addresses its files and prunes on statistics.
+**The mechanics are the `the-lakehouse` skill** — why dlt's merge makes
+DuckLake's change feed useless and what replaces it, reading table versions out
+of the catalog database, the allowlist that decides what
+`lakehouse.tar.gz` publishes, the unpinnable extension and the spec-version
+guard, and how to migrate a tree that predates the move. Four things stay here
+because they bite outside that task:
 
-- **dlt's merge destroys DuckLake's change feed, and this is the finding the
-  layer is built around.** `ducklake_table_changes()` returns
-  `insert`/`delete`/`update_preimage`/`update_postimage` at row grain and is the
-  obvious way to ask what moved. Behind dlt it answers the same thing for
-  everything: reloading 500 *identical* rows through `write_disposition="merge"`
-  reports **500 preimages and 500 postimages**, because dlt regenerates `_dlt_id`
-  *and* `_dlt_load_id` on every row it touches. The feed is faithful; the writer
-  is what makes it useless. Measured with three loads — first, identical, one-row
-  change — and the second and third are indistinguishable.
-  - **The replacement is a snapshot diff, and it is better in two ways.**
-    `revisions()` compares the table at two versions with `EXCEPT`, projecting
-    dlt's provenance columns away: **0 rows** for the identical reload, **1 row**
-    for the one-row change, naming it. It works between *any* two snapshots
-    rather than adjacent ones, and it is a query a consumer can re-derive from a
-    published catalog months later with no bookkeeping this repo has to keep
-    right.
-  - **The failure mode is a plausible number, not an exception.** Drop a column
-    from the ignore list and every row differs on `_dlt_id` alone, so the diff
-    returns the whole table — which reads exactly like a catastrophic upstream
-    restatement. `weather_revisions_are_derivable` is bounded on the total for
-    that reason, and `tests/test_lakehouse.py` asserts the zero as hard as the
-    one.
-- **`table_versions` reads the catalog database, because the query surface
-  cannot answer the question.** A dlt load writes several snapshots (staging,
-  merge, cleanup), so "the previous snapshot" is usually not the previous
-  snapshot *of this table*. `snapshots()` returns a `changes` map keyed on table
-  *ids*; `table_changes(name, from, to)` raises `Table … does not exist at
-  version N` for a range starting before the table did — it needs the answer as
-  its argument. DuckLake attaches its own catalog as
-  `__ducklake_metadata_<alias>`, so `ducklake_data_file` is readable with no
-  second ATTACH (which DuckDB refuses outright: *unique file handle conflict*).
-  - **Inlined rows have to be unioned in, and missing them fails silently.**
-    DuckLake writes a change of `data_inlining_row_limit` rows or fewer (default
-    10) into the catalog rather than to Parquet, leaving no `ducklake_data_file`
-    row at all. A version list built from files alone skips that load rather than
-    erroring. Not a test-only case: a quiet FX day is under ten rows.
-- **`read_parquet` over `data/lakehouse/data/` is not the table**, in either
-  configuration. At the default inlining limit small changes live in the catalog
-  and the files return superseded values; at 0 they reach Parquet but so does a
-  `…-delete.parquet` of `(file_path, pos)`, which makes a glob fail on the schema
-  mismatch or — excluded by name — return **both** versions of the row.
-- **The catalog stores its `data_path` as given, and that decides portability.**
-  Absolute (what the *working* copy holds) means a consumer needs
-  `ATTACH … (OVERRIDE_DATA_PATH true)` or a one-row rewrite of
-  `ducklake_metadata`; relative is what the published copy holds and what a bare
-  `ATTACH` needs. Absolute is right for the working copy because dlt reads it
-  from the repo root and dbt from `dbt/`, which no relative path serves; the form
-  is rewritten at each boundary (`publish` out, `restore` in).
-  - **A relative `data_path` resolves against the catalog *file*, not the process
-    working directory** — measured both ways, from the unpacked directory and
-    from its parent, and the bare `ATTACH` reads the same rows from either. That
-    is stronger than "relocatable" and is what lets the consumer instruction be
-    one line with no `cd` in it. `tests/test_export.py` pins it.
 - **`just sql` attaches the lakehouse, and without it a third of the warehouse
   does not open.** The nine `staging` models are *views* over `lakehouse.raw`, so
   a bare `duckdb data/warehouse.duckdb` binds the 26 `marts`/`analytics`/`history`
   relations and fails every one of the 9 staging views with `Catalog "lakehouse"
-  does not exist!`. This is the `Catalog "warehouse" does not exist` trap from the
-  other side, and the export already solves its own half by materialising staging
-  (`solidify_staging`) — which is exactly what an interactive session cannot do.
-  The recipe attaches in the same mode as the warehouse, so `just sql write` can
-  repair a landing table and the default cannot touch one by accident.
-- **A tree that predates the move has to be migrated, and nothing says so.** A
-  fresh clone cold-starts and a release restore carries the tarball, but a
-  working tree that already held `raw` inside `data/warehouse.duckdb` gets
-  neither: dbt reads `lakehouse.raw`, the catalog is empty, and the weather
-  watermark reads null — so the next ingest cold-starts at
-  `WEATHER_COLD_START_YEARS` and *silently* ignores however many years the old
-  file holds. Nothing is lost and nothing goes red; the archive is simply in the
-  wrong file. Carrying `raw.om_weather_daily` across with its
-  `_dlt_load_id`/`_dlt_id` is the whole of the fix, and it is the same shape as
-  `restore` — dlt finds no `_dlt_version`, calls the dataset new, and merges onto
-  the carried rows.
+  does not exist!`. The recipe attaches in the same mode as the warehouse, so
+  `just sql write` can repair a landing table and the default cannot touch one by
+  accident.
 - **It is the only copy of every landing table, so `just clean` still does not
-  take it** — and the reason got stronger. Deleting it costs the snapshot lineage
-  *and* the weather archive, which is days of Open-Meteo budget. Both silently.
-- **The landing zone is published as a second release asset**, `lakehouse.tar.gz`,
-  and that is what keeps the weather archive deepening instead of cold-starting
-  every month. `CARRIED` names `history` alone now — the weather rows are not in
-  the database to carry — so `publish/restore_history.py` restores the tarball
-  beside it and one command still carries both. Verified end to end: restore a
-  release into an empty tree and `weather_watermark()` reads 2022-12-31, so the
-  next ingest asks for a 90-day lookback rather than three years.
-  - **What ships is an allowlist (`PUBLISHED_TABLES`), for two reasons that would
-    each be sufficient.** Cost: only the weather archive is unreproducible within
-    the budget; everything else in `raw` is a free re-fetch. Disclosure:
-    `raw.retail_invoice_lines` and dlt's `raw_staging` copy hold 824,364 clear
-    customer ids between them, and shipping `raw` whole would undo the largest
-    privacy gain of the move.
-  - **And it cannot be fixed by dropping afterwards, which is why the catalog is
-    *built* from the list.** DuckLake keeps dropped tables in earlier snapshots:
-    after `drop table`, `select * from lh.raw.secret at (version => 2)` returned
-    the row — measured, with a customer id in it. A published catalog contains
-    what it was created with, permanently.
-  - **The published catalog's `data_path` is relative and the working one's is
-    absolute**, and the form is rewritten at each boundary (`publish` out,
-    `restore` in). There is no form that serves both: a consumer needs relative
-    to open it with a bare `ATTACH` wherever they unpacked it, and the working
-    copy needs absolute because dlt reads it from the repo root and dbt from
-    `dbt/`. DuckLake checks the stored path on every attach and refuses a
-    mismatch, so getting this wrong fails loudly on the *next* command.
-  - **`just` exports an absolute `LAKEHOUSE_DIR` for every recipe**, which is not
-    a convenience. `profiles.yml`'s relative default made a `dbt build` create a
-    catalog recording `../data/lakehouse/data/`, which `lake.lakehouse` then
-    could not open — and the error names a path nobody typed. `WAREHOUSE_PATH`
-    gets away with a relative default because a plain file keeps no such record.
-    - **The workflows go through `just` now, and this is the defect that made
-      them.** Until 2026-09-01 they ran `uv run dagster job execute` directly and
-      each set the paths itself — so all four needed the same new line when the
-      landing zone moved into DuckLake, and none of them got it. dlt writes the
-      catalog from the repo root and records an absolute `data_path`; dbt then
-      resolves `profiles.yml`'s relative default from `dbt/`, and DuckLake
-      compares the two **as strings** — so *the same directory under two
-      spellings* is refused with `DATA_PATH parameter
-      "../data/lakehouse/data/" does not match existing data path`. The failure
-      is in `dbt build`, one layer downstream of the layer that chose the
-      spelling, and **no recipe could reproduce it because every recipe exported
-      the variable that hid it**: a faithful run had to unset `LAKEHOUSE_DIR` and
-      work in a clone.
-      - **`.github/actions/setup` is the one definition now** — uv, the venv,
-        `just`, and all three paths absolute. `WAREHOUSE_PATH` was previously set
-        in `ci.yml` alone; it is set everywhere, which is a no-op in value and
-        removes a `paths.py` fallback from the question. Three tests in
-        `tests/test_workflows.py` hold it: the action must export all three (the
-        vacuity guard — the other two assert an *absence* and would both pass if
-        nothing set them at all), no workflow may define one itself, and every
-        workflow running the pipeline must use the action.
-      - **`just` respects a pre-set `LAKEHOUSE_DIR` and used to override
-        `DAGSTER_HOME`.** `env("LAKEHOUSE_DIR", …)` against a bare assignment —
-        the two agreed in CI, since `$GITHUB_WORKSPACE` *is* `justfile_directory()`
-        there, which is exactly what would have made a disagreement invisible
-        until the day they differed. Both take `env()` now.
-  - **A tarball rather than loose files**, because a GitHub release asset is a
-    file and a DuckLake is a directory. One asset also means one line in
-    `SHA256SUMS`, so `sha256sum -c` still covers the whole release.
-  - **`SHA256SUMS` is now produced by walking the export directory** rather than
-    by listing what the code thinks it wrote. The two were identical while the
-    release was a database and some Parquet; the first artifact written by a hook
-    would have shipped unverified with nothing to say so.
-  - **The exporter takes `lakehouse_dir` as a parameter, and defaulting it made a
-    test pass for the wrong reason.** `publish_lakehouse` read the module
-    constant, so the *shape of the export* depended on whether the machine had
-    ingested: an empty `data/lakehouse/` gave five `SHA256SUMS` lines and a
-    populated one gave six, and `test_sha256sums_is_checkable` asserted five. It
-    was green at commit time because the lakehouse happened to be empty, and it
-    would have stayed green in CI forever — CI builds from nothing. It only fails
-    on the machine of anyone who has run `just ingest` once. The fixture names an
-    empty directory now instead of inheriting one.
-  - **The second release asset had no test at all**, which is how the above
-    survived. It is a *published artifact*, so it earns three on this repo's own
-    terms, and each was confirmed by mutation: the tarball is checksummed (walk
-    the directory, not the list); the published catalog opens with a **bare**
-    `ATTACH` from any working directory; and a table outside `PUBLISHED_TABLES`
-    is absent **at every snapshot**, not merely the current one — which is the
-    assertion that matters, because time travel is what makes
-    copy-then-drop useless as a mitigation.
-  - **The DuckLake extension is the one version in this stack that nothing can
-    pin, and it is not the coupling people expect.** It cannot drift against
-    `duckdb`: builds are served per DuckDB version and one built for another
-    refuses to load, naming both versions. What is unpinnable is the extension
-    *itself* — it is a 36 MB binary from extensions.duckdb.org with no PyPI
-    package, and `duckdb_extensions()` reports its version as a git hash
-    (`d8a1881e`) where `parquet` reports `v1.5.5`. That is the "unpinned binary
-    no lockfile here can see" shape that lost pyright to ty and keeps `uvx dg`
-    out, except here there is no lockfile-visible alternative to choose.
-    - **`just setup` installs it, and that is a download location rather than a
-      pin.** DuckDB autoloads it on first use, so the lake works without this;
-      what it buys is that a network failure surfaces at setup instead of inside
-      a `dbt build` in a Dagster op. The version is right by construction — the
-      extension directory is keyed on the DuckDB version, so a bump re-fetches
-      rather than going stale, and `duckdb-cli` reads the same directory, so one
-      install serves `just sql`. Plain `install` and not `force install`: the
-      only case the no-op misses is a rebuild republished for an unchanged
-      DuckDB version.
-    - **So the catalog's own spec version is guarded instead** —
-      `ducklake_metadata` holds `version` (`1.0` today) and `created_by`, the
-      direct analogue of `storage_version` and `duckdb_version`, and both now
-      ship in `manifest.json` and the release notes. See *Publishing* for the
-      shape, which is the storage-version guard's with one part working harder.
-  - **dbt's `ATTACH IF NOT EXISTS` leaves an empty DuckDB file** at the catalog
-    path on any build that runs before the first ingest, and a read-only attach
-    of *that* fails with `Existing DuckLake … does not exist - and creating a new
-    DuckLake is explicitly disabled`. So "is there a lakehouse here" is
-    `is_catalog()` — does it hold `ducklake_metadata` — not `path.exists()`.
-  - **The warm-state refusal moved with the landing zone and is unchanged in
-    substance.** dlt with local state against a restored destination still dies
-    with `Table with name _dlt_version does not exist!`; re-measured against the
-    directory copy rather than inherited from the table carry, because a new
-    mechanism does not escape an old trap by being new.
-
-
+  take it.** Deleting it costs the snapshot lineage *and* the weather archive,
+  which is days of Open-Meteo budget. Both silently.
+- **`just` exports an absolute `LAKEHOUSE_DIR` for every recipe**, which is not a
+  convenience. DuckLake compares the stored `data_path` against the given one **as
+  strings**, so the same directory under two spellings is refused —
+  `profiles.yml`'s relative default made dlt (from the repo root) and dbt (from
+  `dbt/`) disagree, and the error lands in `dbt build`, one layer downstream of
+  the layer that chose the spelling. **No recipe could reproduce it, because every
+  recipe exported the variable that hid it.** `WAREHOUSE_PATH` gets away with a
+  relative default because a plain file keeps no such record.
+- **`.github/actions/setup` is the one definition of that environment** — uv, the
+  venv, `just`, and all three paths absolute — because until 2026-09-01 the four
+  workflows each set the paths themselves, so all four needed the same new line
+  when the landing zone moved and none of them got it. Three tests in
+  `tests/test_workflows.py` hold it: the action must export all three (the vacuity
+  guard — the other two assert an *absence* and would both pass if nothing set
+  them at all), no workflow may define one itself, and every workflow running the
+  pipeline must use the action.
 ## Publishing (`publish/export_warehouse.py`)
 
 `just export-data` packages the built warehouse into `data/export/` (gitignored):
@@ -1186,170 +1070,34 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
 - **`raw` and `history` ship in the DuckDB file but not as Parquet.** The flat
   files are the modelled layers only (`PUBLISHED_SCHEMAS`); anyone who wants
   dlt's landing tables or the snapshot downloads the database.
-- **`data_loaded_at` has to name the catalog, and getting it wrong is silent in
-  two directions.** `loaded_at` read an unqualified `raw._dlt_loads` off the
-  copy, which stopped being where dlt writes when the landing zone moved into
-  DuckLake. On a fresh or CI tree that raises, the `except duckdb.Error` returns
-  `None`, and every release body says *"Data last landed: unknown."* On a tree
-  migrated in place — still holding the pre-move `raw` — it returns the stale
-  copy's timestamp instead: measured 4h20m adrift here, and a believable wrong
-  answer is the worse of the two. `transform/pipeline_status.py` was migrated for
-  exactly this and documents the hazard; `export.py` was missed, and the test
-  fixture hid it by building `raw._dlt_loads` *inside* the warehouse, the shape
-  production no longer produces.
-  - **The reader is a project hook, not a package parameter.** `export()` takes
-    `read_loaded_at` the way it already takes `extra_artifacts` for the tarball,
-    so the package still knows nothing about DuckLake; `publish/export_warehouse.py`
-    supplies `landed_at`, which attaches read-only **only when there is a
-    catalog** — the same test `solidify_staging` makes, so a warehouse carrying
-    its own `raw` is still exportable. Where both exist the catalog wins.
-  - **The fixture now holds both tables with different timestamps**, because
-    `assert data_loaded_at is not None` passes on a clock read, a stale read and
-    the wrong catalog's read — every way of being wrong except the one that
-    raises. Asserting the value is what makes the mutation red.
-- **The published file's storage format is not its writer's version, and the
-  manifest carries both.** `duckdb_version` answers "who wrote this";
-  `storage_version` answers "can I open it", which is the only question a
-  consumer has. They differ: DuckDB 1.x writes format **64** by default — the
-  one `v0.10.0` through `v1.1.3` all read — so a file written by 1.5.5 opens on
-  a client five years older. The release notes said "Written by DuckDB 1.5.5.
-  Older clients may not read the storage format" for the whole life of the
-  release, which was unmeasured and, it turns out, *pessimistic*.
-  - **There is no SQL that answers it.** `duckdb_databases()` returns an empty
-    `options` map, there is no pragma, and the only surface DuckDB exposes is
-    `ATTACH … (STORAGE_VERSION …)` on the write side.
-    `modern_data_stack.export.storage_version` reads the header instead — 8-byte
-    checksum, `DUCK` magic, little-endian uint64 — which is the right shape for
-    a release gate anyway: it describes the artifact, not the process. The
-    mapping, measured by writing a file per version on 1.5.5: **64** =
-    v0.10.0–v1.1.3, **65** = v1.2.x, **66** = v1.3.x, **67** = v1.4.x, **68** =
-    v1.5.x. A *lower* number is the more widely readable file.
-  - **The guard is split across two moments because one of them cannot see the
-    thing that moves.** DuckDB 2.0 ships a new default storage format, nothing
-    caps `duckdb>=1.1`, and `lockfile-only` means the bump arrives as one line
-    of a grouped monthly Dependabot PR. Every *artifact* check would pass it —
-    they read a file the same binary just wrote. So
+- **The rest of the boundary is the `publishing-a-release` skill** — the two
+  format ceilings and the moments their tripwires fire, why `data_loaded_at` has
+  to name the catalog rather than the copy, and the rules that carry the
+  unreproducible tables forward. Three of its results are load-bearing outside
+  that task:
+  - **The manifest carries both `duckdb_version` and `storage_version`**, because
+    "who wrote this" and "can I open it" are different questions with different
+    answers: DuckDB 1.x writes format **64** by default, which every client back
+    to v0.10.0 reads. `MAX_PUBLISHED_STORAGE_VERSION` is the ceiling and
     `test_the_installed_duckdb_still_writes_the_format_the_release_promises`
-    checks the **toolchain** (a bare `duckdb.connect()`, no `STORAGE_VERSION`)
-    and is the only one that fires on the bump, on the PR, before it merges. The
-    artifact checks — `export()`'s ceiling and `release-data.yml`'s verify step
-    — catch a file that should not be uploaded. This is "green CI proves nothing
-    about versions" one turn further round: what moves is the *format of the
-    artifact* rather than the code.
-  - **`max_storage_version` has no default in the package**, matching `schema`
-    on `db.write_frames`. A ceiling is a compatibility promise to consumers the
-    package knows nothing about, and it is only meaningful beside the minimum
-    reader version a project states — `MAX_PUBLISHED_STORAGE_VERSION` and
-    `MIN_READER_VERSION` live in `publish/export_warehouse.py` together.
-  - **The ceiling is tested from both sides**, because `>` against `>=` is the
-    slip and a one-sided test passes under either — the same lesson as
-    the export ceiling's two sides and the FX partitioning fixture.
-  - **Not an upper bound on `duckdb`, deliberately.** Pinning would block every
-    unrelated fix in 2.x to guard one property; the tripwire lets the bump land
-    and makes a person decide the format question with a red test naming it.
-    `dagster<3.15` therefore remains the only hard upper bound in the tree.
-- **The landing zone has its own format version, and its tripwire has to work
-  harder than the file's.** `ducklake_metadata.version` (`1.0`) is what decides
-  whether a consumer's `ducklake` can open `lakehouse.tar.gz`, exactly as
-  `storage_version` decides it for `warehouse.duckdb`;
-  `MAX_PUBLISHED_LAKE_VERSION` is the ceiling and `ducklake.publish` refuses
-  above it. What differs is the *moment*, and it is the whole reason this needed
-  building rather than copying.
-  - **There is no PR to fail.** DuckDB's format moves when `uv.lock` moves, so
-    that tripwire fires on a Dependabot PR with a person already reading the
-    diff. The DuckLake spec moves when extensions.duckdb.org republishes, and
-    nothing in this repo changes — see the extension bullet under *The
-    lakehouse*. `test_the_installed_ducklake_still_writes_the_spec_the_release_promises`
-    on the next CI run is the only thing that can say so, which makes the
-    toolchain half load-bearing here rather than merely thorough.
-  - **A ceiling that exists is not a ceiling that is applied**, and the two need
-    separate tests. `test_the_lakehouse_ceiling_is_inclusive` proves `publish`
-    enforces a limit it is handed — from both sides, for the `>` against `>=`
-    reason — while `test_the_release_path_applies_the_lakehouse_ceiling` drives
-    `run()` with an impossible one. Deleting the constant from
-    `publish_lakehouse`'s call fails only the second: the manifest assertions
-    keep passing, because the spec is still under the ceiling nobody checked.
-    Verified by mutation, as was each other half.
-  - **`created_by` is a DuckDB git hash and answers a different question.** It
-    ships beside the spec for `duckdb_version`'s reason — who wrote this, against
-    can I open it — and `catalog_metadata` returns the whole map so the two are
-    one read rather than two.
-  - dlt's own `automatic_migration` defaults to **False**, so a catalog *we*
-    write is safe by refusal if the spec ever moves under us. This guards the
-    half dlt cannot see: a consumer meeting a tarball written against a spec
-    their extension does not know.
-- **Each release carries the previous one's unreproducible tables forward**
-  (`publish/restore_history.py`), which is what makes the published snapshot
-  accumulate a real revision log instead of holding one version per row forever,
-  and what keeps the weather archive deepening instead of resetting to a
-  three-year cold start every month. The restore runs *before* the graph, so dlt
-  lands into a file that already exists — safe because dlt keys "is this
-  destination fresh?" on its own bookkeeping, not on the file existing (verified:
-  a fixture load into a restored file still fetched the full WDI series, not a
-  five-year window).
-  - **Two reasons a table is carried, and one mechanism.** `history` is state *in
-    principle*: no rebuild invents a revision. `raw.om_weather_daily` is
-    unreproducible within a *budget* — the archive costs more than Open-Meteo's
-    10,000 units a day. Different arguments, identical consequence, so
-    `modern_data_stack.history` takes a tuple of `Carry` rules (schema, optional
-    table allowlist, the columns that prove the relation qualifies) and `carry`
-    has **no default**, for `db.write_frames`'s reason.
-  - **The allowlist is not a stylistic choice.** Copying `raw` whole would bring
-    dlt's `_dlt_loads`/`_dlt_version`/`_dlt_pipeline_state` with it, and dlt would
-    then believe every table the schema describes is present — the *other* merge
-    resources die on `DELETE FROM "raw"."ecb_fx_rates" … does not exist`. Measured,
-    along with the fact that carrying more bookkeeping makes it worse rather than
-    better.
-  - **Whether it works at all depends on dlt's *local* state, which is why the
-    failure is invisible in CI.** A fresh runner has no `~/.dlt`, so dlt queries
-    the destination, finds no `_dlt_version`, treats the dataset as new and merges
-    onto the carried rows — measured at 44,936 weather rows surviving a full load.
-    A machine that has run `just ingest` has state, trusts it, and dies with
-    `Table with name _dlt_version does not exist!`. `sync_destination()` does not
-    fix it. So `run()` **refuses** when a landing table would be carried and dlt
-    has local state, naming `rm -rf ~/.dlt/pipelines/modern_data_stack` as the
-    remedy — the restore is replacing the destination that state describes.
-    Carrying `history` alone never creates the `raw` schema and is unaffected,
-    which a test pins: the recipe that already worked has to keep working.
-  - **`irreplaceable_rows()` is the one count.** `just clean warehouse`'s gate,
-    the restore step's `restored_rows` and the "did not shrink" verify all call
-    it, so a rule added to `CARRIED` reaches all three at once instead of leaving
-    whichever was added last unguarded.
-  - **Only "no previous release" may skip.** A failed download or restore is
-    fatal in `release-data.yml`: continuing would publish an empty history that
-    the *next* release then inherits, which is the exact failure the step
-    prevents. The verify step asserts the shipped snapshot is no smaller than
-    what was carried in. `pages.yml` runs the same step `continue-on-error`,
-    because there the snapshot is a read-only display and a missing release
-    should cost one section of one page, not the deploy.
-  - **A release is two assets and a workflow that downloads one of them fails
-    silently, which `pages.yml` did until 2026-08-27.** It asked for
-    `warehouse.duckdb` alone; `restore_history` finds the lakehouse *beside* the
-    database rather than being told where it is, so it got a directory with no
-    tarball in it — which is the "restoring nothing is normal" path, not an
-    error. The cost lands a layer down and is a *depth*, not a failure: every
-    workflow rebuilds the marts from `raw`, `raw` is in the DuckLake catalog now,
-    so the published database carries no weather rows at all —
-    `weather_watermark()` reads null, the ingest cold-starts at
-    `WEATHER_COLD_START_YEARS`, and `marts.fct_country_weather_year` builds three
-    years deep against the release's fifteen. The Weather page then renders
-    perfectly off a thin mart. Green build, green checks, right shape, wrong
-    depth, and no line anywhere saying so. This is the "no workflow goes through
-    `just`, so all four needed the same line" shape again, one asset further on;
-    `tests/test_workflows.py` now derives which workflows restore and asserts each
-    downloads every asset, with the names read from the code rather than retyped.
-  - **It refuses to overwrite a destination that already holds carried state**,
-    so running it against the real warehouse can't destroy months of local
-    versions — `--force` if that is genuinely what you want. It also rejects a
-    source relation missing the columns its rule requires, which would otherwise
-    fail later and much less legibly: a snapshot without dbt's SCD2 columns dies
-    inside `dbt build`, and a landing table without `_dlt_load_id`/`_dlt_id` dies
-    at the next load with DuckDB's `Adding columns with constraints not yet
-    supported`, dlt trying to add the column `NOT NULL` to a table with rows.
-  - Verified end to end against fixtures rather than by waiting for OWID: export
-    release 1, restore into a fresh warehouse, restate three country-years in
-    `raw.owid_co2`, rebuild — 595 snapshot rows became 598 and
-    `fct_co2_estimate_versions` showed the three at version 2.
+    checks the *toolchain*, so it fires on the Dependabot PR that moves DuckDB
+    rather than on the artifact. **Not an upper bound on `duckdb`, deliberately**
+    — `dagster<3.15` remains the only hard upper bound in the tree.
+  - **`lakehouse.tar.gz` has the same shape of ceiling** (`ducklake_metadata.version`,
+    `MAX_PUBLISHED_LAKE_VERSION`) and its tripwire has to work harder, because
+    the DuckLake spec moves when extensions.duckdb.org republishes and **there is
+    no PR to fail** — only the next CI run can say so.
+  - **Each release carries the previous one's unreproducible tables forward**
+    (`publish/restore_history.py`, `just restore-history`), which is what makes
+    the published snapshot accumulate a real revision log instead of holding one
+    version per row forever, and what keeps the weather archive deepening instead
+    of resetting to a three-year cold start every month. `CARRIED` is a tuple of
+    `Carry` rules and `irreplaceable_rows()` is the one count all three callers
+    use — `just clean warehouse`'s gate, the restore step and the "did not
+    shrink" verify — so a rule added there reaches all three at once. **Only "no
+    previous release" may skip**; a failed download or restore is fatal in
+    `release-data.yml`, because continuing would publish an empty history that
+    the *next* release then inherits.
 
 ## Conventions & gotchas (learned the hard way)
 
@@ -1397,32 +1145,12 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   runs exactly one load. Add a resource to `public_indicators()` and it must go
   in `FULL_REFRESH_RESOURCES` or `INCREMENTAL_RESOURCES` too; a test asserts the
   two cover the source exactly.
-- **WDI's incremental window is 5 years, and that's about restatements.** The
-  watermark (`max_year_by_indicator`, in dlt's resource state — one entry per
-  indicator, so a newly added code still pulls its whole series) is *not* the
-  fetch floor: `wdi_start_year()` subtracts `WDI_LOOKBACK_YEARS`, because the
-  World Bank revises years it has already published. Merging on
-  `(indicator, country_iso3, year)` is what makes the partial fetch safe. Two
-  things it gives up, both deliberate: a country-year the World Bank *withdraws*
-  stays in `raw.wb_wdi` until a full reload, and a restatement older than the
-  window is never seen — `just ingest-wdi-full` (`INGEST_WDI_FULL=1`) re-fetches
-  everything, and `just backfill-wdi 1997` re-fetches exactly that year through
-  the partitioned asset. The window and the partitions sit *beside* each other on
-  purpose: the daily path stays cheap and unattended, and reaching further back
-  is an explicit act with a key you can point at. dlt resets its own state when the destination is empty, so
-  deleting the warehouse still gives you a full load; dropping *just* the raw
-  table does not.
 - **dlt state is keyed on the pipeline *name*, not the destination.** So a
   fixture run would otherwise hand its WDI watermark to the next real run, which
   would fetch a five-year window into a warehouse that has no history —
   `build_pipeline()` appends `_fixtures` to the name under `INGEST_FIXTURES=1`
   for exactly that reason. (dlt does reset state when the destination is empty,
   which is why this only bites when the real warehouse already exists.)
-- **`wb_wdi`'s column types are declared, not inferred** (`WDI_COLUMNS`). It's
-  the one resource whose schema isn't dropped and re-inferred each run, and
-  `value` mixes counts with ratios — a lookback window that happened to hold only
-  integers would infer bigint and shunt the next ratio into a
-  `value__v_double` variant column.
 - **A resource that yields Arrow gets no `_dlt_load_id` unless you ask.**
   `retail_invoice_lines` yields Arrow batches straight out of DuckDB, and dlt's
   Parquet normalizer leaves the load-id column off by default — so the biggest
@@ -1440,110 +1168,26 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
 - **Declare `timezone: False` on a timestamp column, or dlt makes it
   `TIMESTAMP WITH TIME ZONE`.** A 07:45 till time then reads `08:45:00+01:00` on
   a CET machine and differs between a laptop and CI.
-- **Polars CSV type inference** defaults to the first 100 rows. OWID's early rows
-  are empty for most metrics, so `pl.read_csv(..., infer_schema_length=None)` is
-  required or numeric columns land as VARCHAR.
-- **World Bank JSON is snake_cased by dlt**: API `iso2Code`/`capitalCity`/
-  `incomeLevel.value` land as `iso2_code`/`capital_city`/`income_level__value`.
-  Verify column names against `information_schema.columns` before writing SQL.
-- **The World Bank doesn't list every ISO3 OWID emits for.** Taiwan (~286 Mt CO2,
-  bigger than the Netherlands) and ten small territories arrive with a null
-  `region`, so any `where region is not null` silently drops them from regional
-  rollups. `dbt/seeds/country_overrides.csv` fills them in and `stg_country`
-  unions it in. Antarctica is deliberately left out — a null `region` should mean
-  "not a country". Coordinates use `try_cast`: the API sends `''` for territories.
-- **World Bank region names are padded** — `'Sub-Saharan Africa '` and
-  `'Latin America & Caribbean '` come back with a trailing space. `stg_country`
-  trims them, so join and group on the trimmed values.
-- **"Latest year" is per column, not per table.** `max(year)` on the mart is
-  whichever source runs furthest ahead (Eurostat prices, a year beyond the rest),
-  and coverage thins out unevenly before that: `co2_mt` holds 214 countries into
-  the latest year, `primary_energy_twh` collapses from ~210 to **79**,
-  `consumption_co2` stops a year earlier still. Cutting an energy chart to the
-  latest CO2 year quietly drops two thirds of its sample. The Evidence layer
-  reads `sources/warehouse/latest_years.sql` — latest year per *metric family*,
-  each with its own coverage floor — instead of hardcoding a literal; add a
-  family there before charting a column whose coverage curve differs.
-- **`renewables_share_pct` covers 79 countries; the `*_elec` columns cover ~210.**
-  OWID's broad-coverage energy series is the *electricity* mix, not the
-  primary-energy mix. For anything where country coverage matters, prefer
-  `low_carbon_share_elec_pct` or `carbon_intensity_elec_g_kwh` (gCO2/kWh, which
-  also reads directly: coal grid ~800, gas ~400, nuclear/hydro under 50). They
-  answer a narrower question — electricity is roughly a third of energy use — so
-  the two are not interchangeable in levels, only in intent.
-- **Territorial vs. consumption-based emissions.** `co2_mt` is what a country
-  burns; `consumption_co2` adds the carbon embodied in imports and subtracts
-  exports (~120 countries, one year behind). It exists so "the cut was just
-  offshored" can be measured rather than caveated: the UK's territorial fall
-  since 2005 is 46% and its consumption fall 36%, so about a fifth of the
-  headline is trade moving and the rest isn't. `trade_co2_share` is deliberately
-  untested — the real range is about -98% to +1023% (Singapore imports ten times
-  what it emits), so a 0–100 bound would fail on reality, not on a bug.
-- **Two carbon-intensity columns, different bases.**
-  `fct_emissions_energy.co2_kg_per_gdp_ppp_2011` is OWID's kg CO2 per 2011
-  international-$ (PPP) and stops in 2022 / 164 countries.
-  `analytics.co2_intensity.co2_per_gdp_const_usd` is derived in
-  `transform/co2_intensity.py` and tracks the mart — ~197 countries through 2024,
-  but only back to 1960, where WDI starts. Levels aren't comparable between the
-  two; the rank uses only the derived one. The mart's column was called
-  `co2_per_gdp` until the v2 rename, which is the whole reason that model is
-  versioned — see *Contracts, ownership and versions* above.
-- **Divide by `gdp_constant_usd`, never `gdp_usd`, for anything measured over
-  time.** `gdp_usd` (`NY.GDP.MKTP.CD`) is *current* US$, so it moves with
-  inflation and the exchange rate: on that basis Japan cut emissions 21% from
-  2010–2024 and still scored 10% *worse* on carbon intensity.
-  `gdp_constant_usd` (`NY.GDP.MKTP.KD`, constant 2015 US$) is the real-terms
-  series. **The same failure is now measurable rather than narrated** — see the
-  Currency section: the EU household electricity price rose 35% or 13.5% between
-  2021-S1 and 2022-S2 depending only on whether you counted in euros or dollars.
-  - **The yen figure was wrong here and in `transform/co2_intensity.py` until
-    2026-08-24, and it was wrong in the way a plausible number is.** It said the
-    yen "fell 28% against the dollar"; 28% is Japan's *current-dollar GDP* fall
-    (5.812 → 4.190 tn), i.e. the effect written down as the cause. The yen went
-    **87.7 → 151.4 JPY/USD** on ECB annual averages — it lost **42%** of its
-    dollar value. The full decomposition, which is worth keeping because it shows
-    the currency term dominating: current-$ GDP ×0.721 = real growth ×1.104 ×
-    dollar value of the yen ×0.579 × a ×1.128 residual (domestic prices).
-  - **"Current US$ is fine for single-year cross-sections" is the shorthand, and
-    it means *internally consistent*, not *the same answer*.** Ranking countries
-    within income group for 2024 on each basis moves **166 of 194 — 86% — to a
-    different rank**, worst move 26 places. Over time it is worse than a ranking
-    change: of the 193 countries with both series in 2010 and 2024, **30 flip the
-    sign of their decarbonisation trend**, five from improving to worsening
-    (Nigeria −13.5% → +76.3%, then Brazil, Japan, Lesotho, Namibia).
-- **World Bank WDI** is fetched long (one row per indicator/country/year) and
-  pivoted to wide columns in `stg_wdi.sql`. Add indicators in two places:
-  `WB_WDI_INDICATORS` in `ingest/pipeline.py` and a `max(case …)` in `stg_wdi.sql`.
-  The dict already carries the column name, so those two places restate the
-  same mapping — `tests/test_ingest.py` holds them together, including against
-  a code pointed at the *wrong* column, which no range test can see.
-- **Eurostat is JSON-stat** — a flat `value` dict keyed by a row-major index over
-  all dimensions. `eu_elec_prices` filters every dimension but `geo`/`time`
-  server-side, then walks that grid (see `pipeline.py`). Its `geo` codes are ISO2
-  *except* `EL`=Greece (GR) and `UK`=UK (GB);
-  `stg_eu_electricity_prices_semiannual.sql` remaps those and joins `stg_country`
-  for ISO3. EU/EEA only, so the mart column is null for the rest of the world.
-  (The `length(geo) = 2` filter there drops `EU27_2020` and friends but *not*
-  `EA` — two letters. That falls out at the inner join, which no ISO2 matches.)
-- **Eurostat prices are semi-annual, and both grains are modelled.**
-  `stg_eu_electricity_prices_semiannual` is the cleaning model at
-  `(country_iso3, year, half)`; `stg_eu_electricity_prices` averages it to annual
-  so it can join the country-year spine. Averaging is what the annual grain costs,
-  and the cost is large enough to model around: the mean absolute half-over-half
-  change was 19% across countries in 2022 and 13% in 2023 against 3–4% through the
-  2010s, and the Netherlands went €0.034/kWh in 2022-S1 to €0.142 in S2 (+320%) as
-  that year's energy-tax cuts landed in the first half. The annual €0.088 is a
-  price nobody paid. Chart prices *over time* off
-  `marts.fct_eu_electricity_prices_semiannual`; use the annual column only to
-  join prices to emissions or GDP.
-- **An "annual" price can be one half-year.** Eurostat publishes S1 around May and
-  S2 the following spring, so `n_half_years` (staging) / `price_is_partial_year`
-  (mart) exist to say when the average is over one half. It is *not* only a
-  latest-year edge case — 29 country-years carry the flag, including 23 countries
-  at the 2007 series start and one-offs like the UK in 2020 and Iceland in 2025.
-  `sources/warehouse/latest_years.sql` counts only complete years for
-  `price_year`, and the dashboard reports the partial count for the selected year
-  rather than dropping those countries (in 2007 that would drop 23 of 27).
+- **The country-year data semantics are the `country-stats-models` skill**, and
+  they are the largest body of "plausible number, wrong basis" in the repo:
+  coverage that thins per column, OWID's territorial-vs-consumption pair, the
+  World Bank's padded region names and missing ISO3s, Eurostat's JSON-stat grid
+  and its two ISO2 exceptions, and the WDI incremental window. Four of them
+  cannot wait for a skill to load, because they change what a query *means*:
+  - **Divide by `gdp_constant_usd`, never `gdp_usd`.** `gdp_usd` is *current* US$,
+    so it moves with inflation and the exchange rate. Of the 193 countries with
+    both series in 2010 and 2024, **30 flip the sign of their decarbonisation
+    trend** on that choice alone.
+  - **"Latest year" is per column, not per table.** `max(year)` on the mart is
+    whichever source runs furthest ahead, and coverage thins unevenly before it —
+    `co2_mt` holds 214 countries where `primary_energy_twh` collapses to **79**.
+    Read `reports/sources/warehouse/latest_years.sql`, never a literal.
+  - **Eurostat prices are semi-annual.** Chart prices over time off
+    `marts.fct_eu_electricity_prices_semiannual`; the annual column exists to
+    join prices to emissions or GDP and is a price nobody paid.
+  - **Adding a WDI indicator is two places** — `WB_WDI_INDICATORS` in
+    `ingest/sources/worldbank.py` and a `max(case …)` in `stg_wdi.sql`, held
+    together by `tests/test_ingest.py`.
 
 ## Orchestration (`orchestration/`)
 
@@ -1564,117 +1208,35 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 - **Everything runs in one process** (`in_process_executor`, and the four
   `replace` dlt resources in a single op). DuckDB takes one writer at a time, so
   parallel steps would just fight over the file lock.
-- **`raw/wb_wdi` is partitioned by year and nothing else is** — which is why it
-  sits in its own `@dlt_assets` block (`ingest_wdi`). Dagster gives every asset
-  in a multi-asset the same `partitions_def`, and four of the other five sources
-  are whole-file `replace` downloads with no per-year fetch to express, so
-  partitioning them would be a fiction. WDI earns it: the API takes `&date=lo:hi`,
-  the disposition is `merge`, and `year` is in the primary key, so a partition is
-  a real re-runnable unit of work.
-  - **Merging is not what earns a partition, and `ecb_fx_rates` is the near-miss
-    that proves it.** It is incremental *and* its API takes a date range, so by
-    the letter of the paragraph above it qualifies — but its entire 27-year
-    series is one three-second request, and partitioning it would trade that for
-    thousands of Dagster partitions and buy nothing. So the blocks split on
-    `PARTITIONED_RESOURCES`, not on the disposition, and
-    `UNPARTITIONED_RESOURCES` in `orchestration/assets.py` is derived as
-    everything else. **Before this there were two tuples and the WDI block was
-    built from `INCREMENTAL_RESOURCES` directly** — adding a second merge
-    resource to that constant would silently have given it yearly partitions.
-    `load_groups` still owns the refresh/merge split; the blocks only decide who
-    gets a `partitions_def`. Two tests in `tests/test_ingest.py` hold both
-    splits to the source.
-  - **The asset has two paths and the unpartitioned one has to keep working.**
-    `full_refresh` contains this asset and `ci.yml` / `nightly.yml` /
-    `release-data.yml` execute that job with no partition key. A partitioned
-    asset in an unpartitioned run doesn't fail at plan time — it fails *inside
-    the body*, at the first touch of `context.partition_key`. So the fallback is
-    an explicit guard in the asset, not something the job gives you: no partition
-    means the incremental lookback, exactly as before.
-  - **Guard on `has_partition_key` *and* `has_partition_key_range`.**
-    `has_partition_key_range` is False for a run targeting a single partition, so
-    testing it alone makes `--partition 1995` fall through to the incremental
-    branch — and it *succeeds*, having loaded the wrong window. (Verified by
-    doing it.) `context.partition_key_range` itself covers both cases; it returns
-    `start == end` for one key.
-  - **A backfill deliberately doesn't move the WDI watermark.** The watermark
-    means "everything up to here is loaded", which a run over one window can't
-    claim: partitions 2020–2025 into an empty warehouse would otherwise leave a
-    2025 watermark and the next incremental run would look back five years over
-    sixty years that were never fetched.
-  - **`end_offset=1`, or the current year isn't a partition.** A yearly window
-    only closes on 1 January, so the newest partition would be last year — the
-    one you actually want to re-run wouldn't exist.
-  - **`end` is exclusive, and the retail partitions were short a month because of
-    it.** `TimeWindowPartitionsDefinition(start=RETAIL_FIRST_MONTH,
-    end=RETAIL_LAST_MONTH)` reads like a closed interval and is not one: it
-    resolved to 24 keys ending at `2011-11`, so December 2011's 25,526 lines had
-    no partition to land in and no key that could ask for them. Nothing was ever
-    red — every workflow and justfile recipe uses the *unpartitioned* path, which
-    loads the whole workbook — so the only symptom was a per-partition backfill
-    quietly stopping a month early. `_month_after(RETAIL_LAST_MONTH)` is the
-    fix, keeping the constant meaning the data's last month, and
-    `tests/test_definitions.py` now pins both ends and the key count.
-    `end_offset=1` above solves the same off-by-one for the open-ended source;
-    this is the closed-archive half of it.
-  - `BackfillPolicy.single_run()` (which a `TimeWindowPartitionsDefinition` also
-    defaults to) is what makes a range one request per indicator instead of one
-    per year: 1990–2025 is 11 requests, not 396. It also means the CLI's
-    `--partition-range` refuses any selection that reaches the *unpartitioned*
-    downstream models, so `just backfill-wdi` targets `raw/wb_wdi` alone and you
-    rebuild after it.
-  - Partition status starts empty even though `raw.wb_wdi` holds the full series:
-    the rows came from unpartitioned runs. That's cosmetic — the merge key, not
-    Dagster's partition record, is what makes a re-run idempotent.
+- **Two assets are partitioned and three jobs exist because of it.**
+  `raw/wb_wdi` is yearly and `raw/retail_invoice_lines` monthly;
+  `define_asset_job` resolves a selection to a *single* `partitions_def` or
+  raises, and there is no opt-out. So `load_retail` carries the retail ingest
+  alone, `full_refresh` is `AssetSelection.all() - site - retail_ingest`, and
+  **`load_retail` has to run first** because dbt reads the table it lands. The
+  justfile recipes and all four workflows pair them; running `full_refresh` by
+  itself against a fresh warehouse fails inside dbt with `Catalog Error: Table
+  with name retail_invoice_lines does not exist!`.
 - **Every asset and check is listed by hand in `definitions.py`, and nothing
-  tells you when one isn't.** `dg.Definitions` takes explicit lists, so an
-  omission is not an error — the asset is simply not in the graph,
-  `AssetSelection.all()` never sees it, and `dagster definitions validate`
-  passes. That is how `raw/retail_invoice_lines`, `analytics/retail_rfm` and two
-  asset checks sat unregistered from the retail and currency commits until
-  `full_refresh` failed in CI with `Catalog Error: Table with name
-  retail_invoice_lines does not exist!` — one layer downstream, in dbt, naming
-  the symptom and not the cause. The two checks failed more quietly still: an
-  unregistered check just never runs. `tests/test_definitions.py` now compares
-  what `assets.py` defines against what the graph resolves, and CI runs it in the
-  `dbt parse` step (it needs the manifest, so it skips itself in `just test`).
-  - **Compare *executable* asset keys, not `get_all_asset_keys()`.** An
-    unregistered asset that something depends on still appears in the graph as an
-    external node, so the wider set reports `analytics/retail_rfm` present purely
-    because `pipeline_status` names it in `deps` — a test that passes while the
-    pipeline is broken. Same trap one level up: `full_refresh`'s job graph
-    contains `raw/retail_invoice_lines` as an unexecutable node.
-  - **`AssetChecksDefinition` is a subclass of `AssetsDefinition`.** An
-    `isinstance` chain that tests the parent first swallows every check into the
-    asset branch, where `.keys` is empty — the check half of the test then
-    measures nothing and is green forever.
-- **An asset job may not span two partitions definitions, which is why there are
-  three jobs.** `raw/wb_wdi` is yearly and `raw/retail_invoice_lines` is monthly;
-  `define_asset_job` resolves its selection to a single `partitions_def` or
-  raises. There is no opt-out — `allow_different_partitions_defs` is hardcoded
-  `False` for named asset jobs and `True` only for Dagster's own implicit global
-  job. So `load_retail` carries the retail ingest alone, `full_refresh` is
-  `AssetSelection.all() - site - retail_ingest`, and **`load_retail` has to run
-  first** because dbt reads the table it lands. The justfile recipes and all four
-  workflows pair them; running `full_refresh` by itself against a fresh warehouse
-  reproduces the catalog error above.
-  - `dagster asset materialize --select '*'` is not a way round it: the CLI
-    refuses a partitioned asset without `--partition` ("Asset has partitions, but
-    no '--partition' option was provided"), so the unpartitioned whole-graph run
-    only exists as a job.
-  - **A job shares a namespace with the ops**, so the job is `load_retail` and
-    not `ingest_retail` — `@dlt_assets(name="ingest_retail")` already holds that
-    name, and the collision reports as `Conflicting definitions found in
-    repository with name 'ingest_retail'` naming `__ASSET_JOB`.
+  tells you when one isn't** — an omission is not an error, it is simply an asset
+  the graph never sees, and `dagster definitions validate` passes.
+  `tests/test_definitions.py` compares what `assets.py` defines against what the
+  graph resolves, and CI runs it in the `dbt parse` step.
+- **The rest of the graph is the `dagster-graph-and-jobs` skill** — what earns a
+  partition and what a partitioned asset needs in order to keep working
+  unpartitioned, the two traps in the registration test, and the costed decision
+  not to be a `dg`-shaped project or to use declarative automation. The three
+  facts about how the *site* meets the graph — the per-table deps map, the
+  size-checking render guard, and Evidence's reserved route names — moved to
+  `building-evidence-reports`.
 - **The Evidence site is an asset, and it's the asset excluded from
   `full_refresh` for a reason that isn't partitioning.** `reports/evidence_site`
   shells out to npm via `publish/build_report.py`; `ci.yml`, `nightly.yml` and
   `release-data.yml` all run `full_refresh` on a bare uv checkout with no Node, so
   a site in that job would break three workflows to serve one. `pages.yml` runs
-  `publish_site` — one job instead of the three npm steps that used to sit after
-  it. Both selections in `definitions.py` now name what they leave out; a second
-  npm-shaped *or* differently-partitioned asset would have to be excluded by hand
-  too.
+  `publish_site`. Both selections in `definitions.py` name what they leave out; a
+  second npm-shaped *or* differently-partitioned asset would have to be excluded
+  by hand too.
 - **Importing `orchestration.assets` leaves a dlt pipeline active process-wide.**
   The `@dlt_assets` decorators call `build_pipeline()` at import time and dlt
   records the result as the ambient pipeline, so a later test calling a resource
@@ -1684,93 +1246,11 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
   only on a machine that has loaded WDI at least once. `tests/test_definitions.py`
   deactivates the pipeline on teardown; anything else under `tests/` that imports
   the orchestration layer has to do the same.
-- **The site's deps are one per table it reads, not the single ordering edge.**
-  `publish.build_report.TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY` map the 20
-  tables the source queries read to the assets that write them, and
-  `tests/test_report.py` parses `reports/sources/**/*.sql` and fails if the two
-  disagree. Without it, adding a source query on a new mart would leave the site
-  building from a stale copy of it while the graph still showed complete lineage —
-  no error, just an old number. The maps live in `scripts/` rather than beside the
-  asset because `just test` runs before `dbt parse` in CI and so can't import
-  anything that needs the dbt manifest.
-- **`site_pages_all_rendered` is blocking, and it checks file *size*.**
-  `evidence build` exits 0 for a site missing a page, and nothing downstream reads
-  `reports/build/` — so a route that emitted only the SvelteKit shell would
-  materialise green and deploy. The eleven pages render at 19–92 kB; the floor is
-  8 kB. The two smallest are the ones carrying the least SQL — the routing front
-  page (19 kB) and Restatements (20 kB) — so it is prose-only pages, not chart
-  pages, that would ever bring the floor into play.
-- **`explore`, `settings` and `api` are reserved route names.** Evidence's own
-  template ships `pages/explore/` (the SQL console and schema browser) and
-  `pages/settings/`, so a `reports/pages/explore.md` is silently *not* copied into
-  `.evidence/template/src/pages/` and the build dies on
-  `Internal Error /api/[...route]/evidencemeta.json … /api/explore/… status 500`
-  — a message that names neither the page nor the collision. `just report-clean`
-  does not help, because nothing is stale. The country explorer is
-  `pages/countries.md` for exactly this reason.
 - The `daily_refresh` schedule ships `STOPPED` on purpose — opening the UI
   shouldn't start hammering public APIs on a timer. It targets `full_refresh`, so
   it doesn't try to build the site either.
 - Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile).
   Only `dagster.yaml` is checked in.
-- **This is deliberately not a `dg`-shaped project, and the two halves of that
-  decision are separable.** `create-dagster` scaffolds a `defs/` tree that
-  autoloads, a `[tool.dg.project]` block and YAML components; `dagster-expert`,
-  the vendor skill, is written around the `dg` CLI and assumes all of it. Costed
-  2026-08-25 rather than assumed:
-  - **The autoloading half is already here and free.** `dagster.components` and
-    `dagster.load_from_defs_folder` ship in `dagster` core — no extra package.
-    What it would buy is deleting `tests/test_definitions.py`, because an
-    unregistered asset becomes impossible rather than merely caught. That trade
-    is close to a wash: the test costs ~1s and *also* documents two traps that
-    the framework would silently absorb (`get_all_asset_keys()` is too wide;
-    `AssetChecksDefinition` subclasses `AssetsDefinition`, so an `isinstance`
-    chain in the wrong order measures nothing).
-  - **The CLI half is +20 packages on a 151-package tree** — `uv pip install
-    --dry-run dagster-dg-cli` installs 24 and removes 4, pulling
-    `dagster-cloud-cli`, `github3-py`, `cryptography`, `pyjwt`, `httpx`,
-    `questionary` and `yaspin` into a project with no Dagster Plus deployment,
-    and forcing dagster 1.13.15 → 1.13.19. That is the harlequin/marimo shape
-    exactly — a dev tool that duplicates capability the stack already has is
-    weight, and it is measured in the `dependency-versions` skill.
-  - **`uvx dg` is the trap, and this repo has already refused it twice.** It
-    dodges the lockfile — which is the argument that lost pyright to ty
-    ("an unpinned global binary no lockfile here can see") and the reason
-    `ty-lsp` runs `uv run ty server` rather than a bare `ty`.
-  - **Components would delete the explanation, which is the deliverable.** The
-    skill's own dbt page reserves the pythonic `@dbt_assets` path for "complex
-    customization" — `FolderGroupDbtTranslator` is exactly that, and its comment
-    is longer than its code on purpose.
-  - **Declarative automation is the adjacent question, and the answer is the
-    same for a different reason: nothing here runs a daemon.** All four
-    workflows are one-shot `dagster job execute`; the daemon exists only under
-    `just dagster`, locally, to serve the UI. An `AutomationCondition` is
-    evaluated by an automation sensor *in the daemon*, so DA here would never
-    fire at all — it would restate one legible eight-line `ScheduleDefinition`
-    across nine asset definitions and be strictly *less* functional than the
-    STOPPED schedule it replaced. Dagster's own decision tree routes "simple,
-    fixed time-based execution" to schedules and reserves DA for partition-aware
-    and graph-state-dependent triggering; `ScheduleDefinition` raises no
-    deprecation warning on 1.13, so this is not a legacy path being tolerated.
-    - **The partition angle is the near-miss.** Two assets here *are*
-      partitioned, which is DA's stated niche — but backfills are deliberately
-      manual (`just backfill-wdi`, "an explicit act with a key you can point
-      at"), so DA would automate precisely what this project chose to keep
-      explicit.
-    - **What would change it is circumstance, not taste**: a long-running daemon
-      *and* cadences that diverge — FX is daily, OWID annual, retail a closed
-      archive. Today everything moves together on one cron, so there is nothing
-      for a condition to express. Note the repo already runs the *observability*
-      half of that world: `FreshnessPolicy` on every asset. Heavy use of
-      Dagster's modelling with almost none of its runtime is a coherent position
-      here, not a half-finished adoption.
-  - **The skill's depth and this repo's content are close to disjoint**, which is
-    the part worth knowing before reaching for it. Grepping its 172 reference
-    files for what `assets.py` actually calls: `FreshnessPolicy` 1 (in a
-    components file, dead here), `BackfillPolicy` 0, `end_offset` 0,
-    `asset_check` 1 (in passing), against `AutomationCondition` 10 — which this
-    project uses nowhere. It is worth loading for **asset selection syntax** and
-    the **dagster-dbt/dlt integration pages**, and not for anything else here.
 
 ## Testing (`tests/`)
 
@@ -1856,8 +1336,8 @@ Gotchas:
     and both tests kept passing because they handed it a throwaway file that did
     contain `raw.wb_wdi`. On a tree that predates the move the real warehouse
     *also* still holds a stale `raw`, so the check passed against a copy of a
-    table that no longer lives there — see the migration bullet under *The
-    lakehouse*.
+    table that no longer lives there — the `the-lakehouse` skill has the
+    migration.
   - **A check's verdict is not enough to assert.** Pointed at the lakehouse, the
     healthy-half test failed loudly and the failing-half test stayed green: it
     asserts a bogus indicator is missing, and it is missing from the real
