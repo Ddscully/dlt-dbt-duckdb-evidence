@@ -25,8 +25,18 @@
 -- `is_revenue_line` is the one opinion in the file: a product sale or return
 -- that a customer was actually charged for. Everything else stays, flagged, so
 -- the alternative definitions are a `where` clause rather than a rebuild.
+--
+-- It also resolves the source's country *label* to the `country_iso3` the rest
+-- of the warehouse keys on, which is what lets retail be joined to the country
+-- domain at all. The map is a seed because 9 of the 43 labels do not match the
+-- dimension's own names and a join on name loses them without saying so — see
+-- `retail_country_map` in `_seeds.yml` for the nine and what they cost.
 with source as (
     select * from {{ source('raw', 'retail_invoice_lines') }}
+),
+
+country_map as (
+    select * from {{ ref('retail_country_map') }}
 ),
 
 renamed as (
@@ -75,6 +85,23 @@ classified as (
             else 'product'
         end as item_type
     from renamed
+),
+
+-- **Left, and an inner join here would be the silent version of this model.**
+-- The seed is exhaustive, so a null code means one of the three labels that are
+-- not countries (`European Community`, `West Indies`, `Unspecified`) — and
+-- anything else means a label the seed has never seen, which the
+-- `relationships` test in `_staging.yml` exists to name. An inner join deletes
+-- those rows instead, and then that test *passes*, because the rows it reads
+-- are the ones that went. Measured against a warehouse copy: 17,866 lines and
+-- GBP 615,520 gone with all 90 nodes green. The unit test
+-- `..._keeps_a_line_whose_country_the_map_has_never_seen` is what catches it.
+resolved as (
+    select
+        c.*,
+        m.country_iso3
+    from classified as c
+    left join country_map as m on c.country = m.retail_country
 )
 
 select
@@ -92,6 +119,12 @@ select
     quantity * unit_price as line_amount_gbp,
     customer_id,
     country,
+    -- The conformed key. Kept beside the source's own label rather than
+    -- replacing it: the label is what the file says, and the 871 lines
+    -- (GBP 11,515) whose label is an aggregate or an absence resolve to no code
+    -- at all — dropping the label would make those countryless rather than
+    -- merely un-joinable.
+    country_iso3,
     invoice_ts,
     invoice_date,
     invoice_month,
@@ -106,4 +139,4 @@ select
     item_type = 'product'
     and not (invoice_type = 'sale' and quantity < 0)
     and invoice_type <> 'adjustment' as is_revenue_line
-from classified
+from resolved

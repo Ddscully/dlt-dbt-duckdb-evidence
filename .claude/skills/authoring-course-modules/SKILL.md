@@ -155,7 +155,7 @@ workbook's own count instead.
 
 ### Module 03 — tests
 
-**It measured how much of the warehouse the 440 tests actually look at, and the
+**It measured how much of the warehouse the 447 tests actually look at, and the
 answer is the module.** `dbt_utils.accepted_range` compiles to
 `where not (col >= min)`, and `not (null >= 0)` is *null*, so every range test
 silently skips its nulls. On `fct_emissions_energy` that means each of the
@@ -164,7 +164,7 @@ of 43,138) and **54%** (`co2_mt`) of the fact — except `year`, the one column
 that is never null, at 100%. 162 of the 367 `marts` columns carry any test at
 all, against every mart model under a type contract: two different guarantees, and
 worth being able to say which one you have. The audit schema is measurable too —
-**391 tables against 440 tests**, i.e. 22 orphans, which is the stale-audit-table
+**391 tables against 447 tests**, i.e. 22 orphans, which is the stale-audit-table
 bullet in `CLAUDE.md` showing up as a number.
 
 **Drill 1 is the calibration trap with a second axis nobody expects.** Adding

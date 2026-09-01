@@ -206,6 +206,7 @@ SALT_ENV = "PII_SALT"
 EXTRA_CLASSIFICATIONS: dict[tuple[str, str, str], str] = {
     ("analytics", "retail_rfm", "customer_id"): "direct_identifier",
     ("analytics", "retail_rfm", "country"): "quasi_identifier",
+    ("analytics", "retail_rfm", "country_iso3"): "quasi_identifier",
     ("analytics", "retail_rfm", "cohort_month"): "quasi_identifier",
     ("analytics", "retail_rfm", "first_order_date"): "quasi_identifier",
     ("analytics", "retail_rfm", "last_order_date"): "quasi_identifier",
@@ -707,7 +708,11 @@ select count(*) from lakehouse.raw.om_weather_daily;
   (`is_stock_write_off`), 22.8% of lines carry no customer id so every
   per-customer table covers a subset of the business, and returns are matched to
   the sale they reverse by inference — `match_status` says how confidently, per
-  row, because the source has no key linking the two.
+  row, because the source has no key linking the two. All four fact and
+  dimension tables carry `country_iso3` beside the source's own country label,
+  so retail can be joined to the country tables above — the source spells nine
+  of its 43 countries in its own way (`EIRE`, `RSA`, `USA`, ...) and joining
+  those two halves on a country *name* silently drops them.
 - **`customer_id` is pseudonymised in this release and is stable across
   releases.** It is a salted digest of the publisher's own id, applied to every
   copy of the column in the file (`raw`, `staging`, `marts`, `analytics`), so it

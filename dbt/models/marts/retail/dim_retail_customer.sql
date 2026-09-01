@@ -116,7 +116,13 @@ activity as (
         -- classic dimension bug, and 13 rows is exactly the size at which
         -- nobody notices.
         count(distinct country) as n_countries,
-        max(country) as country
+        max(country) as country,
+        -- `max_by`, not `max`: the code has to be the one belonging to the
+        -- label the line above picked. For the 13 customers who transact from
+        -- two countries a plain `max` on each column independently can name
+        -- one country and code another, which is a row that agrees with
+        -- nothing and reads as a mapping bug.
+        max_by(country_iso3, country) as country_iso3
     from lines
     group by customer_id
 )
@@ -124,6 +130,7 @@ activity as (
 select
     a.customer_id,
     a.country,
+    a.country_iso3,
     a.n_countries,
     a.n_countries > 1 as has_moved_country,
     f.first_order_date,

@@ -57,7 +57,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   proves an answer is *in* the list, never that it is the right member of it. A
   misclassification moves money between buckets without changing any total, so no
   row-level constraint can see it. Mutated against a warehouse copy, running the
-  model's 19 data tests each time: dropping `upper()` from `stock_code` moves net
+  model's 20 data tests each time: dropping `upper()` from `stock_code` moves net
   revenue by **+GBP 1,702** and all 19 pass; sending `AMAZONFEE` to `product`
   moves it by **-GBP 260,764** and all 19 pass; removing
   `invoice_type <> 'adjustment'` from `is_revenue_line` changes **nothing at all**

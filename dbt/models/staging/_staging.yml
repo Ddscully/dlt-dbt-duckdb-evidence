@@ -702,9 +702,29 @@ models:
         meta:
           pii: direct_identifier
       - name: country
+        description: >
+          The source's own label, 43 of them, kept as written. `relationships`
+          against `retail_country_map` is what makes a label the seed has never
+          seen loud: the resolution is a left join, so an unmapped label
+          otherwise lands as a null `country_iso3` and looks exactly like the
+          three labels that are deliberately unmappable.
         meta:
           pii: quasi_identifier
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('retail_country_map')
+                field: retail_country
+      - name: country_iso3
+        description: >
+          The conformed country key, resolved from `country` through
+          `retail_country_map`. Null on 871 lines (0.08%) whose label is an
+          aggregate or an absence rather than a place; deliberately *not*
+          `not_null` for that reason, and the seed test pins which rows may do
+          it.
+        meta:
+          pii: quasi_identifier
       - name: invoice_ts
         description: >
           Wall-clock shop time, stored naive. See `RETAIL_COLUMNS` in

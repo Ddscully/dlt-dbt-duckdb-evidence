@@ -185,6 +185,10 @@ def build_retail_rfm(customers: pl.DataFrame, as_of_date: dt.date) -> pl.DataFra
         .select(
             "customer_id",
             "country",
+            # The conformed key beside the label, so an RFM segment can be
+            # grouped by region or put beside a country-stats figure. It is the
+            # dimension's own resolution — carried, not recomputed here.
+            "country_iso3",
             "as_of_date",
             "cohort_month",
             "first_order_date",

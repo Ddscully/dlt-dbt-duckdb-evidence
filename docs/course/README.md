@@ -20,7 +20,7 @@ lessons are about syntax. Everything expensive in this trade is somewhere else:
 
 None of those raised. Every one produced a number a reviewer would accept. That
 is the subject of the course, and this repo is the material because it has
-**440 dbt tests, 17 enforced contracts and an offline fixture harness** you can
+**447 dbt tests, 17 enforced contracts and an offline fixture harness** you can
 break in a sandbox and rebuild in under a minute.
 
 ## How a module works

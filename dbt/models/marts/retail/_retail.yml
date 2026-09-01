@@ -52,6 +52,17 @@ models:
         data_type: VARCHAR
         meta:
           pii: quasi_identifier
+      - name: country_iso3
+        description: >
+          The conformed country key, resolved from `country` through the
+          `retail_country_map` seed. This is what joins retail to
+          `dim_country_year` and everything built on it. Null on the 871 lines
+          (0.08%) whose label is an aggregate or an absence — `European
+          Community`, `West Indies`, `Unspecified` — so it is nullable on
+          purpose and the seed's own tests pin which rows may do it.
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
       - name: invoice_ts
         data_type: TIMESTAMP
         meta:
@@ -235,6 +246,16 @@ models:
         data_type: VARCHAR
         meta:
           pii: quasi_identifier
+      - name: country_iso3
+        description: >
+          The conformed key for the country named beside it, so a customer
+          rollup can be grouped by `region` or `income_group`. Taken with
+          `max_by` rather than `max`, so that for the 13 customers who transact
+          from two countries the code is the one belonging to the label this row
+          shows rather than an independent pick.
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
       - name: n_countries
         data_type: BIGINT
       - name: has_moved_country
@@ -374,6 +395,14 @@ models:
       - name: description
         data_type: VARCHAR
       - name: country
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
+      - name: country_iso3
+        description: >
+          The conformed country key, carried from `stg_retail_lines` through
+          `int_retail_return_matches`. Nullable for the same three labels as on
+          `fct_retail_order_line`.
         data_type: VARCHAR
         meta:
           pii: quasi_identifier

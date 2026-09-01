@@ -88,6 +88,16 @@ The country-year spine is the dominant grain but not a house rule.
 the FX tables have no country, and the five retail models sit below country
 grain.
 
+Below country grain is not outside it. `fct_retail_order_line`,
+`fct_retail_returns`, `dim_retail_customer` and `analytics.retail_rfm` all carry
+`country_iso3` beside the source's own country label, resolved once in
+`stg_retail_lines` through the `retail_country_map` seed — so retail revenue can
+be grouped by `region` or `income_group`, or put beside the electricity price
+its market pays. The source spells nine of its 43 country labels in ways the
+dimension does not (`EIRE`, `RSA`, `USA`, `Korea`, `Czech Republic`,
+`Hong Kong`, and three that are not countries at all), which is why the
+resolution is a seed rather than a join on name.
+
 ## The lakehouse: `data/lakehouse/`
 
 **This is where `raw` lives.** dlt lands the eight source tables into a

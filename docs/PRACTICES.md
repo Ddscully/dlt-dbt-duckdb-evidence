@@ -29,6 +29,21 @@ reach the mart with World Bank data and no OWID emissions at all.
 → [`dbt/models/marts/country_stats/dim_country_year.sql`](../dbt/models/marts/country_stats/dim_country_year.sql),
 [`fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql)
 
+**A key two processes share has to be spelled the same way in both.** The
+retail source names countries in its own words — `EIRE`, `RSA`, `USA`, `Korea` —
+while every other model here keys on ISO3, so the two halves of the warehouse
+could not be joined at all. 34 of the 43 labels happen to match the country
+dimension's names, which is the trap: joining on name succeeds quietly and drops
+the other nine — 19,898 lines and £652,387, of which `EIRE` alone is £615,520
+and the retailer's second-largest market. A seed resolves all 43 once, in
+staging, and the join is a *left* one for a reason an inner join makes vivid:
+it deletes the rows it cannot resolve, and the `relationships` test that exists
+to catch them then passes, because the rows were the evidence. Measured by
+deleting one label from the seed — 17,866 lines and £615,520 gone, all 90 nodes
+green.
+→ [`dbt/seeds/retail_country_map.csv`](../dbt/seeds/retail_country_map.csv),
+[`stg_retail_lines.sql`](../dbt/models/staging/stg_retail_lines.sql)
+
 **Model the grain the publisher used, and only then aggregate.** Eurostat
 publishes electricity prices every half-year. Averaging that to a year is not
 free: the mean absolute half-over-half change was 19% across countries in 2022
@@ -112,7 +127,7 @@ the release notes, because the consumers who need it never read a dbt log.
 quarter is range-checked 1–4, which caught a float-division bug at quarter 5.
 Change the same expression from `/ 3` to `/ 4` and every fiscal quarter in the
 warehouse is wrong while **all 19 data tests on the model pass** — measured, not
-argued. Three unit tests fail on it. There are 29 unit tests over twelve models,
+argued. Three unit tests fail on it. There are 30 unit tests over twelve models,
 and each exists because of a specific mutation the data tests could not see.
 → [`dbt/models/marts/_unit_tests.yml`](../dbt/models/marts/_unit_tests.yml)
 

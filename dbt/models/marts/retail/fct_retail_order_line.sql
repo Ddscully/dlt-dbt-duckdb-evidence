@@ -68,6 +68,12 @@ select
     l.description,
     l.customer_id,
     l.country,
+    -- The conformed country key, resolved once in staging. This is the column
+    -- that lets a retail figure be grouped by `region` or `income_group`, or
+    -- put beside the electricity price its market pays — every one of which was
+    -- unreachable while the only country here was a label the country
+    -- dimension does not use.
+    l.country_iso3,
     l.invoice_ts,
     l.invoice_date,
     l.invoice_month,

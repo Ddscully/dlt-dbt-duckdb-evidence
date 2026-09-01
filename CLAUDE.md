@@ -148,7 +148,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (31 models, 2 snapshots, 6 seeds + 440 data tests + 29 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (31 models, 2 snapshots, 7 seeds + 447 data tests + 30 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -669,7 +669,7 @@ loose in *Conventions & gotchas* until 2026-09-01 for exactly that reason.
 |--------|-------|---------------|
 | OWID, the World Bank and Eurostat (the `country_stats` group) | `country-stats-models` | coverage that thins per column, current against constant dollars, territorial against consumption emissions, the WDI window and its restatements, and Eurostat's semi-annual grain |
 | Scope 2 factors and CBAM (the dbt `compliance` group) | `compliance-models` | the vintage filter that cannot be a year literal, the fabricated worked example, the annex transcription policy, the 2026/1740 migration, and why Annexes II–IV are left out |
-| Retail transactions (the `retail` group) | `retail-models` | the three cleaning decisions whose wrong answers are plausible, the returns inference, the ragged cohort triangle, and why `ntile(5)` is wrong for RFM |
+| Retail transactions (the `retail` group) | `retail-models` | the three cleaning decisions whose wrong answers are plausible, the returns inference, the ragged cohort triangle, why `ntile(5)` is wrong for RFM, and the country map that joins retail to the country domain |
 | ECB rates and the calendar | `currency-and-calendar` | the 7-day carry-forward cap, spot against average, ISO year against calendar year, and the project's one incremental model |
 | Capital-city weather (`om_weather_daily`) | `weather-models` | the weighted rate budget that bounds the whole source, the positional multi-location response, the three-year cold start, and the two degree-day conventions |
 
@@ -1021,7 +1021,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 438 of the 440 tests use the default. `severity` comes across
+  is what dbt does; 438 of the 447 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the
@@ -1229,6 +1229,22 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   - **Adding a WDI indicator is two places** — `WB_WDI_INDICATORS` in
     `ingest/sources/worldbank.py` and a `max(case …)` in `stg_wdi.sql`, held
     together by `tests/test_ingest.py`.
+
+- **Retail carries `country_iso3` now, and the join that resolves it has to stay
+  a *left* join.** The source names countries in its own words, so the retail
+  models could not be joined to the country domain at all;
+  `retail_country_map` (a seed, 43 rows) resolves every label once in
+  `stg_retail_lines`, and the fact, the returns fact, `dim_retail_customer` and
+  `analytics.retail_rfm` all carry the key. 34 of the 43 labels match
+  `dim_country_year.country_name` exactly, which is what makes a join on name
+  look like it works while losing the other nine — `EIRE` alone is GBP 615,520
+  and the second-largest market. The seed is exhaustive on purpose and
+  `relationships(country → seed)` is what makes a label from a re-ingest loud.
+  **An inner join does not trip that test, it defeats it**: it deletes the
+  unresolved rows, so the test reads a model with nothing left to fail on —
+  measured at 17,866 lines and GBP 615,520 gone, four customers with them, and
+  all 90 nodes green. The nine labels, the six judgements and the `max_by` in
+  the customer dimension are the `retail-models` skill.
 
 ## Orchestration (`orchestration/`)
 
