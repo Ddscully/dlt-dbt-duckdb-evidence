@@ -74,8 +74,12 @@ policy those pins serve is in `CLAUDE.md` under *Style guide*.
   that is the one moment they appear.
 - **`astral-sh/setup-uv` is pinned to an exact patch, not a major.** It stopped
   publishing moving major/minor tags at v8 as a supply-chain measure, so `@v9`
-  does not resolve at all. All four workflows carry a comment saying so, because
-  the obvious tidy-up is to "simplify" it back to a major.
+  does not resolve at all. It is used in exactly one place —
+  `.github/actions/setup/action.yml`, the composite action all four workflows
+  call — and the comment saying so lives beside it, because the obvious tidy-up
+  is to "simplify" it back to a major. It was in four workflows until
+  2026-09-01, which is four places for a Dependabot bump to disagree with
+  itself.
 - **`pages.yml` is the only workflow that needs Node** (24; the Evidence build).
   The other three run on a bare uv checkout — see the Orchestration section for
   why the site is excluded from `full_refresh`.

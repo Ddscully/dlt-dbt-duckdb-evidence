@@ -1,16 +1,11 @@
--- Returns, matched back to the sale they reverse.
+-- Returns, matched back to the sale they reverse, with the match classified.
 -- Grain: one row per cancellation line — every one of them, matched or not.
 --
--- **The source has no link between a return and its original order.** There is
--- no order reference, no RMA number, no line pointer; there is a `C`-prefixed
--- invoice with a negative quantity and the expectation that you work it out.
--- That is the ordinary condition of transactional data and it is why this model
--- exists — the join has to be *inferred*, and inferring it means deciding what
--- counts as a match and then reporting how often the decision failed.
---
--- The rule: the same customer's most recent prior purchase of the same product.
--- An `asof join`, because "most recent before" is exactly what it expresses and
--- a correlated subquery over 1M rows is not.
+-- The matching itself is `int_retail_return_matches`: the source carries no link
+-- between a return and its original order, so the join is *inferred* from the
+-- same customer's most recent prior purchase of the same product. This model is
+-- the other half of that — deciding what counts as a match and then reporting
+-- how often the decision failed.
 --
 -- What the rule cannot do, stated rather than hidden:
 --
@@ -33,114 +28,15 @@
 -- rate is 91.4%. The honest way to read the remainder is as the cost of a source
 -- without a foreign key, not as a bug to be tuned away — and the 2.0% is the
 -- more interesting number than the 87.6%, because it is the rule being wrong
--- rather than the data being absent.
+-- rather than the data being absent. That bucket is an upper bound rather than a
+-- count; `int_retail_return_matches` measures why.
 --
 -- The distribution is a sanity check in itself and it passes: the median return
 -- comes back **10 days** after purchase, the mean is 32, and 1,585 come back the
 -- same day. A matching rule that had latched onto arbitrary sales would produce
 -- a flat spread over the two-year window instead of that shape.
-with lines as (
-    select * from {{ ref('stg_retail_lines') }}
-),
-
--- Only genuine product returns. A cancellation of a postage line or a manual
--- adjustment is a correction, not a customer sending something back, and mixing
--- them in is how a return rate ends up above what was ever sold.
-returns as (
-    select
-        invoice,
-        line_number,
-        customer_id,
-        stock_code,
-        description,
-        country,
-        invoice_ts,
-        invoice_date,
-        invoice_month,
-        -- Flipped to positive here: a returned quantity of 4 reads better than
-        -- -4 everywhere downstream, and the signed amount stays signed.
-        -quantity as quantity_returned,
-        unit_price,
-        line_amount_gbp as return_amount_gbp
-    from lines
-    where
-        invoice_type = 'cancellation'
-        and item_type = 'product'
-        and quantity < 0
-),
-
--- One candidate per (customer, product, instant), because an `asof join` that
--- has several rows tied on its inequality key picks one of them arbitrarily —
--- and 33,518 groups here are tied, covering 70,174 of the 802,716 purchase
--- lines (8.7%). 604 return lines (3.68%) land on one of those groups, up to 20
--- deep, and before this the model was **not reproducible between builds**:
--- three consecutive runs against byte-identical sources gave 16,031 / 16,032 /
--- 16,030 clean matches and `sum(original_quantity)` of 637,411 / 636,410 /
--- 636,208. `dim_retail_customer` had already met this and settled it the same
--- way, ranking on `min(invoice_ts)` then `invoice`.
---
--- The tie-break is the lowest invoice then the lowest line number. `invoice` is
--- a string, so that ordering is lexicographic rather than numeric — which is
--- fine for the job, since the point is that the choice is *fixed*, not that it
--- is meaningful. Nothing here claims the chosen line is the better match.
---
--- **Deliberately one line and not their sum**, and the cost of that is
--- measured rather than waved past. Summing the tied lines would change what
--- `original_quantity` means and leave `original_line_number` with nothing to
--- point at, so it is a re-specification of the matching rule and not a fix for
--- an unstable one. But it is not free: of the 604 tied matches, 63 are flagged
--- 'matched, quantity exceeds purchase' and **56 of them would be plain matches
--- if the tied lines were added up** — the customer did buy that many, across
--- two lines of one order. That is 15% of the 366 rows in the bucket this model
--- calls its most interesting number, so the bucket is an upper bound on "the
--- rule found the wrong sale" rather than a count of it. Left as a separate
--- decision on purpose; a determinism fix should not quietly move 56 rows
--- between buckets.
---
--- These five figures are measured against the warehouse this model *now*
--- builds. The first version of this comment quoted 70 / 63 / 367, taken while
--- diagnosing the instability — i.e. from the model that gave a different answer
--- every build. A determinism fix invalidates the evidence gathered for it, so
--- everything here was re-measured afterwards. This comment is the one copy that
--- carries the numbers; CLAUDE.md and the retail skill cite it.
-purchases as (
-    select
-        invoice,
-        line_number,
-        customer_id,
-        stock_code,
-        invoice_ts,
-        invoice_date,
-        quantity,
-        unit_price,
-        line_amount_gbp
-    from lines
-    where
-        invoice_type = 'sale'
-        and item_type = 'product'
-        and quantity > 0
-        and customer_id is not null
-    qualify row_number() over (
-        partition by customer_id, stock_code, invoice_ts
-        order by invoice, line_number
-    ) = 1
-),
-
-matched as (
-    select
-        r.*,
-        p.invoice as original_invoice,
-        p.line_number as original_line_number,
-        p.invoice_date as original_invoice_date,
-        p.quantity as original_quantity,
-        p.unit_price as original_unit_price,
-        p.line_amount_gbp as original_amount_gbp
-    from returns as r
-    asof left join purchases as p
-        on
-            r.customer_id = p.customer_id
-            and r.stock_code = p.stock_code
-            and r.invoice_ts >= p.invoice_ts
+with matched as (
+    select * from {{ ref('int_retail_return_matches') }}
 )
 
 select

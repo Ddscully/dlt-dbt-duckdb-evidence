@@ -39,7 +39,7 @@ MANIFEST_PATH = dbt_manifest_path()
 # The schemas that make up the modelled warehouse, in pipeline order. `raw` is
 # covered separately by `build_sources` (it has freshness, these don't) and
 # dbt's own bookkeeping schemas are deliberately absent.
-LAYERS = ("staging", "marts", "analytics", "history")
+LAYERS = ("staging", "intermediate", "marts", "analytics", "history")
 
 # dlt's landing tables, minus its internal `_dlt_*` bookkeeping.
 #

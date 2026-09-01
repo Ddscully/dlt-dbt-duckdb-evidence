@@ -42,7 +42,6 @@ NOT_A_SITE_INPUT = (
     "README.md",
     "CLAUDE.md",
     "LICENSE",
-    "justfile",  # pages.yml calls uv and dagster directly, never a recipe
     ".gitignore",
     ".pre-commit-config.yaml",  # lint gates, and this job does not lint
     ".sqlfluff",
@@ -54,6 +53,15 @@ NOT_A_SITE_INPUT = (
     ".github/CONTRIBUTING.md",
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/ISSUE_TEMPLATE/**",
+    # `.github/actions/**` is on the *allow* side, not here: the setup action
+    # installs the toolchain and exports the paths this build runs under, so a
+    # change to it changes the site. `justfile` moved across for the same reason
+    # — it used to sit here reading "pages.yml calls uv and dagster directly,
+    # never a recipe", which stopped being true the day the build became
+    # `just materialize-site`. That comment is why this test exists: the premise
+    # a classification rests on goes stale silently, and the only symptom would
+    # have been a site that stopped moving.
+    #
     # The other three workflows. Listed one by one rather than as
     # `.github/workflows/*`: a *new* workflow should land here unclassified and
     # make someone say whether the site is built from it.
@@ -275,4 +283,191 @@ def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
     assert not missing, (
         "workflows that restore a release but do not download all of it: "
         f"{missing}\nEach asset needs its own `gh release download --pattern` line."
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The pipeline environment is defined once, in the setup action
+# --------------------------------------------------------------------------- #
+
+
+SETUP_ACTION = REPO_ROOT / ".github/actions/setup/action.yml"
+
+# The three paths every layer resolves itself from. Absolute, and the first one
+# is load-bearing rather than tidy — see the action's own comment.
+PIPELINE_PATHS = ("WAREHOUSE_PATH", "LAKEHOUSE_DIR", "DAGSTER_HOME")
+
+
+def _uncommented(text: str) -> str:
+    """Workflow text with whole-line comments dropped.
+
+    `pages.yml` names `DAGSTER_HOME` in prose — explaining that
+    `.dagster/dagster.yaml` is a build input — and a scan that cannot tell a
+    mention from an assignment would either fail on that sentence or be widened
+    until it stopped seeing assignments too.
+    """
+    return "\n".join(line for line in text.splitlines() if not line.strip().startswith("#"))
+
+
+def _assigns(text: str, name: str) -> bool:
+    """`NAME: value` as a YAML key, or `NAME=value` in a run block."""
+    return re.search(rf"^\s*{name}\s*[:=]", _uncommented(text), re.MULTILINE) is not None
+
+
+def test_the_setup_action_defines_every_pipeline_path():
+    """Vacuity guard, and it comes first: the two tests below assert an *absence*.
+
+    If the action stopped exporting these the workflows would be clean of them,
+    both of the assertions below would pass, and every job would run against
+    `profiles.yml`'s relative default — which resolves to the same file until the
+    day something runs from another directory.
+    """
+    action = SETUP_ACTION.read_text()
+    missing = [name for name in PIPELINE_PATHS if f"{name}=$GITHUB_WORKSPACE" not in action]
+    assert not missing, (
+        f"{SETUP_ACTION.name} no longer exports {missing}; the absence tests below "
+        "would then pass while nothing sets them at all"
+    )
+
+
+def test_no_workflow_defines_a_pipeline_path_itself():
+    """These were set in all four workflows behind an identical six-line comment,
+    and `WAREHOUSE_PATH` in exactly one of them.
+
+    Both halves of that shape have already cost this repo something. When the
+    landing zone moved into DuckLake all four needed the same new absolute
+    `LAKEHOUSE_DIR` and none of them got it — dlt wrote the catalog from the repo
+    root, dbt resolved its own copy from `dbt/`, and DuckLake compares the two as
+    *strings*, so the same directory under two spellings was refused inside
+    `dbt build`, one layer downstream of the layer that chose the spelling. No
+    recipe could reproduce it, because every recipe exported the variable that
+    hid it.
+
+    A workflow that sets one of these again is not wrong on its own — it is a
+    second definition, which is how the first one drifted.
+    """
+    offenders = {
+        path.name: [name for name in PIPELINE_PATHS if _assigns(path.read_text(), name)]
+        for path in sorted(WORKFLOWS_DIR.glob("*.yml"))
+    }
+    offenders = {name: found for name, found in offenders.items() if found}
+    assert not offenders, (
+        f"workflows defining a pipeline path themselves: {offenders}\n"
+        "These come from .github/actions/setup, which is the one place they are stated."
+    )
+
+
+def test_every_workflow_that_runs_the_pipeline_uses_the_setup_action():
+    """The other direction, and the one an absence test cannot reach.
+
+    Dropping the `uses:` line makes a workflow inherit nothing: no `just` on
+    PATH, no paths exported, and `profiles.yml`'s relative default quietly
+    standing in for the two that matter. Nothing above notices, because a
+    workflow that defines none of them is exactly what those tests want to see.
+    """
+    runners = {
+        path.name
+        for path in sorted(WORKFLOWS_DIR.glob("*.yml"))
+        if "just materialize" in path.read_text()
+    }
+    assert runners == {"ci.yml", "nightly.yml", "pages.yml", "release-data.yml"}, (
+        f"the scan for pipeline-running workflows found {sorted(runners)}; all four run it"
+    )
+    missing = sorted(
+        name
+        for name in runners
+        if "./.github/actions/setup" not in (WORKFLOWS_DIR / name).read_text()
+    )
+    assert not missing, f"workflows running the pipeline without the setup action: {missing}"
+
+
+# --------------------------------------------------------------------------- #
+# Dependabot watches the composite action, not just the workflows
+# --------------------------------------------------------------------------- #
+
+
+DEPENDABOT = REPO_ROOT / ".github/dependabot.yml"
+ACTIONS_DIR = REPO_ROOT / ".github/actions"
+
+
+def composite_actions_with_dependencies() -> set[str]:
+    """`{"/.github/actions/setup"}` — local actions that pin a third-party one.
+
+    An action with no `uses:` of its own has nothing for Dependabot to bump and
+    is not this test's business.
+    """
+    return {
+        f"/.github/actions/{path.parent.name}"
+        for path in ACTIONS_DIR.glob("*/action.yml")
+        if re.search(r"^\s*(-\s*)?uses:", path.read_text(), re.MULTILINE)
+    }
+
+
+def dependabot_action_directories() -> list[str]:
+    """The `directory`/`directories` values on the `github-actions` entry.
+
+    Scanned rather than parsed, for `pages_allowlist`'s reason: PyYAML is not a
+    declared dependency here — it arrives as dbt's transitive, and this repo has
+    been bitten once by a runtime import that was really some other package's
+    grand-child.
+    """
+    lines = DEPENDABOT.read_text().splitlines()
+    found: list[str] = []
+    in_entry = in_list = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("- package-ecosystem:"):
+            in_entry = "github-actions" in stripped
+            in_list = False
+            continue
+        if not in_entry or stripped.startswith("#"):
+            continue
+        if stripped.startswith("directory:"):
+            found.append(stripped.split(":", 1)[1].strip().strip("\"'"))
+        elif stripped.startswith("directories:"):
+            in_list = True
+        elif in_list and stripped.startswith("- "):
+            found.append(stripped[2:].strip().strip("\"'"))
+        elif in_list:
+            in_list = False
+    return found
+
+
+def test_the_dependabot_scan_reads_the_entry_it_thinks_it_does():
+    """Vacuity guard, first for the reason the pages one is: the test below
+    asserts a *covering*, and an empty read covers nothing but also finds nothing
+    to cover if the actions scan is empty too."""
+    assert "/" in dependabot_action_directories(), (
+        "the github-actions entry in dependabot.yml no longer yields `/`; the scan "
+        "has stopped matching the file rather than the file having changed"
+    )
+    assert composite_actions_with_dependencies(), (
+        "no composite action with a `uses:` was found; either they are gone or the "
+        "scan is looking in the wrong place"
+    )
+
+
+def test_dependabot_watches_every_composite_action_that_pins_one():
+    """A bare `directory: /` scans `.github/workflows/` and nothing else.
+
+    So moving the four workflows' shared setup into `.github/actions/setup` took
+    the exactly-pinned `astral-sh/setup-uv` out of Dependabot's view with it —
+    still pinned, no longer watched, and frozen with nothing to say so. Nothing
+    goes red when a guard stops looking, which is why this is a test and not a
+    comment in the config.
+
+    `setup-uv` is the one that makes it matter: it stopped publishing moving
+    major tags at v8, so a grouped monthly PR is the only thing that can ever
+    bump it (see the `dependency-versions` skill).
+    """
+    watched = dependabot_action_directories()
+    unwatched = sorted(
+        directory
+        for directory in composite_actions_with_dependencies()
+        if not any(_matches(directory.lstrip("/"), pattern.lstrip("/")) for pattern in watched)
+    )
+    assert not unwatched, (
+        f"composite actions Dependabot cannot see: {unwatched}\n"
+        "Add the directory (or a glob covering it) to the github-actions entry's "
+        "`directories:` list in .github/dependabot.yml."
     )

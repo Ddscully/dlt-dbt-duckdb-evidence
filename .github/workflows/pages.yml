@@ -48,6 +48,11 @@ on:
       - "uv.lock"
       - ".python-version"
       - ".github/workflows/pages.yml"
+      # The build now runs through a recipe and a composite action, so both are
+      # build inputs. Leaving either out is the stale-site case above: a change
+      # to how the site is built would not rebuild the site.
+      - "justfile"
+      - ".github/actions/**"
   schedule:
     # Weekly, 06:40 UTC Monday. The sources publish annually, so a nightly
     # rebuild would burn Actions minutes to republish identical numbers.
@@ -68,34 +73,13 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      # No INGEST_FIXTURES: see the note at the top.
-      # Absolute for the same reason, and here it is not merely tidiness: dlt
-      # writes the catalog from the repo root, so DuckLake records an *absolute*
-      # data_path, while dbt resolves profiles.yml's relative default from dbt/.
-      # DuckLake stores the path as given and compares the two as strings, so
-      # one directory under two spellings is refused — `DATA_PATH parameter
-      # "../data/lakehouse/data/" does not match existing data path`.
-      LAKEHOUSE_DIR: ${{ github.workspace }}/data/lakehouse
-      DAGSTER_HOME: ${{ github.workspace }}/.dagster
+    # No INGEST_FIXTURES: see the note at the top. The three paths, and the
+    # `dbt parse` the graph cannot load without, come from the setup action and
+    # `just materialize-site`'s own dependency chain.
     steps:
       - uses: actions/checkout@v7
 
-      # Pinned to the exact patch: setup-uv stopped publishing moving major/minor
-      # tags at v8, so `@v9` does not resolve. Bump it by hand.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
-        with:
-          enable-cache: true
-
-      - name: Sync deps
-        run: uv sync --group orchestration
-
-      # dbt/dbt_packages/ and dbt/target/ are gitignored, and `prepare_if_dev`
-      # only fires under `dagster dev` — so outside the UI the manifest has to
-      # be built explicitly before the asset graph can load.
-      - name: Install dbt packages and parse the project
-        run: cd dbt && uv run dbt deps && uv run dbt parse
+      - uses: ./.github/actions/setup
 
       # 24 is the active LTS; 20 went end-of-life in April 2026 and the runners
       # now force node20 actions onto 24 anyway. `package.json` only asks for
@@ -176,14 +160,12 @@ jobs:
           uv run python -m scripts.restore_history prev-release/warehouse.duckdb
           rm -rf prev-release
 
+      # `materialize-site`, not `materialize`: this is the one workflow whose job
+      # is `publish_site`, which is `full_refresh` plus `reports/evidence_site`.
+      # That asset is why `setup-node` runs above and why the other three
+      # workflows need no Node at all.
       - name: Build the warehouse and the site from live sources
-        run: |
-          mkdir -p "$DAGSTER_HOME"
-          # Two jobs: an asset job takes one partitions definition, and the retail
-          # ingest is monthly where wb_wdi is yearly. dbt reads the retail table, so
-          # this one goes first (see orchestration/definitions.py).
-          uv run dagster job execute -m orchestration.definitions -j load_retail
-          uv run dagster job execute -m orchestration.definitions -j publish_site
+        run: just materialize-site
 
       - uses: actions/configure-pages@v6
 

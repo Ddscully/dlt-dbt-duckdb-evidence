@@ -71,7 +71,7 @@ that an upstream publisher moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
 that OWID was down.
 
-**What blocks.** 424 dbt tests run inside `dbt build`, every one with
+**What blocks.** 440 dbt tests run inside `dbt build`, every one with
 `store_failures`, so a red test hands you `select * from
 dbt_test__audit.<test_name>` rather than a count. Six Dagster asset checks sit
 alongside them, and `site_pages_all_rendered` is blocking and checks page *size*
@@ -91,7 +91,7 @@ Measured on this machine against the live APIs, per stage:
 | Stage | Time | Notes |
 |-------|------|-------|
 | `just ingest` | **61.0 s** | seven sources; 55.2 s of it with the retail workbook already cached |
-| `just dbt-build` | **26.4 s** | 488 built nodes — 28 models, 2 snapshots, 6 seeds, 424 data tests and 28 unit tests (dbt's own total of 498 adds the 10 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
+| `just dbt-build` | **30.0 s** | 508 built nodes — 31 models, 2 snapshots, 6 seeds, 440 data tests and 29 unit tests (dbt's own total of 518 adds the 10 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
 | `just transform` | **2.1 s** | two Polars models |
 | `just pipeline-status` | **1.4 s** | observability tables |
 | `just lake` | **3.2 s** | 793 Parquet files, ~60 MB |
@@ -108,14 +108,24 @@ Warehouse contents: 344,242 staging rows, 808,787 mart rows (43,138 of them the
 wide fact and 646k the three FX tables), 9,821 snapshot rows across the two
 `history` tables.
 
-CI, from the repo's own run history (median of successful runs):
+CI, from the repo's own run history — median of the successful runs in the last
+40, re-measured 2026-09-01:
 
-| Workflow | Median | What it does |
-|----------|--------|--------------|
-| `ci` | **92 s** | pytest + the whole asset graph against fixtures, offline |
-| `nightly` | **154 s** | the same graph against live sources |
-| `pages` | **199 s** | live build + the Evidence site + deploy |
-| `release-data` | **178 s** | live build + export + a dated GitHub release |
+| Workflow | Median | Range | n | What it does |
+|----------|--------|-------|---|--------------|
+| `ci` | **153 s** | 136–187 | 37 | pytest + the whole asset graph against fixtures, offline |
+| `nightly` | **173 s** | 89–985 | 32 | the same graph against live sources |
+| `pages` | **273 s** | 174–712 | 36 | live build + the Evidence site + deploy |
+| `release-data` | **154 s** | 109–247 | 5 | live build + export + a dated GitHub release |
+
+**Every one of those was stale, and `ci` was stale by 66%** — it read 92 s,
+measured before the retail source, the weather source and the DuckLake move.
+Nothing could have said so: `tests/test_documented_counts.py` guards counts by
+scanning integers in front of a *test*-noun, and a **timing** has no such
+anchor. The range and `n` ship beside the median for that reason — a single
+number invites exactly the quiet decay that produced the 92 s, and the two live
+workflows' spread (`nightly` reaching 985 s, `pages` 712 s) is a property of the
+public APIs rather than noise to be averaged away.
 
 **The dollar cost is zero**, and I'd rather say that plainly than dress it up:
 GitHub Actions' free tier, no cloud warehouse, no credentials, no bill. That is a
@@ -159,7 +169,7 @@ warehouse that bills by the second, that table is where the invoice comes from.
    is a few thousand a second and a few terabytes, there's no distributed query
    processing, and it's beta until 2.0 this autumn. And I haven't put dbt's
    build graph through it. That's the run that would settle it.
-3. **Full-refresh materialisation, for 27 of the 28 models.** Every mart is
+3. **Full-refresh materialisation, for 30 of the 31 models.** Every mart is
    `+materialized: table` and rebuilt whole. That is deliberate rather than
    pending: each one re-derives a source that gets fully re-fetched, so
    rebuilding is *how* an upstream restatement is picked up, and the whole

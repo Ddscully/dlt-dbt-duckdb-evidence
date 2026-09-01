@@ -26,43 +26,22 @@ permissions:
 jobs:
   live:
     runs-on: ubuntu-latest
-    env:
-      # No INGEST_FIXTURES here — that's the entire point of this workflow.
-      # Absolute for the same reason, and here it is not merely tidiness: dlt
-      # writes the catalog from the repo root, so DuckLake records an *absolute*
-      # data_path, while dbt resolves profiles.yml's relative default from dbt/.
-      # DuckLake stores the path as given and compares the two as strings, so
-      # one directory under two spellings is refused — `DATA_PATH parameter
-      # "../data/lakehouse/data/" does not match existing data path`.
-      LAKEHOUSE_DIR: ${{ github.workspace }}/data/lakehouse
-      DAGSTER_HOME: ${{ github.workspace }}/.dagster
+    # No INGEST_FIXTURES anywhere in this workflow — that is the entire point of
+    # it. The three paths come from the setup action.
     steps:
       - uses: actions/checkout@v7
 
-      # Pinned to the exact patch: setup-uv stopped publishing moving major/minor
-      # tags at v8, so `@v9` does not resolve. Bump it by hand.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+      - uses: ./.github/actions/setup
         with:
-          enable-cache: true
+          groups: --group dev --group orchestration
 
-      - name: Sync deps
-        run: uv sync --group dev --group orchestration
-
-      # dbt/dbt_packages/ and dbt/target/ are gitignored, and `prepare_if_dev`
-      # only fires under `dagster dev` — so outside the UI the manifest has to
-      # be built explicitly before the asset graph can load.
-      - name: Install dbt packages and parse the project
-        run: cd dbt && uv run dbt deps && uv run dbt parse
-
+      # `just materialize` depends on `dbt-parse`, which is what writes the
+      # gitignored `dbt/target/manifest.json` that `@dbt_assets` reads at *import*
+      # time — `prepare_if_dev` only fires under `dagster dev`, so outside the UI
+      # the graph cannot load without it. It used to be a separate step in three
+      # workflows; the dependency is now the only place that is stated.
       - name: Materialize the asset graph against live sources
-        run: |
-          mkdir -p "$DAGSTER_HOME"
-          # Two jobs: an asset job takes one partitions definition, and the retail
-          # ingest is monthly where wb_wdi is yearly. dbt reads the retail table, so
-          # this one goes first (see orchestration/definitions.py).
-          uv run dagster job execute -m orchestration.definitions -j load_retail
-          uv run dagster job execute -m orchestration.definitions -j full_refresh
+        run: just materialize
 
       # A build artifact, not a release: handy for diffing what the live sources
       # actually returned on the day the run went red. `release-data.yml` is the

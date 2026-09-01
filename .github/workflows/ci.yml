@@ -14,30 +14,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # Serve every source from the recorded fixtures.
+      # The only variable this workflow owns. The three paths come from the
+      # setup action, which is the single definition of them.
       INGEST_FIXTURES: "1"
-      # Absolute, because dbt resolves this from dbt/ and Python from the root.
-      WAREHOUSE_PATH: ${{ github.workspace }}/data/warehouse.duckdb
-      # Absolute for the same reason, and here it is not merely tidiness: dlt
-      # writes the catalog from the repo root, so DuckLake records an *absolute*
-      # data_path, while dbt resolves profiles.yml's relative default from dbt/.
-      # DuckLake stores the path as given and compares the two as strings, so
-      # one directory under two spellings is refused — `DATA_PATH parameter
-      # "../data/lakehouse/data/" does not match existing data path`.
-      LAKEHOUSE_DIR: ${{ github.workspace }}/data/lakehouse
-      DAGSTER_HOME: ${{ github.workspace }}/.dagster
     steps:
       - uses: actions/checkout@v7
 
-      # Pinned to the exact patch: setup-uv stopped publishing moving major/minor
-      # tags at v8, so `@v9` does not resolve. Bump it by hand.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+      - uses: ./.github/actions/setup
         with:
-          enable-cache: true
-
-      - name: Sync deps
-        run: uv sync --group dev --group orchestration
+          groups: --group dev --group orchestration
 
       # Mocked-payload unit tests over the parsing logic: retry/raise, WDI
       # pagination, the Eurostat stride walk, the Polars transform.
@@ -59,20 +44,19 @@ jobs:
       # step that catches it.
       - name: Validate Dagster definitions
         run: |
-          cd dbt && uv run dbt deps && uv run dbt parse && cd ..
+          just dbt-parse
           uv run dagster definitions validate -m orchestration.definitions
           uv run pytest tests/test_definitions.py tests/test_asset_checks.py tests/test_documented_counts.py
 
       # Runs ingest -> dbt build + test -> Polars in asset-graph order, and
       # evaluates the asset checks alongside dbt's tests — all against fixtures.
+      #
+      # The recipe is the definition of what a pipeline run *is*: two jobs in
+      # order, because an asset job takes one partitions definition and the
+      # retail ingest is monthly where wb_wdi is yearly. All four workflows call
+      # it, so `just materialize` on a laptop is the same run.
       - name: Materialize the asset graph
-        run: |
-          mkdir -p "$DAGSTER_HOME"
-          # Two jobs: an asset job takes one partitions definition, and the retail
-          # ingest is monthly where wb_wdi is yearly. dbt reads the retail table, so
-          # this one goes first (see orchestration/definitions.py).
-          uv run dagster job execute -m orchestration.definitions -j load_retail
-          uv run dagster job execute -m orchestration.definitions -j full_refresh
+        run: just materialize
 
       # The publish path (`release-data.yml`) against the fixture warehouse: a
       # renamed schema or a copy whose views don't survive fails here, on a pull
@@ -89,22 +73,14 @@ jobs:
           uv run python -m scripts.export_warehouse
           cd data/export && sha256sum -c SHA256SUMS
 
-      # From dbt/: the dbt templater opens the warehouse via the profile's
-      # relative path without chdir'ing into the project first. Same paths as
-      # `just lint` and the pre-commit hook (which runs that recipe) — a narrower
-      # set here would mean CI passing SQL a contributor's commit hook rejects.
+      # The recipe, not a bare sqlfluff call: the paths (`models snapshots`) and
+      # the chdir into `dbt/` used to be written here *and* in the justfile, and
+      # a narrower set in one of them means CI passing SQL a contributor's commit
+      # hook rejects. `just` is on PATH from the setup action — the pre-commit
+      # step below needs it too, since `sqlfluff-lint` is a `local` hook whose
+      # entry is this same recipe.
       - name: Lint SQL
-        run: cd dbt && uv run sqlfluff lint models snapshots
-
-      # `sqlfluff-lint` is a `local` hook whose entry is the `just lint` recipe —
-      # deliberately, so there is exactly one pinned sqlfluff (see
-      # .pre-commit-config.yaml). The cost is that the runner needs `just` on
-      # PATH: without it every pre-commit run fails with "Executable `just` not
-      # found", and the SQL never gets linted by the hook at all.
-      - name: Install just
-        run: |
-          uv tool install rust-just
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        run: just lint
 
       # ruff, formatting and whitespace. The same hooks contributors get from
       # `uv run pre-commit install`, run here because an outside PR arrives

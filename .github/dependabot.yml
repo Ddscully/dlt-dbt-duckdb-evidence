@@ -14,8 +14,20 @@ updates:
   # `astral-sh/setup-uv` is pinned to an exact patch (it stopped publishing
   # moving major tags at v8), so it can only ever be bumped by something like
   # this. The rest track major tags and move on their own within a major.
+  #
+  # **`directories`, plural, and the second entry is not decoration.** A bare
+  # `directory: /` scans `.github/workflows/` and nothing else, so when the four
+  # workflows' shared setup moved into a composite action on 2026-09-01 the
+  # `setup-uv` pin went with it — out of Dependabot's view, still pinned exactly,
+  # and therefore frozen forever with nothing to say so. That is this repo's
+  # collected failure shape: the guard stays green because it is no longer
+  # looking. The glob rather than the one path, so a second composite action is
+  # covered by existing configuration instead of by someone remembering.
+  # `tests/test_workflows.py` asserts the pair.
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: monthly
     open-pull-requests-limit: 1

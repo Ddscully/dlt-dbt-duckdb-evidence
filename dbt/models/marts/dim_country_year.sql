@@ -7,38 +7,18 @@ with country as (
     select * from {{ ref('stg_country') }}
 ),
 
-co2 as (
-    select * from {{ ref('stg_co2') }}
-),
-
-energy as (
-    select * from {{ ref('stg_energy') }}
-),
-
-wdi as (
-    select * from {{ ref('stg_wdi') }}
-),
-
-eu_prices as (
-    select * from {{ ref('stg_eu_electricity_prices') }}
-),
-
 -- The span is taken from the data rather than hardcoded: OWID CO2 reaches back
 -- to 1750 and the World Bank publishes the current year, and both ends move.
+--
+-- Which sources "the data" means is `int_country_year_observed`, and it is a
+-- ref rather than a union here because `fct_emissions_energy` needs the same
+-- answer. The two used to list the four staging models separately; see that
+-- model's header for what drifting apart cost.
 bounds as (
     select
         min(year) as first_year,
         max(year) as last_year
-    from (
-        select year from co2
-        union all
-        select year from energy
-        union all
-        select year from wdi
-        union all
-        select year from eu_prices
-    ) as observed_years
-    where year is not null
+    from {{ ref('int_country_year_observed') }}
 ),
 
 -- range()'s upper bound is exclusive
