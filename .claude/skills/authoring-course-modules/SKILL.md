@@ -162,7 +162,7 @@ silently skips its nulls. On `fct_emissions_energy` that means each of the
 fourteen range tests examines between **1.6%** (`electricity_price_eur_kwh`, 701
 of 43,138) and **54%** (`co2_mt`) of the fact — except `year`, the one column
 that is never null, at 100%. 162 of the 367 `marts` columns carry any test at
-all, against 17 of 17 marts under a type contract: two different guarantees, and
+all, against every mart under a type contract: two different guarantees, and
 worth being able to say which one you have. The audit schema is measurable too —
 **391 tables against 440 tests**, i.e. 22 orphans, which is the stale-audit-table
 bullet in `CLAUDE.md` showing up as a number.

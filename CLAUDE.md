@@ -25,11 +25,21 @@ The rest of this file is about *this* warehouse.
 [`DATA_QUALITY.md`](docs/DATA_QUALITY.md) (tests, contracts, groups, exposures,
 versions), [`PUBLISHED_DATA.md`](docs/PUBLISHED_DATA.md) (the release and how to
 query it), [`DATA_PROTECTION.md`](docs/DATA_PROTECTION.md) (the one personal
-column and what the release does to it) and
-[`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). Those files carry the
+column and what the release does to it),
+[`DASHBOARD.md`](docs/DASHBOARD.md) (the eleven Evidence pages and the deploy)
+and [`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). Those files carry the
 *explanation*; this one carries what it cost to learn, and the two should not
 start duplicating each other. A change to how a layer works usually needs an edit
 in `docs/` **and** here.
+
+**[`PRACTICES.md`](docs/PRACTICES.md) is the odd one out and is the README's main
+entry point** (2026-09-01): not a topic but an *index over* the topics — each
+practice this repo demonstrates, the failure it prevents, the number that
+measures it, and a link to where in the code it happens. It is deliberately thin
+on argument, because the argument is here. **The risk it carries is the one the
+docs split already names**: it restates figures that live in five other files, so
+a claim added to it is a claim to keep in step. `tests/test_documented_counts.py`
+covers the test and mart counts in it; nothing covers the rest.
 
 ## The layers, and what each directory is for
 
@@ -837,8 +847,8 @@ the point of the layer is that none of it is a comment.
 - **Marts are `public` because the release makes them so.** Every mart ships as a
   standalone Parquet file to people who cannot be paged; `access` is a statement
   about that, not about the repo.
-- **Contracts are enforced on all 17 marts — 327 columns, each with a
-  `data_type`.** The ymls documented 179 of those columns before, so the list was
+- **Contracts are enforced on every mart — 19 relations (18 models, one of them
+  versioned) and 385 columns, each with a `data_type`.** The ymls documented 179 of those columns before, so the list was
   *generated* from the built warehouse's `information_schema` and inserted
   line-wise, reordering the existing entries into SQL order and keeping every
   description untouched. A PyYAML round-trip would have reflowed 1,246 lines of
@@ -885,7 +895,7 @@ the point of the layer is that none of it is a comment.
   - **CI builds the same types.** The declared types come from the full
     warehouse; CI builds the 17-country fixture slice, so a column whose type is
     inferred from data could have differed. `just test-pipeline` was run to check
-    it rather than assumed — all 17 contracts hold on the slice.
+    it rather than assumed — every contract holds on the slice.
 - **Exposures are per *page*, not per site, and they are checked.**
   `dbt/models/_exposures.yml` declares nine Evidence pages and the monthly data
   release, so `dbt ls --select +exposure:evidence_retail` answers "what breaks if

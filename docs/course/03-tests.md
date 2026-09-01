@@ -480,7 +480,7 @@ from mart_cols m
 left join tested t on t.tested_model = m.model and t.tested_column = m.column_name;
 ```
 
-Set that beside the *contract* coverage: all 17 marts are contract-enforced, so
+Set that beside the *contract* coverage: every mart is contract-enforced, so
 **every one of those columns has its type pinned** and 44% have their values
 checked. Those are two different guarantees and it is worth being able to say
 which one you have.

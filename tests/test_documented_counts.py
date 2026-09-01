@@ -86,6 +86,13 @@ def as_int(token: str) -> int:
 # Prose that makes these claims. `git ls-files` rather than a glob, so the
 # gitignored `docs/sessions/` transcripts (which quote historical counts by
 # design) are outside this by construction rather than by an exclude list.
+#
+# The consequence is worth knowing before you trust a green run on new work: a
+# doc that has never been `git add`ed is not tracked, so it is not scanned, and
+# every count in it passes by not being looked at. Found by mutation — a stale
+# figure planted in a brand-new `docs/` page went uncaught until the file was
+# staged. Nothing here can fix that (a glob would drag the transcripts back in);
+# stage the file, then trust the run.
 SCANNED = (
     "*.md",
     "dbt/models/staging/_unit_tests.yml",
@@ -212,3 +219,71 @@ def test_every_documented_test_count_is_one_dbt_actually_builds():
         f"scanner matched only {seen} claims; the patterns or the file list have drifted"
     )
     assert not stale, "test counts in prose disagree with the dbt manifest:\n" + "\n".join(stale)
+
+
+# Every integer counting marts. Two things this needs that `CLAIM` does not, both
+# found by writing the loose version first and reading what it caught:
+#
+# * A lookbehind, because these documents quote row counts with thousands
+#   separators. `\b(\d+)` matches the "787" inside "808,787" and the "096"
+#   inside "4,096" — three false positives, all of them digits mid-number.
+# * The head noun, because "mart" is far more often a *modifier* here than a
+#   counted thing: "808,787 mart rows" counts rows, "19 mart relations" counts
+#   marts. Plural `marts` is unambiguous; singular `mart` only counts when the
+#   noun after it says so.
+#
+# No words-as-numerals form: "seventeen marts" was never written, only "17".
+MART_CLAIM = re.compile(
+    r"(?<![\d,])(\d+)\s+(?:of\s+(?:those|the|them)\s+)?"
+    r"(?:marts\b|mart\s+(?:relation|model|node|table)s?\b)",
+    re.IGNORECASE,
+)
+
+
+def mart_counts(man: dict) -> set[int]:
+    """Counts a sentence may state about the marts layer.
+
+    Both the node total and the distinct-model total, because a versioned model
+    is two nodes and one model and prose legitimately means either. The set is
+    deliberately not narrowed further: which of the two a sentence means is a
+    judgement, and the failure this catches is a number that is *neither*.
+    """
+    marts = [
+        v
+        for v in man["nodes"].values()
+        if v.get("resource_type") == "model" and v["config"].get("schema") == "marts"
+    ]
+    return {len(marts), len({v["name"] for v in marts})}
+
+
+def test_every_documented_mart_count_is_one_dbt_actually_builds():
+    """The same failure as the test counts, one noun over, and it had happened.
+
+    `CLAIM` only reads numbers in front of a test-noun, so "all 17 marts" was
+    invisible to it — and stayed written in five places (`README.md`, `CLAUDE.md`
+    twice, a skill and a course module) across the commits that added
+    `fct_country_weather_year` and versioned `fct_emissions_energy`. By then the
+    true figures were 19 nodes over 18 models. Nothing was red: a mart count is
+    not a number any build prints, so there was no run that could disagree with
+    it.
+
+    No floor on `seen` here, unlike the test-count scan above. Mart counts are
+    genuinely rare in this prose — one or two sites, against dozens for tests —
+    so a floor would be a number to maintain rather than a guard, and the
+    vacuity risk it covers there is covered here by `MART_CLAIM` being three
+    words long.
+    """
+    allowed = mart_counts(manifest())
+    stale = []
+    for path in tracked_prose():
+        text = path.read_text()
+        for match in MART_CLAIM.finditer(text):
+            if int(match.group(1)) in allowed:
+                continue
+            line = text.count("\n", 0, match.start()) + 1
+            claim = " ".join(match.group(0).split())
+            stale.append(f"  {path.relative_to(REPO_ROOT)}:{line}: {claim!r}")
+    assert not stale, (
+        f"mart counts in prose disagree with the dbt manifest (it builds {sorted(allowed)}):\n"
+        + "\n".join(stale)
+    )
