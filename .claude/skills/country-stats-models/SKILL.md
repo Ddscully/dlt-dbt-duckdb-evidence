@@ -6,7 +6,7 @@ description: The country-year domain — OWID emissions and energy, World Bank W
 # Country statistics (the `country_stats` dbt group)
 
 The dominant grain of this warehouse: `(country_iso3, year)`, joined on ISO3 code
-and year, with `stg_country` supplying `region` and `income_group`. Four
+and year, with `marts.dim_country` supplying `region` and `income_group`. Four
 publishers land here — OWID CO2, OWID energy, the World Bank (the country
 endpoint and WDI) and Eurostat electricity prices — and the models are
 `stg_co2`, `stg_energy`, `stg_wdi`, `stg_country`,

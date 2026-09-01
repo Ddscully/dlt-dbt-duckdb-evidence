@@ -1,6 +1,120 @@
 version: 2
 
 models:
+  - name: dim_country
+    config:
+      contract:
+        enforced: true
+    description: >
+      The country dimension: one row per `country_iso3`, 228 of them. Names,
+      the World Bank region and income classification, the capital city and its
+      coordinates.
+
+      **The published answer to "what is a country" in this warehouse.** It is
+      what `dim_country_year` is crossed with, what `fct_cbam_exposure` resolves
+      its annex names against, and what a release consumer joins to instead of
+      deduplicating 62,928 spine rows. Until it existed the only country
+      dimension was `stg_country`, a *staging* model that five models across
+      three groups reached into — which is why that model still carries an
+      `access: protected` override, and why the override's reason is now two
+      staging peers rather than a mart in another domain.
+
+      Its `income_group` is the World Bank's **current** classification applied
+      to every year, because the `/country` endpoint publishes no history. A
+      country reclassified in 2019 reads as its 2026 class in a 1990 rollup.
+      That is a Type-1 dimension attribute and the warehouse has no Type-2 for
+      it; treat "emissions by income group" over long spans accordingly.
+    columns:
+      - name: country_iso3
+        description: >
+          ISO 3166-1 alpha-3, except where the World Bank's own list is not
+          ISO: `CHI` is the Channel Islands, which ISO splits into JEY and GGY.
+          The dimension is the authority here, because it is what every
+          `country_iso3` in the warehouse has to join to.
+        data_type: VARCHAR
+        data_tests: [not_null, unique]
+      - name: country_iso2
+        data_type: VARCHAR
+        data_tests: [not_null, unique]
+      - name: country_name
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: region
+        description: >
+          Trimmed World Bank region — the API pads two of them. Never null: the
+          `country_overrides` seed fills it for every territory it adds,
+          precisely so that a null region would mean "not a country" rather than
+          "not in the World Bank's list", and Antarctica is deliberately absent.
+        data_type: VARCHAR
+        data_tests:
+          - not_null
+      - name: income_group
+        description: >
+          World Bank income classification, and **nullable on purpose**: 10 of
+          the 11 `country_overrides` territories have none, so a `not_null` here
+          would fail on reality rather than on a bug. `is_manual_entry` is how
+          you tell that case from a missing value.
+        data_type: VARCHAR
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [High income, Upper middle income, Lower middle income, Low income]
+      - name: capital_city
+        description: Null for the manual entries, which the World Bank does not list.
+        data_type: VARCHAR
+      - name: latitude
+        description: >
+          The capital's coordinates, and not decoration — `stg_weather_daily`
+          exists because these are here, and the ingest layer sends them to
+          Open-Meteo. Null where the API sends an empty string.
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -90, max_value: 90}
+      - name: longitude
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -180, max_value: 180}
+      - name: is_manual_entry
+        description: >
+          True for the 11 rows the `country_overrides` seed supplies because the
+          World Bank `/country` endpoint omits them — Taiwan is the material one
+          at ~286 Mt CO2. Carried rather than inferred: it is the answer to "why
+          is `income_group` null here", and it is not the same question, because
+          the seed fills Taiwan's.
+        data_type: BOOLEAN
+        data_tests: [not_null]
+    data_tests:
+      # Model-level, not on the column: `expression_is_true` attached to a column
+      # prefixes the column name onto the expression, so the same check there
+      # compiles to `not(country_iso3 length(country_iso3) = 3)` and dies in the
+      # parser. The staging models write it this way for the same reason.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "length(country_iso3) = 3"
+      # The dimension and the spine must know the same countries. `dim_country_year`
+      # is this crossed with the years, so a country in one and not the other is
+      # either a spine that lost a row or a dimension that gained one — and both
+      # are silent: the spine would simply carry fewer country-years, and every
+      # `not_null` on it would still pass.
+      - dbt_utils.expression_is_true:
+          name: dim_country_holds_exactly_the_countries_the_spine_does
+          arguments:
+            expression: >
+              (select count(*) from (
+                  select country_iso3 from {{ ref('dim_country') }}
+                  except
+                  select country_iso3 from {{ ref('dim_country_year') }}
+                  union all
+                  select country_iso3 from {{ ref('dim_country_year') }}
+                  except
+                  select country_iso3 from {{ ref('dim_country') }})) = 0
+
   - name: dim_date
     config:
       contract:

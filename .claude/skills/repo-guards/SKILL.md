@@ -248,7 +248,7 @@ is in the `unit-testing-dbt-models` skill.
     words. Both are handled; words only from ten up, because below that they are
     always local ("Two unit tests catch all five") and admitting them produced
     nine false positives against zero finds. Anything longer than that filler is
-    deliberately out — "422 of the 447 tests" has to capture 424, not 422. What
+    deliberately out — "422 of the 460 tests" has to capture 424, not 422. What
     still escapes is a number with no test-noun after it at all ("pass all 14:"),
     so phrase a count with its noun.
   - `seen > 35` is the vacuity guard. A scanner whose patterns stop matching

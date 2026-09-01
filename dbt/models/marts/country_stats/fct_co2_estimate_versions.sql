@@ -11,7 +11,7 @@ with history as (
 ),
 
 country as (
-    select * from {{ ref('stg_country') }}
+    select * from {{ ref('dim_country') }}
 ),
 
 versions as (

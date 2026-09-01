@@ -4,7 +4,7 @@
 -- reports is a queryable gap rather than an absence.
 -- Grain: one row per (country_iso3, year).
 with country as (
-    select * from {{ ref('stg_country') }}
+    select * from {{ ref('dim_country') }}
 ),
 
 -- The span is taken from the data rather than hardcoded: OWID CO2 reaches back

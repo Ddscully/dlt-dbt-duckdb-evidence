@@ -116,7 +116,7 @@ The README is the tour. The detail lives here:
 | [`docs/PRACTICES.md`](./docs/PRACTICES.md) | **the practices this repo demonstrates, and where each one is in the code** |
 | [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the schemas they land in, and the Parquet lake beside them |
 | [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the Dagster asset graph, the three jobs, backfills and freshness policies |
-| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 447 dbt tests, the mart-model contracts, and the groups, exposures and model versions around them |
+| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 460 dbt tests, the mart-model contracts, and the groups, exposures and model versions around them |
 | [`docs/DASHBOARD.md`](./docs/DASHBOARD.md) | the eleven dashboard pages, what each is for, and how the site is deployed |
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
@@ -125,7 +125,7 @@ The README is the tour. The detail lives here:
 
 And [`docs/course/`](./docs/course/) teaches the same warehouse as material for
 analytics engineers, built around the failures that stay green — a one-word join
-edit that drops two thirds of the countries with all 447 tests still passing.
+edit that drops two thirds of the countries with all 460 tests still passing.
 Modules 00–04 are written; 05–10 are outlined in the course index.
 
 Plus [`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) for SQL conventions,
@@ -187,7 +187,7 @@ live endpoints and opens an issue when a source has moved, which is the cue to
 CI runs the same hooks over every file. Details in
 [`tests/README.md`](./tests/README.md).
 
-Alongside them, `just dbt-build` runs 477 tests — 447 data tests and 30 unit
+Alongside them, `just dbt-build` runs 490 tests — 460 data tests and 30 unit
 tests — and enforces a schema contract on every mart model. What each gate catches is
 [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md); why the gates are shaped that
 way is [`docs/PRACTICES.md`](./docs/PRACTICES.md).

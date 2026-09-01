@@ -148,7 +148,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (31 models, 2 snapshots, 7 seeds + 447 data tests + 30 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (31 models, 2 snapshots, 7 seeds + 460 data tests + 30 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -519,8 +519,10 @@ done in the skills; scanning this file would need that ambiguity resolved first.
   `int_retail_return_matches` (the returns-to-purchase inference). `private` and
   uncontracted, like staging; they do not ship as Parquet
 - `marts` — dbt tables, **one folder per mart**: `country_stats/` (6),
-  `reference/` (5), `retail/` (5), `compliance/` (3). The models are:
-  `dim_country_year` (the country-year spine),
+  `reference/` (6), `retail/` (5), `compliance/` (3). The models are:
+  `dim_country` (**the conformed country dimension** — one row per
+  `country_iso3`, 228 of them, and what every other model's country key joins
+  to), `dim_country_year` (the country-year spine, that crossed with the years),
   `fct_emissions_energy` (the wide join, built on the spine, and **the one
   versioned model** — `fct_emissions_energy_v1` is a compatibility view live
   until 2026-11-01),
@@ -533,7 +535,8 @@ done in the skills; scanning this file would need that ambiguity resolved first.
   country in them at all: `dim_date` (the calendar), `dim_currency`,
   `fct_fx_rates_published` (the ECB's fixings as published, and **the project's
   only incremental model**), `fct_fx_rates_daily` (gap-filled) and
-  `fct_fx_rates_periods` (month / quarter / half / year). Plus the five retail
+  `fct_fx_rates_periods` (month / quarter / half / year) — `dim_country` sits in
+  the same group and is the exception to "no country in them". Plus the five retail
   models, the only ones at a grain below a country: `fct_retail_order_line`
   (`(invoice, line_number)` — the warehouse's finest grain), `dim_retail_product`,
   `dim_retail_customer`, `fct_retail_returns` and `fct_retail_customer_cohorts`
@@ -549,7 +552,7 @@ done in the skills; scanning this file would need that ambiguity resolved first.
 ways until 2026-09-01.** In the BI sense a mart is the view a department works
 with — so there are **four** here, and they are `dbt/models/_groups.yml`:
 `country_stats`, `reference`, `retail`, `compliance`. `marts/` is dbt's name for
-the *layer*, and the 19 relations inside it (18 models, one of them versioned)
+the *layer*, and the 20 relations inside it (19 models, one of them versioned)
 are **mart models**. The docs counted models and called them marts, which is how
 a stale count of 17 survived two additions to the layer;
 `tests/test_documented_counts.py` guards the number now and the folders make the
@@ -568,6 +571,21 @@ not try — the same trap as the pytest-count phrasing under *Testing*.)
   1,067,371 (1.7%), and `fct_country_weather_year` covers 41 countries against
   `fct_emissions_energy`'s 228. Merging either would mean columns null on 98% of
   the rows. One fact table per business *process*, not per grain.
+- **Normalising the country attributes out of the facts was considered and
+  measured against, and only half of it was done.** `dim_country` shipped
+  because five models across three groups were reading a *staging* model for
+  want of a published dimension and the release made a consumer deduplicate a
+  62,928-row spine to find 228 countries. Stripping `country_name`, `region` and
+  `income_group` back out of the five facts that carry them did **not**, and the
+  numbers are why: it saves **6.7 kB of a 1,591 kB Parquet — 0.4%** on
+  `fct_emissions_energy`, because zstd dictionary-encodes 228 repeated strings
+  to nearly nothing, and **no copy can drift** — every one is built from the
+  dimension in the same run, and all 71,000-odd rows across the six relations
+  agree with it today, measured. The cost is 8 Evidence pages, 2 source queries
+  and `transform/co2_intensity.py` (which ranks *within* `income_group`) each
+  gaining a join, plus a v3 of the one versioned model. Kimball's rule against
+  dimension attributes in a fact is a row-store storage argument; in a columnar
+  file it buys 0.4%.
 - **The near-miss is `fct_fx_rates_published`**, which `fct_fx_rates_daily` is a
   strict superset of (`where is_published_rate` recovers it). It stays a mart
   model because it is the project's only incremental model and the site reads it
@@ -575,8 +593,8 @@ not try — the same trap as the pytest-count phrasing under *Testing*.)
   concern in the presentation layer.
 
 Grain of every *country* fact/staging model is **`(country_iso3, year)`**; joins
-are on ISO3 country code + year. The country dimension (`stg_country`) supplies
-`region` and `income_group`. Two of those models are Eurostat prices at their
+are on ISO3 country code + year. The country dimension (`marts.dim_country`,
+one row per country) supplies `region` and `income_group`. Two of those models are Eurostat prices at their
 published `(country_iso3, year, half)` grain —
 `stg_eu_electricity_prices_semiannual` and the mart off it — and they are the
 exception on purpose, not a model waiting to be flattened; the `country-stats-models`
@@ -591,7 +609,7 @@ modelled isn't a country-year is how you get a fact with a fabricated dimension
 on it.
 
 **The fact hangs off the spine, not off a source.** `dim_country_year` is
-`stg_country` × every year the data covers (bounds read from the sources, so both
+`dim_country` × every year the data covers (bounds read from the sources, so both
 ends move); `fct_emissions_energy` inner-joins it to the union of country-years
 any source reports, then left-joins each source onto that. Consequences worth
 knowing:
@@ -868,18 +886,26 @@ the point of the layer is that none of it is a comment.
 - **Staging is `private`, marts are `public`, and the two exceptions are the
   whole content.** The defaults are set per folder in `dbt_project.yml`;
   `stg_country` and `stg_energy` override to `protected` because they are the
-  only two places one domain reads another's cleaning layer — the country
-  dimension has no mart above it, and `dim_grid_emission_factors` deliberately
-  re-models `stg_energy`'s intensity column for a different reader and needs
-  `source_loaded_at` with it. Both reasons are written next to the override.
-  Enforcement is real and was verified by breaking it: flipping `stg_country` to
-  `private` fails `dbt parse` naming `fct_cbam_exposure`, not `dbt build` an hour
-  later.
+  only two places one domain reads another's cleaning layer, and
+  `dim_grid_emission_factors` deliberately re-models `stg_energy`'s intensity
+  column for a different reader and needs `source_loaded_at` with it. Both
+  reasons are written next to the override. Enforcement is real and was verified
+  by breaking it: flipping `stg_country` to `private` fails `dbt parse` naming
+  its consumer, not `dbt build` an hour later.
+  - **`stg_country`'s override got smaller when `dim_country` shipped, and the
+    difference is the point.** It used to be read by marts in two other groups
+    for want of a published country dimension; they read `marts.dim_country`
+    now. What is left is two *staging* peers in `country_stats` —
+    `stg_weather_daily` needs the capital coordinates and
+    `stg_eu_electricity_prices_semiannual` the ISO2→ISO3 map — so breaking the
+    override names `stg_weather_daily` today where it named `fct_cbam_exposure`
+    before. Pointing those two at a mart would invert the layering to save an
+    override, which is the worse trade.
 - **Marts are `public` because the release makes them so.** Every mart ships as a
   standalone Parquet file to people who cannot be paged; `access` is a statement
   about that, not about the repo.
-- **Contracts are enforced on every mart model — 19 relations (18 models, one of
-  them versioned) and 385 columns, each with a `data_type`.** The ymls documented 179 of those columns before, so the list was
+- **Contracts are enforced on every mart model — 20 relations (19 models, one of
+  them versioned) and 397 columns, each with a `data_type`.** The ymls documented 179 of those columns before, so the list was
   *generated* from the built warehouse's `information_schema` and inserted
   line-wise, reordering the existing entries into SQL order and keeping every
   description untouched. A PyYAML round-trip would have reflowed 1,246 lines of
@@ -948,15 +974,17 @@ the point of the layer is that none of it is a comment.
     `test_the_pages_with_no_exposure_are_the_two_that_cannot_have_one` asserts the
     *table* counts as well: `index` must read zero source queries and `pipeline`
     must still read some. Put a chart on the front page and it fails.
-  - **The release exposure names `stg_country`**, the one staging model in the
-    list, because the release notes point a reader at `staging.stg_country` by
-    name. The other seven staging views ship as Parquet too and nothing promises
-    them.
+  - **The release exposure is exactly the marts now, and was not.** It named
+    `stg_country` — a *staging* model in the promise a release makes — because
+    the notes pointed a reader at it as the country dimension and no mart said
+    the same thing. `dim_country` closed that, so `tests/test_exposures.py`
+    asserts the exception's *absence* rather than its shape. The eight staging
+    views still ship as Parquet and nothing promises them.
 - **Every numeric mart column declares `meta: {additivity: …}`**, from a closed
   four-value vocabulary — `additive`, `semi_additive`, `non_additive`,
   `not_a_measure` — because a contract states a type and a test states
   correctness, and neither says whether `sum()` means anything. 92 of the 188
-  are non-additive. `tests/test_additivity.py` holds four properties, each
+  are non-additive. `tests/test_additivity.py` holds five properties, each
   mutation-proven: the layer is covered exhaustively, the vocabulary is closed,
   only numeric columns are labelled (the vacuity guard), and **no column named
   like a ratio may be declared summable** — a name rule, because it is the only
@@ -1066,7 +1094,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 438 of the 447 tests use the default. `severity` comes across
+  is what dbt does; 438 of the 460 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the

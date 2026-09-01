@@ -133,5 +133,9 @@ def test_the_release_exposure_names_every_mart():
     # than only asserting "nothing undeclared".
     marts = {re.sub(r"_v\d+$", "", sql.stem) for sql in MARTS_DIR.rglob("*.sql")}
     assert marts - declared == set(), "mart published by the release but not declared"
-    # `stg_country` is the one non-mart in the list — see the comment in the yml.
-    assert declared - marts == {"stg_country"}
+    # And nothing but marts. `stg_country` was the one exception here until
+    # `dim_country` existed: the release notes named a *staging* model as the
+    # country dimension for want of a mart saying the same thing. A staging view
+    # in the promise a release makes is the gap that model closed, so the
+    # exception is gone and this asserts its absence rather than its shape.
+    assert declared - marts == set()

@@ -76,7 +76,7 @@ holds 214 countries into the latest year where `primary_energy_twh` collapses to
 **First, a word this repo uses precisely.** In the BI sense a *mart* is the
 subject area a reader works with, and there are **four**:  `country_stats`,
 `reference`, `retail` and `compliance`. `marts/` is dbt's name for the presentation
-*layer*, one folder per mart, and the 19 relations inside it are **mart models**.
+*layer*, one folder per mart, and the 20 relations inside it are **mart models**.
 Getting that backwards is easy and this repo did it — it counted models and
 called them marts, so a stale figure sat in five files through two additions to
 the layer.
@@ -94,7 +94,7 @@ the start.
 → [`dbt/models/marts/country_stats/_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
 
 **Enforce a schema contract on everything that leaves.** All 19 mart models are
-contract-enforced, across 385 declared columns each carrying a `data_type`.
+contract-enforced, across 397 declared columns each carrying a `data_type`.
 The grain test and the schema contract catch different things: the contract is
 what sees a column change type under a consumer. Verified by declaring `year` as
 `VARCHAR` — the build fails with a per-column mismatch table *before writing
@@ -115,6 +115,20 @@ closed vocabulary, and no ratio-shaped name may be declared summable — which
 holds across the tree with no exceptions.
 → [`tests/test_additivity.py`](../tests/test_additivity.py),
 [`_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
+
+**A dimension every domain joins to is a published table, not a staging view.**
+The country dimension lived in `staging` and five models across three groups
+reached into it, which is why it carried an `access` override; the release
+published country names only as columns repeated inside facts, so a consumer
+wanting the 228 countries had to deduplicate a 62,928-row spine. `dim_country`
+is that dimension, contracted and public. The copies stay, and that half is
+measured rather than conceded: stripping `country_name`, `region` and
+`income_group` from `fct_emissions_energy` saves 6.7 kB of a 1,591 kB Parquet —
+0.4%, because zstd dictionary-encodes 228 repeated strings to nearly nothing —
+and no copy can drift, since every one is built from the dimension in the same
+run. Purity that costs eight dashboard pages a join and buys 0.4% is not a
+practice.
+→ [`dbt/models/marts/reference/dim_country.sql`](../dbt/models/marts/reference/dim_country.sql)
 
 **Say who owns a model and who may depend on it.** Four groups by *domain*, not
 by layer — a staging/marts split would put every staging model in one group and

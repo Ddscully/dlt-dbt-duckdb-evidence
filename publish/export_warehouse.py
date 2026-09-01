@@ -496,8 +496,8 @@ def solidify_staging(
     view raised.
 
     Materialising is the fix rather than dropping them, because the alternative
-    is a smaller promise: `_exposures.yml`'s release exposure names
-    `stg_country`, and the release notes point a reader at it. Doing it *here*
+    is a smaller promise: the release ships all eight staging views as Parquet
+    and a half-broken database is worse than a bigger one. Doing it *here*
     rather than making staging tables in `dbt_project.yml` keeps the local build
     cheap — eight views that cost nothing to rebuild — and pays for the copy only
     when a copy is made.
@@ -835,7 +835,9 @@ select count(*) from lakehouse.raw.om_weather_daily;
 ```
 
 - **Grain:** one row per `(country_iso3, year)`, with these exceptions —
-  `staging.stg_country` is the country dimension (region, income group), the two
+  `marts.dim_country` is one row per country (names, region, income group,
+  capital coordinates) and is what everything else's `country_iso3` joins to, the
+  two
   `*_semiannual` tables keep Eurostat's published `(country_iso3, year, half)`,
   `marts.fct_example_scope2_emissions` is one row per site,
   `marts.fct_cbam_exposure` is one row per (sourcing country, good) with no year

@@ -206,10 +206,11 @@ exposures:
   # project. It is also why every mart model is `access: public` rather than
   # `protected`: those files land on somebody else's disk.
   #
-  # `stg_country` is in the list because the release notes point a reader at
-  # `staging.stg_country` by name as the country dimension — there is no
-  # `dim_country` mart saying the same thing, which is the same gap that makes
-  # that model `protected` instead of `private`. The other seven staging views
+  # `dim_country` is in the list because the release notes point a reader at
+  # it by name as the country dimension. It used to be `stg_country` here, for
+  # want of a mart saying the same thing — a staging model in the promise a
+  # release makes, which is exactly the gap `dim_country` closed. The eight
+  # staging views
   # ship as Parquet too (`PUBLISHED_SCHEMAS`), but nothing in the notes promises
   # them, so they are not declared here.
   - name: published_data_release
@@ -242,7 +243,7 @@ exposures:
       - ref('fct_retail_customer_cohorts')
       - ref('fct_retail_order_line')
       - ref('fct_retail_returns')
-      - ref('stg_country')
+      - ref('dim_country')
     owner:
       name: Daniel Scully
       email: danieldscully@gmail.com

@@ -165,7 +165,7 @@ unit_tests:
           - {product_group: "Cement", year: 2026, markup_pct: 10}
           - {product_group: "Cement", year: 2027, markup_pct: 20}
           - {product_group: "Cement", year: 2028, markup_pct: 30}
-      - input: ref('stg_country')
+      - input: ref('dim_country')
         rows:
           - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
       - input: ref('dim_grid_emission_factors')
@@ -207,7 +207,7 @@ unit_tests:
           - {product_group: "Cement", year: 2026, markup_pct: 10}
           - {product_group: "Cement", year: 2027, markup_pct: 20}
           - {product_group: "Cement", year: 2028, markup_pct: 30}
-      - input: ref('stg_country')
+      - input: ref('dim_country')
         rows:
           - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
           - {country_iso3: "CHL", country_name: "Chile",  region: "Latin America & Caribbean", income_group: "High income"}

@@ -6,7 +6,7 @@ models:
       contract:
         enforced: true
     description: >
-      Country-year spine: `stg_country` crossed with every year the warehouse
+      Country-year spine: `dim_country` crossed with every year the warehouse
       covers (the span is read from the sources, so both ends move with the
       data). Grain is one row per (country_iso3, year), and it is the *complete*
       set of them — left-join a fact onto this to see coverage gaps as rows
@@ -38,7 +38,7 @@ models:
         data_type: VARCHAR
       - name: region
         data_type: VARCHAR
-        description: World Bank region, trimmed. Never null — see `stg_country`.
+        description: World Bank region, trimmed. Never null — see `dim_country`.
         data_tests: [not_null]
       - name: income_group
         data_type: VARCHAR
@@ -552,7 +552,7 @@ models:
           - not_null
           - relationships:
               arguments:
-                to: ref('stg_country')
+                to: ref('dim_country')
                 field: country_iso3
       - name: year
         data_type: INTEGER

@@ -36,7 +36,7 @@ Three tables break it, and the three exceptions are the whole lesson:
 
 ## 2. The spine
 
-`marts.dim_country_year` is `stg_country` × every year any source covers:
+`marts.dim_country_year` is `marts.dim_country` × every year any source covers:
 
 ```sql
 -- dbt/models/marts/country_stats/dim_country_year.sql, abridged
@@ -99,7 +99,7 @@ just course-rebuild
 ```
 
 **Observe.** The build finishes on `PASS=402 WARN=0 ERROR=0 SKIP=0`: the same
-verdict, to the row, as the healthy build. All 447 data tests pass. Both grain
+verdict, to the row, as the healthy build. All 460 data tests pass. Both grain
 contracts still hold, because the grain *is* still unique; the model simply has
 fewer rows in it.
 
