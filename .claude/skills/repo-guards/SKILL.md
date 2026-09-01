@@ -17,6 +17,23 @@ is in the `unit-testing-dbt-models` skill.
 
 ## The lists and what holds them
 
+- **The additivity labels are a judgement per column, and the guard is what
+  stops the judgement going missing.** Every numeric mart column carries
+  `meta: {additivity: …}`; `tests/test_additivity.py` asserts four properties and
+  each was mutation-proven when it was written — drop a label, use a fifth
+  value, call `co2_per_capita` additive, delete a `semi_additive` description,
+  label a varchar, and a different one of the five fails each time. The one
+  worth understanding is **`test_a_ratio_shaped_name_is_never_summable`**: the
+  other assertions can only see a label that is *absent*, and a wrong label is
+  as present as a right one. A name carrying `_pct`, `_per_`, `share`, `rate`,
+  `intensity`, `median_`, `avg_` or `price` is a ratio by construction, so
+  declaring one summable is a contradiction the tree can check — and it holds
+  today with no exceptions, which is what makes it an assertion rather than a
+  paragraph. It is one-directional on purpose: plenty of non-additive columns
+  are not ratio-named (`temp_mean_c`, `longest_gap_days`, `n_customers`), and
+  requiring the converse would claim the pattern is a complete theory of
+  measures.
+
 - **Two lists re-enumerated the seven dlt resources with no covering test, and
   both fail green.** `SOURCE_TABLES` (`transform/pipeline_status.py`) is
   iterated by `observability.build_sources`, so an unlisted source yields no

@@ -83,6 +83,42 @@ recommends keeping unit tests out of production runs to save warehouse spend;
 that argument is about a cloud warehouse, and this is a local DuckDB build where
 all twenty-eight cost 4.2 seconds. `just dbt-unit-test` is the inner loop.
 
+## Which measures may be summed
+
+A test says a column is *correct*. Nothing in a schema says what a column
+*means* under aggregation, and that is where a plausible wrong number comes
+from: `sum(renewables_share_pct)` and `avg(co2_per_capita)` across countries are
+both meaningless and both come back a number with no error anywhere.
+
+So every numeric column in the marts layer carries `meta: {additivity: …}`
+beside its `data_type`, from a closed vocabulary of four:
+
+| Label | Means | Count |
+|-------|-------|------:|
+| `additive` | Sum it along any dimension of the table. Money, tonnes, counted rows, durations. | 42 |
+| `semi_additive` | Summable some ways and not others; **the column's description says which**. | 13 |
+| `non_additive` | Never summable — ratios, rates, prices, averages, extrema, distinct counts. | 92 |
+| `not_a_measure` | A key, a calendar part, or a parameter carried on the row. | 41 |
+
+Half of them are non-additive, which is the number that makes the exercise worth
+doing. The interesting cases are the middle row: `population` adds across
+countries and gives person-years across years; `cumulative_co2` is a stock and
+counts every earlier year again; `cohort_size` is constant down a cohort's rows;
+`original_quantity` belongs to the matched purchase, and 16,398 matched returns
+point at 15,312 distinct purchases, so summing it counts 1,086 of them twice.
+The label alone cannot say any of that, which is why a `semi_additive` column
+with no description is a test failure.
+
+`tests/test_additivity.py` holds it: every numeric mart column is labelled, the
+vocabulary is closed, no column named like a ratio (`_pct`, `_per_`, `share`,
+`rate`, `intensity`, `median_`, `avg_`, `price`) is declared summable — that
+holds across the whole tree with no exceptions — and the labels reach
+`manifest.json` in the release, because a label with no consequence is
+decoration. `staging` and `analytics` are deliberately outside it: staging is a
+cleaning copy whose measures are declared one layer up, and the Polars outputs
+are invisible to dbt, the same gap `EXTRA_CLASSIFICATIONS` fills for personal
+data.
+
 ## Who it's for
 
 Around the tests sits the part that says who this is *for*.

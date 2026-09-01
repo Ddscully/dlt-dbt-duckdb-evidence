@@ -78,6 +78,7 @@ __all__ = [
     "MIN_READER_VERSION",
     "PUBLISHED_SCHEMAS",
     "SALT_ENV",
+    "additivity",
     "default_tag",
     "landed_at",
     "main",
@@ -234,6 +235,44 @@ def classifications(manifest_path: str = MANIFEST_PATH) -> dict[tuple[str, str, 
     if not path.exists():
         return dict(EXTRA_CLASSIFICATIONS)
     return privacy.classifications(json.loads(path.read_text())) | EXTRA_CLASSIFICATIONS
+
+
+def additivity(manifest_path: str = MANIFEST_PATH) -> dict[str, dict[str, str]] | None:
+    """Which published columns may be summed, keyed by published relation.
+
+    A consumer of a Parquet file has the column names and the types and nothing
+    that says `renewables_share_pct` must not be summed while `co2_mt` may be —
+    and 92 of the 188 numeric mart columns are in the first category. The labels
+    are declared once, as `meta: {additivity: …}` on the column in the same ymls
+    that carry the contract, and this is what carries them out of the repo.
+
+    Keyed by `schema.alias`, so it names the relations the release actually
+    ships: the versioned model appears as both `marts.fct_emissions_energy` and
+    `marts.fct_emissions_energy_v1`, which is what the Parquet files are called.
+
+    **Degrades to `None` when the manifest is absent**, the same way
+    `classifications` does and for the same reason — `dbt/target/` is gitignored.
+    `None` and `{}` are different answers here: the first says nobody asked dbt,
+    the second would say dbt was asked and knows of no labelled column. Only the
+    first can be true by accident.
+    """
+    path = Path(manifest_path)
+    if not path.exists():
+        return None
+    nodes = json.loads(path.read_text()).get("nodes", {}).values()
+    out: dict[str, dict[str, str]] = {}
+    for node in nodes:
+        if node.get("resource_type") != "model":
+            continue
+        labels: dict[str, str] = {}
+        for column, spec in (node.get("columns") or {}).items():
+            label = (spec.get("meta") or {}).get("additivity")
+            if label:
+                labels[column] = label
+        if labels:
+            relation = f"{node['schema']}.{node.get('alias') or node['name']}"
+            out[relation] = dict(sorted(labels.items()))
+    return dict(sorted(out.items()))
 
 
 def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -> dict:
@@ -675,6 +714,16 @@ it for `{base}/download/{tag}/…`.
 `manifest.json` carries the row counts, year coverage and SHA-256 of every asset;
 `SHA256SUMS` is `sha256sum -c`-compatible.
 
+**`manifest.json` also says which columns may be summed.** Its `additivity` map
+labels every numeric column of every mart: `additive` (sum it in any direction),
+`semi_additive` (summable some ways and not others — the column's own
+description says which), `non_additive` (a ratio, rate, price, average or
+extremum: recompute it from its components rather than aggregating it) and
+`not_a_measure` (a key, a calendar part, or a parameter carried on the row).
+Roughly half the numeric columns here are non-additive, which a Parquet file has
+no way of telling you: `sum(renewables_share_pct)` and `avg(co2_per_capita)`
+across countries are both meaningless and both come back a number.
+
 **`raw` is not in `{warehouse["file"]}` any more.** dlt lands the source tables
 in a [DuckLake](https://ducklake.select) catalog rather than in the database, so
 the database holds what dbt built — `staging`, `marts`, `analytics`, `history` —
@@ -822,7 +871,7 @@ def run(
         tag=tag,
         repo=repo,
         grain="(country_iso3, year)",
-        extra_manifest=lambda con: {"history": _history(con)},
+        extra_manifest=lambda con: {"history": _history(con), "additivity": additivity()},
         read_loaded_at=lambda con: landed_at(con, lakehouse_dir),
         prepare_copy=lambda con: prepare_published_copy(con, lakehouse_dir),
         extra_artifacts=lambda dest: publish_lakehouse(dest, lakehouse_dir),

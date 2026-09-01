@@ -7,6 +7,14 @@ too, so you can use the joined data without running any of this. Each release
 carries the whole DuckDB file plus a Parquet per modelled table, `manifest.json`
 (row counts, year coverage, SHA-256 per asset) and `SHA256SUMS`.
 
+**`manifest.json` also says which columns may be summed.** Its `additivity` map
+labels every numeric mart column `additive`, `semi_additive`, `non_additive` or
+`not_a_measure` — half of them are non-additive, and a Parquet file has no way
+of telling you that `sum(renewables_share_pct)` is nonsense that returns a
+number. Where a column is `semi_additive` its description says which direction
+fails: `population` adds across countries and gives person-years across years,
+`cumulative_co2` is a stock that recounts every earlier year.
+
 ## Querying it
 
 DuckDB reads a remote database over HTTPS, so you can query it where it sits:

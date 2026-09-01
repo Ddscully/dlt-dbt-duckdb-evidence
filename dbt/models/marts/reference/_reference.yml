@@ -41,28 +41,40 @@ models:
         data_tests: [not_null, unique]
       - name: date_key
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         description: "Integer surrogate, yyyymmdd — sorts and reads like the date."
         data_tests: [not_null, unique]
       - name: year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1999, max_value: 2100}
       - name: quarter
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 4}
       - name: month
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 12}
       - name: day_of_month
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: day_of_year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: month_name
         data_type: VARCHAR
       - name: year_start_date
@@ -87,6 +99,8 @@ models:
         data_type: DATE
       - name: iso_year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         description: >
           The ISO-8601 week-numbering year, which is **not** `year`. 2021-01-01
           is a Friday in ISO week 53 of ISO year 2020, and 2019-12-30 is already
@@ -96,6 +110,8 @@ models:
         data_tests: [not_null]
       - name: iso_week
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 53}
@@ -107,6 +123,8 @@ models:
         data_tests: [not_null]
       - name: day_of_week
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         description: ISO day number, 1 = Monday.
         data_tests:
           - dbt_utils.accepted_range:
@@ -124,6 +142,8 @@ models:
         data_type: BOOLEAN
       - name: fiscal_year_start_month
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         description: >
           The policy that produced the fiscal columns, carried per row so anything
           joining on them can tell which convention built the table.
@@ -134,17 +154,23 @@ models:
         data_type: TIMESTAMP
       - name: fiscal_year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         description: >
           The calendar year the fiscal year *ends* in — the convention that makes
           this collapse onto `year` when `fiscal_year_start_month` is 1.
         data_tests: [not_null]
       - name: fiscal_quarter
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 4}
       - name: fiscal_month
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 12}
@@ -200,6 +226,8 @@ models:
         data_type: DATE
       - name: n_published_days
         data_type: BIGINT
+        meta:
+          additivity: additive
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1}
@@ -217,6 +245,8 @@ models:
           "carried forward to today" cannot disagree.
       - name: longest_gap_days
         data_type: BIGINT
+        meta:
+          additivity: non_additive
         description: >
           The longest run of calendar days between two consecutive fixings. 3 for
           a weekend, 5 for the Christmas closures, and only two values far beyond
@@ -284,6 +314,8 @@ models:
               arguments: {values: ['EUR']}
       - name: units_per_eur
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Units of the quote currency per 1 EUR, exactly as the ECB quotes it.
         data_tests:
           - not_null
@@ -291,12 +323,16 @@ models:
               arguments: {min_value: 0, inclusive: false}
       - name: eur_per_unit
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
       - name: date_key
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         description: >
           Computed here rather than joined from `dim_date`, so this model has no
           dependencies and can be backfilled or rebuilt on its own.
@@ -349,6 +385,8 @@ models:
         data_tests: [not_null]
       - name: date_key
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: currency_code
         data_type: VARCHAR
         data_tests: [not_null]
@@ -357,6 +395,8 @@ models:
         data_tests: [not_null]
       - name: units_per_eur
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Null where the carry has run past the cap, so a stale number cannot be
           multiplied by anything by accident. That is 3,359 rows: Iceland
@@ -366,6 +406,8 @@ models:
               arguments: {min_value: 0, inclusive: false}
       - name: eur_per_unit
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
@@ -375,6 +417,8 @@ models:
         data_tests: [not_null]
       - name: days_since_published_rate
         data_type: BIGINT
+        meta:
+          additivity: non_additive
         description: 0 on a publication day, 1-2 over a weekend, more over a holiday.
         data_tests:
           - not_null
@@ -394,10 +438,16 @@ models:
         data_tests: [not_null]
       - name: year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: quarter
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: month
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: half
         data_type: VARCHAR
       - name: is_weekday
@@ -459,6 +509,8 @@ models:
         data_tests: [not_null]
       - name: year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: quote_currency
         data_type: VARCHAR
         data_tests: [not_null]
@@ -466,6 +518,8 @@ models:
         data_type: VARCHAR
       - name: avg_units_per_eur
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: For flows. The mean of the fixings actually published in the period.
         data_tests:
           - not_null
@@ -473,6 +527,8 @@ models:
               arguments: {min_value: 0, inclusive: false}
       - name: avg_eur_per_unit
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           The mean of the reciprocals, which is not the reciprocal of the mean —
           see the model description. Convert in the direction the rate is quoted
@@ -483,6 +539,8 @@ models:
               arguments: {min_value: 0, inclusive: false}
       - name: period_end_units_per_eur
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: For stocks. The last fixing published inside the period.
         data_tests:
           - not_null
@@ -490,29 +548,43 @@ models:
               arguments: {min_value: 0, inclusive: false}
       - name: period_end_eur_per_unit
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Its exact reciprocal — a single point inverts without the averaging problem.
         data_tests: [not_null]
       - name: period_start_units_per_eur
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests: [not_null]
       - name: period_end_vs_avg_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           How far the closing rate sits from the average, as a percent of the
           average. Deliberately untested for range: a currency crisis legitimately
           puts it near +100%.
       - name: min_units_per_eur
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: max_units_per_eur
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: intra_period_range_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: High-to-low spread within the period, as a percent of the low.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: n_published_days
         data_type: BIGINT
+        meta:
+          additivity: additive
         data_tests:
           - not_null
           - dbt_utils.accepted_range:

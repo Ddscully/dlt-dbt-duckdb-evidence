@@ -17,6 +17,25 @@ attribution obligation are all applied here rather than in a model. The
 constraints that must not depend on this skill loading are in `CLAUDE.md`'s
 *Publishing* section; this file is the rest.
 
+## What the manifest tells a consumer they cannot see
+
+- **`manifest.json` carries an `additivity` map, and it exists because a Parquet
+  file has types and nothing else.** 224 published mart columns are labelled
+  `additive` / `semi_additive` / `non_additive` / `not_a_measure`, and about half
+  are non-additive — `sum(renewables_share_pct)` is nonsense that returns a
+  number, with no error anywhere for a consumer who cannot be paged.
+  `export_warehouse.additivity()` reads the labels off `meta:` in the dbt
+  manifest through the `extra_manifest` hook, so nothing in
+  `modern_data_stack.export` had to learn about them.
+  - **It degrades to `None`, not to `{}`, when `dbt/target/manifest.json` is
+    absent** — the same shape as `classifications()`, and the distinction is
+    load-bearing: `None` says nobody asked dbt, `{}` would say dbt was asked and
+    knows of no labelled column. Only the first can be true by accident.
+  - **Keyed by `schema.alias`**, so it names the relations the release actually
+    ships. The versioned model appears twice — `marts.fct_emissions_energy` and
+    `marts.fct_emissions_energy_v1` — which is what the Parquet files are called,
+    and v1 inherits its 36 labels through `include: all`.
+
 ## Reading the load time
 
 - **`data_loaded_at` has to name the catalog, and getting it wrong is silent in

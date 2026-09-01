@@ -952,6 +952,41 @@ the point of the layer is that none of it is a comment.
     list, because the release notes point a reader at `staging.stg_country` by
     name. The other seven staging views ship as Parquet too and nothing promises
     them.
+- **Every numeric mart column declares `meta: {additivity: …}`**, from a closed
+  four-value vocabulary — `additive`, `semi_additive`, `non_additive`,
+  `not_a_measure` — because a contract states a type and a test states
+  correctness, and neither says whether `sum()` means anything. 92 of the 188
+  are non-additive. `tests/test_additivity.py` holds four properties, each
+  mutation-proven: the layer is covered exhaustively, the vocabulary is closed,
+  only numeric columns are labelled (the vacuity guard), and **no column named
+  like a ratio may be declared summable** — a name rule, because it is the only
+  one of the four that can catch a label that is present and *wrong*. It holds
+  today with no exceptions.
+  - **`semi_additive` is the only label that is useless alone**, so its
+    description must say which direction fails and a test requires one. There
+    are 13, and they are where the value is: `population` adds across countries
+    and gives person-years across years, `cumulative_co2` is a stock that
+    recounts every earlier year, `cohort_size` is constant down a cohort's rows,
+    and `original_quantity` belongs to the matched purchase — 16,398 matched
+    returns point at 15,312 distinct purchases, so summing it counts 1,086 of
+    them twice.
+  - **`gdp_usd` is `semi_additive` and `gdp_constant_usd` is `additive`**, which
+    is the current-vs-constant-dollar gotcha under *Conventions & gotchas*
+    expressed as metadata rather than as prose somebody has to have read.
+  - **The labels ship**, in `manifest.json`'s `additivity` map, for the reason
+    `direct_identifier` is real: a label with no consequence is decoration, and
+    a Parquet consumer has the types and nothing else. `staging` and `analytics`
+    are outside the rule on purpose — staging's measures are declared one layer
+    up, and the Polars outputs are invisible to dbt, which is the same gap
+    `EXTRA_CLASSIFICATIONS` fills for `pii` and is still open here.
+  - **Inserting 188 labels line-wise found the duplicate-key trap twice.** A
+    `meta:` block can sit *below* a comment block or a `description:`, so a
+    lookahead that only skipped comments wrote a second `meta:` key — which
+    PyYAML resolves silently by taking the last, dropping a `pii`
+    classification, and which `check-yaml` does not flag. The insertion has to
+    scan the whole column block. Same trap as the `unit_tests:` one above, and
+    just as quiet.
+
 - **`fct_emissions_energy` is versioned, and it is the right model rather than
   the biggest.** Nothing in the project refs it and the release ships it, so a
   rename is free in-repo and breaking outside it. v2 renames `co2_per_gdp` to

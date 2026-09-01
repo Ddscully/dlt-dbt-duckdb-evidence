@@ -35,6 +35,8 @@ models:
         data_tests: [not_null]
       - name: line_number
         data_type: BIGINT
+        meta:
+          additivity: not_a_measure
         data_tests: [not_null]
       - name: invoice_type
         data_type: VARCHAR
@@ -73,9 +75,13 @@ models:
         data_type: VARCHAR
       - name: date_key
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests: [not_null]
       - name: year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         description: >
           Calendar year, and the Parquet lake's partition column. Carried
           explicitly rather than reusing the `iso_year` beside it: the two agree
@@ -86,8 +92,12 @@ models:
         data_tests: [not_null]
       - name: iso_year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: iso_week
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: iso_week_start_date
         data_type: DATE
       - name: day_name
@@ -96,25 +106,41 @@ models:
         data_type: BOOLEAN
       - name: fiscal_year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: fiscal_quarter
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: quantity
         data_type: BIGINT
+        meta:
+          additivity: additive
       - name: unit_price
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: line_amount_gbp
         data_type: DOUBLE
+        meta:
+          additivity: additive
         data_tests: [not_null]
       - name: line_amount_eur
         data_type: DOUBLE
+        meta:
+          additivity: additive
         description: Converted at the transaction date's ECB fixing, carried forward over closures.
         data_tests: [not_null]
       - name: line_amount_usd
         data_type: DOUBLE
+        meta:
+          additivity: additive
         description: GBP to EUR to USD, both legs at the same date's fixing.
         data_tests: [not_null]
       - name: eur_per_gbp
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: fx_rate_source_date
         data_type: DATE
         description: >
@@ -167,18 +193,28 @@ models:
         data_tests: [not_null]
       - name: n_lines
         data_type: BIGINT
+        meta:
+          additivity: additive
       - name: n_invoices
         data_type: BIGINT
+        meta:
+          additivity: non_additive
       - name: n_customers
         data_type: BIGINT
+        meta:
+          additivity: non_additive
       - name: first_sold_date
         data_type: DATE
       - name: last_sold_date
         data_type: DATE
       - name: units_sold
         data_type: HUGEINT
+        meta:
+          additivity: additive
       - name: units_returned
         data_type: HUGEINT
+        meta:
+          additivity: additive
         description: >
           Units cancelled, as a **positive** count — the same direction
           `fct_retail_returns.quantity_returned` points, rather than the negative
@@ -195,9 +231,12 @@ models:
         # `tests/test_privacy.py` requires the distinction be written down rather
         # than inferred from silence.
         meta:
+          additivity: additive
           pii: non_personal
       - name: median_unit_price_gbp
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Median, not mean. This retailer sells the same SKU at wholesale and
           retail prices, so the mean lands between two prices that both exist and
@@ -207,10 +246,16 @@ models:
               arguments: {min_value: 0}
       - name: min_unit_price_gbp
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: max_unit_price_gbp
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: n_descriptions
         data_type: BIGINT
+        meta:
+          additivity: non_additive
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
@@ -258,6 +303,8 @@ models:
           pii: quasi_identifier
       - name: n_countries
         data_type: BIGINT
+        meta:
+          additivity: non_additive
       - name: has_moved_country
         data_type: BOOLEAN
       - name: first_order_date
@@ -277,28 +324,44 @@ models:
           pii: quasi_identifier
       - name: tenure_days
         data_type: BIGINT
+        meta:
+          additivity: additive
         description: Zero for the 1,626 customers who ordered once — a fact, not a gap.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: n_orders
         data_type: BIGINT
+        meta:
+          additivity: additive
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1}
       - name: n_cancellations
         data_type: BIGINT
+        meta:
+          additivity: additive
       - name: n_active_months
         data_type: BIGINT
+        meta:
+          additivity: non_additive
       - name: n_distinct_products
         data_type: BIGINT
+        meta:
+          additivity: non_additive
       - name: units_bought
         data_type: HUGEINT
+        meta:
+          additivity: additive
       - name: gross_revenue_gbp
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: returned_gbp
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: net_revenue_gbp
         data_type: DOUBLE
         # A quasi-identifier, and the one that surprises people. Measured over the
@@ -310,6 +373,7 @@ models:
         # identifier whatever it is called, which is why deleting `customer_id`
         # from an extract does not anonymise it. See `docs/DATA_PROTECTION.md`.
         meta:
+          additivity: additive
           pii: quasi_identifier
       - name: first_order_gbp
         data_type: DOUBLE
@@ -323,6 +387,7 @@ models:
         # sharper half of it: `(country, first_order_date, first_order_gbp)` is
         # unique for 99.6% of the 5,881 customers.
         meta:
+          additivity: additive
           pii: quasi_identifier
         data_tests:
           # A first order cannot be negative: the first *purchase* invoice is a
@@ -340,8 +405,12 @@ models:
               arguments: {min_value: 0}
       - name: avg_order_value_gbp
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: return_rate_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           By value, not by order count. Deliberately carries no upper bound: a
           customer who returns more than they bought in the window is a real
@@ -385,6 +454,8 @@ models:
         data_tests: [not_null]
       - name: line_number
         data_type: BIGINT
+        meta:
+          additivity: not_a_measure
         data_tests: [not_null]
       - name: customer_id
         data_type: VARCHAR
@@ -416,6 +487,8 @@ models:
         data_type: VARCHAR
       - name: quantity_returned
         data_type: BIGINT
+        meta:
+          additivity: additive
         description: Positive. The signed amount stays signed in `return_amount_gbp`.
         data_tests:
           - not_null
@@ -423,24 +496,48 @@ models:
               arguments: {min_value: 1}
       - name: unit_price
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: return_amount_gbp
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: original_invoice
         data_type: VARCHAR
         meta:
           pii: quasi_identifier
       - name: original_line_number
         data_type: BIGINT
+        meta:
+          additivity: not_a_measure
       - name: original_invoice_date
         data_type: DATE
       - name: original_quantity
         data_type: BIGINT
+        meta:
+          additivity: semi_additive
+        description: >
+          The matched *purchase* line's quantity, carried onto the return. It
+          belongs to the purchase and not to this row: 16,398 matched returns
+          point at 15,312 distinct purchase lines, so summing it across returns
+          counts 1,086 purchases more than once. Compare it per row; aggregate
+          `quantity_returned` instead.
       - name: original_unit_price
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: original_amount_gbp
         data_type: DOUBLE
+        meta:
+          additivity: semi_additive
+        description: >
+          The matched purchase line's amount, and the same caution as
+          `original_quantity` — a purchase matched by two returns is added
+          twice.
       - name: days_to_return
         data_type: BIGINT
+        meta:
+          additivity: additive
         description: >
           Median 10, mean 32, max 656. The shape is itself a check on the
           matching rule — an arbitrary match would spread flat over the window.
@@ -513,6 +610,8 @@ models:
         data_tests: [not_null]
       - name: months_since_first_order
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -521,24 +620,44 @@ models:
         data_type: VARCHAR
       - name: cohort_size
         data_type: BIGINT
+        meta:
+          additivity: semi_additive
+        description: >
+          Customers in the cohort, constant on every `months_since_first_order`
+          row of it. Summing across cohorts at one offset is a real total;
+          summing down one cohort multiplies it by the number of offsets that
+          cohort has rows for, which is a different number per cohort because
+          the triangle is ragged.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1}
       - name: active_customers
         data_type: BIGINT
+        meta:
+          additivity: semi_additive
+        description: >
+          Distinct customers of the cohort who bought in that month. Additive
+          across cohorts at one offset; summing across offsets gives
+          customer-months rather than customers, because a customer who returns
+          in three months is counted in all three.
       - name: net_revenue_gbp
         data_type: DOUBLE
         meta:
+          additivity: additive
           pii: non_personal
       - name: retention_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: revenue_per_active_customer_gbp
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: is_left_censored_cohort
         data_type: BOOLEAN
       - name: is_complete_period

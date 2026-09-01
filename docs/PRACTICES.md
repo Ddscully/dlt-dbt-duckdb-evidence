@@ -102,6 +102,20 @@ anything*.
 → [`dbt/models/marts/`](../dbt/models/marts/) — one folder and one yml per mart,
 so the boundary is the one dbt itself can check rather than a filing convention
 
+**Say what a measure means under `sum()`.** A contract states a column's type
+and a test states that it is correct; neither says whether adding it up is
+meaningful. Half the numeric columns here — 92 of 188 — are ratios, rates,
+prices, averages or extrema, where a sum is nonsense that comes back as a number.
+Every one carries `meta: {additivity: …}` from a closed four-value vocabulary,
+the 13 `semi_additive` ones have to say in prose *which* direction fails
+(`population` gives person-years across years; `cumulative_co2` recounts every
+earlier year), and the labels ship in the release manifest so a Parquet consumer
+who cannot be paged has them too. Guarded three ways: exhaustive over the layer,
+closed vocabulary, and no ratio-shaped name may be declared summable — which
+holds across the tree with no exceptions.
+→ [`tests/test_additivity.py`](../tests/test_additivity.py),
+[`_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
+
 **Say who owns a model and who may depend on it.** Four groups by *domain*, not
 by layer — a staging/marts split would put every staging model in one group and
 nothing would ever cross it. Enforcement is real and was verified by breaking it:

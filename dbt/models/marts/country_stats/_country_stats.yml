@@ -28,6 +28,8 @@ models:
         data_tests: [not_null]
       - name: year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -72,6 +74,8 @@ models:
         data_type: VARCHAR
       - name: year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -82,6 +86,8 @@ models:
         data_tests: [not_null]
       - name: version_count
         data_type: BIGINT
+        meta:
+          additivity: additive
         description: Versions the snapshot holds for this country-year.
         data_tests:
           - dbt_utils.accepted_range:
@@ -98,20 +104,32 @@ models:
           since "revised at" would otherwise read as the first load.
       - name: first_co2_mt
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: latest_co2_mt
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: co2_mt_change
         data_type: DOUBLE
+        meta:
+          additivity: additive
         description: Latest estimate minus the first, million tonnes. Signed.
       - name: co2_mt_change_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           The same as a percentage of the first estimate. Null where the first
           estimate was zero.
       - name: first_co2_per_capita
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: latest_co2_per_capita
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
 
   - name: fct_emissions_energy
     # The project's one versioned model, and the reason it is this one: nothing
@@ -141,6 +159,8 @@ models:
             exclude: [co2_kg_per_gdp_ppp_2011]
           - name: co2_per_gdp
             data_type: DOUBLE
+            meta:
+              additivity: non_additive
             description: >
               **Deprecated — use `co2_kg_per_gdp_ppp_2011` in v2.** Same numbers,
               a name that says neither the unit nor the basis. Kept until the
@@ -186,23 +206,31 @@ models:
           does not classify.
       - name: year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1750, max_value: 2030}
       - name: co2_mt
         data_type: DOUBLE
+        meta:
+          additivity: additive
         description: Territorial CO2 emissions, million tonnes (OWID).
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: co2_per_capita
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       # Renamed in v2 from `co2_per_gdp`, which said neither the unit nor the
       # basis while a second, differently-based intensity column sat one schema
       # away. v1 serves it under the old name until the deprecation date.
       - name: co2_kg_per_gdp_ppp_2011
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           OWID's kg CO2 per 2011 international-$ (PPP). Ends in 2022 and covers
           164 countries — for a current, fuller series use
@@ -210,14 +238,24 @@ models:
           per **constant 2015 US$** and so is not comparable in levels.
       - name: share_global_co2
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: coal_co2
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: oil_co2
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: gas_co2
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: consumption_co2
         data_type: DOUBLE
+        meta:
+          additivity: additive
         description: >
           Consumption-based CO2, million tonnes (OWID): territorial emissions
           adjusted for carbon embodied in trade. ~120 countries and one year
@@ -229,24 +267,37 @@ models:
               arguments: {min_value: 0}
       - name: consumption_co2_per_capita
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: trade_co2
         data_type: DOUBLE
+        meta:
+          additivity: additive
         description: >
           `consumption_co2 - co2_mt`. Positive = net importer of embodied carbon.
           Signed, so no `min_value`.
       - name: trade_co2_share
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           `trade_co2` as a percent of territorial emissions. Deliberately
           untested: the real range is about -98% to +1023%.
       - name: cumulative_co2
         data_type: DOUBLE
-        description: CO2 emitted since 1750, million tonnes (OWID). Stock, not flow.
+        meta:
+          additivity: semi_additive
+        description: >
+          CO2 emitted since 1750, million tonnes (OWID). Stock, not flow — it
+          adds across countries and never across years, where it would count
+          every earlier year again.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: share_global_cumulative_co2
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Share of all CO2 ever emitted, %. Ranks countries very differently to
           `share_global_co2`: the US is 23.8% cumulative against 12.9% of the
@@ -256,8 +307,12 @@ models:
               arguments: {min_value: 0, max_value: 100}
       - name: primary_energy_twh
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: renewables_share_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Renewables as a share of primary energy, % (OWID). **79 countries** in
           every year — the narrowest widely-used column in this table. For
@@ -269,13 +324,19 @@ models:
               arguments: {min_value: 0, max_value: 100}
       - name: fossil_share_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: electricity_generation_twh
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: carbon_intensity_elec_g_kwh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Grams of CO2 per kWh generated (OWID). ~210 countries — the
           broad-coverage alternative to `renewables_share_pct`, and in a unit a
@@ -285,66 +346,106 @@ models:
               arguments: {min_value: 0, max_value: 2000}
       - name: low_carbon_share_elec_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Renewables plus nuclear as a share of electricity generated, %.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: solar_share_elec_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: wind_share_elec_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: nuclear_share_elec_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: coal_share_elec_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: gas_share_elec_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: gdp_per_capita_usd
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: GDP per capita, current US$ (WDI NY.GDP.PCAP.CD).
       - name: gdp_usd
         data_type: DOUBLE
+        meta:
+          additivity: semi_additive
         description: >
           GDP, current US$ (WDI NY.GDP.MKTP.CD). Moves with inflation and the
           exchange rate — use `gdp_constant_usd` for anything measured over time.
       - name: gdp_constant_usd
         data_type: DOUBLE
+        meta:
+          additivity: additive
         description: >
           GDP, constant 2015 US$ (WDI NY.GDP.MKTP.KD). The real-terms series;
           denominator for carbon intensity in `analytics.co2_intensity`.
       - name: life_expectancy
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Life expectancy at birth, years (WDI SP.DYN.LE00.IN).
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: population
         data_type: DOUBLE
+        meta:
+          additivity: semi_additive
+        description: >
+          Total population (WDI SP.POP.TOTL). A level read once a year, not a
+          flow: additive across countries, and summing it across years gives
+          person-years rather than people.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: poverty_rate
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: internet_users_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Individuals using the internet, % of population (WDI IT.NET.USER.ZS).
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: urban_pop_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: forest_area_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: renew_elec_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Renewable electricity output, % of total (WDI EG.ELC.RNEW.ZS).
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: energy_imports_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: electricity_price_eur_kwh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Household electricity price, EUR/kWh incl. all taxes, medium band DC
           (Eurostat nrg_pc_204). Null for non-EU/EEA countries. **Averaged over
@@ -455,22 +556,32 @@ models:
                 field: country_iso3
       - name: year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1940, max_value: 2100}
       - name: hdd_total
         data_type: DOUBLE
+        meta:
+          additivity: semi_additive
         description: >
           Annual heating degree days from the daily mean, at `heating_base_c`.
           The standard weather-normalisation denominator. Bounded generously:
           Reykjavik and Nicosia are the two ends and the range has to hold both.
+
+          Degree days accumulate over *time* and not over space: summing this
+          across countries weights Malta like Russia and is not a climate
+          quantity. The same holds for every accumulated weather column here.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 10000}
       - name: hdd_minmax_total
         data_type: DOUBLE
+        meta:
+          additivity: semi_additive
         description: The (max + min)/2 convention, for comparison with `hdd_total`.
         data_tests:
           - not_null
@@ -478,6 +589,8 @@ models:
               arguments: {min_value: 0, max_value: 10000}
       - name: cdd_total
         data_type: DOUBLE
+        meta:
+          additivity: semi_additive
         description: Annual cooling degree days from the daily mean, at `cooling_base_c`.
         data_tests:
           - not_null
@@ -485,6 +598,8 @@ models:
               arguments: {min_value: 0, max_value: 5000}
       - name: heating_base_c
         data_type: DOUBLE
+        meta:
+          additivity: not_a_measure
         description: >
           The base temperature these totals were computed against, carried per
           row. A degree-day figure without its base is uninterpretable, and this
@@ -493,10 +608,14 @@ models:
           - not_null
       - name: cooling_base_c
         data_type: DOUBLE
+        meta:
+          additivity: not_a_measure
         data_tests:
           - not_null
       - name: temp_mean_c
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Mean of the daily means. Not the same as a mean of hourly values.
         data_tests:
           - not_null
@@ -504,16 +623,22 @@ models:
               arguments: {min_value: -30, max_value: 40}
       - name: temp_min_c
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Coldest daily minimum in the year.
         data_tests:
           - not_null
       - name: temp_max_c
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Warmest daily maximum in the year.
         data_tests:
           - not_null
       - name: frost_days
         data_type: BIGINT
+        meta:
+          additivity: semi_additive
         description: Days whose minimum fell below 0 C.
         data_tests:
           - not_null
@@ -521,24 +646,32 @@ models:
               arguments: {min_value: 0, max_value: 366}
       - name: precipitation_mm
         data_type: DOUBLE
+        meta:
+          additivity: semi_additive
         description: Annual total precipitation.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: solar_radiation_mj_m2
         data_type: DOUBLE
+        meta:
+          additivity: semi_additive
         description: Annual shortwave radiation sum.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: wind_speed_max_kmh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Mean of the daily maximum wind speeds — wind does not accumulate.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: n_days
         data_type: BIGINT
+        meta:
+          additivity: additive
         description: Days of data behind the row. 365, or 366 in a leap year, when complete.
         data_tests:
           - not_null
@@ -558,6 +691,8 @@ models:
           - not_null
       - name: grid_distance_km
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Distance from the capital to the ERA5 cell that answered for it,
           carried up from staging so the approximation stays visible at this
@@ -594,6 +729,8 @@ models:
         data_type: VARCHAR
       - name: year
         data_type: BIGINT
+        meta:
+          additivity: not_a_measure
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -615,6 +752,8 @@ models:
         data_tests: [not_null]
       - name: electricity_price_eur_kwh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           EUR/kWh incl. all taxes, medium consumption band DC. Unaveraged, so this
           is the column that shows the 2021-23 energy crisis as it actually
@@ -625,6 +764,8 @@ models:
               arguments: {min_value: 0, max_value: 1, inclusive: false}
       - name: change_vs_previous_half_eur_kwh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Change from the preceding half-year, EUR/kWh. Signed. Null at the start
           of each country's series and across any gap in it — the previous row a
@@ -632,12 +773,16 @@ models:
           when it is.
       - name: change_vs_previous_half_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           The same change as a percent. Deliberately untested: the Dutch 2022-S2
           figure is +320% off a rebate-suppressed S1, which is reality rather than
           a bug. Also null where the previous price was zero.
       - name: electricity_price_usd_kwh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           The same price in US dollars, converted at the *average* USD/EUR rate
           over the same half-year, because a price paid across a period is a flow
@@ -654,12 +799,16 @@ models:
               arguments: {min_value: 0, max_value: 2, inclusive: false}
       - name: usd_per_eur_period_avg
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           The rate actually used, on the row it was used on. A converted figure
           whose rate is not visible is a figure nobody downstream can check.
         data_tests: [not_null]
       - name: usd_per_eur_period_end
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           The closing rate for the same half — shipped and deliberately *not*
           used. It is the correct rate for a balance and the wrong one for a

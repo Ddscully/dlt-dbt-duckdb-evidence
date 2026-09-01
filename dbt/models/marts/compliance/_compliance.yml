@@ -50,12 +50,16 @@ models:
         data_type: VARCHAR
       - name: year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1985, max_value: 2030}
       - name: emission_factor_g_co2_per_kwh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Grams of CO2 per kWh generated. Never null — a row exists only where
           a factor does.
@@ -65,6 +69,8 @@ models:
               arguments: {min_value: 0, max_value: 2000}
       - name: emission_factor_t_co2_per_mwh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           The same factor in the unit meter data arrives in: tonnes CO2e per
           MWh, i.e. g/kWh / 1000. Shipped rather than left as a division because
@@ -75,8 +81,12 @@ models:
               arguments: {min_value: 0, max_value: 2}
       - name: electricity_generation_twh
         data_type: DOUBLE
+        meta:
+          additivity: additive
       - name: low_carbon_share_elec_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: is_latest_available
         data_type: BOOLEAN
         description: >
@@ -90,10 +100,14 @@ models:
         data_tests: [not_null]
       - name: latest_available_year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         description: This country's newest factor year, repeated on every one of its rows.
         data_tests: [not_null]
       - name: latest_factor_lag_years
         data_type: INTEGER
+        meta:
+          additivity: non_additive
         description: >
           How far `latest_available_year` sits behind the newest factor year in
           the whole table — how stale the *best* number available for this
@@ -104,6 +118,8 @@ models:
               arguments: {min_value: 0}
       - name: factor_version_count
         data_type: BIGINT
+        meta:
+          additivity: additive
         description: >
           Versions of this factor the warehouse has held, from
           `snap_grid_emission_factors`. **Null before 2015**, which is where the
@@ -111,6 +127,8 @@ models:
           scratch — a snapshot can only record a revision it was present for.
       - name: first_published_factor_g_co2_per_kwh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           The factor as first snapshotted. The point of keeping it is that a
           disclosure filed against a superseded number has to stay reconcilable;
@@ -182,12 +200,16 @@ models:
         data_type: VARCHAR
       - name: annual_electricity_mwh
         data_type: INTEGER
+        meta:
+          additivity: additive
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
       - name: factor_year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
         description: >
           The vintage of the factor applied to this site. Deliberately on the
           fact rather than looked up: two sites in the same group can be priced
@@ -195,8 +217,12 @@ models:
         data_tests: [not_null]
       - name: latest_factor_lag_years
         data_type: INTEGER
+        meta:
+          additivity: non_additive
       - name: emission_factor_g_co2_per_kwh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Null would mean a site in a country with no published factor — a group
           total that quietly under-reports. The join is a left join so that
@@ -204,8 +230,12 @@ models:
         data_tests: [not_null]
       - name: low_carbon_share_elec_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: scope2_t_co2e
         data_type: DOUBLE
+        meta:
+          additivity: additive
         description: Location-based Scope 2 emissions for one year, tonnes CO2e.
         data_tests:
           - not_null
@@ -213,17 +243,23 @@ models:
               arguments: {min_value: 0}
       - name: share_of_group_pct
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: scope2_at_best_grid_t_co2e
         data_type: DOUBLE
+        meta:
+          additivity: additive
         description: The same consumption on the cleanest grid the group operates on.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: scope2_at_worst_grid_t_co2e
         data_type: DOUBLE
+        meta:
+          additivity: additive
         description: The same consumption on the dirtiest grid the group operates on.
         data_tests:
           - dbt_utils.accepted_range:
@@ -359,10 +395,16 @@ models:
         data_tests: [not_null]
       - name: direct_t_co2e_per_t
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: indirect_t_co2e_per_t
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
       - name: total_t_co2e_per_t
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Embedded emissions per tonne of good, before the mark-up.
         data_tests:
           - not_null
@@ -370,6 +412,8 @@ models:
               arguments: {min_value: 0}
       - name: certificates_2026_t_co2e_per_t
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           Certificates surrendered per tonne, i.e. after the mark-up. Not null
           anywhere: every row either carries a country-specific value or resolves
@@ -388,9 +432,13 @@ models:
       # test is the other half.
       - name: certificates_2027_t_co2e_per_t
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests: [not_null]
       - name: certificates_2028_t_co2e_per_t
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests: [not_null]
       - name: markup_2026_pct
         description: >
@@ -402,13 +450,19 @@ models:
           model hardcoding one rate would overstate every fertiliser line by nine
           points in 2026 and twenty-seven in 2028.
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 31}
       - name: ets_price_eur_per_t
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: cbam_cost_2026_eur_per_t
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: Certificates x `eu_ets_price_eur_per_t`, EUR per tonne of good.
         data_tests:
           - not_null
@@ -416,12 +470,18 @@ models:
               arguments: {min_value: 0}
       - name: cbam_cost_2027_eur_per_t
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests: [not_null]
       - name: cbam_cost_2028_eur_per_t
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         data_tests: [not_null]
       - name: excess_over_cleanest_source_t_co2e_per_t
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           This country's 2026 certificates per tonne minus the cheapest listed
           source of the same good. The procurement number: the same tonne of steel
@@ -432,8 +492,12 @@ models:
               arguments: {min_value: 0}
       - name: grid_factor_year
         data_type: INTEGER
+        meta:
+          additivity: not_a_measure
       - name: grid_factor_t_co2_per_mwh
         data_type: DOUBLE
+        meta:
+          additivity: non_additive
         description: >
           The country's latest OWID grid emission factor, as context for the
           indirect column. **Not the factor the annex used** — the annex's
