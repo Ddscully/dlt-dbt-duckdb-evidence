@@ -238,6 +238,31 @@ reasoning behind each is in `compliance-models`, `retail-models` and
       lowest line number, so `order by line_number, invoice` passed it too. It
       now puts the lowest line number on the highest invoice, and all three
       permutations fail.
+    - **…and that is still not enough: the test does not catch the tie-break
+      being deleted outright.** Separating the three *orderings* says nothing
+      about separating "ordered" from "not ordered at all". Delete the `qualify`
+      and `return_matches_break_a_tied_purchase_the_same_way_every_build` passes
+      — measured 2026-09-01, and measured at the commit *before* the test moved
+      to `int_retail_return_matches`, in a scratch `git worktree`, so it is the
+      test's own blind spot and not something the move introduced.
+      - The fixture is not the problem; the *harness* is. Loaded into a plain
+        DuckDB table the same four rows separate the cases cleanly — 700/5
+        without the tie-break, 700/3 with it — but dbt builds a mocked input as
+        a `union all` of literal selects, and in that shape the un-tie-broken
+        `asof join` happens to land on 700/3 anyway. So the test pins the
+        *answer* and not the *mechanism*, and the determinism it exists to guard
+        is unguarded.
+      - **The fix is a second tie group whose correct answer sits at a different
+        position** — first in one group, last in the other — so no single
+        positional bias can satisfy both, whatever order the harness feeds them
+        in. Do not "fix" it by reordering the existing rows: that pins the
+        current arbitrary pick, which is the bug wearing the fix's clothes.
+      - The general lesson is the one this whole page is built on, one turn
+        further round: a mutation that a test survives is a finding about the
+        *test*. Run the mutation against the fixture's own data first — if the
+        model's real inputs separate the cases and the mocked ones do not, the
+        gap is the harness and no amount of fixture rows in the same shape will
+        close it.
 - **`fct_retail_customer_cohorts` is the seventh, and the two things that define
   the triangle's *edge* were both untested.** Six mutations against its 11 data
   tests: `<=` to `<` on the ragged bound deletes the newest diagonal of every
