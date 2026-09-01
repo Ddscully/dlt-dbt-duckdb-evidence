@@ -1,0 +1,679 @@
+version: 2
+
+models:
+  - name: dim_country_year
+    config:
+      contract:
+        enforced: true
+      group: country_stats
+    description: >
+      Country-year spine: `stg_country` crossed with every year the warehouse
+      covers (the span is read from the sources, so both ends move with the
+      data). Grain is one row per (country_iso3, year), and it is the *complete*
+      set of them — left-join a fact onto this to see coverage gaps as rows
+      instead of inferring them from what's missing.
+      `fct_emissions_energy` is built on it, filtered to the country-years at
+      least one source reports.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+    columns:
+      - name: country_iso3
+        data_type: VARCHAR
+        description: >
+          ISO3 code, from the country dimension. Codes the sources emit but the
+          dimension doesn't carry (World Bank aggregates like `WLD`, and
+          Antarctica) are not countries and so are not here — which is what
+          keeps them out of the fact.
+        data_tests: [not_null]
+      - name: year
+        data_type: INTEGER
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1750, max_value: 2030}
+      - name: country_name
+        data_type: VARCHAR
+      - name: region
+        data_type: VARCHAR
+        description: World Bank region, trimmed. Never null — see `stg_country`.
+        data_tests: [not_null]
+      - name: income_group
+        data_type: VARCHAR
+        description: >
+          World Bank income group. Null for the territories in
+          `country_overrides`, which the World Bank does not classify.
+
+  - name: fct_co2_estimate_versions
+    config:
+      contract:
+        enforced: true
+      group: country_stats
+    description: >
+      Version history of OWID's CO2 estimates, summarised off the
+      `snap_co2_estimates` SCD2 snapshot: how many versions of each country-year
+      the warehouse has held, the first, the current, and the change.
+      Grain: one row per (country_iso3, year) in the snapshot, 1990 onwards.
+
+      `is_revised` is the interesting filter, and it is **all false on a
+      warehouse built from scratch** — a snapshot can only record a revision it
+      was present for. That is also why the published copy is unrevised: the
+      Pages and release workflows both start from an empty DuckDB file.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+    columns:
+      - name: country_iso3
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: country_name
+        data_type: VARCHAR
+      - name: region
+        data_type: VARCHAR
+      - name: year
+        data_type: INTEGER
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1990, max_value: 2030}
+      - name: is_revised
+        data_type: BOOLEAN
+        description: Whether the estimate has changed since it was first loaded.
+        data_tests: [not_null]
+      - name: version_count
+        data_type: BIGINT
+        description: Versions the snapshot holds for this country-year.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: first_loaded_at
+        data_type: TIMESTAMP
+        description: >
+          `min(dbt_valid_from)` — when this country-year first entered the
+          snapshot, not when OWID first published it.
+      - name: last_revised_at
+        data_type: TIMESTAMP
+        description: >
+          When the most recent version appeared. Null while `version_count` is 1,
+          since "revised at" would otherwise read as the first load.
+      - name: first_co2_mt
+        data_type: DOUBLE
+      - name: latest_co2_mt
+        data_type: DOUBLE
+      - name: co2_mt_change
+        data_type: DOUBLE
+        description: Latest estimate minus the first, million tonnes. Signed.
+      - name: co2_mt_change_pct
+        data_type: DOUBLE
+        description: >
+          The same as a percentage of the first estimate. Null where the first
+          estimate was zero.
+      - name: first_co2_per_capita
+        data_type: DOUBLE
+      - name: latest_co2_per_capita
+        data_type: DOUBLE
+
+  - name: fct_emissions_energy
+    # The project's one versioned model, and the reason it is this one: nothing
+    # inside the project refs it, and the monthly release ships it as a Parquet
+    # file to consumers who cannot be paged. A rename here is free in-repo and
+    # breaking out of it, which is exactly the case `versions:` exists for.
+    #
+    # `ref('fct_emissions_energy')` resolves to the latest version, so every
+    # consumer that doesn't ask for a version gets v2. v2 is aliased back to the
+    # bare relation name for the same reason: the Evidence source query, the
+    # lake's `ARCHIVED_TABLES`, `TABLE_TO_DBT_MODEL` and the release notes all
+    # name `marts.fct_emissions_energy`, and a migration that renames the table
+    # out from under them is not a migration.
+    latest_version: 2
+    versions:
+      - v: 2
+        config:
+          alias: fct_emissions_energy
+      - v: 1
+        # The window. dbt warns on every parse once this date is inside 30 days
+        # and errors for anyone still `ref`-ing v1 after it passes; the release
+        # notes carry the same date, because the consumers who need it are the
+        # ones who never see a dbt log.
+        deprecation_date: 2026-11-01
+        columns:
+          - include: all
+            exclude: [co2_kg_per_gdp_ppp_2011]
+          - name: co2_per_gdp
+            data_type: DOUBLE
+            description: >
+              **Deprecated — use `co2_kg_per_gdp_ppp_2011` in v2.** Same numbers,
+              a name that says neither the unit nor the basis. Kept until the
+              deprecation date above so a release consumer has a version to
+              migrate *from* rather than a column that vanished.
+    config:
+      contract:
+        enforced: true
+      group: country_stats
+    description: >
+      Country-year fact combining OWID emissions & energy, World Bank WDI
+      (GDP, life expectancy, population, poverty, internet, urbanisation, forest,
+      renewable electricity, energy imports) and Eurostat household electricity
+      prices (EU only), with World Bank classifications.
+
+      Built on `dim_country_year`: every measure is a left join off the spine, so
+      a country-year that only OWID energy or only WDI reports arrives with the
+      other sources' columns null instead of being dropped.
+    data_tests:
+      # The grain contract. Every join in this model is a left join off the
+      # spine, so a duplicate on either side of any of the four would fan rows
+      # out here without changing the row count of anything upstream.
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+    columns:
+      - name: country_iso3
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: country_name
+        data_type: VARCHAR
+      - name: region
+        data_type: VARCHAR
+        description: >
+          World Bank region, trimmed (the API pads 'Sub-Saharan Africa ' and
+          'Latin America & Caribbean '). Comes from the spine, so never null —
+          the ISO3 codes the World Bank omits are filled by the
+          `country_overrides` seed and Antarctica isn't in the dimension at all.
+      - name: income_group
+        data_type: VARCHAR
+        description: >
+          World Bank income group (dimension attribute for grouping marts).
+          Null for the territories in `country_overrides`, which the World Bank
+          does not classify.
+      - name: year
+        data_type: INTEGER
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1750, max_value: 2030}
+      - name: co2_mt
+        data_type: DOUBLE
+        description: Territorial CO2 emissions, million tonnes (OWID).
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: co2_per_capita
+        data_type: DOUBLE
+      # Renamed in v2 from `co2_per_gdp`, which said neither the unit nor the
+      # basis while a second, differently-based intensity column sat one schema
+      # away. v1 serves it under the old name until the deprecation date.
+      - name: co2_kg_per_gdp_ppp_2011
+        data_type: DOUBLE
+        description: >
+          OWID's kg CO2 per 2011 international-$ (PPP). Ends in 2022 and covers
+          164 countries — for a current, fuller series use
+          `co2_per_gdp_const_usd` in `analytics.co2_intensity`, which is kg CO2
+          per **constant 2015 US$** and so is not comparable in levels.
+      - name: share_global_co2
+        data_type: DOUBLE
+      - name: coal_co2
+        data_type: DOUBLE
+      - name: oil_co2
+        data_type: DOUBLE
+      - name: gas_co2
+        data_type: DOUBLE
+      - name: consumption_co2
+        data_type: DOUBLE
+        description: >
+          Consumption-based CO2, million tonnes (OWID): territorial emissions
+          adjusted for carbon embodied in trade. ~120 countries and one year
+          behind `co2_mt`, so null here alongside a populated `co2_mt` is the
+          normal case. This is the column that answers the "emissions were just
+          offshored" objection to any territorial trend.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: consumption_co2_per_capita
+        data_type: DOUBLE
+      - name: trade_co2
+        data_type: DOUBLE
+        description: >
+          `consumption_co2 - co2_mt`. Positive = net importer of embodied carbon.
+          Signed, so no `min_value`.
+      - name: trade_co2_share
+        data_type: DOUBLE
+        description: >
+          `trade_co2` as a percent of territorial emissions. Deliberately
+          untested: the real range is about -98% to +1023%.
+      - name: cumulative_co2
+        data_type: DOUBLE
+        description: CO2 emitted since 1750, million tonnes (OWID). Stock, not flow.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: share_global_cumulative_co2
+        data_type: DOUBLE
+        description: >
+          Share of all CO2 ever emitted, %. Ranks countries very differently to
+          `share_global_co2`: the US is 23.8% cumulative against 12.9% of the
+          2023 flow, China 15.1% against 32.0%.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: primary_energy_twh
+        data_type: DOUBLE
+      - name: renewables_share_pct
+        data_type: DOUBLE
+        description: >
+          Renewables as a share of primary energy, % (OWID). **79 countries** in
+          every year — the narrowest widely-used column in this table. For
+          country coverage use `low_carbon_share_elec_pct` (~210) instead; it is
+          a share of electricity rather than of all energy, so the two are not
+          interchangeable in levels.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: fossil_share_pct
+        data_type: DOUBLE
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: electricity_generation_twh
+        data_type: DOUBLE
+      - name: carbon_intensity_elec_g_kwh
+        data_type: DOUBLE
+        description: >
+          Grams of CO2 per kWh generated (OWID). ~210 countries — the
+          broad-coverage alternative to `renewables_share_pct`, and in a unit a
+          reader can hold.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 2000}
+      - name: low_carbon_share_elec_pct
+        data_type: DOUBLE
+        description: Renewables plus nuclear as a share of electricity generated, %.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: solar_share_elec_pct
+        data_type: DOUBLE
+      - name: wind_share_elec_pct
+        data_type: DOUBLE
+      - name: nuclear_share_elec_pct
+        data_type: DOUBLE
+      - name: coal_share_elec_pct
+        data_type: DOUBLE
+      - name: gas_share_elec_pct
+        data_type: DOUBLE
+      - name: gdp_per_capita_usd
+        data_type: DOUBLE
+        description: GDP per capita, current US$ (WDI NY.GDP.PCAP.CD).
+      - name: gdp_usd
+        data_type: DOUBLE
+        description: >
+          GDP, current US$ (WDI NY.GDP.MKTP.CD). Moves with inflation and the
+          exchange rate — use `gdp_constant_usd` for anything measured over time.
+      - name: gdp_constant_usd
+        data_type: DOUBLE
+        description: >
+          GDP, constant 2015 US$ (WDI NY.GDP.MKTP.KD). The real-terms series;
+          denominator for carbon intensity in `analytics.co2_intensity`.
+      - name: life_expectancy
+        data_type: DOUBLE
+        description: Life expectancy at birth, years (WDI SP.DYN.LE00.IN).
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: population
+        data_type: DOUBLE
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: poverty_rate
+        data_type: DOUBLE
+      - name: internet_users_pct
+        data_type: DOUBLE
+        description: Individuals using the internet, % of population (WDI IT.NET.USER.ZS).
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: urban_pop_pct
+        data_type: DOUBLE
+      - name: forest_area_pct
+        data_type: DOUBLE
+      - name: renew_elec_pct
+        data_type: DOUBLE
+        description: Renewable electricity output, % of total (WDI EG.ELC.RNEW.ZS).
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: energy_imports_pct
+        data_type: DOUBLE
+      - name: electricity_price_eur_kwh
+        data_type: DOUBLE
+        description: >
+          Household electricity price, EUR/kWh incl. all taxes, medium band DC
+          (Eurostat nrg_pc_204). Null for non-EU/EEA countries. **Averaged over
+          the year's two half-years**, which is what the annual grain costs:
+          within-year moves of 300% have happened. Use
+          `fct_eu_electricity_prices_semiannual` for anything about prices over
+          time.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1, inclusive: false}
+      - name: price_is_partial_year
+        data_type: BOOLEAN
+        description: >
+          True when `electricity_price_eur_kwh` averages a single half-year — the
+          state of the newest year between Eurostat's S1 and S2 releases, when an
+          "annual" price is really a January-June one. Null wherever the price is.
+          `sources/warehouse/latest_years.sql` excludes these years from
+          `price_year`, so the site's price cross-section is always a full year.
+
+  - name: fct_country_weather_year
+    config:
+      contract:
+        enforced: true
+      group: country_stats
+    description: >
+      Capital-city weather aggregated to (country_iso3, year), for the 41 EU/EEA
+      countries Eurostat publishes an electricity price for. The warehouse's
+      control variable: it exists so that "was it colder that year" can be
+      disposed of before a movement in energy or price is attributed to anything
+      else.
+
+      Built from `stg_weather_daily` rather than from `dim_country_year`,
+      unlike the wide fact. The spine is the right base for a fact that must
+      carry every country the dimension knows; this one deliberately carries
+      only the countries it has data for, the same way
+      `fct_eu_electricity_prices_semiannual` sits at Eurostat's own grain and
+      coverage rather than being padded out to the spine.
+
+      `year_is_complete` is not a formality. The archive stops a few days short
+      of today, so the current year is always partial, and a degree-day total
+      over a partial year is not comparable with a whole one — the missing days
+      are whichever season the run happens to sit in. Filter on it for any
+      year-over-year comparison.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+      # **`hdd_total` and `hdd_minmax_total` being swapped is not catchable by a
+      # data test here.** A comment in this spot used to claim it was — that the
+      # (max + min)/2 convention "runs warmer than the mean-based one, never
+      # colder", by construction — and it was wrong twice over. The expression
+      # underneath it was `hdd_minmax_total >= 0 and hdd_total >= 0`: pure
+      # non-negativity, already carried by `not_null` and the two
+      # `accepted_range {min_value: 0}` below, and *invariant* under the swap it
+      # claimed to catch. And the ordering does not hold. Over the full archive
+      # (656 rows, 41 capitals x 16 years) `hdd_minmax_total` is the larger in
+      # 253 rows (38.6%) and the smaller in 403, gaps running -153.0 to +96.2 —
+      # whether the midpoint sits above or below the true daily mean depends on
+      # the day's diurnal shape, and both directions occur. So encoding the
+      # claim would redden the build on reality rather than on a bug.
+      #
+      # Two plausible totals, both in a legal range, differing by an amount with
+      # no fixed sign, is a wrong answer that is also a legal one — which is a
+      # unit test's job, not a data test's. Measured against a warehouse copy:
+      # swap the two columns in the model's final SELECT and **all 29 of
+      # `fct_country_weather_year`'s data tests pass**, with DEU 2022 reading
+      # 2170.55 where it should read 2177.70.
+      # `weather_year_keeps_the_two_degree_day_conventions_apart` is what fails
+      # on it.
+
+      # **Two tests stood here that could not fail, and they are worth recording
+      # rather than just deleting.**
+      #
+      # `cdd_total < hdd_total + 5000` claimed to catch a base-temperature
+      # mix-up. It does not. Rebuilding the model against a warehouse copy with
+      # the two vars swapped raised heating totals 89% and cooling totals 336%,
+      # and `max(cdd_total - hdd_total)` went 637.5 to 975.2 — still five times
+      # under the bound, with **all 55 data tests on the two models passing**. A
+      # swap moves both totals the same way, so a ceiling on their difference is
+      # structurally the wrong instrument, and the annual grain has already
+      # summed away the thing that breaks. The base ordering is now asserted at
+      # the daily grain in `_staging.yml`, where it fails on 52,253 rows of that
+      # same mutation.
+      #
+      # `frost_days <= n_days` was true by construction — `count(*) filter (…)`
+      # against `count(*)` in the same `group by` — so no data could break it and
+      # no build ever would. Real slack was 153 days at its tightest.
+      #
+      # What replaces the second is the *biconditional* between two aggregates
+      # this model computes independently: a year has a frost day exactly when
+      # its coldest daily minimum is below zero. Measured over the 656 rows, by
+      # recomputing `frost_days` three plausible wrong ways: the wrong column
+      # (`temp_mean_c`) fails 60 rows, the wrong extreme (`temp_max_c`) fails
+      # 138, and the correct model fails none. The boundary mutation `<=` for `<`
+      # is **not** caught and is stated rather than hidden — it needs a daily
+      # minimum of exactly 0.0, which no double in this archive is.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "(frost_days > 0) = (temp_min_c < 0)"
+    columns:
+      - name: country_iso3
+        data_type: VARCHAR
+        description: ISO3. EU/EEA only — null for the rest of the world upstream.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_country')
+                field: country_iso3
+      - name: year
+        data_type: INTEGER
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1940, max_value: 2100}
+      - name: hdd_total
+        data_type: DOUBLE
+        description: >
+          Annual heating degree days from the daily mean, at `heating_base_c`.
+          The standard weather-normalisation denominator. Bounded generously:
+          Reykjavik and Nicosia are the two ends and the range has to hold both.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 10000}
+      - name: hdd_minmax_total
+        data_type: DOUBLE
+        description: The (max + min)/2 convention, for comparison with `hdd_total`.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 10000}
+      - name: cdd_total
+        data_type: DOUBLE
+        description: Annual cooling degree days from the daily mean, at `cooling_base_c`.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 5000}
+      - name: heating_base_c
+        data_type: DOUBLE
+        description: >
+          The base temperature these totals were computed against, carried per
+          row. A degree-day figure without its base is uninterpretable, and this
+          is a `var` — so the number can legitimately differ between builds.
+        data_tests:
+          - not_null
+      - name: cooling_base_c
+        data_type: DOUBLE
+        data_tests:
+          - not_null
+      - name: temp_mean_c
+        data_type: DOUBLE
+        description: Mean of the daily means. Not the same as a mean of hourly values.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -30, max_value: 40}
+      - name: temp_min_c
+        data_type: DOUBLE
+        description: Coldest daily minimum in the year.
+        data_tests:
+          - not_null
+      - name: temp_max_c
+        data_type: DOUBLE
+        description: Warmest daily maximum in the year.
+        data_tests:
+          - not_null
+      - name: frost_days
+        data_type: BIGINT
+        description: Days whose minimum fell below 0 C.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 366}
+      - name: precipitation_mm
+        data_type: DOUBLE
+        description: Annual total precipitation.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: solar_radiation_mj_m2
+        data_type: DOUBLE
+        description: Annual shortwave radiation sum.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: wind_speed_max_kmh
+        data_type: DOUBLE
+        description: Mean of the daily maximum wind speeds — wind does not accumulate.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: n_days
+        data_type: BIGINT
+        description: Days of data behind the row. 365, or 366 in a leap year, when complete.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1, max_value: 366}
+      - name: last_day
+        data_type: DATE
+        description: The newest day in the year that has data — where a partial year stops.
+        data_tests:
+          - not_null
+      - name: year_is_complete
+        data_type: BOOLEAN
+        description: >
+          Whether the year has all of its days. Compared against the year's own
+          length rather than 365, so a leap year is not permanently one short.
+        data_tests:
+          - not_null
+      - name: grid_distance_km
+        data_type: DOUBLE
+        description: >
+          Distance from the capital to the ERA5 cell that answered for it,
+          carried up from staging so the approximation stays visible at this
+          grain too.
+        data_tests:
+          - not_null
+
+  - name: fct_eu_electricity_prices_semiannual
+    config:
+      contract:
+        enforced: true
+      group: country_stats
+    description: >
+      EU/EEA household electricity prices at Eurostat's published grain: one row
+      per (country_iso3, year, half), 2007 onwards. The only non-annual fact in
+      the warehouse, and the reason it exists is that the annual average is lossy
+      — the mean absolute half-over-half change was 19% across
+      countries in 2022 and 13% in 2023, against 3-4% through the 2010s.
+
+      Built on `dim_country_year` for its dimension attributes, so like every
+      other fact here it can only carry countries the dimension knows.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year, half]
+    columns:
+      - name: country_iso3
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: country_name
+        data_type: VARCHAR
+      - name: region
+        data_type: VARCHAR
+      - name: income_group
+        data_type: VARCHAR
+      - name: year
+        data_type: BIGINT
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 2007, max_value: 2030}
+      - name: half
+        data_type: VARCHAR
+        description: "'S1' (January-June) or 'S2' (July-December), from Eurostat's period code."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: ['S1', 'S2']}
+      - name: period
+        data_type: VARCHAR
+        description: Eurostat's period label, e.g. '2022-S1'.
+        data_tests: [not_null]
+      - name: period_start_date
+        data_type: DATE
+        description: First day of the half-year — the column to put on a time axis.
+        data_tests: [not_null]
+      - name: electricity_price_eur_kwh
+        data_type: DOUBLE
+        description: >
+          EUR/kWh incl. all taxes, medium consumption band DC. Unaveraged, so this
+          is the column that shows the 2021-23 energy crisis as it actually
+          arrived.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1, inclusive: false}
+      - name: change_vs_previous_half_eur_kwh
+        data_type: DOUBLE
+        description: >
+          Change from the preceding half-year, EUR/kWh. Signed. Null at the start
+          of each country's series and across any gap in it — the previous row a
+          country has is not always the previous half, so this is only reported
+          when it is.
+      - name: change_vs_previous_half_pct
+        data_type: DOUBLE
+        description: >
+          The same change as a percent. Deliberately untested: the Dutch 2022-S2
+          figure is +320% off a rebate-suppressed S1, which is reality rather than
+          a bug. Also null where the previous price was zero.
+      - name: electricity_price_usd_kwh
+        data_type: DOUBLE
+        description: >
+          The same price in US dollars, converted at the *average* USD/EUR rate
+          over the same half-year, because a price paid across a period is a flow
+          and not a balance. This is the warehouse's only currency conversion,
+          and it exists because this is its only euro-denominated measurement
+          sitting beside dollar-denominated GDP.
+
+          It changes the story rather than restating it: across the 39 countries
+          present in both halves, the average household price rose **35%**
+          between 2021-S1 and 2022-S2 in euros and **13.5%** in dollars, because
+          the euro fell from 1.205 to 1.014 over the same eighteen months.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 2, inclusive: false}
+      - name: usd_per_eur_period_avg
+        data_type: DOUBLE
+        description: >
+          The rate actually used, on the row it was used on. A converted figure
+          whose rate is not visible is a figure nobody downstream can check.
+        data_tests: [not_null]
+      - name: usd_per_eur_period_end
+        data_type: DOUBLE
+        description: >
+          The closing rate for the same half — shipped and deliberately *not*
+          used. It is the correct rate for a balance and the wrong one for a
+          price, and carrying both is what keeps that a visible choice.
+        data_tests: [not_null]
+      - name: usd_conversion_is_partial_period
+        data_type: BOOLEAN
+        description: >
+          True when the half-year's FX average is over a period that has not
+          finished. Same caveat as `price_is_partial_year` one model over, for
+          the same reason.
+        data_tests: [not_null]

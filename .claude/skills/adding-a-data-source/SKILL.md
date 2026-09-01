@@ -117,7 +117,9 @@ carry can't reach the mart at all. If your source has ISO3 codes the World Bank
 omits, they belong in `dbt/seeds/country_overrides.csv` (step 3's territory
 problem), not in a wider join.
 
-Update `dbt/models/marts/_marts.yml`, then `just dbt-build`. Note the partial
+Update the mart yml for your model's dbt group — `dbt/models/marts/` holds one
+per group (`_country_stats.yml`, `_reference.yml`, `_compliance.yml`,
+`_retail.yml`) — then `just dbt-build`. Note the partial
 coverage in the column's YAML description either way — that's the convention.
 
 ## 6. Downstream

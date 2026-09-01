@@ -17,6 +17,9 @@ left silently unlabelled, which is the way a classification actually rots.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import duckdb
 import pytest
 import yaml
@@ -27,7 +30,7 @@ from scripts.export_warehouse import EXTRA_CLASSIFICATIONS, MASKED_LABELS, SALT_
 
 LABELS = {"direct_identifier", "quasi_identifier", "non_personal"}
 
-MARTS_YML = project_root() / "dbt" / "models" / "marts" / "_marts.yml"
+MARTS_DIR = project_root() / "dbt" / "models" / "marts"
 STAGING_YML = project_root() / "dbt" / "models" / "staging" / "_staging.yml"
 SOURCES_YML = project_root() / "dbt" / "models" / "staging" / "_sources.yml"
 
@@ -236,8 +239,55 @@ def yml_columns(path) -> dict[str, dict]:
     }
 
 
+def marts_ymls() -> list[Path]:
+    """Every models-shaped yml in the marts folder.
+
+    A glob rather than a named file: this was one 2,183-line `_marts.yml` until
+    it was split per dbt group, and the split is exactly the kind of change that
+    leaves a coverage test reading three quarters of the tree while still
+    passing. A fifth group file has to be seen without anyone remembering to add
+    it here. `_unit_tests.yml` carries no `models:` key and drops out on its own.
+    """
+    return sorted(
+        p for p in MARTS_DIR.glob("*.yml") if (yaml.safe_load(p.read_text()) or {}).get("models")
+    )
+
+
+def models_yml_paths() -> list[Path]:
+    return [*marts_ymls(), STAGING_YML]
+
+
+def merged(reader) -> dict:
+    out: dict = {}
+    for path in models_yml_paths():
+        out |= reader(path)
+    return out
+
+
 def declared() -> dict[tuple[str, str], str]:
-    return yml_classifications(MARTS_YML) | yml_classifications(STAGING_YML)
+    return merged(yml_classifications)
+
+
+def test_the_yml_scan_finds_every_mart_it_should():
+    """The vacuity guard for the glob above.
+
+    Two of the three coverage tests below assert an *absence* — no unlabelled
+    name collision, no unclassified copy of the identifier — so both would pass
+    on an empty scan, which is precisely what a mistyped suffix or a fifth file
+    in a subfolder would produce. Deriving the expected set from the `.sql`
+    files means a model whose yml block went missing in a move is a failure
+    rather than a silence.
+
+    `fct_emissions_energy` is the one collapse: `_v1.sql` and `_v2.sql` are two
+    files under one `versions:` entry, so the suffix comes off before comparing.
+    """
+    declared_models = set(merged(yml_columns))
+    on_disk = {re.sub(r"_v\d+$", "", p.stem) for p in MARTS_DIR.glob("*.sql")}
+
+    assert len(marts_ymls()) >= 2, "the marts glob collapsed back to a single file"
+    assert on_disk - declared_models == set(), (
+        f"marts models with no yml block anywhere: {sorted(on_disk - declared_models)}"
+    )
 
 
 def test_the_label_vocabulary_is_closed():
@@ -259,7 +309,7 @@ def test_a_column_named_like_a_classified_one_is_never_left_unlabelled():
     """
     labelled = declared()
     names = {column for _, column in labelled}
-    models = yml_columns(MARTS_YML) | yml_columns(STAGING_YML)
+    models = merged(yml_columns)
 
     missing = {
         (model, column)
@@ -277,7 +327,7 @@ def test_the_identifier_is_classified_everywhere_it_appears():
     it is a column that ships in the clear."""
     labelled = declared()
     identifiers = {column for (_, column), label in labelled.items() if label in MASKED_LABELS}
-    models = yml_columns(MARTS_YML) | yml_columns(STAGING_YML)
+    models = merged(yml_columns)
 
     for model, spec in models.items():
         for column in spec["columns"]:

@@ -180,8 +180,8 @@ its first source with a *finite budget*.
   policy, the warehouse builds one value of it, and every other value it claims
   to support is untested by construction.
   - **"Disagree" is the whole of it — there is no ordering between them, and
-    `_marts.yml` asserted one for three weeks.** A comment there claimed the
-    midpoint convention "runs warmer than the mean-based one, never colder", by
+    `_country_stats.yml` asserted one for three weeks.** A comment there claimed
+    the midpoint convention "runs warmer than the mean-based one, never colder", by
     construction. Measured over the full archive (656 rows, 41 capitals x 16
     years): `hdd_minmax_total` is the **larger in 253 rows (38.6%)** and the
     smaller in 403, gaps running -153.0 to +96.2. Whether the midpoint sits

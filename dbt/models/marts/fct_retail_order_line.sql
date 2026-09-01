@@ -95,7 +95,7 @@ select
     l.line_amount_gbp,
     -- EUR and USD at the transaction date's fixing. Null when no rate can be
     -- carried (never, for GBP over this period — but the column is nullable
-    -- because the *model* must not assume that, and `_marts.yml` tests it).
+    -- because the *model* must not assume that, and `_retail.yml` tests it).
     l.line_amount_gbp * g.eur_per_unit as line_amount_eur,
     l.line_amount_gbp * g.eur_per_unit * u.units_per_eur as line_amount_usd,
     g.eur_per_unit as eur_per_gbp,

@@ -71,7 +71,7 @@ bounds as (
 -- The bound is a var and not a literal because it is the one number here that
 -- can silently *truncate* the answer: set it below the extract's span and the
 -- oldest cohorts simply stop early, with no error and a retention curve that
--- looks like churn. `fct_retail_cohorts_are_not_truncated` in `_marts.yml` is
+-- looks like churn. `fct_retail_cohorts_are_not_truncated` in `_retail.yml` is
 -- what makes that loud — it asserts the first cohort reaches the last month.
 offsets as (
     select unnest(

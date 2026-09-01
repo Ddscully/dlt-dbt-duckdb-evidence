@@ -55,7 +55,7 @@ absorbed them is now load-bearing for nothing:
   10/20/30%. Still true, still the reason the mark-up is a property of the
   product group rather than a constant, and now asserted rather than measured.
 
-`dbt/seeds/_seeds.yml` and `dbt/models/marts/_marts.yml` test what remains, so
+`dbt/seeds/_seeds.yml` and `dbt/models/marts/_compliance.yml` test what remains, so
 the next amendment shows up as a failing test rather than as a silent change in a
 published euro figure.
 """

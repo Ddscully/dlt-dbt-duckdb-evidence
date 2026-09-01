@@ -95,6 +95,13 @@ marts are `public`, which dbt enforces at parse time. Two staging models overrid
 to `protected` because they are the only places one domain reads another's
 cleaning layer, and the reason sits next to each override.
 
+Those four groups are also how the marts declarations are filed:
+`dbt/models/marts/` holds `_country_stats.yml`, `_reference.yml`, `_retail.yml`
+and `_compliance.yml` rather than one file for the layer. dbt is indifferent to
+which yml declares a model, so the boundary had to be chosen — and choosing the
+one dbt already enforces means the file a model is declared in and the group it
+answers to cannot drift apart.
+
 Each dashboard page and the monthly data release are declared as `exposures`, so
 `dbt ls --select +exposure:evidence_retail` answers "what breaks if I change
 this". A test fails if a page starts reading a model its exposure doesn't name.

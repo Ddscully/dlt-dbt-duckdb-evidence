@@ -122,7 +122,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
       gained a route, the row count held at 11,665 and the euro total held at
       EUR 2,462,927.40 to the cent. Every `accepted_range` and `not_null` on
       this mart is over a numeric column and the defect lived entirely in a
-      VARCHAR that no test named — `_marts.yml` gave it a `data_type` and
+      VARCHAR that no test named — `_compliance.yml` gave it a `data_type` and
       nothing else. A contract pins a column's shape; only a test pins its
       meaning.
     - **The mutation table missed it because a mutation can only break a rule
@@ -346,7 +346,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     implementations *disagree*, which is the same lesson as the FX partitioning
     fixture and `lake_matches_warehouse`' two drift cases.
 - **`fct_country_weather_year` is the ninth, and it is the only one so far where
-  the *test's own premise* was the defect.** `_marts.yml` carried a
+  the *test's own premise* was the defect.** `_country_stats.yml` carried a
   `dbt_utils.expression_is_true` under a comment claiming the `(max + min)/2`
   degree-day convention "runs warmer than the mean-based one, never colder", by
   construction, and that this was therefore the one test catching the two totals

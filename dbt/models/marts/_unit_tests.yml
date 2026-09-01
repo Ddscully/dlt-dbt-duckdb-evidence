@@ -2,9 +2,10 @@ version: 2
 
 # Unit tests for `dim_date`'s fiscal arithmetic.
 #
-# Kept out of `_marts.yml` on purpose: that file is 1,246 lines of column
-# descriptions and contracts, and this is a different kind of assertion about one
-# model.
+# Kept out of the per-group ymls on purpose: those are column descriptions and
+# enforced contracts, and this is a different kind of assertion about one model.
+# They were a single 2,183-line `_marts.yml` until 2026-09-01; this file stayed
+# whole through that split, because it is one axis and they are four domains.
 #
 # Why these exist when the columns already carry data tests: `fiscal_quarter` is
 # guarded by `accepted_range 1-4`, `fiscal_month` by `1-12`, `fiscal_year` by
@@ -898,7 +899,7 @@ unit_tests:
     description: >
       The two `hdd` columns are the same shape, the same unit and the same order
       of magnitude, so swapping them in the final SELECT is a wrong answer that
-      is entirely legal — every data test on this mart passes on it. `_marts.yml`
+      is entirely legal — every data test on this mart passes on it. `_country_stats.yml`
       carried a comment claiming one convention is never colder than the other
       and that a test therefore caught the swap; both halves were false, and the
       expression under it was non-negativity that is invariant under the swap.

@@ -279,7 +279,7 @@ against a warehouse copy says how much they were worth:
   - **Not one euro moved.** 202 rows gained a route; row count held at 11,665 and
     the euro total at EUR 2,462,927.40 to the cent. That is why it survived: every
     range and null test here is over a numeric column, and the defect lived in a
-    VARCHAR that `_marts.yml` gave a `data_type` and no description or test.
+    VARCHAR that `_compliance.yml` gave a `data_type` and no description or test.
   - **The mutation table above could not have found it.** A mutation breaks a rule
     that is written down; this rule was stated in the model's prose comment and
     never implemented. Treat those comments as claims to verify.

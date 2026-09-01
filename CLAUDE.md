@@ -735,9 +735,37 @@ the point of the layer is that none of it is a comment.
 - **Contracts are enforced on all 17 marts — 327 columns, each with a
   `data_type`.** The ymls documented 179 of those columns before, so the list was
   *generated* from the built warehouse's `information_schema` and inserted
-  line-wise into `_marts.yml`, reordering the existing entries into SQL order and
-  keeping every description untouched. A PyYAML round-trip would have reflowed
-  1,246 lines of prose to add scalars; don't do that to this file.
+  line-wise, reordering the existing entries into SQL order and keeping every
+  description untouched. A PyYAML round-trip would have reflowed 1,246 lines of
+  prose to add scalars; **don't do that to these files**, and that constraint is
+  what shaped the split below as well.
+- **The marts declarations are one yml per dbt group, not one per layer.**
+  `_country_stats.yml` (5 models, 680 lines), `_reference.yml` (5, 536),
+  `_retail.yml` (5, 526) and `_compliance.yml` (3, 450) replaced a single
+  2,183-line `_marts.yml` on 2026-09-01. dbt does not care which file declares a
+  model, so the boundary had to come from somewhere — and `_groups.yml` already
+  declares exactly four domains with enforced `access` between them, which makes
+  the split the one dbt itself can check. A layer-shaped split would have put
+  every mart in one file and changed nothing.
+  - **The move was line-slicing, and the guard was a manifest diff.** Blocks
+    were relocated as bytes and asserted byte-identical afterwards; then a
+    fingerprint of every marts node in `manifest.json` — group, access, alias,
+    version, contract, materialization, description, and each column's
+    `data_type` and description, plus every test node hanging off a marts
+    model — was compared before and after and came back **identical**. `dbt build` stayed at PASS=508 ERROR=0.
+    A green build proves the yml parses; only the diff proves nothing moved.
+  - **The reason it was worth doing is the merge lock, not the line count.**
+    Shared prose "behaves like a lock" (see *Branches and PRs*) — no two commits
+    touching it can be reordered or cherry-picked — and a 2,183-line file every
+    mart change edits is that problem for the model layer.
+  - **`_unit_tests.yml` deliberately stayed whole.** It is one axis of assertion
+    across twelve models; the four group files are four domains. Splitting it
+    too would have cut the same tree twice on different lines.
+  - **A file naming one of these is a list that can go quiet**, which the split
+    proved by breaking one: `tests/test_privacy.py` named `_marts.yml` and would
+    have read a quarter of the marts layer. It globs now and derives the
+    expected set from the `.sql` files, so a fifth group file — or a model whose
+    block goes missing in a move — is a failure rather than a silence.
   - **The grain contract and the schema contract catch different things.**
     `unique_combination_of_columns` has been holding the grain since the start;
     what it never saw was a column changing type under a consumer. Verified by

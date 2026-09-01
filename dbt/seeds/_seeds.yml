@@ -287,7 +287,7 @@ seeds:
       # `max(markup_pct) filter (where year = ...)`, so a group seeded with only
       # a 2026 row yields null rates for 2027 and 2028 — and null euro figures in
       # two of the three years of a published Parquet, on a green build. The
-      # `not_null` tests on the 2027 and 2028 columns in `_marts.yml` are the
+      # `not_null` tests on the 2027 and 2028 columns in `_compliance.yml` are the
       # other half of that; this is the half that names the cause.
       - dbt_utils.expression_is_true:
           arguments:
