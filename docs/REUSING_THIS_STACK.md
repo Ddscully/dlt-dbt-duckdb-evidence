@@ -62,7 +62,13 @@ justfile recipes and the asset graph all still call the same names.
 - `dbt/macros/generate_schema_name.sql` — clean schema names (`marts`, not
   `main_marts`). Six lines, and every schema reference in the project depends on it.
 - `dbt/profiles.yml` — rename the profile, keep the `env_var('WAREHOUSE_PATH', …)`
-  pattern.
+  pattern. **Add `ci` and `prod` targets if you are moving off DuckDB**, and
+  that is the one place this project's shape does not carry over. There is a
+  single target here because the environment *is* the file: `WAREHOUSE_PATH`
+  swaps the whole database, so a second output would differ in name only. On
+  Snowflake, BigQuery or Postgres the *schema* is the environment, which is
+  exactly what a target separates — the reasoning written beside that output
+  inverts, and `generate_schema_name.sql` below has to be reconsidered with it.
 - `orchestration/resources.py` and `orchestration/definitions.py` — the dbt/dlt
   resource handles and the two-job split (`full_refresh` without the site,
   `publish_site` with it). Both are about Node, not about your data.

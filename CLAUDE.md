@@ -106,6 +106,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
 | `just lint` | `sqlfluff lint dbt/models dbt/snapshots` |
 | `just typecheck` | `ty check` — Python type diagnostics; reports, gates nothing |
+| `just where` | print which warehouse file and landing zone the recipes will use — dbt's own log line names the *target*, never the file |
 | `just sql` | open the warehouse in the DuckDB CLI with the lakehouse attached, read-only (`just sql write` to write) |
 | `just clean` | delete the gitignored build output (`deep` also drops `reports/node_modules`) |
 
@@ -1271,6 +1272,31 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
 - **Clean schema names** come from `dbt/macros/generate_schema_name.sql`, which
   overrides dbt's default `<target>_<custom>` (which would give `main_marts`).
   Reference marts as `marts.fct_emissions_energy`, not `main_marts.…`.
+- **One dbt target, and that is a decision rather than an omission.** `dev` is
+  the only output in `dbt/profiles.yml`. A target separates *schemas inside one
+  database*, which is the whole of what `dev`/`ci`/`prod` do on Snowflake or
+  BigQuery; DuckDB is a file, so `WAREHOUSE_PATH` swaps the entire database —
+  a stronger separation — and the macro above deliberately keeps the schema
+  names identical in every context, which is what lets
+  `marts.fct_emissions_energy` resolve the same on a laptop, in CI and in the
+  published release. Three outputs would differ in name only, selected by a
+  second environment variable on top of the one that already decides
+  everything. Measured before deciding: `target.` appears **once** in the whole
+  project (`target.schema`, in that macro) and no `--target` is ever passed.
+  The reasoning sits in `profiles.yml` beside the output it explains; a port to
+  a real warehouse should add the targets, and `docs/REUSING_THIS_STACK.md`
+  says so.
+  - **What it costs is that dbt's one "where am I" line is uninformative.**
+    `Concurrency: 4 threads (target='dev')` names the target and never the
+    file, so `just dbt-build` against the real warehouse and against a course
+    sandbox print the same line — which is the trap the course notes and the
+    fixture-run warning both describe, from two directions. `just where` prints
+    the file, and the eleven recipes that write to the warehouse or the landing
+    zone take it as their first dependency, so a run announces its destination
+    before reaching it. `just` runs a shared dependency once, so `just run`
+    says it once. The three recipes that export `WAREHOUSE_PATH` themselves are
+    excluded on purpose: they announce their own, and `where` would print the
+    outer value.
 - **dlt persists its schema and only *widens* types.** If a column lands with the
   wrong type, re-running won't fix it — the pipeline uses
   `refresh="drop_resources"` (`REFRESH` in `ingest/pipeline.py`) to force

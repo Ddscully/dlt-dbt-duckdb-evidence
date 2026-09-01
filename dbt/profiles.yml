@@ -12,6 +12,33 @@
 # `database: lakehouse`, and that name is this alias. Change one without the
 # other and dbt cannot find the sources at all, which at least fails loudly;
 # the silent version is renaming a dlt resource, which splits the asset graph.
+#
+# **One target, deliberately, and this is the decision a reviewer scans for.**
+# dbt convention is `dev` / `ci` / `prod`, because on Snowflake or BigQuery a
+# target separates *schemas inside one database* — that is the mechanism it
+# exists to provide. DuckDB is a file, so `WAREHOUSE_PATH` swaps the whole
+# database instead: a stronger separation than a schema prefix, and the one the
+# three contexts here (local, CI-against-fixtures, release-against-live) already
+# use. `.github/actions/setup` is the single definition of it for all four
+# workflows, and `just` is the single definition locally.
+#
+# Adding `ci` and `prod` outputs would produce three copies of this block
+# differing only in name, selected by a *second* environment variable on top of
+# the one that already decides everything. It could not vary the schema either:
+# `macros/generate_schema_name.sql` pins `staging` / `marts` / `analytics` to be
+# identical in every context, which is what lets `marts.fct_emissions_energy`
+# resolve the same on a laptop, in CI and inside the published release.
+# Measured before deciding: `target.` appears **once** in this whole project, as
+# `target.schema` in that macro, and no `--target` is ever passed.
+#
+# What a target *would* have bought is dbt's only "where am I" line —
+# `Concurrency: 4 threads (target='dev')`. It names the target and never the
+# file, so with one target it carries no information, and with three it would
+# still not answer the question that matters here. `just where` prints the file
+# instead, and every recipe that writes to it says so first.
+#
+# **Porting this to a real warehouse? Add the targets.** There the schema is the
+# environment and this reasoning inverts — see `docs/REUSING_THIS_STACK.md`.
 modern_data_stack:
   target: dev
   outputs:

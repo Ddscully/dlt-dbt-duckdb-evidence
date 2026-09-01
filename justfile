@@ -25,6 +25,31 @@ export LAKEHOUSE_DIR := env("LAKEHOUSE_DIR", justfile_directory() / "data/lakeho
 default:
     @just --list
 
+# **Which warehouse is this about to write to?** dbt's own answer to that is
+# `Concurrency: 4 threads (target='dev')` — it names the *target*, and there is
+# exactly one target here on purpose (the reasoning is in `dbt/profiles.yml`),
+# so that line is a constant carrying no information. What actually varies is
+# the **file**, and no dbt output ever prints it.
+#
+# So every recipe below that writes to the warehouse or the landing zone depends
+# on this one and says where it is going before it goes there. `just` runs a
+# shared dependency once per invocation, so `just run` prints this once rather
+# than four times.
+#
+# The three recipes that *set* `WAREHOUSE_PATH` themselves — `test-pipeline` and
+# the two course ones — deliberately do **not** depend on it: they export their
+# own path inside the recipe body and announce that, where this would print the
+# outer value and be actively wrong. Inheriting the variable is the dangerous
+# direction anyway: a shell that exported it for a course drill silently
+# redirects the next `just dbt-build`, and a fixture run that loses it merges a
+# 17-country slice into the real landing zone. Both are recorded in CLAUDE.md as
+# traps; neither was visible at the moment of running until this existed.
+# (`just --list` renders only the line directly above a recipe.)
+# Print which warehouse file and landing zone the pipeline recipes will use
+where:
+    @echo "warehouse: ${WAREHOUSE_PATH:-(unset - this repo's data/warehouse.duckdb)}"
+    @echo "lakehouse: $LAKEHOUSE_DIR"
+
 # DuckLake is a 36 MB binary from extensions.duckdb.org, not a Python package —
 # nothing in `pyproject.toml` or `uv.lock` can name it, and its own version is a
 # git hash rather than a number. DuckDB autoloads it on first use, so this is not
@@ -50,13 +75,13 @@ setup:
     uv run python -c "import duckdb; duckdb.connect().execute('install ducklake')"
 
 # EL: pull public sources into DuckDB
-ingest:
+ingest: where
     uv run python -m ingest.pipeline
 
 # Same, but re-fetch the whole WDI series instead of the incremental window.
 # For a World Bank restatement older than the 5-year lookback (or to rebuild
 # history after the raw table was dropped out from under the watermark).
-ingest-wdi-full:
+ingest-wdi-full: where
     INGEST_WDI_FULL=1 uv run python -m ingest.pipeline
 
 # What the next incremental run will ask for. dlt keeps this in its own data dir
@@ -90,7 +115,7 @@ dbt-deps:
     cd dbt && uv run dbt deps
 
 # T: build + test dbt models
-dbt-build: dbt-deps
+dbt-build: where dbt-deps
     cd dbt && uv run dbt build
 
 # Every headless `dagster` recipe below depends on this, because @dbt_assets
@@ -142,13 +167,13 @@ lakehouse:
     uv run python -m lake.lakehouse
 
 # Polars derived metrics
-transform:
+transform: where
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
 
 # Pipeline observability tables (load times, layer inventory, dbt test failures)
 # Must run after dbt-build: it reads dbt_test__audit and dbt/target/manifest.json.
-pipeline-status:
+pipeline-status: where
     uv run python -m transform.pipeline_status
 
 # Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
@@ -213,7 +238,7 @@ disclosure-risk:
 # waiting a month for OWID:
 #   gh release download --pattern warehouse.duckdb --dir prev
 #   just restore-history prev/warehouse.duckdb
-restore-history from:
+restore-history from: where
     uv run python -m scripts.restore_history {{ from }}
 
 # Re-record the fixtures from the live APIs (hits the network; commit the diff)
@@ -233,7 +258,7 @@ dagster:
 # `load_retail` has to come first: dbt reads raw.retail_invoice_lines.
 # (`just --list` renders only the line directly above a recipe.)
 # Full pipeline ordered by the asset graph, minus the Evidence site
-materialize: dbt-parse
+materialize: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
     uv run --group orchestration dagster job execute -m orchestration.definitions -j full_refresh
@@ -242,7 +267,7 @@ materialize: dbt-parse
 # This is what .github/workflows/pages.yml runs.
 # (`just --list` renders only the line directly above a recipe.)
 # The same graph with the Evidence site on the end of it (needs Node)
-materialize-site: dbt-parse
+materialize-site: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
     uv run --group orchestration dagster job execute -m orchestration.definitions -j publish_site
@@ -254,7 +279,7 @@ materialize-site: dbt-parse
 # `dagster asset list -m orchestration.definitions --select '<sel>'`.
 # (`just --list` shows only the line below, so keep the summary last.)
 # Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi*'` (* = all downstream, + = one layer)
-materialize-select selection: dbt-parse
+materialize-select selection: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster asset materialize \
         -m orchestration.definitions --select '{{ selection }}'
@@ -278,7 +303,7 @@ materialize-preview selection: dbt-parse
 # table. Only `raw/wb_wdi` is partitioned, so this can't pull the downstream
 # models along (the CLI rejects a range over unpartitioned assets); follow with
 # `just dbt-build` or `just materialize`.
-backfill-wdi start end='': dbt-parse
+backfill-wdi start end='': where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "$DAGSTER_HOME"
@@ -307,7 +332,7 @@ backfill-wdi start end='': dbt-parse
 # The rows are carried forward into the next release, which is what makes this
 # worth doing once rather than every run — see `scripts/restore_history.py`.
 # Follow with `just dbt-build` or `just materialize`.
-backfill-weather start end='': dbt-parse
+backfill-weather start end='': where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "$DAGSTER_HOME"
