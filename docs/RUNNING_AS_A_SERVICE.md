@@ -81,7 +81,7 @@ serve: where dbt-parse
     trap 'kill 0' EXIT           # or Ctrl-C orphans both children
     uv run --group orchestration dagster-webserver -h 127.0.0.1 -p 3000 &
     uv run --group orchestration dagster-daemon run &
-    python -m http.server 8081 --directory "$SITE_ROOT" &
+    python -m http.server 8081 --directory "$SITE_ROOT" &   # the `current` symlink of §4
     wait
 ```
 
@@ -107,6 +107,10 @@ recipe's, and the layering keeps the recipe as the single definition of *what*
 runs while the unit supplies restart, boot and logging:
 
 ```ini
+[Unit]
+Description=modern-data-stack
+After=network-online.target
+
 [Service]
 Type=exec
 User=mds
@@ -114,7 +118,15 @@ WorkingDirectory=/srv/mds/repo
 EnvironmentFile=/srv/mds/service.env   # the paths in §3 — and nothing secret; see §6
 ExecStart=/usr/bin/just serve
 Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
 ```
+
+`[Install]` is what `systemctl enable` needs; without it the unit starts by hand
+and never at boot. `Type=exec` rather than `simple` so a failure to execute
+`just` is reported at start time instead of appearing to succeed.
 
 ## 3. The state that must outlive a restart
 
@@ -172,6 +184,23 @@ one.
    site and flip a `current` symlink at the served directory (`ln -sfn`, atomic
    via rename).
 
+**Dagster is the trigger for all four steps — there is no second scheduler.**
+The swap is an asset on the end of the graph, not a wrapper around it, and two
+facts make that work:
+
+- **`rename(2)` does not need the lock**, and nothing in the run holds the
+  warehouse across steps anyway: `_scalar` and both warehouse-reading asset
+  checks open a connection and close it in a `finally`. So a swap asset
+  downstream of `analytics/pipeline_status` finds the file quiescent.
+- **The build path is fixed at daemon start, not chosen per run.**
+  `transform/co2_intensity.py` binds `DUCKDB_PATH = warehouse_path()` **at
+  import**, and `orchestration/assets.py` imports that constant — so the code
+  location reads `WAREHOUSE_PATH` once when it loads. A run cannot vary it. It
+  does not need to: point the daemon's `WAREHOUSE_PATH` at the build file, let
+  every run write there, and let the swap asset promote it to the path readers
+  know. `reports/evidence_site` then depends on the swap, so the site is built
+  from the promoted file.
+
 Three properties make this worth the machinery:
 
 - **The live warehouse becomes read-only by construction.** Nothing writes to it
@@ -227,9 +256,21 @@ is not:
   `stg_retail_lines`, with `Catalog Error: Table with name retail_invoice_lines
   does not exist!`.
 
-So **the service's first run is a different command from its steady state**, and
-a deployment runbook has to say so rather than leave it to be discovered on a
+So **the service's first run is a different command from its steady state** —
+§10 is the runbook that says so, rather than leaving it to be discovered on a
 rebuilt host at 06:00 UTC.
+
+**`daily_refresh` is the only scheduler**, and adopting §4 does not change that.
+The swap is an asset inside `full_refresh`, so the schedule that runs the graph
+runs the swap with it; there is no systemd timer and no second cron. What
+adopting §4 changes is one environment variable — `WAREHOUSE_PATH` points at the
+build file rather than the served one — and one asset on the end of the graph.
+
+**Without §4 the schedule still works**, materialising into the served warehouse
+in place. That is the smaller starting point and it costs exactly two things: a
+reader lockout for the length of a build (§8), and a half-written file where the
+good one was if the build goes red. Both are survivable on an internal
+deployment and neither is silent.
 
 ## 6. Exposure
 
@@ -315,3 +356,78 @@ Three things here were not, and should be before anyone trusts the design:
   survives under the old inode, so a mid-swap reader should see a consistent old
   database rather than a torn new one — but that is the documented behaviour, not
   this warehouse's observed behaviour.
+
+## 10. Standing it up
+
+The ordered version of everything above. Written as a runbook because §5's two
+facts are only dangerous out of order — and, again, none of it runs today: it
+assumes the `just serve` recipe of §2 and the swap asset of §4 have been built.
+
+**1. The host, once.** Clone, then `just setup` — which syncs the venv and
+fetches the DuckLake extension, the one dependency no lockfile can name. Node is
+needed only if the deployment serves the Evidence site; `full_refresh` does not
+touch it. Install `just` itself (`uv tool install rust-just`).
+
+**2. The paths, once.** Write `/srv/mds/service.env` with the §3 set, all
+absolute, and nothing secret in it:
+
+```sh
+PROJECT_ROOT=/srv/mds/repo
+LAKEHOUSE_DIR=/srv/mds/state/lakehouse
+INGEST_CACHE_DIR=/srv/mds/state/cache
+DAGSTER_HOME=/srv/mds/state/dagster
+XDG_DATA_HOME=/srv/mds/state          # or dlt's watermark follows $HOME — §3
+WAREHOUSE_PATH=/srv/mds/state/build/warehouse.duckdb   # the *build* file, §4
+SITE_ROOT=/srv/mds/state/sites/current
+```
+
+`WAREHOUSE_PATH` is the one line that encodes the §4 decision. Point it at the
+served file instead and the graph builds in place, which is the smaller starting
+point §5 describes.
+
+**3. Bootstrap, by hand, before the service exists.** This is the step that
+differs from steady state, and it differs because `daily_refresh` targets
+`full_refresh`, which excludes `load_retail`:
+
+```sh
+just materialize     # load_retail, then full_refresh — in that order
+```
+
+Skip it and the first scheduled run dies inside `stg_retail_lines` with
+`Catalog Error: Table with name retail_invoice_lines does not exist!`. Doing it
+by hand also means the first failure is watched rather than discovered in a log.
+
+**4. The service.** Install the §2 unit, then `systemctl enable --now mds`.
+Confirm the code location actually loaded — `dbt parse` runs as a recipe
+dependency, but `prepare_if_dev()` does not fire here (§2), so this is the step
+that catches a missing `dbt/target/manifest.json`:
+
+```sh
+uv run dagster definitions validate -m orchestration.definitions
+```
+
+**5. Turn the schedule on. It is off until you do**, and this is instance state
+in `DAGSTER_HOME`, not code — so it is also the step to repeat if that directory
+is ever wiped:
+
+```sh
+uv run dagster schedule start -m orchestration.definitions daily_refresh
+```
+
+The UI toggle is the same action against the same instance; use either. What is
+*not* equivalent is editing `default_status` in `definitions.py`, which changes
+what `dagster dev` does for everyone who clones the repo.
+
+**6. Verify, and prefer the checks that fail loudly.** `dagster schedule list`
+shows it RUNNING. After the first scheduled run, the useful assertions are the
+ones the repo already computes rather than a glance at the dashboard:
+`analytics.pipeline_sources` for per-source load times and row counts,
+`analytics.pipeline_tests` for anything failing, and the freshness policies in
+the UI — which are the reason §1 calls the daemon the thing that makes the SLA
+real.
+
+**What can go wrong quietly, in the order it bites:** a wiped `DAGSTER_HOME`
+leaves the schedule stopped and the service serving an ageing site; a `$HOME`
+change moves dlt's watermark and re-fetches everything; a moved mount point
+breaks every DuckLake attach because `data_path` is compared as a string. All
+three are §8, and none of them raises where you are looking.
