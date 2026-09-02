@@ -229,6 +229,33 @@ facts make that work:
   know. `reports/evidence_site` then depends on the swap, so the site is built
   from the promoted file.
 
+### The swap semantics — measured
+
+A rename over an open database is the step the design rests on, so it was run
+rather than reasoned from POSIX. Two throwaway databases, `v1` served and `v2`
+built, each with a 400,000-row table so pages are read lazily rather than
+slurped on connect:
+
+| | Result |
+|---|---|
+| `rename(2)` while a reader holds the served file | **succeeds**; the inode changes under it |
+| the held reader, afterwards | still answers, still `v1`, all 400,000 rows and the checksum intact |
+| a **new** reader, separate process | sees `v2` immediately |
+| a **writer**, separate process, stale reader still open | **can open the live path** — the stale reader's lock is on the old, now-unlinked inode |
+
+So a swap mid-query gives a reader a consistent *old* database rather than a torn
+new one, and the next cycle is not held hostage by whoever forgot to close a
+session. That last row is §8's lock nuisance genuinely dissolving rather than
+merely being avoided.
+
+**Re-running this needs separate processes, and the first attempt got it
+wrong.** DuckDB's Python client caches an instance per path within a process, so
+asking it for a "new" connection to the swapped path returned the *old* one —
+reporting `v1` after the swap — and then refused a writer with `Can't open a
+connection to same database file with a different configuration`. Both answers
+looked like filesystem findings and neither touched the filesystem. Open the
+second connection in a subprocess.
+
 Three properties make this worth the machinery:
 
 - **The live warehouse becomes read-only by construction.** Nothing writes to it
@@ -377,15 +404,15 @@ keeps, extended with the ones only an always-on deployment meets:
 ## 9. What is still unmeasured
 
 The standard this repo holds itself to is that a claim in the docs was measured.
-Two things here were not, and should be before anyone trusts the design:
+One thing here was not, and it is the one that cannot be measured without
+building the design first:
 
 - **A full swap cycle end to end**, timed against the ≈94 s stage baseline in
   [`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md#3-what-does-a-run-cost-and-how-long-does-it-take).
-  The swap adds a restore, a verify and two renames to a run that is 65% network.
-- **`rename(2)` over a warehouse a reader has open.** POSIX says the open file
-  survives under the old inode, so a mid-swap reader should see a consistent old
-  database rather than a torn new one — but that is the documented behaviour, not
-  this warehouse's observed behaviour.
+  The swap adds a restore, a verify and two renames to a run that is 65%
+  network, so the expectation is that it disappears into the noise — but the
+  restore copies `history` and the weather archive, which is real I/O, and
+  nobody has timed it.
 
 ## 10. Standing it up
 
