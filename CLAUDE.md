@@ -39,7 +39,7 @@ measures it, and a link to where in the code it happens. It is deliberately thin
 on argument, because the argument is here. **The risk it carries is the one the
 docs split already names**: it restates figures that live in five other files, so
 a claim added to it is a claim to keep in step. `tests/test_documented_counts.py`
-covers the test and mart counts in it; nothing covers the rest.
+covers the test, mart and additivity counts in it; nothing covers the rest.
 
 ## The layers, and what each directory is for
 
@@ -818,7 +818,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are twenty-nine unit tests, over twelve models, and they exist because a data
+- **There are thirty unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -865,8 +865,9 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  twenty-nine cost 4.0s. A broken fiscal calendar should stop `release-data.yml`,
-  not ride along in it. `just dbt-unit-test` is the ~4s inner loop.
+  thirty cost 4.3s. A broken fiscal calendar should stop `release-data.yml`,
+  not ride along in it. `just dbt-unit-test` is the inner loop — 4.3s of dbt's
+  own time, ~10s wall once `dbt deps` and startup are counted.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.
   It is tautologically green in CI (which loads and then checks), which is why
@@ -983,16 +984,25 @@ the point of the layer is that none of it is a comment.
 - **Every numeric mart column declares `meta: {additivity: …}`**, from a closed
   four-value vocabulary — `additive`, `semi_additive`, `non_additive`,
   `not_a_measure` — because a contract states a type and a test states
-  correctness, and neither says whether `sum()` means anything. 92 of the 188
-  are non-additive. `tests/test_additivity.py` holds five properties, each
-  mutation-proven: the layer is covered exhaustively, the vocabulary is closed,
-  only numeric columns are labelled (the vacuity guard), and **no column named
+  correctness, and neither says whether `sum()` means anything. 117 of the 226
+  are non-additive. **Counted as dbt resolves them, which is the basis every
+  figure in this section uses** — `fct_emissions_energy_v1` inherits 36 labels
+  through `include: all` and declares one, so the ymls carry 190 literal
+  `additivity:` entries where the manifest carries 226 labelled columns (189 +
+  v1's 37). Quoting the yml count while naming the manifest one is how a stale
+  pair survived into a release — described in words rather than digits here,
+  because the guard cannot tell a quotation from an assertion and should not
+  try. `tests/test_additivity.py` holds five properties, each mutation-proven:
+  the layer is covered exhaustively, the vocabulary is closed, only numeric
+  columns are labelled (the vacuity guard), and **no column named
   like a ratio may be declared summable** — a name rule, because it is the only
   one of the four that can catch a label that is present and *wrong*. It holds
   today with no exceptions.
   - **`semi_additive` is the only label that is useless alone**, so its
     description must say which direction fails and a test requires one. There
-    are 13, and they are where the value is: `population` adds across countries
+    are 16 `semi_additive` columns, three of them `fct_emissions_energy_v1`'s
+    inherited copies, and they are where the value is: `population` adds across
+    countries
     and gives person-years across years, `cumulative_co2` is a stock that
     recounts every earlier year, `cohort_size` is constant down a cohort's rows,
     and `original_quantity` belongs to the matched purchase — 16,398 matched
@@ -1001,8 +1011,8 @@ the point of the layer is that none of it is a comment.
   - **`gdp_usd` is `semi_additive` and `gdp_constant_usd` is `additive`**, which
     is the current-vs-constant-dollar gotcha under *Conventions & gotchas*
     expressed as metadata rather than as prose somebody has to have read.
-  - **The labels ship**, in `manifest.json`'s `additivity` map — 280 columns
-    across 24 relations — for the reason `direct_identifier` is real: a label
+  - **The labels ship**, in `manifest.json`'s `additivity` map — 282 columns
+    across 25 relations — for the reason `direct_identifier` is real: a label
     with no consequence is decoration, and a Parquet consumer has the types and
     nothing else. The five `analytics` tables are invisible to dbt, so their 56
     are `EXTRA_ADDITIVITY`, beside `EXTRA_CLASSIFICATIONS` and for its reason.
@@ -1017,7 +1027,7 @@ the point of the layer is that none of it is a comment.
     `retail_rfm` cannot be reached by name at all — `frequency` is
     `n_orders` and `monetary_gbp` is `net_revenue_gbp` — so its coverage is
     asserted against the frame `build_retail_rfm` actually emits.
-  - **Inserting 188 labels line-wise found the duplicate-key trap twice.** A
+  - **Inserting the labels line-wise found the duplicate-key trap twice.** A
     `meta:` block can sit *below* a comment block or a `description:`, so a
     lookahead that only skipped comments wrote a second `meta:` key — which
     PyYAML resolves silently by taking the last, dropping a `pii`

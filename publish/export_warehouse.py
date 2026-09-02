@@ -326,7 +326,7 @@ def additivity(manifest_path: str = MANIFEST_PATH) -> dict[str, dict[str, str]] 
 
     A consumer of a Parquet file has the column names and the types and nothing
     that says `renewables_share_pct` must not be summed while `co2_mt` may be —
-    and 92 of the 188 numeric mart columns are in the first category. The labels
+    and 117 of the 226 numeric mart columns are non-additive. The labels
     are declared once, as `meta: {additivity: …}` on the column in the same ymls
     that carry the contract, and this is what carries them out of the repo.
 

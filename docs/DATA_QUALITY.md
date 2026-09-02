@@ -27,7 +27,7 @@ happily pass a threshold the full 200+ would break.
 
 ## Unit tests
 
-Twenty-nine of those tests are dbt *unit* tests, over twelve models — `dim_date`,
+Thirty of those tests are dbt *unit* tests, over twelve models — `dim_date`,
 `stg_retail_lines`, `stg_weather_daily`, `fct_cbam_exposure`,
 `fct_country_weather_year`, `fct_fx_rates_daily`, `fct_fx_rates_periods`,
 `fct_retail_returns`, `fct_retail_customer_cohorts` and

@@ -104,15 +104,15 @@ so the boundary is the one dbt itself can check rather than a filing convention
 
 **Say what a measure means under `sum()`.** A contract states a column's type
 and a test states that it is correct; neither says whether adding it up is
-meaningful. Half the numeric columns here — 92 of 188 — are ratios, rates,
-prices, averages or extrema, where a sum is nonsense that comes back as a number.
-Every one carries `meta: {additivity: …}` from a closed four-value vocabulary,
-the 13 `semi_additive` ones have to say in prose *which* direction fails
-(`population` gives person-years across years; `cumulative_co2` recounts every
-earlier year), and the labels ship in the release manifest so a Parquet consumer
-who cannot be paged has them too. Guarded three ways: exhaustive over the layer,
-closed vocabulary, and no ratio-shaped name may be declared summable — which
-holds across the tree with no exceptions.
+meaningful. 117 of the 226 numeric mart columns are non-additive — ratios,
+rates, prices, averages or extrema, where a sum is nonsense that comes back as a
+number. Every one carries `meta: {additivity: …}` from a closed four-value
+vocabulary, the 16 `semi_additive` ones have to say in prose *which* direction
+fails (`population` gives person-years across years; `cumulative_co2` recounts
+every earlier year), and the labels ship in the release manifest so a Parquet
+consumer who cannot be paged has them too. Guarded three ways: exhaustive over
+the layer, closed vocabulary, and no ratio-shaped name may be declared summable
+— which holds across the tree with no exceptions.
 → [`tests/test_additivity.py`](../tests/test_additivity.py),
 [`_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
 

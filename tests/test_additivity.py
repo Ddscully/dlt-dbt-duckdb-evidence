@@ -2,11 +2,20 @@
 
 A Parquet file carries column names and types and nothing else. Nothing in it
 says that `co2_mt` may be summed while `renewables_share_pct` may not, or that
-`population` adds across countries and not across years — and 92 of the 188
-numeric mart columns are in the first of those categories, 13 in the second. So
+`population` adds across countries and not across years — and 117 of the 226
+numeric mart columns are non-additive, with 16 more semi_additive. So
 the warehouse states it: `meta: {additivity: …}` on the column, in the same ymls
 that carry the contract, and `publish/export_warehouse.py` carries the labels
 into the release manifest so a consumer who cannot be paged has them too.
+
+**Every count in this docstring is a manifest count, which is the basis
+`numeric()` below returns and the only one anything here can check.** The ymls
+carry 190 literal `additivity:` lines; the manifest carries 226 labelled
+columns, because `fct_emissions_energy_v1` inherits 37 through `include: all`
+and declares one. Quoting the first while naming the second is how these figures
+went stale once already, so
+`test_every_documented_additivity_count_is_one_the_labels_actually_carry`
+now reads them out of the prose.
 
 The vocabulary is four values and closed, for `pii`'s reason exactly — a blank
 is ambiguous between "additive" and "nobody looked", and only one of those can

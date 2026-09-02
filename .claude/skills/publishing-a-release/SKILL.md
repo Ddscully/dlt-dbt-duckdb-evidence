@@ -20,7 +20,7 @@ constraints that must not depend on this skill loading are in `CLAUDE.md`'s
 ## What the manifest tells a consumer they cannot see
 
 - **`manifest.json` carries an `additivity` map, and it exists because a Parquet
-  file has types and nothing else.** 280 published columns are labelled
+  file has types and nothing else.** 282 published columns are labelled
   `additive` / `semi_additive` / `non_additive` / `not_a_measure`, and about half
   are non-additive — `sum(renewables_share_pct)` is nonsense that returns a
   number, with no error anywhere for a consumer who cannot be paged.

@@ -221,6 +221,33 @@ is in the `unit-testing-dbt-models` skill.
   wrong in fourteen — including `README.md` labelling `docs/DATA_QUALITY.md`
   with a count of 368 while linking to a file that already said 369. `lint`,
   `pytest` and `dbt build` were green through all of it.
+  - **Three nouns, because each one broke separately.** Test counts came first;
+    mart counts were added when a stale "all N marts" survived two additions to
+    the layer; additivity counts were added when publishing `dim_country` moved
+    every label figure and left the old pair standing in four files, two of
+    them Python docstrings — which is why the scan is pointed at
+    `tests/test_additivity.py` and `publish/export_warehouse.py` as well as the
+    markdown. A docstring is prose.
+    - **Describe a stale claim, never quote it.** Each of the three additions
+      failed on its own explanatory prose first: the scanner cannot tell a
+      quotation from an assertion and should not try, so a sentence naming the
+      bug has to spell the old figure in words, or as `N`, or not at all.
+  - **The word-number list is generated to 99 rather than written out, and the
+    hand-written one stopped exactly where a real claim went.** It ended at
+    "twenty", the unit-test total moved to 30, and CLAUDE.md and a skill said
+    the total in hyphenated words in three places through a whole review:
+    `twenty` cannot match a compound like twenty-something (the hyphen is not
+    `\s`) and the unit word is below the ten-and-above floor, so the scanner
+    matched nothing and reported nothing.
+    A list extended by hand every time a total crosses a decade is a guard with
+    a scheduled expiry.
+  - **An additivity figure is bound to its own label, not to a global set.**
+    There are two honest bases — 190 literal `additivity:` entries in the ymls
+    against 226 labelled columns in the manifest, the gap being
+    `fct_emissions_energy_v1`'s inherited labels — so a set holding both makes
+    either legal anywhere. A bare "N labels" is deliberately not scanned at
+    all: `docs/PRACTICES.md` writes "34 of the 43 labels" about the retail
+    country map, which is a different kind of label entirely.
 
     The guard forbids quoting a superseded count directly in front of a
     test-noun, which is why this bullet phrases the old figures the long way
