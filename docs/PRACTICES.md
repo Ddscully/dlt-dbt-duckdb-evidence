@@ -44,6 +44,28 @@ green.
 → [`dbt/seeds/retail_country_map.csv`](../dbt/seeds/retail_country_map.csv),
 [`stg_retail_lines.sql`](../dbt/models/staging/stg_retail_lines.sql)
 
+**Derive the bus matrix, because the practice above cannot check itself.**
+Business processes down, conformed dimensions across — the artifact that says
+which dimensions each fact can be joined on, and the one thing groups (who owns
+it), exposures (who reads it) and contracts (what shape it is) do not state.
+It is generated from `manifest.json`, never written: the grain comes from each
+model's own uniqueness tests and the columns from its enforced contract. The
+reason it earns its place is that the entry above was *already written down* and
+still broken one schema away — `fct_fx_rates_periods` and
+`fct_fx_rates_published` carry `quote_currency` where `dim_currency` publishes
+`currency_code`, while their own sibling `fct_fx_rates_daily` spells it the
+conformed way. No test in this repo could see it: every guard is scoped to one
+relation, so a key spelled two ways is three green models. Two rules make the
+output honest — a uniqueness test carrying a `where` is not a grain
+(`dim_grid_emission_factors` asserts one row per country *where
+`is_latest_available`*, which read as a grain turns a country-year reference
+table into a conformed dimension every fact appears to join), and conformance is
+exact name matching, because an alias list would render the defect above as a
+tidy row of ticks. 13 facts, 5 conformed dimensions, and the holes are declared
+with a reason each.
+→ [`bus_matrix.py`](../src/modern_data_stack/bus_matrix.py),
+[`WAREHOUSE.md`](WAREHOUSE.md#the-bus-matrix)
+
 **Model the grain the publisher used, and only then aggregate.** Eurostat
 publishes electricity prices every half-year. Averaging that to a year is not
 free: the mean absolute half-over-half change was 19% across countries in 2022

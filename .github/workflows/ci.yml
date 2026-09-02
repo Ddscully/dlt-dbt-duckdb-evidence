@@ -46,7 +46,7 @@ jobs:
         run: |
           just dbt-parse
           uv run dagster definitions validate -m orchestration.definitions
-          uv run pytest tests/test_definitions.py tests/test_asset_checks.py tests/test_documented_counts.py tests/test_additivity.py
+          uv run pytest tests/test_definitions.py tests/test_asset_checks.py tests/test_documented_counts.py tests/test_additivity.py tests/test_bus_matrix.py
 
       # Runs ingest -> dbt build + test -> Polars in asset-graph order, and
       # evaluates the asset checks alongside dbt's tests — all against fixtures.

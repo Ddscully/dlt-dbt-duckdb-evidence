@@ -583,7 +583,7 @@ models:
         enforced: true
     description: >
       Rates aggregated to month, quarter, half and year. Grain: one row per
-      (period_type, period_start_date, currency_code).
+      (period_type, period_start_date, quote_currency).
 
       **It exists for one decision: spot or average.** A stock — a balance, a
       position at an instant — converts at the closing rate; a flow — revenue,

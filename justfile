@@ -225,6 +225,14 @@ export-data:
     PII_SALT="${PII_SALT:-$(uv run python -c 'import secrets; print(secrets.token_hex(32))')}" \
         uv run python -m publish.export_warehouse
 
+# Needs `just dbt-deps && dbt parse` first — the manifest is gitignored. Reads no
+# warehouse: the grain comes from the uniqueness tests and the columns from the
+# enforced contracts, both of which are metadata.
+#
+# Which conformed dimensions does each fact carry? -> docs/WAREHOUSE.md
+bus-matrix:
+    uv run python -m publish.bus_matrix
+
 # Prints the table in docs/DATA_PROTECTION.md from the warehouse, so it can be
 # re-checked when the models move. Read-only.
 #
