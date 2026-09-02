@@ -247,9 +247,15 @@ is not:
 
 - **`daily_refresh` ships `STOPPED`**, deliberately: opening the UI should not
   start hammering public APIs on a timer. Starting it is **instance state in
-  `.dagster/`**, not code, so it survives a restart only if that directory is on
-  the durable volume of §3. Flipping `default_status` instead is a code change
-  that changes what `dagster dev` does for everyone.
+  `DAGSTER_HOME`**, not code — measured, not assumed: a fresh instance reports
+  `daily_refresh [STOPPED]`, `dagster schedule start` flips it to `[RUNNING]`, a
+  *separate process* pointed at the same `DAGSTER_HOME` reads that back, and a
+  `schedules/` directory appears under it. Pointed at a different `DAGSTER_HOME`
+  the same schedule is still `STOPPED`, which is the same fact from the other
+  side. So it survives a restart only if that directory is on the durable volume
+  of §3, and a wipe silently returns the service to ingesting nothing. Flipping
+  `default_status` instead is a code change that changes what `dagster dev` does
+  for everyone who clones the repo.
 - **It targets `full_refresh` only**, which excludes `load_retail`. That is
   correct forever on an established lakehouse — retail is a closed archive whose
   partitions are replayed by hand — and it fails on a fresh one, inside
