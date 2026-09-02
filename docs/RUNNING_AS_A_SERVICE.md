@@ -105,12 +105,25 @@ Three things in that block are load-bearing:
   which CLI typed them, and the shipped `dagster dev` help says "local
   deployment" in its own words, so the conclusion carries. But the sentence
   somebody will go looking for is not phrased about the command used here.
-- **`dbt-parse` as a dependency, not an afterthought.** `prepare_if_dev()` in
+- **`dbt-parse` as a dependency, not an afterthought — measured, and it is the
+  one thing that actually breaks.** `prepare_if_dev()` in
   [`orchestration/resources.py`](../orchestration/resources.py) fires only under
-  the dev CLI, which sets `DAGSTER_IS_DEV_CLI`. Run the webserver directly and it
-  does not fire, so `dbt deps && dbt parse` has to happen first or the code
-  location will not load at all — `dbt/target/` is gitignored, so this bites on
-  every fresh deploy. The justfile already records this at every headless recipe.
+  the dev CLI, which sets `DAGSTER_IS_DEV_CLI`, so running the webserver directly
+  does not prepare the dbt project. Both halves were run:
+
+  | With `dbt/target/manifest.json` | webserver + daemon, separately | `dagster dev` |
+  |---|---|---|
+  | present | code location loads (`RepositoryLocation`), daemon alive | loads |
+  | **absent** | **code location fails** (`PythonError`), webserver still answering | **regenerates the manifest** |
+
+  The failure is legible, which is the good news:
+  `dagster_dbt.errors.DagsterDbtManifestNotFoundError: …/dbt/target/manifest.json
+  does not exist.` The trap is that **the webserver comes up healthy either
+  way** — it answers HTTP and the daemon keeps running, and only the code
+  location inside it is broken. A liveness check on the port would call this
+  deployment fine. `dbt/target/` is gitignored, so it bites on every fresh
+  deploy; the justfile already records the prerequisite at every headless recipe,
+  and §10 makes it a step.
 - **The port collision.** `just dagster` uses 3000 and so does `evidence dev`.
   The site here is static, so it is served by anything; give it its own port and
   do not reach for `evidence dev`, which is a hot-reloading dev server.
@@ -363,16 +376,12 @@ keeps, extended with the ones only an always-on deployment meets:
 
 ## 9. What is still unmeasured
 
-The standard this repo holds itself to is that a number in the docs was measured.
-Three things here were not, and should be before anyone trusts the design:
+The standard this repo holds itself to is that a claim in the docs was measured.
+Two things here were not, and should be before anyone trusts the design:
 
 - **A full swap cycle end to end**, timed against the ≈94 s stage baseline in
   [`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md#3-what-does-a-run-cost-and-how-long-does-it-take).
   The swap adds a restore, a verify and two renames to a run that is 65% network.
-- **The webserver and daemon as separate processes against this code location.**
-  Everything here runs through `dagster dev` or `dagster job execute`; the split
-  is what the `prepare_if_dev()` bullet predicts a problem for, and predicting is
-  not measuring.
 - **`rename(2)` over a warehouse a reader has open.** POSIX says the open file
   survives under the old inode, so a mid-swap reader should see a consistent old
   database rather than a torn new one — but that is the documented behaviour, not
@@ -419,13 +428,19 @@ Skip it and the first scheduled run dies inside `stg_retail_lines` with
 by hand also means the first failure is watched rather than discovered in a log.
 
 **4. The service.** Install the §2 unit, then `systemctl enable --now mds`.
-Confirm the code location actually loaded — `dbt parse` runs as a recipe
-dependency, but `prepare_if_dev()` does not fire here (§2), so this is the step
-that catches a missing `dbt/target/manifest.json`:
+Then confirm the code location actually loaded — do not skip this on the grounds
+that the port answers:
 
 ```sh
 uv run dagster definitions validate -m orchestration.definitions
 ```
+
+**A broken code location does not take the webserver down.** Measured (§2): with
+`dbt/target/manifest.json` missing, the webserver still answers HTTP and the
+daemon still runs, while the only thing in the deployment that does any work
+fails to load. A liveness probe on the port reports a healthy service that
+cannot materialise anything. `definitions validate` is what distinguishes them,
+and it names the cause — `DagsterDbtManifestNotFoundError`.
 
 **5. Turn the schedule on. It is off until you do**, and this is instance state
 in `DAGSTER_HOME`, not code — so it is also the step to repeat if that directory
