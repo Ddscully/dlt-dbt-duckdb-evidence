@@ -335,9 +335,37 @@ knowledge.
 | Plugin | Covers |
 |--------|--------|
 | `dbt@dbt-agent-marketplace` | [dbt Labs' skills](https://github.com/dbt-labs/dbt-agent-skills) — models, tests, docs, debugging |
-| `dagster-expert@dagster` | [Dagster's skills](https://github.com/dagster-io/skills) — assets, automation, CLI |
-| `polars@polars` | [Polars' skill](https://github.com/polars-inc/skills) — idiomatic lazy-API Polars |
 | `skill-creator@claude-plugins-official` | authoring and evaluating the project skills below — the one entry here that is about the repo's own tooling rather than a layer of the stack |
+
+**Two rows left that table on 2026-09-02 and the measurement is again the whole
+reason.** `dagster-expert@dagster` and `polars@polars` had **zero Skill
+invocations across 211 transcripts** spanning 2026-08-09 to 2026-09-02 — and the
+window is not the excuse, because 9 commits touched `orchestration/` and 9
+touched `transform/` inside it. The work happened and neither was reached for.
+Both are skill-only (one `SKILL.md` each, no LSP, MCP, command, hook or agent),
+which is what makes a zero count admissible at all — the caveat that protects
+`ty-lsp`, whose surface never appears as a `Skill` call.
+
+- **`dagster-expert` is the clear one, and it is the `duckdb-skills` argument
+  again.** Its own description sells the **`dg` CLI**, which this project
+  deliberately does not install — `dg` is in neither `pyproject.toml` nor
+  `uv.lock` — and `dagster-graph-and-jobs` covers Dagster *in this repo*, three
+  jobs and two partitioned assets and all. A vendor skill about tooling the
+  project has costed and refused is ~140 tokens of description arguing for a
+  different project.
+- **`polars` is the weaker call and is recorded as weak.** Nothing replaces it:
+  there is no project skill for the two Polars transforms, so this is the first
+  entry to reconsider if `transform/` ever grows into a layer. What decided it
+  is that the two transforms *were* edited in the window, nine times, without it.
+- **Both marketplaces stay registered**, for the reason `astral-sh` does:
+  removing a `github` marketplace *uninstalls* its plugins and the project
+  declaration does not silently bring it back. Re-enabling either is one line.
+- **`false` is not how a plugin is retired here.** The working tree carried
+  `dagster-expert@dagster: false` for a while and nothing noticed, because
+  `tests/test_plugin_settings.py` read `list(enabledPlugins)` — the *keys* — so a
+  disabled plugin was indistinguishable from an enabled one while this table
+  still described both as live. The guard reads values now and a `false` entry is
+  its own failure.
 
 Not enabled, but worth knowing about: `dbt-migration@dbt-agent-marketplace`
 (one-off dbt Core → Fusion work), `dignified-python@dagster`, and dltHub's

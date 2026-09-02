@@ -9,9 +9,11 @@ Adding a source touches five layers that are wired together by **name**, not by
 imports. Miss one and the pipeline still runs — it just quietly splits into two
 disconnected halves. Work the checklist top to bottom.
 
-Vendor skills cover the *how* of each tool (`dbt`, `dagster-expert`, `polars`,
-`duckdb-skills`). This skill covers the *seams between them*, which are specific
-to this repo. Naming rules live in [`docs/STYLE_GUIDE.md`](../../../docs/STYLE_GUIDE.md).
+The `dbt` vendor plugin covers the *how* of dbt, and is the only vendor skill
+still enabled — `dagster-expert`, `polars` and `duckdb-skills` were all retired
+on measured zero use, so the tool-level knowledge for those layers is the
+project skills and `CLAUDE.md`. This skill covers the *seams between the
+layers*, which are specific to this repo. Naming rules live in [`docs/STYLE_GUIDE.md`](../../../docs/STYLE_GUIDE.md).
 
 ## 0. First decide whether you need a new source at all
 
