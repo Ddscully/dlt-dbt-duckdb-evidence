@@ -148,7 +148,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (31 models, 2 snapshots, 7 seeds + 460 data tests + 31 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 7 seeds + 460 data tests + 31 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -979,7 +979,7 @@ the point of the layer is that none of it is a comment.
     `stg_country` — a *staging* model in the promise a release makes — because
     the notes pointed a reader at it as the country dimension and no mart said
     the same thing. `dim_country` closed that, so `tests/test_exposures.py`
-    asserts the exception's *absence* rather than its shape. The eight staging
+    asserts the exception's *absence* rather than its shape. The nine staging
     views still ship as Parquet and nothing promises them.
 - **Every numeric mart column declares `meta: {additivity: …}`**, from a closed
   four-value vocabulary — `additive`, `semi_additive`, `non_additive`,

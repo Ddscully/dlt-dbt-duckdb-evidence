@@ -169,7 +169,7 @@ warehouse that bills by the second, that table is where the invoice comes from.
    is a few thousand a second and a few terabytes, there's no distributed query
    processing, and it's beta until 2.0 this autumn. And I haven't put dbt's
    build graph through it. That's the run that would settle it.
-3. **Full-refresh materialisation, for 30 of the 31 models.** Every mart is
+3. **Full-refresh materialisation, for 31 of the 32 models.** Every mart is
    `+materialized: table` and rebuilt whole. That is deliberate rather than
    pending: each one re-derives a source that gets fully re-fetched, so
    rebuilding is *how* an upstream restatement is picked up, and the whole

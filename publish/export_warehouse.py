@@ -496,10 +496,10 @@ def solidify_staging(
     view raised.
 
     Materialising is the fix rather than dropping them, because the alternative
-    is a smaller promise: the release ships all eight staging views as Parquet
+    is a smaller promise: the release ships all nine staging views as Parquet
     and a half-broken database is worse than a bigger one. Doing it *here*
     rather than making staging tables in `dbt_project.yml` keeps the local build
-    cheap — eight views that cost nothing to rebuild — and pays for the copy only
+    cheap — nine views that cost nothing to rebuild — and pays for the copy only
     when a copy is made.
 
     Runs before `pseudonymise`, and that ordering is load-bearing in the opposite

@@ -209,10 +209,9 @@ exposures:
   # `dim_country` is in the list because the release notes point a reader at
   # it by name as the country dimension. It used to be `stg_country` here, for
   # want of a mart saying the same thing — a staging model in the promise a
-  # release makes, which is exactly the gap `dim_country` closed. The eight
-  # staging views
-  # ship as Parquet too (`PUBLISHED_SCHEMAS`), but nothing in the notes promises
-  # them, so they are not declared here.
+  # release makes, which is exactly the gap `dim_country` closed. The nine
+  # staging views ship as Parquet too (`PUBLISHED_SCHEMAS`), but nothing in the
+  # notes promises them, so they are not declared here.
   - name: published_data_release
     label: Monthly data release (GitHub)
     type: application

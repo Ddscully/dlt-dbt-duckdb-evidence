@@ -11,7 +11,7 @@ into the release manifest so a consumer who cannot be paged has them too.
 **Every count in this docstring is a manifest count, which is the basis
 `numeric()` below returns and the only one anything here can check.** The ymls
 carry 190 literal `additivity:` lines; the manifest carries 226 labelled
-columns, because `fct_emissions_energy_v1` inherits 37 through `include: all`
+columns, because `fct_emissions_energy_v1` inherits 36 through `include: all`
 and declares one. Quoting the first while naming the second is how these figures
 went stale once already, so
 `test_every_documented_additivity_count_is_one_the_labels_actually_carry`
@@ -66,7 +66,30 @@ LABELS = {"additive", "semi_additive", "non_additive", "not_a_measure"}
 
 # The contract gives every mart column a `data_type`, so "is this a measure-
 # shaped column" is answerable without opening the warehouse.
-NUMERIC = {"DOUBLE", "BIGINT", "INTEGER", "FLOAT", "HUGEINT", "SMALLINT", "TINYINT"}
+#
+# **A pattern rather than a list, because a list fails in the wrong direction.**
+# The literal set this replaced held seven names and no `DECIMAL` — the most
+# natural type for money — so a column contracted `DECIMAL(18,2)` was exempt
+# from `test_every_numeric_mart_column_carries_an_additivity_label`, and
+# labelling it anyway reddened `test_only_numeric_columns_are_labelled`: doing
+# the right thing broke the suite. Five types appear in the contracts today
+# (BIGINT, DOUBLE, HUGEINT, INTEGER and VARCHAR/BOOLEAN/DATE/TIMESTAMP), so the
+# gap was invisible and would have stayed invisible until the first fixed-point
+# column arrived.
+#
+# The `\b` is load-bearing twice over: `INTERVAL` begins `INT` and is not a
+# measure, and `INTEGER[]` is a list rather than something to sum, which is what
+# the lookahead excludes. `test_the_numeric_pattern_knows_a_measure_from_a_
+# timestamp` pins both, along with the DECIMAL case that started this.
+NUMERIC = re.compile(
+    r"^(?:"
+    r"U?(?:TINY|SMALL|BIG|HUGE)INT"  # TINYINT … HUGEINT, signed and unsigned
+    r"|U?INT(?:EGER|\d+)?"  # INT, INT4, INT128, INTEGER, UINTEGER
+    r"|DECIMAL|NUMERIC"  # fixed point, both spellings
+    r"|DOUBLE|REAL|FLOAT\d*"  # floating point
+    r"|SIGNED|SHORT|LONG"  # DuckDB's own aliases for the integer widths
+    r")\b(?!\[)"
+)
 
 # Names that promise a ratio. Deliberately a *name* rule and not a type rule:
 # it is the only thing here that can catch a label which is present and wrong.
@@ -118,8 +141,60 @@ def numeric() -> dict[tuple[str, str], dict]:
     return {
         key: spec
         for key, spec in mart_columns().items()
-        if (spec.get("data_type") or "").upper() in NUMERIC
+        if NUMERIC.match((spec.get("data_type") or "").upper())
     }
+
+
+def test_the_numeric_pattern_knows_a_measure_from_a_timestamp():
+    """The pin for `NUMERIC`, which decides what the two coverage tests below
+    even look at.
+
+    It is the one thing here nothing else can check: a type absent from the
+    contracts is invisible to every other assertion in this file, so the rule
+    has to be exercised against types the warehouse does not hold *yet*. That is
+    the whole failure the literal set had — no `DECIMAL`, no column to notice
+    it, and a suite that went red on the correct label rather than the missing
+    one.
+
+    The near-misses are the point of the negative list: `INTERVAL` starts `INT`,
+    `INTEGER[]` is a list of measures rather than a measure, and `STRUCT(…)`
+    can contain one without being one.
+    """
+    measures = [
+        "BIGINT",
+        "INTEGER",
+        "DOUBLE",
+        "HUGEINT",
+        "FLOAT",
+        "REAL",
+        "SMALLINT",
+        "TINYINT",
+        "UBIGINT",
+        "UINTEGER",
+        "UTINYINT",
+        "INT",
+        "INT4",
+        "INT128",
+        "DECIMAL(18,2)",
+        "NUMERIC(10,4)",
+        "FLOAT8",
+    ]
+    not_measures = [
+        "VARCHAR",
+        "BOOLEAN",
+        "DATE",
+        "TIMESTAMP",
+        "TIMESTAMP WITH TIME ZONE",
+        "INTERVAL",
+        "BLOB",
+        "UUID",
+        "JSON",
+        "INTEGER[]",
+        "STRUCT(a INTEGER)",
+    ]
+
+    assert [t for t in measures if not NUMERIC.match(t)] == [], "measures the pattern missed"
+    assert [t for t in not_measures if NUMERIC.match(t)] == [], "non-measures the pattern claimed"
 
 
 def test_every_numeric_mart_column_carries_an_additivity_label():
