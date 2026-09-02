@@ -68,6 +68,12 @@ select
     l.description,
     l.customer_id,
     l.country,
+    -- The conformed country key, resolved once in staging. This is the column
+    -- that lets a retail figure be grouped by `region` or `income_group`, or
+    -- put beside the electricity price its market pays — every one of which was
+    -- unreachable while the only country here was a label the country
+    -- dimension does not use.
+    l.country_iso3,
     l.invoice_ts,
     l.invoice_date,
     l.invoice_month,
@@ -95,7 +101,7 @@ select
     l.line_amount_gbp,
     -- EUR and USD at the transaction date's fixing. Null when no rate can be
     -- carried (never, for GBP over this period — but the column is nullable
-    -- because the *model* must not assume that, and `_marts.yml` tests it).
+    -- because the *model* must not assume that, and `_retail.yml` tests it).
     l.line_amount_gbp * g.eur_per_unit as line_amount_eur,
     l.line_amount_gbp * g.eur_per_unit * u.units_per_eur as line_amount_usd,
     g.eur_per_unit as eur_per_gbp,

@@ -18,8 +18,6 @@
   },
   "enabledPlugins": {
     "dbt@dbt-agent-marketplace": true,
-    "dagster-expert@dagster": true,
-    "polars@polars": true,
     "ty-lsp@modern-data-stack": true,
     "skill-creator@claude-plugins-official": true
   },

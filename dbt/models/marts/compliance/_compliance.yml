@@ -1,0 +1,510 @@
+version: 2
+
+models:
+  - name: dim_grid_emission_factors
+    config:
+      contract:
+        enforced: true
+    description: >
+      Grid emission factors as a reference product: one row per
+      (country_iso3, year) that has a published factor, with the vintage and the
+      lineage a reporter needs beside the number.
+
+      `emission_factor_g_co2_per_kwh` is the same series as
+      `fct_emissions_energy.carbon_intensity_elec_g_kwh`. It is modelled again
+      here because the use is different — under the GHG Protocol this *is* the
+      location-based Scope 2 emission factor, the figure a multi-site company
+      multiplies its metered kWh by for the electricity line of a CSRD, SECR or
+      CDP disclosure, and that reader wants a lookup table rather than a
+      60-column fact.
+
+      Three caveats travel with every row and are stated on the Scope 2 page
+      rather than hidden: it is **location-based** (a market-based factor needs
+      contractual instruments — RECs, GOs — that no public dataset carries), it
+      is an **annual average** rather than hourly-matched, and OWID's series is
+      **production-based**, so it ignores imported electricity.
+
+      Not built on the full spine, unlike every other model here: a country-year
+      with no factor is an absence, not a reference value. `dim_country_year` is
+      where absences are rows.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+      # The contract that makes `is_latest_available` usable as a lookup: filter
+      # on it and you get one row per country, not two and not zero.
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3]
+          config:
+            where: "is_latest_available"
+    columns:
+      - name: country_iso3
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: country_name
+        data_type: VARCHAR
+      - name: region
+        data_type: VARCHAR
+      - name: income_group
+        data_type: VARCHAR
+      - name: year
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1985, max_value: 2030}
+      - name: emission_factor_g_co2_per_kwh
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          Grams of CO2 per kWh generated. Never null — a row exists only where
+          a factor does.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 2000}
+      - name: emission_factor_t_co2_per_mwh
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          The same factor in the unit meter data arrives in: tonnes CO2e per
+          MWh, i.e. g/kWh / 1000. Shipped rather than left as a division because
+          a reporter doing it by hand is how a filing gains a factor of 1000.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 2}
+      - name: electricity_generation_twh
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+      - name: low_carbon_share_elec_pct
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: is_latest_available
+        data_type: BOOLEAN
+        description: >
+          The most recent year this country has a published factor for — the row
+          to use when the question is "the current factor for country X".
+          **That is not the same year for every country**: today it is 2025 for
+          90 of them, 2024 for 105, 2023 for 10 and 2022 for 2, so a
+          `where year = <latest>` cross-section would drop more than half the
+          world. Same lesson as `latest_years.sql`, load-bearing here for a
+          number with a legal consequence.
+        data_tests: [not_null]
+      - name: latest_available_year
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+        description: This country's newest factor year, repeated on every one of its rows.
+        data_tests: [not_null]
+      - name: latest_factor_lag_years
+        data_type: INTEGER
+        meta:
+          additivity: non_additive
+        description: >
+          How far `latest_available_year` sits behind the newest factor year in
+          the whole table — how stale the *best* number available for this
+          country is. 0 for the countries at the frontier.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: factor_version_count
+        data_type: BIGINT
+        meta:
+          additivity: additive
+        description: >
+          Versions of this factor the warehouse has held, from
+          `snap_grid_emission_factors`. **Null before 2015**, which is where the
+          snapshot starts, and 1 for everything else on a warehouse built from
+          scratch — a snapshot can only record a revision it was present for.
+      - name: first_published_factor_g_co2_per_kwh
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          The factor as first snapshotted. The point of keeping it is that a
+          disclosure filed against a superseded number has to stay reconcilable;
+          it does not become wrong when OWID restates.
+      - name: is_restated
+        data_type: BOOLEAN
+        description: Whether the factor has changed since the snapshot first saw it. Null before 2015.
+      - name: first_published_at
+        data_type: TIMESTAMP
+      - name: last_revised_at
+        data_type: TIMESTAMP
+      - name: factor_basis
+        data_type: VARCHAR
+        description: >
+          Always `location-based`. Constant on every row on purpose: this table
+          ships as a standalone Parquet file in the data release, and a factor
+          detached from its basis is the one thing a reporter must not be handed.
+        data_tests: [not_null]
+      - name: source_dataset
+        data_type: VARCHAR
+        description: Always `owid_energy.carbon_intensity_elec`.
+        data_tests: [not_null]
+      - name: source_loaded_at
+        data_type: TIMESTAMP WITH TIME ZONE
+        description: >
+          When this pipeline pulled the extract the factor came out of (dlt's
+          `_dlt_load_id`) — not when the publisher computed it.
+        data_tests: [not_null]
+
+  - name: fct_example_scope2_emissions
+    config:
+      contract:
+        enforced: true
+    description: >
+      The worked example for `dim_grid_emission_factors`: metered MWh x factor
+      -> tonnes CO2e, per site, which is the whole of location-based Scope 2
+      accounting under the GHG Protocol.
+
+      **The twelve sites are invented** — `seeds/example_scope2_sites.csv`, the
+      only fabricated data in this warehouse. The factors they are multiplied by
+      are real, and each site takes the most recent one published for its
+      country, which is a different year for different countries. The seed's
+      countries are constrained to the fixture slice so the `not_null` gates
+      below stay real under CI; see the seed's own description.
+
+      It is modelled rather than left as a query on the Scope 2 page because the
+      arithmetic is the product. `scope2_at_best_grid_t_co2e` and
+      `scope2_at_worst_grid_t_co2e` reprice the identical consumption on the
+      cleanest and dirtiest grid the group already operates on, so the spread is
+      the cost of siting decisions already taken rather than a hypothetical.
+
+      Grain: one row per site.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [site_id]
+    columns:
+      - name: site_id
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: site_name
+        data_type: VARCHAR
+      - name: site_type
+        data_type: VARCHAR
+      - name: country_iso3
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: country_name
+        data_type: VARCHAR
+      - name: annual_electricity_mwh
+        data_type: INTEGER
+        meta:
+          additivity: additive
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+      - name: factor_year
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+        description: >
+          The vintage of the factor applied to this site. Deliberately on the
+          fact rather than looked up: two sites in the same group can be priced
+          off different years, and a disclosure has to be able to say so.
+        data_tests: [not_null]
+      - name: latest_factor_lag_years
+        data_type: INTEGER
+        meta:
+          additivity: non_additive
+      - name: emission_factor_g_co2_per_kwh
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          Null would mean a site in a country with no published factor — a group
+          total that quietly under-reports. The join is a left join so that
+          arrives here as a failing row rather than a missing site.
+        data_tests: [not_null]
+      - name: low_carbon_share_elec_pct
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: scope2_t_co2e
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+        description: Location-based Scope 2 emissions for one year, tonnes CO2e.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: share_of_group_pct
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: scope2_at_best_grid_t_co2e
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+        description: The same consumption on the cleanest grid the group operates on.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: scope2_at_worst_grid_t_co2e
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+        description: The same consumption on the dirtiest grid the group operates on.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+
+  - name: fct_cbam_exposure
+    config:
+      contract:
+        enforced: true
+    description: >
+      What a tonne of an imported CBAM good costs at the EU border, by where it
+      was made: Annex I's default values resolved against the annex's own
+      fallback rule, marked up on the statutory schedule, and multiplied by an
+      EU ETS price.
+
+      Grain: one row per (country or territory listed in the annex, good) —
+      11,665 rows over 121 countries plus the fallback table, x the 260 goods the
+      annex actually prices. Countries the annex does not
+      list are deliberately absent: the regulation sends every one of them to the
+      same "other countries and territories" table, so ranking them against each
+      other would be ranking a hundred copies of one number. That table is here
+      as its own row, flagged `is_fallback_table`.
+
+      **The carbon price is a parameter, not a measurement.** There is no clean
+      free API for EUA spot, so `eu_ets_price_eur_per_t` is a dbt var (EUR 75)
+      and the tonnage columns ship beside the euro columns so a consumer can
+      re-price without a rebuild. `reports/pages/cbam.md` draws the EUR 60-120
+      sensitivity straight off them.
+
+      **A screening tool, not a filing.** These are administrative values with a
+      mark-up designed to be worse than reality, so that going and getting
+      verified supplier data pays. What this ranks is which sourcing lanes are
+      worth that effort — not what any particular importer will owe.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_or_territory, good_key]
+    columns:
+      - name: country_or_territory
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: country_iso3
+        data_type: VARCHAR
+        description: >
+          Null only for the fallback table's own row. Not tested against the
+          country dimension: the annex lists Taiwan and Kosovo, and the join to
+          `stg_country` is a left join so a territory the World Bank does not
+          carry keeps its default values rather than vanishing.
+      - name: country_name
+        data_type: VARCHAR
+      - name: country_display_name
+        data_type: VARCHAR
+      - name: region
+        data_type: VARCHAR
+      - name: income_group
+        data_type: VARCHAR
+      - name: product_group
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: cn_code
+        data_type: VARCHAR
+      - name: goods_description
+        data_type: VARCHAR
+      - name: good_key
+        data_type: VARCHAR
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('cbam_goods')
+                field: good_key
+      - name: production_route_code
+        data_type: VARCHAR
+        description: >
+          Annex I's production route indicator for the row the value came from.
+          Eleven values are present — C (2,781), L (888), F (864), K (744),
+          E (618), A and B (202 each), H (192), C/F (162) and E/H (36). The
+          annex's footnote maps some of them — (C) carbon steel via BF/BOF, (E)
+          via scrap/EAF, (K) primary aluminium, (L) secondary, and so on — and
+          this project has not confirmed the rest from a primary source, so the
+          list is the codes present rather than a glossary. It is a property of
+          the *value*, not of the country: it explains why one row says 8,21
+          tCO2e/t and another 0,13, which is why a fallen-back row carries the
+          fallback's route and not the sourcing country's. Null where the annex
+          prints no route — 4,976 rows, 49% fertilisers and 41% iron and steel.
+        data_tests:
+          # The row-level rule, asserted against the annex rather than against
+          # the mart's own other rows: every row carries the route published on
+          # the row its tonnages came from — its own where the country has a
+          # total, the fallback's where it does not.
+          #
+          # The subquery selects that row rather than exempting a branch, and
+          # the difference is not cosmetic. This test first compared only
+          # against the fallback row and carried `or is_country_specific`, which
+          # made it vacuous on all 10,910 country-specific rows: the mirror
+          # -image defect, reading *every* route off the fallback, passed all 20
+          # data tests. Scoping an assertion with `or <the other case>` reads
+          # like narrowing to the rows in question and is an exemption — it
+          # makes the rule unfalsifiable exactly where it was not being thought
+          # about. The seed is unique on (country_iso3, good_key), so the
+          # correlated subquery returns at most one row.
+          #
+          # `is not distinct from` and not `=`, because 553 of the 755 fallen
+          # -back rows correctly resolve to a null route and `=` is unknown on
+          # a null, which a `where not(...)` then discards — the test would
+          # pass by not looking.
+          #
+          # The comparison stays inside the expression rather than a `config:
+          # where:`, which is not a style choice: `where` makes dbt_utils wrap
+          # the model as `dbt_subquery`, and the correlated reference then has
+          # to name that alias instead of the relation.
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: >
+                  is not distinct from (
+                      select d.production_route_code
+                      from {{ ref('cbam_default_values') }} as d
+                      where d.good_key = fct_cbam_exposure.good_key
+                        and d.country_iso3 is not distinct from case
+                            when fct_cbam_exposure.is_country_specific
+                                then fct_cbam_exposure.country_iso3
+                        end
+                  )
+      - name: is_fallback_table
+        data_type: BOOLEAN
+      - name: is_country_specific
+        data_type: BOOLEAN
+        description: >
+          False where the annex prints "-" for this country and good and the
+          value below came from the fallback table — roughly one row in eight, so
+          a model that only handled *unlisted* countries would leave that many
+          rows with a null cost.
+        data_tests: [not_null]
+      - name: direct_t_co2e_per_t
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: indirect_t_co2e_per_t
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: total_t_co2e_per_t
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: Embedded emissions per tonne of good, before the mark-up.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: certificates_2026_t_co2e_per_t
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          Certificates surrendered per tonne, i.e. after the mark-up. Not null
+          anywhere: every row either carries a country-specific value or resolves
+          to the fallback, and this test is what proves the fallback join covers
+          the annex.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      # 2027 and 2028 are `not_null` for a reason 2026 is not: they are the two
+      # years whose rate could go missing on its own. The mark-up now arrives by
+      # left join from a hand-maintained seed, one filter per year, so a seed
+      # holding only a 2026 row for some group would null these two and nothing
+      # else — null money in a published Parquet, on a green build, in two of the
+      # three years the table is about. `cbam_markup_schedule`'s own coverage
+      # test is the other half.
+      - name: certificates_2027_t_co2e_per_t
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        data_tests: [not_null]
+      - name: certificates_2028_t_co2e_per_t
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        data_tests: [not_null]
+      - name: markup_2026_pct
+        description: >
+          Asserted from the regulation via the `cbam_markup_schedule` seed, not
+          derived — the opposite of what it was until the 2026/1740 correction,
+          which stopped publishing the marked-up columns this was read off.
+          Fertilisers carry 1% in all three years where every other group carries
+          10 / 20 / 30%, so the schedule is a property of the product group and a
+          model hardcoding one rate would overstate every fertiliser line by nine
+          points in 2026 and twenty-seven in 2028.
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 31}
+      - name: ets_price_eur_per_t
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+      - name: cbam_cost_2026_eur_per_t
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: Certificates x `eu_ets_price_eur_per_t`, EUR per tonne of good.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: cbam_cost_2027_eur_per_t
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        data_tests: [not_null]
+      - name: cbam_cost_2028_eur_per_t
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        data_tests: [not_null]
+      - name: excess_over_cleanest_source_t_co2e_per_t
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          This country's 2026 certificates per tonne minus the cheapest listed
+          source of the same good. The procurement number: the same tonne of steel
+          carries a different border cost depending only on which country smelted
+          it.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: grid_factor_year
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+      - name: grid_factor_t_co2_per_mwh
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          The country's latest OWID grid emission factor, as context for the
+          indirect column. **Not the factor the annex used** — the annex's
+          indirect values come from IEA data under a non-commercial licence this
+          project does not redistribute. Sitting beside, not reconciled against.
+      - name: source_instrument
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: factor_basis
+        data_type: VARCHAR

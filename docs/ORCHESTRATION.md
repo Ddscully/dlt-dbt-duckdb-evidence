@@ -20,7 +20,7 @@ raw/eu_elec_prices─┘                            (dbt snapshot)              
   raw/retail_invoice_lines ─▶ staging/stg_retail_lines ─▶ the five retail marts
                                                        └─▶ analytics/retail_rfm  (Polars)
 
-  ...and every mart + both analytics tables + analytics/pipeline_status
+  ...and every mart model + both analytics tables + analytics/pipeline_status
                     └─▶ reports/evidence_site   (Evidence → static HTML)
 ```
 

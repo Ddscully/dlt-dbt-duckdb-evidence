@@ -16,18 +16,24 @@ from types import SimpleNamespace
 import pytest
 
 from ingest import fixtures, pipeline
-from ingest.pipeline import (
-    EU_ELEC_PRICES_API,
-    OWID_CO2,
-    OWID_ENERGY,
-    RETAIL_ARCHIVE,
-    WB_COUNTRY_API,
-    WB_WDI_INDICATORS,
+from ingest.sources.ecb import (
     fx_start_date,
     fx_url,
+)
+from ingest.sources.eurostat import EU_ELEC_PRICES_API
+from ingest.sources.owid import (
+    OWID_CO2,
+    OWID_ENERGY,
+)
+from ingest.sources.retail import (
+    RETAIL_ARCHIVE,
     retail_sql,
+)
+from ingest.sources.weather import weather_url
+from ingest.sources.worldbank import (
+    WB_COUNTRY_API,
+    WB_WDI_INDICATORS,
     wdi_url,
-    weather_url,
 )
 from modern_data_stack import fixtures as _fixtures, workbook
 

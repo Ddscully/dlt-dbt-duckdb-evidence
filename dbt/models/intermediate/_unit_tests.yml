@@ -122,31 +122,81 @@ unit_tests:
       model was therefore not reproducible: three runs against byte-identical
       sources gave 16,031 / 16,032 / 16,030 clean matches. `purchases` now keeps
       the lowest invoice then the lowest line number at each (customer, product,
-      instant), so the choice is stated instead of emergent. Three lines of the
-      same product at one instant, deliberately given out of order and with
-      different quantities, so which one wins is visible in `original_quantity`
-      and not only in `original_line_number`. Nothing asserts the chosen line is
-      the *better* match — only that it is always the same one.
+      instant), so the choice is stated instead of emergent. Nothing here claims
+      the chosen line is the *better* match — only that it is always the same one.
+
+      **Four tie groups, because one group cannot catch the mutation this test
+      exists for.** Delete the `qualify` and the model still returns *a* member
+      of the tie group, and the tie-break's answer is always a member of that
+      group — so no fixture can make a mismatch certain, and this test can only
+      make it overwhelmingly likely. Measured 2026-09-01: DuckDB's *parallel*
+      asof join draws a different tied row per run (at `threads=1` it is
+      deterministic and takes the first row; above that it spreads), so a single
+      group let the deleted tie-break through **28.7% of runs** — 287 of 1,000,
+      which is how this test passed its own mutation for a week. Tie groups draw
+      independently, so four of them take that to **1.1%** (22 of 2,000), and to
+      **0%** single-threaded. The *healthy* model is stable at every thread count
+      (100/100 at 1, 2, 4 and 8 threads), so this is never flaky in CI: the
+      nondeterminism exists only while the model is already broken.
+
+      The correct answer is never listed **first** — first is exactly what an
+      un-tie-broken join takes single-threaded — and it sits at a different
+      position in each group (3rd of 3, 2nd of 3, 4th of 5, 2nd of 3), so no
+      positional rule satisfies all four. Each group also pins a different half
+      of the ordering: lowest invoice beating lowest line number, lowest line
+      within one invoice, both at once across four candidates, and the one
+      nothing else asserts — `invoice` is a **string**, so "1000" sorts below
+      "999" and the tie-break is lexicographic rather than numeric.
     given:
       - input: ref('stg_retail_lines')
         rows:
-          # All three at the identical instant, and the lowest *line number* is
-          # deliberately on the highest *invoice*: ordering by line first would
-          # pick 701/1, so the fixture separates `(invoice, line_number)` from
-          # `(line_number, invoice)` instead of passing under both. Listed out
-          # of order so a fixture-order dependency would show as 700/5 winning.
+          # Group 1 — unchanged since 2026-08-24 and deliberately *not*
+          # reordered: reordering pins today's arbitrary pick, which is the bug
+          # wearing the fix's clothes. All three at the identical instant, and
+          # the lowest *line number* is deliberately on the highest *invoice*,
+          # so ordering by line first would pick 701/1 — the fixture separates
+          # `(invoice, line_number)` from `(line_number, invoice)` instead of
+          # passing under both. Answer 700/3, listed third.
           - {invoice: "700", line_number: 5, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 9, unit_price: 1.0, line_amount_gbp: 9.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
           - {invoice: "701", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 7, unit_price: 1.0, line_amount_gbp: 7.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
           - {invoice: "700", line_number: 3, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 2, unit_price: 1.0, line_amount_gbp: 2.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
           - {invoice: "C700", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -4, unit_price: 1.0, line_amount_gbp: -4.0, invoice_ts: "2024-02-05 09:00:00", invoice_date: "2024-02-05"}
+          # Group 2 — the tie is *within* one invoice, which group 1 cannot
+          # test: 800/4 and 800/9 share an invoice, so only the line number
+          # separates them. Answer 800/4, listed second.
+          - {invoice: "810", line_number: 2, customer_id: "C2", stock_code: "SKU2", invoice_type: "sale", item_type: "product", quantity: 11, unit_price: 1.0, line_amount_gbp: 11.0, invoice_ts: "2024-03-01 09:00:00", invoice_date: "2024-03-01"}
+          - {invoice: "800", line_number: 4, customer_id: "C2", stock_code: "SKU2", invoice_type: "sale", item_type: "product", quantity: 3, unit_price: 1.0, line_amount_gbp: 3.0, invoice_ts: "2024-03-01 09:00:00", invoice_date: "2024-03-01"}
+          - {invoice: "800", line_number: 9, customer_id: "C2", stock_code: "SKU2", invoice_type: "sale", item_type: "product", quantity: 6, unit_price: 1.0, line_amount_gbp: 6.0, invoice_ts: "2024-03-01 09:00:00", invoice_date: "2024-03-01"}
+          - {invoice: "C800", line_number: 1, customer_id: "C2", stock_code: "SKU2", invoice_type: "cancellation", item_type: "product", quantity: -1, unit_price: 1.0, line_amount_gbp: -1.0, invoice_ts: "2024-03-05 09:00:00", invoice_date: "2024-03-05"}
+          # Group 3 — five candidates, both halves of the ordering at once: the
+          # lowest invoice is 900 and it appears twice, so the answer needs the
+          # line number too. Deepest group, and the one that contributes most of
+          # the margin. Answer 900/2, listed fourth of five.
+          - {invoice: "905", line_number: 1, customer_id: "C3", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 12, unit_price: 1.0, line_amount_gbp: 12.0, invoice_ts: "2024-04-01 09:00:00", invoice_date: "2024-04-01"}
+          - {invoice: "906", line_number: 2, customer_id: "C3", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 13, unit_price: 1.0, line_amount_gbp: 13.0, invoice_ts: "2024-04-01 09:00:00", invoice_date: "2024-04-01"}
+          - {invoice: "900", line_number: 7, customer_id: "C3", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 14, unit_price: 1.0, line_amount_gbp: 14.0, invoice_ts: "2024-04-01 09:00:00", invoice_date: "2024-04-01"}
+          - {invoice: "900", line_number: 2, customer_id: "C3", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 5, unit_price: 1.0, line_amount_gbp: 5.0, invoice_ts: "2024-04-01 09:00:00", invoice_date: "2024-04-01"}
+          - {invoice: "907", line_number: 3, customer_id: "C3", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 15, unit_price: 1.0, line_amount_gbp: 15.0, invoice_ts: "2024-04-01 09:00:00", invoice_date: "2024-04-01"}
+          - {invoice: "C900", line_number: 1, customer_id: "C3", stock_code: "SKU3", invoice_type: "cancellation", item_type: "product", quantity: -2, unit_price: 1.0, line_amount_gbp: -2.0, invoice_ts: "2024-04-05 09:00:00", invoice_date: "2024-04-05"}
+          # Group 4 — `invoice` is a varchar, so the ordering is lexicographic:
+          # "1000" < "1001" < "999". A numeric sort would pick 999/1 and the
+          # model comment's claim about string ordering would be untested.
+          # Answer 1000/2, listed second.
+          - {invoice: "999", line_number: 1, customer_id: "C4", stock_code: "SKU4", invoice_type: "sale", item_type: "product", quantity: 20, unit_price: 1.0, line_amount_gbp: 20.0, invoice_ts: "2024-05-01 09:00:00", invoice_date: "2024-05-01"}
+          - {invoice: "1000", line_number: 2, customer_id: "C4", stock_code: "SKU4", invoice_type: "sale", item_type: "product", quantity: 4, unit_price: 1.0, line_amount_gbp: 4.0, invoice_ts: "2024-05-01 09:00:00", invoice_date: "2024-05-01"}
+          - {invoice: "1001", line_number: 1, customer_id: "C4", stock_code: "SKU4", invoice_type: "sale", item_type: "product", quantity: 21, unit_price: 1.0, line_amount_gbp: 21.0, invoice_ts: "2024-05-01 09:00:00", invoice_date: "2024-05-01"}
+          - {invoice: "C999", line_number: 1, customer_id: "C4", stock_code: "SKU4", invoice_type: "cancellation", item_type: "product", quantity: -3, unit_price: 1.0, line_amount_gbp: -3.0, invoice_ts: "2024-05-05 09:00:00", invoice_date: "2024-05-05"}
     expect:
       rows:
-        # Invoice 700 line 3 wins: lowest invoice, then lowest line within it.
-        # Its quantity is 2, so the return of 4 exceeds it — the artefact the
-        # model comment quantifies. 56 of the warehouse's 366 rows in that bucket
+        # Group 1's winner has quantity 2 against a return of 4, so this row is
+        # also the 'matched, quantity exceeds purchase' artefact the model
+        # comment quantifies: 56 of the warehouse's 366 rows in that bucket
         # would be plain matches if tied lines were summed instead of chosen
         # between. That is a separate decision and this test pins today's.
         - {invoice: "C700", original_invoice: "700", original_line_number: 3, original_quantity: 2, quantity_returned: 4}
+        - {invoice: "C800", original_invoice: "800", original_line_number: 4, original_quantity: 3, quantity_returned: 1}
+        - {invoice: "C900", original_invoice: "900", original_line_number: 2, original_quantity: 5, quantity_returned: 2}
+        - {invoice: "C999", original_invoice: "1000", original_line_number: 2, original_quantity: 4, quantity_returned: 3}
 
   - name: return_matches_admit_a_same_instant_reversal_and_exclude_non_product_lines
     model: int_retail_return_matches

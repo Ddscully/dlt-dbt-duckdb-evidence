@@ -5,7 +5,7 @@ version: 2
 # `dbt ls --select +exposure:evidence_retail` now answers "what breaks if I
 # change this model" for one page, and `dbt ls --select +exposure:*` for every
 # consumer at once. Before this file, that dependency existed only as
-# `TABLE_TO_DBT_MODEL` in `scripts/build_report.py` — a hand-maintained Python
+# `TABLE_TO_DBT_MODEL` in `publish/build_report.py` — a hand-maintained Python
 # dict that exists because the site→mart edge was invisible to dbt.
 #
 # The two are not duplicates and neither replaces the other, which is the useful
@@ -203,15 +203,15 @@ exposures:
 
   # Not a page — the monthly GitHub release, which is the consumer nobody can see
   # from inside the repo and the only one that is genuinely *outside* this
-  # project. It is also why every mart is `access: public` rather than
+  # project. It is also why every mart model is `access: public` rather than
   # `protected`: those files land on somebody else's disk.
   #
-  # `stg_country` is in the list because the release notes point a reader at
-  # `staging.stg_country` by name as the country dimension — there is no
-  # `dim_country` mart saying the same thing, which is the same gap that makes
-  # that model `protected` instead of `private`. The other seven staging views
-  # ship as Parquet too (`PUBLISHED_SCHEMAS`), but nothing in the notes promises
-  # them, so they are not declared here.
+  # `dim_country` is in the list because the release notes point a reader at
+  # it by name as the country dimension. It used to be `stg_country` here, for
+  # want of a mart saying the same thing — a staging model in the promise a
+  # release makes, which is exactly the gap `dim_country` closed. The nine
+  # staging views ship as Parquet too (`PUBLISHED_SCHEMAS`), but nothing in the
+  # notes promises them, so they are not declared here.
   - name: published_data_release
     label: Monthly data release (GitHub)
     type: application
@@ -242,7 +242,7 @@ exposures:
       - ref('fct_retail_customer_cohorts')
       - ref('fct_retail_order_line')
       - ref('fct_retail_returns')
-      - ref('stg_country')
+      - ref('dim_country')
     owner:
       name: Daniel Scully
       email: danieldscully@gmail.com

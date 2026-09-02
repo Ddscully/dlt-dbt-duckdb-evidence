@@ -36,10 +36,10 @@ Three tables break it, and the three exceptions are the whole lesson:
 
 ## 2. The spine
 
-`marts.dim_country_year` is `stg_country` × every year any source covers:
+`marts.dim_country_year` is `marts.dim_country` × every year any source covers:
 
 ```sql
--- dbt/models/marts/dim_country_year.sql, abridged
+-- dbt/models/marts/country_stats/dim_country_year.sql, abridged
 bounds as (select min(year) as first_year, max(year) as last_year from (…)),
 years  as (select unnest(range(first_year, last_year + 1)) as year from bounds)
 select c.country_iso3, cast(y.year as integer) as year, c.country_name, …
@@ -85,7 +85,7 @@ for the columns it needs.
 ## 🔧 Drill 1 — the fact that quietly lost two thirds of its countries
 
 **Symptom.** A colleague simplifies the join block in
-`dbt/models/marts/fct_emissions_energy_v2.sql`, reasoning that the wide fact is
+`dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`, reasoning that the wide fact is
 about emissions, so a row with no emissions is not worth carrying. The build is
 green. Nobody notices for a month, until the EU electricity dashboard is missing
 most of Europe.
@@ -94,12 +94,12 @@ most of Europe.
 
 ```bash
 sed -i 's|^left join co2 as c on|inner join co2 as c on|' \
-  dbt/models/marts/fct_emissions_energy_v2.sql
+  dbt/models/marts/country_stats/fct_emissions_energy_v2.sql
 just course-rebuild
 ```
 
 **Observe.** The build finishes on `PASS=402 WARN=0 ERROR=0 SKIP=0`: the same
-verdict, to the row, as the healthy build. All 440 data tests pass. Both grain
+verdict, to the row, as the healthy build. All 460 data tests pass. Both grain
 contracts still hold, because the grain *is* still unique; the model simply has
 fewer rows in it.
 
@@ -114,7 +114,7 @@ fewer rows in it.
 **Verification.** When you think it is fixed:
 
 ```bash
-git checkout dbt/models/marts/fct_emissions_energy_v2.sql
+git checkout dbt/models/marts/country_stats/fct_emissions_energy_v2.sql
 just course-rebuild
 just course-query "
 select

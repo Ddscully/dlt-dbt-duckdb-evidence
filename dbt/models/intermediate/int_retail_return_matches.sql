@@ -36,6 +36,7 @@ returns as (
         stock_code,
         description,
         country,
+        country_iso3,
         invoice_ts,
         invoice_date,
         invoice_month,

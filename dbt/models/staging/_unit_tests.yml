@@ -12,7 +12,7 @@ version: 2
 # so no row-level constraint can see it.
 #
 # Measured rather than argued, by mutating the model against a copy of the
-# warehouse and running its 19 data tests each time:
+# warehouse and running its 20 data tests each time:
 #
 #   | mutation                                    | data tests | net revenue  |
 #   |---------------------------------------------|------------|--------------|
@@ -79,6 +79,11 @@ unit_tests:
           # A stock code that begins with `C`, on an invoice that does not. The
           # prefix test reads `invoice`, and this is the row that says so.
           - {invoice: "536367", line_number: 1, stock_code: "C2", quantity: 1, unit_price: 50.0}
+      # The country map is an input now, and these rows carry no country, so
+      # the mock is empty on purpose: every code resolves to null and nothing
+      # here depends on one.
+      - input: ref('retail_country_map')
+        rows: []
     expect:
       rows:
         - {invoice: "536365",  line_number: 1, invoice_type: sale,         item_type: product,    is_stock_write_off: false, is_revenue_line: true}
@@ -97,7 +102,7 @@ unit_tests:
       Every branch of the `item_type` case, one row each, with the real codes.
       Seven of the eight families are a handful of codes that arrived in the same
       column as the mugs, and getting one wrong is worth money the tests cannot
-      see — moving AMAZONFEE into `product` costs GBP 260,764 with all 19 data
+      see — moving AMAZONFEE into `product` costs GBP 260,764 with all 20 data
       tests green. The paired-case rows are here because `upper(trim(...))` turns
       out to be load-bearing for a whole branch: every one of the 100 voucher
       lines arrives lowercase (`gift_0001_20`), so without the fold the `voucher`
@@ -128,6 +133,11 @@ unit_tests:
           - {invoice: "536365", line_number: 17, stock_code: "gift_0001_20"}
           - {invoice: "536365", line_number: 18, stock_code: "GIFT"}
           - {invoice: "536365", line_number: 19, stock_code: "TEST001"}
+      # The country map is an input now, and these rows carry no country, so
+      # the mock is empty on purpose: every code resolves to null and nothing
+      # here depends on one.
+      - input: ref('retail_country_map')
+        rows: []
     expect:
       rows:
         - {line_number: 1,  stock_code: "85123A",       item_type: product}
@@ -171,39 +181,75 @@ unit_tests:
           - {invoice: "536365", line_number: 5, customer_id: " 17850 ", description: "  WHITE HANGING HEART  ", country: "  United Kingdom  "}
           - {invoice: "536365", line_number: 6, customer_id: "17850",   description: "",                        country: "United Kingdom"}
           - {invoice: "536365", line_number: 7, customer_id: "17850",   description: "   ",                     country: "United Kingdom"}
+      # Every row here is the same country, so one mapping row is the whole
+      # map. It is not decoration: line 5's label arrives padded, and the join
+      # is on the *trimmed* value, so a resolution moved above the trim would
+      # give that one row a null code and the other six GBR.
+      - input: ref('retail_country_map')
+        rows:
+          - {retail_country: "United Kingdom", country_iso3: "GBR", mapping_basis: "name_match"}
     expect:
       rows:
-        - {line_number: 1, customer_id: "17850", description: "WHITE HANGING HEART", country: "United Kingdom"}
-        - {line_number: 2, customer_id: null,    description: "WHITE HANGING HEART", country: "United Kingdom"}
-        - {line_number: 3, customer_id: null,    description: "WHITE HANGING HEART", country: "United Kingdom"}
-        - {line_number: 4, customer_id: null,    description: "WHITE HANGING HEART", country: "United Kingdom"}
-        - {line_number: 5, customer_id: "17850", description: "WHITE HANGING HEART", country: "United Kingdom"}
-        - {line_number: 6, customer_id: "17850", description: null,                  country: "United Kingdom"}
-        - {line_number: 7, customer_id: "17850", description: null,                  country: "United Kingdom"}
+        - {line_number: 1, customer_id: "17850", description: "WHITE HANGING HEART", country: "United Kingdom", country_iso3: "GBR"}
+        - {line_number: 2, customer_id: null,    description: "WHITE HANGING HEART", country: "United Kingdom", country_iso3: "GBR"}
+        - {line_number: 3, customer_id: null,    description: "WHITE HANGING HEART", country: "United Kingdom", country_iso3: "GBR"}
+        - {line_number: 4, customer_id: null,    description: "WHITE HANGING HEART", country: "United Kingdom", country_iso3: "GBR"}
+        - {line_number: 5, customer_id: "17850", description: "WHITE HANGING HEART", country: "United Kingdom", country_iso3: "GBR"}
+        - {line_number: 6, customer_id: "17850", description: null,                  country: "United Kingdom", country_iso3: "GBR"}
+        - {line_number: 7, customer_id: "17850", description: null,                  country: "United Kingdom", country_iso3: "GBR"}
 
-  # ---------------------------------------------------------------------------
-  # `stg_weather_daily` — the degree-day clamp.
-  #
-  # The clamp used to be a bare `greatest(base - temp, 0)`, with a comment saying
-  # a null temperature would stay null. DuckDB's `greatest` *ignores* nulls
-  # rather than propagating them, so `greatest(15.5 - null, 0)` is `0` — the day
-  # scored a confident "needed no heating" and summed into
-  # `fct_country_weather_year.hdd_total` as one.
-  #
-  # No data test on either model can see it, which is the whole reason this is
-  # here. Measured against the built warehouse: `hdd_c` carries `not_null` and
-  # `accepted_range {min_value: 0}` — the two the old comment named as the
-  # backstop — and a fabricated zero passes both, because zero is a legal
-  # heating-degree-day. Every data test on this model and on the mart above it
-  # passes identically before and after the fix, and the annual totals over
-  # today's 234,315-row archive are byte-identical, because that archive happens
-  # to hold no null yet. The ingest
-  # layer re-asks for the last 90 days on every run, which is exactly the
-  # preliminary ERA5T window where one appears.
-  #
-  # The two conventions null independently, and rows 2 and 3 pin that: `hdd_c`
-  # and `cdd_c` need the daily mean, `hdd_minmax_c` needs both extremes. The
-  # average of a known max and an unknown min is not a half-known degree day.
+  - name: stg_retail_lines_keeps_a_line_whose_country_the_map_has_never_seen
+    model: stg_retail_lines
+    description: >
+      The resolution is a left join, and the reason is not tidiness: an inner
+      join deletes the rows it cannot resolve *and then the test that exists to
+      catch them passes*, because the evidence is what it deleted.
+      `_staging.yml` asserts `relationships` from `country` to the seed, and
+      that test reads the built model — so a label missing from the seed only
+      shows up there if the model still carries the row.
+
+      Measured, by deleting `EIRE` from the seed and making the join inner
+      against a copy of the warehouse: **17,866 order lines and GBP 615,520
+      disappear, four customers with them, and all 90 nodes pass** — the
+      relationships test included. The grain contract still holds on what is
+      left, every `not_null` holds on rows that are no longer there, and
+      `dbt_utils.equal_rowcount` compares this model to
+      `fct_retail_order_line`, which is downstream and shrinks by exactly the
+      same 17,866. Two things that fall together cannot measure each other.
+
+      So the fourth row here is the test. `Poland` is deliberately absent from
+      the mocked map — the shape of a country appearing in a re-ingest — and it
+      has to survive with a null code, which is what leaves the relationships
+      test something to fail on. `Unspecified` is the contrast: it *is* in the
+      map and resolves to nothing, so an inner join keeps it, and a fixture
+      built only from that row would pass a model that silently drops the other
+      kind.
+
+      Two of the other three unit tests on this model also go red on that
+      mutation, and neither is a guard: their country map is mocked empty, so
+      an inner join deletes their whole fixture. Give either of them a mapping
+      row one day and they stop noticing. This one fails on the row that
+      matters.
+    given:
+      - input: source('raw', 'retail_invoice_lines')
+        rows:
+          # Mapped, and the ordinary case.
+          - {invoice: "536365", line_number: 1, stock_code: "85123A", quantity: 1, unit_price: 2.55, country: "Germany"}
+          # In the map, resolving to nothing on purpose. An inner join keeps it.
+          - {invoice: "536367", line_number: 1, stock_code: "85123A", quantity: 1, unit_price: 2.55, country: "Unspecified"}
+          # Not in the map at all. An inner join eats this one, and the seed
+          # test that should have named it goes green.
+          - {invoice: "536368", line_number: 1, stock_code: "85123A", quantity: 1, unit_price: 2.55, country: "Poland"}
+      - input: ref('retail_country_map')
+        rows:
+          - {retail_country: "Germany",     country_iso3: "DEU", mapping_basis: "name_match"}
+          - {retail_country: "Unspecified", country_iso3: null,  mapping_basis: "not_a_country"}
+    expect:
+      rows:
+        - {invoice: "536365", country: "Germany",     country_iso3: "DEU"}
+        - {invoice: "536367", country: "Unspecified", country_iso3: null}
+        - {invoice: "536368", country: "Poland",      country_iso3: null}
+
   - name: stg_weather_daily_nulls_a_degree_day_it_cannot_compute
     model: stg_weather_daily
     description: >

@@ -16,7 +16,7 @@
 -- rather than the product's name.
 --
 -- `item_type` comes from `stg_retail_lines` and is constant per code by
--- construction, so it is an `any_value` rather than a mode — and `_marts.yml`
+-- construction, so it is an `any_value` rather than a mode — and `_retail.yml`
 -- tests that it really is constant, because "constant by construction" is the
 -- kind of claim that stops being true when somebody edits the CASE expression.
 with lines as (

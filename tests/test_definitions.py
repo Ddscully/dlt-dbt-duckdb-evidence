@@ -195,7 +195,7 @@ def test_every_retail_month_has_a_partition_to_land_in():
     stopped a month early. This asserts the closed interval the constants
     describe, so the off-by-one cannot come back at either end.
     """
-    from ingest.pipeline import RETAIL_FIRST_MONTH, RETAIL_LAST_MONTH
+    from ingest.sources.retail import RETAIL_FIRST_MONTH, RETAIL_LAST_MONTH
     from orchestration.assets import RETAIL_PARTITIONS
 
     keys = RETAIL_PARTITIONS.get_partition_keys()

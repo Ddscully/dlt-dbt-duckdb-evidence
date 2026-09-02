@@ -39,6 +39,20 @@
 -- models, arriving again: the current year's average is over the months that
 -- have happened, and a chart that puts it beside finished years without saying
 -- so is comparing seven months with twelve.
+--
+-- **For a rate on a *given date*, use `fct_fx_rates_daily`** — it gap-fills the
+-- 30% of calendar days the ECB does not publish on, which this model does not
+-- attempt. Where the two meet they agree, with one exception worth knowing
+-- about: `period_end_*` is `arg_max` over *published* fixings and so has no
+-- notion of staleness, while `fct_fx_rates_daily` caps the carry at
+-- `fx_max_carry_forward_days` and returns null past it. Of the 19,616 complete
+-- period-ends the two share, **19,611 hold the same number**, and 6,002 (31%)
+-- fall on a day with no fixing at all. The five that disagree are both of the
+-- currency crises: the krona's 2008 year end here is its last pre-collapse
+-- fixing, 22 days stale — and lands on the month, quarter, half and year alike —
+-- and the Argentine peso's January 2002 is the same, where the daily model
+-- refuses to quote either. `last_rate_date` is the column that says which case
+-- a row is in.
 with published as (
     select * from {{ ref('fct_fx_rates_published') }}
 ),

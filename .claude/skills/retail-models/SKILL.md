@@ -184,6 +184,46 @@ one; the page is `retail.md`.
     on one value.
 ### Where retail touches the rest of the warehouse
 
+- **`country_iso3` is what makes "retail" and "the country domain" one
+  warehouse**, and it exists because the source's country column is a label
+  rather than a key. `retail_country_map` (a seed, group `retail`) resolves all
+  43 of the extract's labels once, in `stg_retail_lines`; the fact, the returns
+  fact, the customer dimension and `analytics.retail_rfm` all carry it. Revenue
+  by `region` or `income_group`, or revenue beside the electricity price a
+  market pays, is a join now and was impossible before.
+  - **34 of the 43 match `dim_country_year.country_name` exactly, which is the
+    trap rather than the good news.** A join on name succeeds silently for those
+    and drops the other nine: 19,898 lines and GBP 652,387, and `EIRE` alone is
+    GBP 615,520 — the retailer's *second-largest market* — so a regional rollup
+    built that way loses Ireland and looks complete.
+  - **Six labels are human judgements.** `EIRE`→IRL, `RSA`→ZAF, `USA`→USA,
+    `Czech Republic`→CZE (the dimension says Czechia), `Hong Kong`→HKG (Hong
+    Kong SAR, China), and `Korea`→**KOR, not PRK**: the dimension carries both
+    Koreas, the extract has no second Korea label, and a UK gift wholesaler's 63
+    lines are not going to Pyongyang. Three more resolve to nothing on purpose —
+    `European Community` and `West Indies` are groups of countries and
+    `Unspecified` is the source's own unknown, 871 lines and GBP 11,515 between
+    them.
+  - **`country_iso3` here means "the code the country dimension uses", not
+    ISO 3166-1.** `Channel Islands` is `CHI`, a World Bank pseudo-code; ISO would
+    split it into JEY and GGY. The dimension is the authority because the
+    dimension is what the code has to join to.
+  - **The left join is load-bearing and an inner join is the silent version.**
+    An inner join deletes the rows it cannot resolve — and then
+    `relationships(country → retail_country_map)`, the test whose whole job is to
+    name an unmapped label, *passes*, because the rows it would have read are the
+    ones that were deleted. Measured against a warehouse copy by removing `EIRE`
+    from the seed and making the join inner: **17,866 lines and GBP 615,520 gone,
+    four customers with them, and all 90 nodes green.**
+    `dbt_utils.equal_rowcount` cannot see it either — it compares
+    `stg_retail_lines` to `fct_retail_order_line`, which is downstream and
+    shrinks by the same amount. `stg_retail_lines_keeps_a_line_whose_country_the_map_has_never_seen`
+    is the unit test that does, and its fourth fixture row — a label absent from
+    the *mocked* map — is the whole test.
+  - **`dim_retail_customer` takes the code with `max_by`, not `max`.** 13
+    customers transact from two countries; two independent aggregates can name
+    one country and code another.
+
 - **The FX carry-forward stops being theoretical here.** 139,658 lines (13.1%)
   convert on a rate the ECB published earlier, and **every one is a Sunday**:
   this business trades Sunday and not Saturday (139,256 lines against 402), and

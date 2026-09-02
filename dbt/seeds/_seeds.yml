@@ -287,7 +287,7 @@ seeds:
       # `max(markup_pct) filter (where year = ...)`, so a group seeded with only
       # a 2026 row yields null rates for 2027 and 2028 — and null euro figures in
       # two of the three years of a published Parquet, on a green build. The
-      # `not_null` tests on the 2027 and 2028 columns in `_marts.yml` are the
+      # `not_null` tests on the 2027 and 2028 columns in `_compliance.yml` are the
       # other half of that; this is the half that names the cause.
       - dbt_utils.expression_is_true:
           arguments:
@@ -358,3 +358,89 @@ seeds:
             expression: "replaced_by_currency is not null"
           config:
             where: "retired_reason is not null"
+
+  - name: retail_country_map
+    config:
+      group: retail
+    description: >
+      The 43 country labels the UCI Online Retail II extract uses, resolved to
+      the `country_iso3` the rest of the warehouse keys on. This is the join
+      that lets the retail process meet the country one at all.
+
+      **34 of the 43 match `dim_country_year.country_name` exactly and 9 do
+      not**, which is the whole reason this is a seed rather than a join on
+      name. A name join is not a failure that announces itself: it silently
+      succeeds for the 34 and silently drops `EIRE`, `USA`, `RSA`, `Korea`,
+      `Czech Republic`, `Hong Kong` and the three labels that are not countries
+      — 19,898 lines and GBP 652,387, of which `EIRE` alone is GBP 615,520 and
+      the retailer's **second-largest market**. A regional rollup built that way
+      loses Ireland and reads as complete.
+
+      **Exhaustive on purpose**, which is the property the tests hold rather
+      than a description of today's file: every label the source uses has a row,
+      including the three that resolve to nothing, so a null `country_iso3` is a
+      recorded decision and a *missing* row is a failure. `stg_retail_lines`
+      carries the `relationships` test that makes a label appearing in a
+      re-ingest loud instead of quietly unmapped. `cbam_default_values` is the
+      precedent — its `SHEET_TO_ISO3` stopped and named all twelve unmapped
+      sheets when a correction relabelled ten countries, rather than writing
+      blank codes and losing them at the mart's join.
+
+      **The six aliases are judgements and one of them is not obvious.**
+      `Korea` is read as KOR (Korea, Rep.) and not PRK: the dimension carries
+      both, the extract has no other Korea label, and a UK gift wholesaler
+      shipping 63 lines is not shipping them to Pyongyang. `EIRE` is the Irish
+      name for Ireland, `RSA` the Republic of South Africa, and `Czech
+      Republic` / `Hong Kong` are the pre-rename and short forms of the
+      dimension's `Czechia` and `Hong Kong SAR, China`.
+
+      **`country_iso3` means "the code the country dimension uses", not
+      "ISO 3166-1".** `Channel Islands` resolves to `CHI`, which is the World
+      Bank's own pseudo-code — ISO has no such entry and would split the
+      territory into JEY and GGY. The dimension is the authority here because
+      the dimension is what the codes have to join to, and the `relationships`
+      test says so in the only way that stays true.
+
+      The three unresolved labels are aggregates or absences rather than places:
+      `European Community` and `West Indies` name groups of countries, and
+      `Unspecified` is the source's own unknown. They keep their rows, and the
+      lines behind them keep their `country` label, so a revenue total is still
+      complete when the ISO3 is null.
+    columns:
+      - name: retail_country
+        description: >
+          The label exactly as `stg_retail_lines.country` trims it. `unique` is
+          load-bearing rather than hygiene: this seed is left-joined to 1,067,371
+          order lines, so a duplicated label fans the fact table out silently.
+        data_tests: [not_null, unique]
+      - name: country_iso3
+        description: >
+          Null only for the three `not_a_country` rows. Tested against
+          `dim_country_year` — the *public* mart, deliberately, and not
+          `stg_country`: the two carry the same countries, and going through the
+          mart keeps the country dimension's two cross-domain staging reaches at
+          two.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_country_year')
+                field: country_iso3
+      - name: mapping_basis
+        description: >
+          How the row was resolved — `name_match` (34, derived from the
+          dimension), `alias` (6, a human) or `not_a_country` (3). Carried so
+          that "which of these did somebody decide" is a query rather than a
+          reading of the diff.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [name_match, alias, not_a_country]}
+    data_tests:
+      # A null code has to be the decision the basis says it is. Without this the
+      # two failure modes are indistinguishable in the data: a row deliberately
+      # left blank and a row whose code somebody deleted both read as null, and
+      # only one of them should survive review.
+      - dbt_utils.expression_is_true:
+          name: retail_country_map_nulls_are_the_rows_that_say_so
+          arguments:
+            expression: "(country_iso3 is null) = (mapping_basis = 'not_a_country')"

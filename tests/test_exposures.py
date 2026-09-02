@@ -19,7 +19,7 @@ import re
 import yaml
 
 from modern_data_stack.paths import project_root
-from scripts import build_report
+from publish import build_report
 
 EXPOSURES_YML = project_root() / "dbt" / "models" / "_exposures.yml"
 MARTS_DIR = project_root() / "dbt" / "models" / "marts"
@@ -117,7 +117,7 @@ def test_the_tables_no_exposure_can_name_are_exactly_the_polars_outputs():
 def test_the_release_exposure_names_every_mart():
     """The data release ships every table in `marts`, so the exposure has to list them all.
 
-    `scripts/export_warehouse.py` iterates the schema rather than a table list, so a
+    `publish/export_warehouse.py` iterates the schema rather than a table list, so a
     new mart is published the moment it is built — silently, to consumers outside
     this repo who cannot be paged. That is the one dependency here nobody can
     discover by reading the site, which is why it is asserted rather than described.
@@ -127,7 +127,15 @@ def test_the_release_exposure_names_every_mart():
     # exposure names the model, and `ref()` without a `v=` resolves to the latest
     # version. Both relations ship in the release, and both are covered by the one
     # declaration.
-    marts = {re.sub(r"_v\d+$", "", sql.stem) for sql in MARTS_DIR.glob("*.sql")}
+    # `rglob`, because the marts layer is one folder per dbt group. A flat glob
+    # matched nothing after that move and this test went red on an empty set —
+    # the right outcome, and the reason it compares in both directions rather
+    # than only asserting "nothing undeclared".
+    marts = {re.sub(r"_v\d+$", "", sql.stem) for sql in MARTS_DIR.rglob("*.sql")}
     assert marts - declared == set(), "mart published by the release but not declared"
-    # `stg_country` is the one non-mart in the list — see the comment in the yml.
-    assert declared - marts == {"stg_country"}
+    # And nothing but marts. `stg_country` was the one exception here until
+    # `dim_country` existed: the release notes named a *staging* model as the
+    # country dimension for want of a mart saying the same thing. A staging view
+    # in the promise a release makes is the gap that model closed, so the
+    # exception is gone and this asserts its absence rather than its shape.
+    assert declared - marts == set()

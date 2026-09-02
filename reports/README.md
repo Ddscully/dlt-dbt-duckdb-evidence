@@ -36,13 +36,13 @@ for you, which is why this only ever bites in CI.
 
 `reports/evidence_site` (in `orchestration/assets.py`) builds this folder, so the
 dashboard is the last node of the asset graph rather than something built beside
-it. `scripts/build_report.py` is the implementation, the same one `just report`
+it. `publish/build_report.py` is the implementation, the same one `just report`
 calls, so the recipe and the graph can't drift into running different builds.
 
 - It declares **one dep per table the source queries read** (20 tables today),
   and `tests/test_report.py` fails if a new source query reads a table
   none of them covers. Adding `sources/warehouse/foo.sql` on a new mart therefore
-  means adding a line to `TABLE_TO_DBT_MODEL` in `scripts/build_report.py`; see
+  means adding a line to `TABLE_TO_DBT_MODEL` in `publish/build_report.py`; see
   `just test`'s failure message, which says exactly which table is unclaimed.
 - It is the only asset **excluded from the `full_refresh` job**, because it needs
   Node and three workflows run that job on a Python-only checkout.
@@ -391,7 +391,7 @@ Three things nobody tells you, if you're setting this up yourself:
   parquet `.evidence/` already holds, which locally is a warm cache and in CI is
   nothing at all, so `sources:strict` has to run first. Skip it and you deploy a
   perfectly working site where every chart says *Table with name emissions_energy
-  does not exist*. That ordering lives in `scripts/build_report.py`, the single
+  does not exist*. That ordering lives in `publish/build_report.py`, the single
   implementation behind both `just report` and the asset.
 - **Project Pages serve from a subpath**, so the workflow appends
   `deployment.basePath` to `evidence.config.yaml` at build time. It's injected

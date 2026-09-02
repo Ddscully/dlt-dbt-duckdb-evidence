@@ -11,7 +11,7 @@ own CI history — none of it is estimated.
 |------|-----|
 | [`reports/pages/findings.md`](../reports/pages/findings.md) | the analysis, and the "So what" box under each finding |
 | [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including the partitioned WDI load |
-| [`dbt/models/marts/fct_emissions_energy_v2.sql`](../dbt/models/marts/fct_emissions_energy_v2.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest — and the repo's one versioned model, aliased back to the bare relation name so the rename is invisible to its consumers ([`_v1`](../dbt/models/marts/fct_emissions_energy_v1.sql) is a compatibility view over it, not a second copy) |
+| [`dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest — and the repo's one versioned model, aliased back to the bare relation name so the rename is invisible to its consumers ([`_v1`](../dbt/models/marts/country_stats/fct_emissions_energy_v1.sql) is a compatibility view over it, not a second copy) |
 | [`ingest/pipeline.py`](../ingest/pipeline.py) | seven sources, two write dispositions, and why that has to be two `run()` calls |
 | [`CLAUDE.md`](../CLAUDE.md) | every gotcha that cost more than an hour, written down at the point it was learned |
 
@@ -71,7 +71,7 @@ that an upstream publisher moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
 that OWID was down.
 
-**What blocks.** 440 dbt tests run inside `dbt build`, every one with
+**What blocks.** 460 dbt tests run inside `dbt build`, every one with
 `store_failures`, so a red test hands you `select * from
 dbt_test__audit.<test_name>` rather than a count. Six Dagster asset checks sit
 alongside them, and `site_pages_all_rendered` is blocking and checks page *size*
@@ -91,7 +91,7 @@ Measured on this machine against the live APIs, per stage:
 | Stage | Time | Notes |
 |-------|------|-------|
 | `just ingest` | **61.0 s** | seven sources; 55.2 s of it with the retail workbook already cached |
-| `just dbt-build` | **30.0 s** | 508 built nodes — 31 models, 2 snapshots, 6 seeds, 440 data tests and 29 unit tests (dbt's own total of 518 adds the 10 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
+| `just dbt-build` | **23.1 s** | 532 built nodes — 32 models, 2 snapshots, 7 seeds, 460 data tests and 31 unit tests (dbt's own total of 542 adds the 10 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
 | `just transform` | **2.1 s** | two Polars models |
 | `just pipeline-status` | **1.4 s** | observability tables |
 | `just lake` | **3.2 s** | 793 Parquet files, ~60 MB |
@@ -169,7 +169,7 @@ warehouse that bills by the second, that table is where the invoice comes from.
    is a few thousand a second and a few terabytes, there's no distributed query
    processing, and it's beta until 2.0 this autumn. And I haven't put dbt's
    build graph through it. That's the run that would settle it.
-3. **Full-refresh materialisation, for 30 of the 31 models.** Every mart is
+3. **Full-refresh materialisation, for 31 of the 32 models.** Every mart is
    `+materialized: table` and rebuilt whole. That is deliberate rather than
    pending: each one re-derives a source that gets fully re-fetched, so
    rebuilding is *how* an upstream restatement is picked up, and the whole

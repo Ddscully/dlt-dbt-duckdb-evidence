@@ -115,6 +115,27 @@ follows from that rather than from the numbers.
     around a holiday, weighting the mean toward whichever weekday sits next to a
     closure. `fct_fx_rates_periods` reads `fct_fx_rates_published` for that
     reason alone.
+    - **Now measured, and the ranking is the part that names the mechanism.**
+      Against `fct_fx_rates_periods.avg_units_per_eur`, **11,881 of the 12,425
+      complete currency-months (96%) differ** — median 0.033%, p99 0.33%, worst
+      1.59% (ARS, December 2015). EUR/USD is out by more than 0.1% in 55 of its
+      331 months. Those sizes read as rounding; what does not is that mean
+      absolute error by calendar month ranks *by the closure count*: December
+      (10.4 non-publishing days, 0.073%), April (10.2, 0.072%), May (9.6,
+      0.070%), January (9.4, 0.066%) at the top and October (8.8, 0.039%) at the
+      bottom — Christmas, Easter, 1 May, New Year.
+  - **The two models disagree about staleness, and only the daily one has a
+    policy.** `period_end_*` is `arg_max` over *published* fixings, so it has no
+    cap; `fct_fx_rates_daily` nulls a rate carried past
+    `fx_max_carry_forward_days`. Of the 19,616 complete period-ends they share,
+    19,611 agree and 6,002 (31%) fall on a day with no fixing at all. The five
+    that disagree are the two currency crises — the krona's 2008 year end (22
+    days stale, and it lands on month, quarter, half and year alike) and the
+    peso's January 2002 — where `fct_fx_rates_periods` quotes the last fixing
+    and `fct_fx_rates_daily` refuses to quote anything. Neither is wrong for its
+    own question and `last_rate_date` discloses it, but a consumer joining the
+    two gets a rate from one and a null from the other on the same day. Both
+    models now cross-reference each other and say so.
   - **`avg_eur_per_unit` is not `1 / avg_units_per_eur`** — the mean of
     reciprocals is not the reciprocal of the mean. 0.07% apart in a calm year,
     0.53% in 2008. Each column is the mean of its own series; the period-*end*

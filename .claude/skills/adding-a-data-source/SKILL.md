@@ -9,29 +9,47 @@ Adding a source touches five layers that are wired together by **name**, not by
 imports. Miss one and the pipeline still runs — it just quietly splits into two
 disconnected halves. Work the checklist top to bottom.
 
-Vendor skills cover the *how* of each tool (`dbt`, `dagster-expert`, `polars`,
-`duckdb-skills`). This skill covers the *seams between them*, which are specific
-to this repo. Naming rules live in [`docs/STYLE_GUIDE.md`](../../../docs/STYLE_GUIDE.md).
+The `dbt` vendor plugin covers the *how* of dbt, and is the only vendor skill
+still enabled — `dagster-expert`, `polars` and `duckdb-skills` were all retired
+on measured zero use, so the tool-level knowledge for those layers is the
+project skills and `CLAUDE.md`. This skill covers the *seams between the
+layers*, which are specific to this repo. Naming rules live in [`docs/STYLE_GUIDE.md`](../../../docs/STYLE_GUIDE.md).
 
 ## 0. First decide whether you need a new source at all
 
 If the data is another World Bank indicator, you do **not** need a new resource —
 see "Adding a WDI indicator" at the bottom. That's a two-line change.
 
-## 1. dlt resource — `ingest/pipeline.py`
+## 1. dlt resource — `ingest/sources/<source>.py`
 
-Add a `@dlt.resource(name="<resource>", write_disposition="replace")` function,
-register it in the `public_indicators()` source, **and add its name to
+**One module per upstream source**, holding its own constants, URL builders,
+watermark helpers and `@dlt.resource`. A genuinely new publisher gets a new
+module; a second resource from a publisher already here joins that module (the
+World Bank has two, the country dimension and the WDI panel).
+
+Then wire it into the coordination layer, `ingest/pipeline.py`: import the
+resource, add it to `public_indicators()`, **and add its name to
 `FULL_REFRESH_RESOURCES`** (or `INCREMENTAL_RESOURCES` if it merges — see below).
 `load_groups()` loads only what those tuples name, so a resource missing from
 both is extracted by nothing; `tests/test_ingest.py` asserts they cover the
 source exactly.
 
+**The four coordination tuples stay in `ingest/pipeline.py` and are deliberately
+not per-source metadata.** `PARTITIONED_RESOURCES` carries a comment arguing the
+rule across all four candidates at once — why `ecb_fx_rates` merges and is still
+not partitioned, why retail's *load* narrows when its fetch cannot. Scattering
+those onto six modules would file each half of a comparison somewhere it cannot
+be read against the other half.
+
 - The `name=` you pick becomes the raw table name **and** the second element of
   the Dagster asset key (`raw/<resource>`). Choose it once and don't rename it
   casually — step 4 explains what breaks.
-- Fetch through `_get_json()` so you inherit its retry + `raise_for_status`
-  behaviour. Don't hand-roll a `requests.get`.
+- Fetch through `http.get_json()` (`from ingest import http`) so you inherit its
+  retry + `raise_for_status` behaviour, and its fixture awareness. Don't hand-roll
+  a `requests.get`. **Reach through the module, never `from ingest.http import
+  get_json`** — binding the name makes
+  `monkeypatch.setattr(http, "get_json", …)` patch something nothing looks up,
+  and `tests/test_ingest.py` does that in ten places.
 - **CSV sources:** `pl.read_csv(..., infer_schema_length=None)`. The default
   100-row inference sees OWID's empty early rows and lands numerics as VARCHAR.
 - **Leave `REFRESH = "drop_resources"` alone.** dlt persists its schema and only
@@ -97,7 +115,7 @@ uv run --group orchestration dagster definitions validate
 
 then open `just dagster` and confirm the new asset has an edge into `staging`.
 
-## 5. Mart column — `dbt/models/marts/fct_emissions_energy_v2.sql`
+## 5. Mart column — `dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`
 
 **The mart is versioned**, so the file is `_v2.sql` while the relation stays
 `marts.fct_emissions_energy` (v2 is aliased back to the bare name). You do not
@@ -117,7 +135,9 @@ carry can't reach the mart at all. If your source has ISO3 codes the World Bank
 omits, they belong in `dbt/seeds/country_overrides.csv` (step 3's territory
 problem), not in a wider join.
 
-Update `dbt/models/marts/_marts.yml`, then `just dbt-build`. Note the partial
+Update the mart yml for your model's dbt group — `dbt/models/marts/` holds one
+per group (`_country_stats.yml`, `_reference.yml`, `_compliance.yml`,
+`_retail.yml`) — then `just dbt-build`. Note the partial
 coverage in the column's YAML description either way — that's the convention.
 
 ## 6. Downstream
@@ -147,7 +167,8 @@ Check the row count didn't drop and the new column isn't all-null. Don't assume.
 
 Two places, both required:
 
-1. `WB_WDI_INDICATORS` in `ingest/pipeline.py` — the API code and its column name.
+1. `WB_WDI_INDICATORS` in `ingest/sources/worldbank.py` — the API code and its
+   column name.
 2. A `max(case when indicator_id = '<code>' then value end) as <column>` in
    `dbt/models/staging/stg_wdi.sql` — WDI arrives long (one row per
    indicator/country/year) and is pivoted wide there.

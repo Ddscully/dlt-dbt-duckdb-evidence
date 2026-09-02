@@ -3,7 +3,7 @@
 A warehouse can hold a column that its *published* copy must not. This module is
 the mechanism for saying which columns those are and rewriting them on the way
 out; which columns they are, and what the labels mean, is the project's to
-answer (see `scripts/export_warehouse.py`).
+answer (see `publish/export_warehouse.py`).
 
 ## Why the boundary and not the model
 
@@ -201,7 +201,7 @@ def verify(con: duckdb.DuckDBPyConnection, columns: Iterable[Column]) -> None:
     # An empty set verifies clean, and that is correct *here*: a database simply
     # holding none of the classified columns is a no-op, not a failure. What is
     # not correct is an empty set arriving because nothing was ever classified —
-    # that belongs to whoever decides the policy, and `scripts/export_warehouse.py`
+    # that belongs to whoever decides the policy, and `publish/export_warehouse.py`
     # refuses it there rather than letting this function decide for every caller.
     offenders = []
     for schema, table, column in sorted(set(columns)):

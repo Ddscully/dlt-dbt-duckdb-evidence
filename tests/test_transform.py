@@ -104,6 +104,7 @@ def test_rank_is_dense_and_per_cohort():
 CUSTOMER_SCHEMA = {
     "customer_id": pl.Utf8,
     "country": pl.Utf8,
+    "country_iso3": pl.Utf8,
     "cohort_month": pl.Utf8,
     "first_order_date": pl.Date,
     "last_order_date": pl.Date,
@@ -120,6 +121,7 @@ def _customer(cid: str, last_order: str, n_orders: int, revenue: float) -> dict:
     return {
         "customer_id": cid,
         "country": "United Kingdom",
+        "country_iso3": "GBR",
         "cohort_month": "2010-01",
         "first_order_date": dt.date(2010, 1, 1),
         "last_order_date": dt.date.fromisoformat(last_order),

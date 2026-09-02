@@ -1,0 +1,669 @@
+version: 2
+
+models:
+  - name: fct_retail_order_line
+    config:
+      contract:
+        enforced: true
+    description: >
+      Order lines priced in GBP, EUR and USD and joined to `dim_date`, at
+      (invoice, line_number). The warehouse's finest grain and the first fact in
+      it that records something a person did. This is also where the currency and
+      calendar work stops being a demonstration: it is the only fact here with a
+      timestamp and a transactional money amount, which is the shape that
+      actually needs both.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [invoice, line_number]
+      # The fact must not lose or gain a line against staging. It is an inner
+      # join to the date dimension, so a transaction dated outside the calendar's
+      # range would vanish silently — this is what makes that loud.
+      - dbt_utils.equal_rowcount:
+          arguments: {compare_model: ref('stg_retail_lines')}
+      # Every line converts. GBP is quoted for the whole 2009-2011 window so
+      # there is no legitimate null here, and one would mean the carry-forward
+      # cap had been hit — which for GBP would be news.
+      - dbt_utils.expression_is_true:
+          name: fct_retail_every_line_converts_to_eur
+          arguments: {expression: "line_amount_eur is not null"}
+    columns:
+      - name: invoice
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
+        data_tests: [not_null]
+      - name: line_number
+        data_type: BIGINT
+        meta:
+          additivity: not_a_measure
+        data_tests: [not_null]
+      - name: invoice_type
+        data_type: VARCHAR
+      - name: item_type
+        data_type: VARCHAR
+      - name: stock_code
+        data_type: VARCHAR
+      - name: description
+        data_type: VARCHAR
+      - name: customer_id
+        data_type: VARCHAR
+        meta:
+          pii: direct_identifier
+      - name: country
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
+      - name: country_iso3
+        description: >
+          The conformed country key, resolved from `country` through the
+          `retail_country_map` seed. This is what joins retail to
+          `dim_country_year` and everything built on it. Null on the 871 lines
+          (0.08%) whose label is an aggregate or an absence — `European
+          Community`, `West Indies`, `Unspecified` — so it is nullable on
+          purpose and the seed's own tests pin which rows may do it.
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
+      - name: invoice_ts
+        data_type: TIMESTAMP
+        meta:
+          pii: quasi_identifier
+      - name: invoice_date
+        data_type: DATE
+      - name: invoice_month
+        data_type: VARCHAR
+      - name: date_key
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+        data_tests: [not_null]
+      - name: year
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+        description: >
+          Calendar year, and the Parquet lake's partition column. Carried
+          explicitly rather than reusing the `iso_year` beside it: the two agree
+          on every row here only because the business shuts from 23 December to
+          4 January, so no order lands on a day where ISO week 1 crosses the new
+          year. Partitioning on `iso_year` would be correct today and wrong the
+          first New Year they trade.
+        data_tests: [not_null]
+      - name: iso_year
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+      - name: iso_week
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+      - name: iso_week_start_date
+        data_type: DATE
+      - name: day_name
+        data_type: VARCHAR
+      - name: is_weekend
+        data_type: BOOLEAN
+      - name: fiscal_year
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+      - name: fiscal_quarter
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+      - name: quantity
+        data_type: BIGINT
+        meta:
+          additivity: additive
+      - name: unit_price
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: line_amount_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+        data_tests: [not_null]
+      - name: line_amount_eur
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+        description: Converted at the transaction date's ECB fixing, carried forward over closures.
+        data_tests: [not_null]
+      - name: line_amount_usd
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+        description: GBP to EUR to USD, both legs at the same date's fixing.
+        data_tests: [not_null]
+      - name: eur_per_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: fx_rate_source_date
+        data_type: DATE
+        description: >
+          The date of the fixing actually used. Differs from `invoice_date` on
+          13.1% of lines, almost all of them Sundays — this retailer trades on a
+          day the ECB does not quote, which is the carry-forward earning its
+          keep on real data rather than on a weekend in the abstract.
+        data_tests: [not_null]
+      - name: fx_rate_is_carried_forward
+        data_type: BOOLEAN
+      - name: is_revenue_line
+        data_type: BOOLEAN
+        data_tests: [not_null]
+      - name: is_stock_write_off
+        data_type: BOOLEAN
+
+  - name: dim_retail_product
+    config:
+      contract:
+        enforced: true
+    description: >
+      One row per stock code (5,131), with a survivorship-picked description.
+      1,192 codes carry more than one label across their lines and one carries
+      nine, so the dimension has to choose — modal, then alphabetical, so that a
+      rebuild picks the same one and a diff between builds means something.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [stock_code]}
+      # `item_type` is derived per line and asserted constant per code. It is
+      # constant by construction today; this is what stops that from becoming
+      # untrue the first time somebody edits the CASE in staging.
+      - dbt_utils.expression_is_true:
+          name: dim_retail_product_item_type_is_constant_per_code
+          arguments:
+            expression: >
+              (select count(*) from (
+                 select stock_code from {{ ref('stg_retail_lines') }}
+                 group by 1 having count(distinct item_type) > 1)) = 0
+    columns:
+      - name: stock_code
+        data_type: VARCHAR
+        data_tests: [not_null, unique]
+      - name: description
+        data_type: VARCHAR
+        description: >
+          Null for 4 codes that never carried one on any line. Not tested for
+          nullity: an absent label is the source's answer, not a join failure.
+      - name: item_type
+        data_type: VARCHAR
+        data_tests: [not_null]
+      - name: n_lines
+        data_type: BIGINT
+        meta:
+          additivity: additive
+      - name: n_invoices
+        data_type: BIGINT
+        meta:
+          additivity: non_additive
+      - name: n_customers
+        data_type: BIGINT
+        meta:
+          additivity: non_additive
+      - name: first_sold_date
+        data_type: DATE
+      - name: last_sold_date
+        data_type: DATE
+      - name: units_sold
+        data_type: HUGEINT
+        meta:
+          additivity: additive
+      - name: units_returned
+        data_type: HUGEINT
+        meta:
+          additivity: additive
+        description: >
+          Units cancelled, as a **positive** count — the same direction
+          `fct_retail_returns.quantity_returned` points, rather than the negative
+          sign the source carries. Null for the 2,233 products never returned,
+          which is an absence and not a zero.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: net_revenue_gbp
+        data_type: DOUBLE
+        # Deliberately not personal, and said out loud rather than left blank. This
+        # is revenue per *product*; the name it shares with
+        # `dim_retail_customer.net_revenue_gbp` is all the two have in common, and
+        # `tests/test_privacy.py` requires the distinction be written down rather
+        # than inferred from silence.
+        meta:
+          additivity: additive
+          pii: non_personal
+      - name: median_unit_price_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          Median, not mean. This retailer sells the same SKU at wholesale and
+          retail prices, so the mean lands between two prices that both exist and
+          on one that doesn't.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: min_unit_price_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: max_unit_price_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: n_descriptions
+        data_type: BIGINT
+        meta:
+          additivity: non_additive
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: has_multiple_descriptions
+        data_type: BOOLEAN
+      - name: is_non_product
+        data_type: BOOLEAN
+
+  - name: dim_retail_customer
+    config:
+      contract:
+        enforced: true
+    description: >
+      One row per identified customer (5,881 of the 5,942 ids that appear; the
+      other 61 never made a purchase). Covers 86.2% of net revenue — the rest is
+      anonymous and structurally cannot be attributed, which every per-customer
+      figure downstream inherits and which the Evidence page states rather than
+      implies.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [customer_id]}
+      # A customer cannot be active before they were acquired.
+      - dbt_utils.expression_is_true:
+          name: dim_retail_customer_last_order_is_not_before_first
+          arguments: {expression: "last_order_date >= first_order_date"}
+    columns:
+      - name: customer_id
+        data_type: VARCHAR
+        meta:
+          pii: direct_identifier
+        data_tests: [not_null, unique]
+      - name: country
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
+      - name: country_iso3
+        description: >
+          The conformed key for the country named beside it, so a customer
+          rollup can be grouped by `region` or `income_group`. Taken with
+          `max_by` rather than `max`, so that for the 13 customers who transact
+          from two countries the code is the one belonging to the label this row
+          shows rather than an independent pick.
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
+      - name: n_countries
+        data_type: BIGINT
+        meta:
+          additivity: non_additive
+      - name: has_moved_country
+        data_type: BOOLEAN
+      - name: first_order_date
+        data_type: DATE
+        meta:
+          pii: quasi_identifier
+        data_tests: [not_null]
+      - name: cohort_month
+        data_type: VARCHAR
+        description: Month of first *purchase*, not of first appearance.
+        meta:
+          pii: quasi_identifier
+        data_tests: [not_null]
+      - name: last_order_date
+        data_type: DATE
+        meta:
+          pii: quasi_identifier
+      - name: tenure_days
+        data_type: BIGINT
+        meta:
+          additivity: additive
+        description: Zero for the 1,626 customers who ordered once — a fact, not a gap.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: n_orders
+        data_type: BIGINT
+        meta:
+          additivity: additive
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: n_cancellations
+        data_type: BIGINT
+        meta:
+          additivity: additive
+      - name: n_active_months
+        data_type: BIGINT
+        meta:
+          additivity: non_additive
+      - name: n_distinct_products
+        data_type: BIGINT
+        meta:
+          additivity: non_additive
+      - name: units_bought
+        data_type: HUGEINT
+        meta:
+          additivity: additive
+      - name: gross_revenue_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+      - name: returned_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+      - name: net_revenue_gbp
+        data_type: DOUBLE
+        # A quasi-identifier, and the one that surprises people. Measured over the
+        # built warehouse, `net_revenue_gbp` on its own is unique for 97.4% of the
+        # 5,881 customers; with `first_order_gbp` and `n_orders` beside it, 98.6%.
+        # (Shares, not counts: the counts are not reproducible between builds —
+        # `sum()` over doubles has no fixed order. See `docs/DATA_PROTECTION.md`.)
+        # A near-continuous money column at person grain is an
+        # identifier whatever it is called, which is why deleting `customer_id`
+        # from an extract does not anonymise it. See `docs/DATA_PROTECTION.md`.
+        meta:
+          additivity: additive
+          pii: quasi_identifier
+      - name: first_order_gbp
+        data_type: DOUBLE
+        description: >
+          Net revenue of the customer's first *invoice*, not of their first day —
+          393 customers bought twice on the day they arrived, and `n_orders`
+          counts invoices. Null for the 47 whose first invoice held no product
+          line (a `Manual` adjustment, the test SKU); zero would read as a free
+          order rather than as an unpriced one.
+        # Part of the same quasi-identifying set as `net_revenue_gbp`, and the
+        # sharper half of it: `(country, first_order_date, first_order_gbp)` is
+        # unique for 99.6% of the 5,881 customers.
+        meta:
+          additivity: additive
+          pii: quasi_identifier
+        data_tests:
+          # A first order cannot be negative: the first *purchase* invoice is a
+          # sale invoice, and a sale line with a negative quantity is a stock
+          # write-off, which `is_revenue_line` already excludes. So this is the
+          # check that the two definitions have not drifted apart.
+          #
+          # The test this replaced was `first_order_gbp <= net_revenue_gbp` for
+          # customers with no returns, which is true by construction and **fails
+          # on 272 rows** — every one of them a one-order customer where the two
+          # columns are the same money summed in a different order. The excess
+          # tops out at 1.8e-12. Comparing two independently-summed doubles for
+          # containment is a float-equality test wearing an inequality.
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: avg_order_value_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: return_rate_pct
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          By value, not by order count. Deliberately carries no upper bound: a
+          customer who returns more than they bought in the window is a real
+          pattern at the extract's edges, not a bug.
+      - name: is_repeat_customer
+        data_type: BOOLEAN
+      - name: is_left_censored_cohort
+        data_type: BOOLEAN
+        description: >
+          True for the 955 customers whose first order is in the extract's first
+          month and who may have been customers for years already.
+        data_tests: [not_null]
+
+  - name: fct_retail_returns
+    config:
+      contract:
+        enforced: true
+    description: >
+      Returns matched back to the sale they reverse, one row per return line
+      (18,286). The source carries no link between the two — no order reference,
+      no RMA — so the join is inferred by an `asof` on the same customer's most
+      recent prior purchase of the same product, and the model reports how often
+      that failed: 87.6% match cleanly, 2.0% match to a smaller purchase, 8.4%
+      have no prior purchase in the window and 1.9% have no customer id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [invoice, line_number]}
+      # A return cannot be matched to a sale that happened after it. The asof
+      # join's inequality is what guarantees this, so the test is really on the
+      # join direction — the single easiest thing to get backwards here.
+      - dbt_utils.expression_is_true:
+          name: fct_retail_returns_never_match_a_later_sale
+          arguments:
+            expression: "original_invoice_date <= invoice_date"
+            config: {where: "is_matched"}
+    columns:
+      - name: invoice
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
+        data_tests: [not_null]
+      - name: line_number
+        data_type: BIGINT
+        meta:
+          additivity: not_a_measure
+        data_tests: [not_null]
+      - name: customer_id
+        data_type: VARCHAR
+        meta:
+          pii: direct_identifier
+      - name: stock_code
+        data_type: VARCHAR
+      - name: description
+        data_type: VARCHAR
+      - name: country
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
+      - name: country_iso3
+        description: >
+          The conformed country key, carried from `stg_retail_lines` through
+          `int_retail_return_matches`. Nullable for the same three labels as on
+          `fct_retail_order_line`.
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
+      - name: invoice_ts
+        data_type: TIMESTAMP
+        meta:
+          pii: quasi_identifier
+      - name: invoice_date
+        data_type: DATE
+      - name: invoice_month
+        data_type: VARCHAR
+      - name: quantity_returned
+        data_type: BIGINT
+        meta:
+          additivity: additive
+        description: Positive. The signed amount stays signed in `return_amount_gbp`.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: unit_price
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: return_amount_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+      - name: original_invoice
+        data_type: VARCHAR
+        meta:
+          pii: quasi_identifier
+      - name: original_line_number
+        data_type: BIGINT
+        meta:
+          additivity: not_a_measure
+      - name: original_invoice_date
+        data_type: DATE
+      - name: original_quantity
+        data_type: BIGINT
+        meta:
+          additivity: semi_additive
+        description: >
+          The matched *purchase* line's quantity, carried onto the return. It
+          belongs to the purchase and not to this row: 16,398 matched returns
+          point at 15,312 distinct purchase lines, so summing it across returns
+          counts 1,086 purchases more than once. Compare it per row; aggregate
+          `quantity_returned` instead.
+      - name: original_unit_price
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: original_amount_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: semi_additive
+        description: >
+          The matched purchase line's amount, and the same caution as
+          `original_quantity` — a purchase matched by two returns is added
+          twice.
+      - name: days_to_return
+        data_type: BIGINT
+        meta:
+          additivity: additive
+        description: >
+          Median 10, mean 32, max 656. The shape is itself a check on the
+          matching rule — an arbitrary match would spread flat over the window.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: is_matched
+        data_type: BOOLEAN
+        data_tests: [not_null]
+      - name: match_status
+        data_type: VARCHAR
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - matched
+                  - 'matched, quantity exceeds purchase'
+                  - no prior purchase in window
+                  - no customer id
+      - name: quantity_is_consistent
+        data_type: BOOLEAN
+      - name: price_differs_from_original
+        data_type: BOOLEAN
+
+  - name: fct_retail_customer_cohorts
+    config:
+      contract:
+        enforced: true
+    description: >
+      Monthly acquisition cohorts and their retention, at
+      (cohort_month, months_since_first_order). Ragged on purpose: a cohort only
+      has rows for months it could have been observed in, so nothing averages in
+      a period that had no chance to happen. Retention is against the cohort's
+      own size, never against the previous month.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [cohort_month, months_since_first_order]
+      # Month zero is every cohort's own definition, so it must be exactly 100%.
+      # This is the structural check on the whole triangle: an off-by-one in the
+      # month arithmetic, a cohort assigned from the wrong date, or a customer
+      # counted in two cohorts all show up here first.
+      - dbt_utils.expression_is_true:
+          name: fct_retail_cohorts_month_zero_is_full_retention
+          arguments:
+            expression: "retention_pct = 100"
+            config: {where: "months_since_first_order = 0"}
+      # `retail_max_cohort_age_months` is an upper bound on generation, and
+      # setting it below the extract's span truncates the oldest cohorts into
+      # what reads as churn — silently, because a short curve looks like a
+      # result. The first cohort must reach the last month in the table.
+      - dbt_utils.expression_is_true:
+          name: fct_retail_cohorts_are_not_truncated
+          arguments:
+            expression: >
+              (select max(p.months_since_first_order) + 1
+               from {{ ref('fct_retail_customer_cohorts') }} as p
+               where p.cohort_month = (select min(q.cohort_month)
+                                       from {{ ref('fct_retail_customer_cohorts') }} as q))
+              = (select count(distinct r.activity_month)
+                 from {{ ref('fct_retail_customer_cohorts') }} as r)
+    columns:
+      - name: cohort_month
+        data_type: VARCHAR
+        # Cohort grain, not person grain — a row here is hundreds of customers, so
+        # the columns that identify at customer grain do not identify here.
+        meta:
+          pii: non_personal
+        data_tests: [not_null]
+      - name: months_since_first_order
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: activity_month
+        data_type: VARCHAR
+      - name: cohort_size
+        data_type: BIGINT
+        meta:
+          additivity: semi_additive
+        description: >
+          Customers in the cohort, constant on every `months_since_first_order`
+          row of it. Summing across cohorts at one offset is a real total;
+          summing down one cohort multiplies it by the number of offsets that
+          cohort has rows for, which is a different number per cohort because
+          the triangle is ragged.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+      - name: active_customers
+        data_type: BIGINT
+        meta:
+          additivity: semi_additive
+        description: >
+          Distinct customers of the cohort who bought in that month. Additive
+          across cohorts at one offset; summing across offsets gives
+          customer-months rather than customers, because a customer who returns
+          in three months is counted in all three.
+      - name: net_revenue_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: additive
+          pii: non_personal
+      - name: retention_pct
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: revenue_per_active_customer_gbp
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+      - name: is_left_censored_cohort
+        data_type: BOOLEAN
+      - name: is_complete_period
+        data_type: BOOLEAN
+        description: >
+          False for each cohort's final row: the extract stops on 2011-12-09, so
+          every curve's last month is nine days long. A retention chart that ends
+          on a cliff is reading that, not a collapse in loyalty.
+        data_tests: [not_null]

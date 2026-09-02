@@ -31,7 +31,7 @@ policy those pins serve is in `CLAUDE.md` under *Style guide*.
   file fails with `ERESOLVE` on a `typescript` peer conflict between
   `svelte-preprocess` and `svelte2tsx` — on npm 9 **and** npm 11, so it is not
   an old-npm artifact. `npm ci` works only because it never re-resolves, which
-  is why `scripts/build_report.py` prefers it on a cold checkout and why nothing
+  is why `publish/build_report.py` prefers it on a cold checkout and why nothing
   has ever noticed. Editing that file therefore needs `npm install --force`.
   - **`--legacy-peer-deps` is the trap, because it fails later and elsewhere.**
     It resolves, installs, and prints nothing alarming — then `evidence build`
@@ -224,7 +224,7 @@ policy those pins serve is in `CLAUDE.md` under *Style guide*.
     derived.** It holds the `history` schema — see *Snapshot history* in
     `CLAUDE.md` — which no
     rebuild reproduces. `just clean warehouse` mirrors
-    `scripts/restore_history.py`: it gates on *whether there is history to
+    `publish/restore_history.py`: it gates on *whether there is history to
     lose*, not on how alarming the file looks, so an empty `history` schema
     goes without ceremony and a populated one needs `--force`.
   - **A refusal has to be a no-op, and this one was not.** The gate started out

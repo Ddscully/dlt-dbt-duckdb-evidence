@@ -9,7 +9,7 @@ Produces `data/export/`:
   ATTRIBUTION.md                    who owns the data (it isn't us)
   RELEASE_NOTES.md                  the GitHub release body
 
-Run:  uv run python -m scripts.export_warehouse            (or `just export`)
+Run:  uv run python -m publish.export_warehouse            (or `just export`)
 
 `.github/workflows/release-data.yml` runs this after materializing the asset graph
 against the live sources and uploads the directory as a dated GitHub release, so
@@ -70,6 +70,7 @@ __all__ = [
     "ATTRIBUTION",
     "DUCKDB_PATH",
     "EXPORT_DIR",
+    "EXTRA_ADDITIVITY",
     "EXTRA_CLASSIFICATIONS",
     "LAKEHOUSE_ASSET",
     "MASKED_LABELS",
@@ -78,6 +79,7 @@ __all__ = [
     "MIN_READER_VERSION",
     "PUBLISHED_SCHEMAS",
     "SALT_ENV",
+    "additivity",
     "default_tag",
     "landed_at",
     "main",
@@ -206,10 +208,94 @@ SALT_ENV = "PII_SALT"
 EXTRA_CLASSIFICATIONS: dict[tuple[str, str, str], str] = {
     ("analytics", "retail_rfm", "customer_id"): "direct_identifier",
     ("analytics", "retail_rfm", "country"): "quasi_identifier",
+    ("analytics", "retail_rfm", "country_iso3"): "quasi_identifier",
     ("analytics", "retail_rfm", "cohort_month"): "quasi_identifier",
     ("analytics", "retail_rfm", "first_order_date"): "quasi_identifier",
     ("analytics", "retail_rfm", "last_order_date"): "quasi_identifier",
     ("analytics", "retail_rfm", "monetary_gbp"): "quasi_identifier",
+}
+
+
+# The additivity labels dbt cannot see, in exactly the shape and for exactly the
+# reason `EXTRA_CLASSIFICATIONS` above has: the `analytics` tables are written by
+# Polars, downstream of dbt and invisible to it, and they ship in the release
+# beside the marts. Without these the map would stop at the layer boundary and a
+# consumer would find five published tables with no labels at all.
+#
+# **Copied, not inherited at runtime, and that is the point.** Deriving
+# `co2_intensity`'s 37 shared labels from `marts.fct_emissions_energy` would be
+# less typing and would fail *open*: rename a column in the mart and the copy
+# quietly loses its label with nothing to say so. Stated here, the same rename
+# fails `test_a_copied_column_keeps_the_label_the_mart_gave_it`. Asserting rather
+# than deriving is what every other hand-maintained list here does.
+EXTRA_ADDITIVITY: dict[tuple[str, str, str], str] = {
+    # `co2_intensity` is `select * from marts.fct_emissions_energy` plus two
+    # derived columns, so its labels are the mart's plus two.
+    ("analytics", "co2_intensity", "year"): "not_a_measure",
+    ("analytics", "co2_intensity", "co2_mt"): "additive",
+    ("analytics", "co2_intensity", "co2_per_capita"): "non_additive",
+    ("analytics", "co2_intensity", "co2_kg_per_gdp_ppp_2011"): "non_additive",
+    ("analytics", "co2_intensity", "share_global_co2"): "non_additive",
+    ("analytics", "co2_intensity", "coal_co2"): "additive",
+    ("analytics", "co2_intensity", "oil_co2"): "additive",
+    ("analytics", "co2_intensity", "gas_co2"): "additive",
+    ("analytics", "co2_intensity", "consumption_co2"): "additive",
+    ("analytics", "co2_intensity", "consumption_co2_per_capita"): "non_additive",
+    ("analytics", "co2_intensity", "trade_co2"): "additive",
+    ("analytics", "co2_intensity", "trade_co2_share"): "non_additive",
+    ("analytics", "co2_intensity", "cumulative_co2"): "semi_additive",
+    ("analytics", "co2_intensity", "share_global_cumulative_co2"): "non_additive",
+    ("analytics", "co2_intensity", "primary_energy_twh"): "additive",
+    ("analytics", "co2_intensity", "renewables_share_pct"): "non_additive",
+    ("analytics", "co2_intensity", "fossil_share_pct"): "non_additive",
+    ("analytics", "co2_intensity", "electricity_generation_twh"): "additive",
+    ("analytics", "co2_intensity", "carbon_intensity_elec_g_kwh"): "non_additive",
+    ("analytics", "co2_intensity", "low_carbon_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "solar_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "wind_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "nuclear_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "coal_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "gas_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "gdp_per_capita_usd"): "non_additive",
+    ("analytics", "co2_intensity", "gdp_usd"): "semi_additive",
+    ("analytics", "co2_intensity", "gdp_constant_usd"): "additive",
+    ("analytics", "co2_intensity", "life_expectancy"): "non_additive",
+    ("analytics", "co2_intensity", "population"): "semi_additive",
+    ("analytics", "co2_intensity", "poverty_rate"): "non_additive",
+    ("analytics", "co2_intensity", "internet_users_pct"): "non_additive",
+    ("analytics", "co2_intensity", "urban_pop_pct"): "non_additive",
+    ("analytics", "co2_intensity", "forest_area_pct"): "non_additive",
+    ("analytics", "co2_intensity", "renew_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "energy_imports_pct"): "non_additive",
+    ("analytics", "co2_intensity", "electricity_price_eur_kwh"): "non_additive",
+    # The two the Polars step adds. A dense rank is ordinal — summing ranks is
+    # the classic way to turn an ordering into a number that means nothing.
+    ("analytics", "co2_intensity", "co2_per_gdp_const_usd"): "non_additive",
+    ("analytics", "co2_intensity", "co2_intensity_rank"): "non_additive",
+    # `retail_rfm` renames on the way in, which is why these are stated by hand
+    # rather than found by name: `frequency` is `dim_retail_customer.n_orders`
+    # and `monetary_gbp` is its `net_revenue_gbp` — both additive, and neither
+    # reachable from the mart by name. The three scores are quintiles: ordinal,
+    # so `rfm_total` is a sum of ordinals and is still ordinal.
+    ("analytics", "retail_rfm", "frequency"): "additive",
+    ("analytics", "retail_rfm", "monetary_gbp"): "additive",
+    ("analytics", "retail_rfm", "recency_days"): "non_additive",
+    ("analytics", "retail_rfm", "recency_score"): "non_additive",
+    ("analytics", "retail_rfm", "frequency_score"): "non_additive",
+    ("analytics", "retail_rfm", "monetary_score"): "non_additive",
+    ("analytics", "retail_rfm", "rfm_total"): "non_additive",
+    ("analytics", "retail_rfm", "avg_order_value_gbp"): "non_additive",
+    ("analytics", "retail_rfm", "n_distinct_products"): "non_additive",
+    ("analytics", "retail_rfm", "return_rate_pct"): "non_additive",
+    # The observability tables. `year_min`/`year_max` are calendar bounds and not
+    # measures, the same answer `year` gets everywhere else.
+    ("analytics", "pipeline_sources", "rows"): "additive",
+    ("analytics", "pipeline_sources", "year_min"): "not_a_measure",
+    ("analytics", "pipeline_sources", "year_max"): "not_a_measure",
+    ("analytics", "pipeline_tables", "rows"): "additive",
+    ("analytics", "pipeline_tables", "year_min"): "not_a_measure",
+    ("analytics", "pipeline_tables", "year_max"): "not_a_measure",
+    ("analytics", "pipeline_tests", "failing_rows"): "additive",
 }
 
 
@@ -233,6 +319,53 @@ def classifications(manifest_path: str = MANIFEST_PATH) -> dict[tuple[str, str, 
     if not path.exists():
         return dict(EXTRA_CLASSIFICATIONS)
     return privacy.classifications(json.loads(path.read_text())) | EXTRA_CLASSIFICATIONS
+
+
+def additivity(manifest_path: str = MANIFEST_PATH) -> dict[str, dict[str, str]] | None:
+    """Which published columns may be summed, keyed by published relation.
+
+    A consumer of a Parquet file has the column names and the types and nothing
+    that says `renewables_share_pct` must not be summed while `co2_mt` may be —
+    and 117 of the 226 numeric mart columns are non-additive. The labels
+    are declared once, as `meta: {additivity: …}` on the column in the same ymls
+    that carry the contract, and this is what carries them out of the repo.
+
+    Keyed by `schema.alias`, so it names the relations the release actually
+    ships: the versioned model appears as both `marts.fct_emissions_energy` and
+    `marts.fct_emissions_energy_v1`, which is what the Parquet files are called.
+
+    **Degrades to `None` when the manifest is absent** — `dbt/target/` is
+    gitignored, so a fresh clone has none. `None` and `{}` are different answers
+    here: the first says nobody asked dbt, the second would say dbt was asked and
+    knows of no labelled column. Only the first can be true by accident.
+
+    It drops `EXTRA_ADDITIVITY` on that path rather than publishing it alone,
+    which is where this parts company with `classifications` — that one degrades
+    to the extras *because* a partial answer still masks every identifier it
+    names. Here a partial map is the more dangerous artifact: a consumer seeing
+    `analytics` labelled and `marts` missing has no way to read the gap as
+    "nobody asked" rather than as "nothing to say", and the default reading of a
+    missing label is the wrong one.
+    """
+    path = Path(manifest_path)
+    if not path.exists():
+        return None
+    nodes = json.loads(path.read_text()).get("nodes", {}).values()
+    out: dict[str, dict[str, str]] = {}
+    for node in nodes:
+        if node.get("resource_type") != "model":
+            continue
+        labels: dict[str, str] = {}
+        for column, spec in (node.get("columns") or {}).items():
+            label = (spec.get("meta") or {}).get("additivity")
+            if label:
+                labels[column] = label
+        if labels:
+            relation = f"{node['schema']}.{node.get('alias') or node['name']}"
+            out[relation] = labels
+    for (schema, table, column), label in EXTRA_ADDITIVITY.items():
+        out.setdefault(f"{schema}.{table}", {})[column] = label
+    return {relation: dict(sorted(cols.items())) for relation, cols in sorted(out.items())}
 
 
 def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -> dict:
@@ -363,10 +496,10 @@ def solidify_staging(
     view raised.
 
     Materialising is the fix rather than dropping them, because the alternative
-    is a smaller promise: `_exposures.yml`'s release exposure names
-    `stg_country`, and the release notes point a reader at it. Doing it *here*
+    is a smaller promise: the release ships all nine staging views as Parquet
+    and a half-broken database is worse than a bigger one. Doing it *here*
     rather than making staging tables in `dbt_project.yml` keeps the local build
-    cheap — eight views that cost nothing to rebuild — and pays for the copy only
+    cheap — nine views that cost nothing to rebuild — and pays for the copy only
     when a copy is made.
 
     Runs before `pseudonymise`, and that ordering is load-bearing in the opposite
@@ -533,7 +666,7 @@ def _history(con: duckdb.DuckDBPyConnection) -> dict | None:
     """How much revision history the published snapshot carries.
 
     `release-data.yml` restores `history` from the previous release before it
-    builds (see `scripts/restore_history.py`), so this grows release over
+    builds (see `publish/restore_history.py`), so this grows release over
     release. `None` when there is no snapshot to describe at all — an export of
     a warehouse whose mart wasn't built, rather than one that has simply never
     seen a revision, which reports zero.
@@ -674,6 +807,17 @@ it for `{base}/download/{tag}/…`.
 `manifest.json` carries the row counts, year coverage and SHA-256 of every asset;
 `SHA256SUMS` is `sha256sum -c`-compatible.
 
+**`manifest.json` also says which columns may be summed.** Its `additivity` map
+labels every numeric column of every `marts` and `analytics` table published
+here — 280 of them: `additive` (sum it in any direction),
+`semi_additive` (summable some ways and not others — the column's own
+description says which), `non_additive` (a ratio, rate, price, average or
+extremum: recompute it from its components rather than aggregating it) and
+`not_a_measure` (a key, a calendar part, or a parameter carried on the row).
+Roughly half the numeric columns here are non-additive, which a Parquet file has
+no way of telling you: `sum(renewables_share_pct)` and `avg(co2_per_capita)`
+across countries are both meaningless and both come back a number.
+
 **`raw` is not in `{warehouse["file"]}` any more.** dlt lands the source tables
 in a [DuckLake](https://ducklake.select) catalog rather than in the database, so
 the database holds what dbt built — `staging`, `marts`, `analytics`, `history` —
@@ -691,7 +835,9 @@ select count(*) from lakehouse.raw.om_weather_daily;
 ```
 
 - **Grain:** one row per `(country_iso3, year)`, with these exceptions —
-  `staging.stg_country` is the country dimension (region, income group), the two
+  `marts.dim_country` is one row per country (names, region, income group,
+  capital coordinates) and is what everything else's `country_iso3` joins to, the
+  two
   `*_semiannual` tables keep Eurostat's published `(country_iso3, year, half)`,
   `marts.fct_example_scope2_emissions` is one row per site,
   `marts.fct_cbam_exposure` is one row per (sourcing country, good) with no year
@@ -707,7 +853,11 @@ select count(*) from lakehouse.raw.om_weather_daily;
   (`is_stock_write_off`), 22.8% of lines carry no customer id so every
   per-customer table covers a subset of the business, and returns are matched to
   the sale they reverse by inference — `match_status` says how confidently, per
-  row, because the source has no key linking the two.
+  row, because the source has no key linking the two. All four fact and
+  dimension tables carry `country_iso3` beside the source's own country label,
+  so retail can be joined to the country tables above — the source spells nine
+  of its 43 countries in its own way (`EIRE`, `RSA`, `USA`, ...) and joining
+  those two halves on a country *name* silently drops them.
 - **`customer_id` is pseudonymised in this release and is stable across
   releases.** It is a salted digest of the publisher's own id, applied to every
   copy of the column in the file (`raw`, `staging`, `marts`, `analytics`), so it
@@ -817,7 +967,7 @@ def run(
         tag=tag,
         repo=repo,
         grain="(country_iso3, year)",
-        extra_manifest=lambda con: {"history": _history(con)},
+        extra_manifest=lambda con: {"history": _history(con), "additivity": additivity()},
         read_loaded_at=lambda con: landed_at(con, lakehouse_dir),
         prepare_copy=lambda con: prepare_published_copy(con, lakehouse_dir),
         extra_artifacts=lambda dest: publish_lakehouse(dest, lakehouse_dir),

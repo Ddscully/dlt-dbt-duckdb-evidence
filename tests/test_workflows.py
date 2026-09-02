@@ -68,6 +68,13 @@ NOT_A_SITE_INPUT = (
     ".github/workflows/ci.yml",
     ".github/workflows/nightly.yml",
     ".github/workflows/release-data.yml",
+    # `scripts/**` crossed to this side on 2026-09-01, when the three
+    # load-bearing modules left it for `publish/`. What remains is one-off:
+    # `build_cbam_seeds.py` (its output is the checked-in seeds, so the site
+    # moves when `dbt/**` does), `record_fixtures.py` (this job runs live) and
+    # `measure_disclosure_risk.py` (read-only). The allowlist was coarse only
+    # because the directory was mixed.
+    "scripts/**",
 )
 
 
@@ -234,7 +241,7 @@ def release_restoring_workflows() -> dict[str, str]:
     return {
         path.name: path.read_text()
         for path in sorted(WORKFLOWS_DIR.glob("*.yml"))
-        if "scripts.restore_history" in path.read_text()
+        if "publish.restore_history" in path.read_text()
     }
 
 
@@ -264,7 +271,7 @@ def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
     The asset names come from the code rather than from string literals here, so
     renaming either one fails this instead of quietly matching nothing.
     """
-    from scripts import restore_history
+    from publish import restore_history
 
     required = {Path(restore_history.DUCKDB_PATH).name, restore_history.LAKEHOUSE_ASSET}
     workflows = release_restoring_workflows()
@@ -471,3 +478,109 @@ def test_dependabot_watches_every_composite_action_that_pins_one():
         "Add the directory (or a glob covering it) to the github-actions entry's "
         "`directories:` list in .github/dependabot.yml."
     )
+
+
+JUSTFILE = REPO_ROOT / "justfile"
+
+# Running any of these writes to the warehouse or the landing zone. The set is
+# derived from what a recipe *does*, not from a list of recipe names, so a new
+# writing recipe has to opt out deliberately instead of being forgotten — which
+# is the whole failure mode here, since nothing about a silent destination is
+# visible until afterwards.
+WRITING_COMMANDS = (
+    "python -m ingest.pipeline",
+    "python -m transform.",
+    "python -m publish.restore_history",
+    "dbt build",
+    "dagster job execute",
+    "dagster asset materialize",
+)
+
+# `name:`, `name dep:` or `name arg='': dep` at column 0. The lookahead keeps
+# `set dotenv-load := true` and `export LAKEHOUSE_DIR := …` out: those are
+# assignments, and `:=` is the only thing separating them from a recipe header.
+_RECIPE_HEADER = re.compile(r"^(?P<name>[a-z][a-z0-9-]*)(?P<params>[^:\n]*):(?!=)(?P<deps>.*)$")
+
+
+def just_recipes() -> dict[str, tuple[str, str]]:
+    """recipe name -> (its dependency list, its body)."""
+    recipes: dict[str, tuple[str, str]] = {}
+    name: str | None = None
+    deps = ""
+    body: list[str] = []
+    for line in JUSTFILE.read_text().splitlines():
+        header = _RECIPE_HEADER.match(line)
+        if header:
+            if name is not None:
+                recipes[name] = (deps, "\n".join(body))
+            name, deps, body = header["name"], header["deps"], []
+        elif name is not None and (line.startswith((" ", "\t")) or not line.strip()):
+            body.append(line)
+        elif line.startswith("#"):
+            continue
+        else:
+            if name is not None:
+                recipes[name] = (deps, "\n".join(body))
+            name, deps, body = None, "", []
+    if name is not None:
+        recipes[name] = (deps, "\n".join(body))
+    return recipes
+
+
+def writing_recipes() -> dict[str, tuple[str, str]]:
+    return {
+        name: parts
+        for name, parts in just_recipes().items()
+        if any(command in parts[1] for command in WRITING_COMMANDS)
+    }
+
+
+def test_the_justfile_scan_finds_the_recipes_it_thinks_it_does():
+    """Vacuity guard, and it comes first.
+
+    The test below iterates over whatever this scan returns, so a regex that
+    matched nothing — or that swallowed `export LAKEHOUSE_DIR := …` as a recipe
+    — would pass it by having nothing to check.
+    """
+    recipes = just_recipes()
+    assert "where" in recipes, "the announcing recipe itself is missing"
+    assert "export" not in recipes, "`:=` assignments are being read as recipes"
+    writing = writing_recipes()
+    assert {"ingest", "dbt-build", "materialize", "test-pipeline"} <= set(writing), (
+        f"the writing-recipe scan found only {sorted(writing)}"
+    )
+
+
+def test_every_recipe_that_writes_says_where_it_is_writing():
+    """dbt's only "where am I" line names the *target*, and there is one target
+    here on purpose (`dbt/profiles.yml` argues it), so that line is a constant.
+    What varies is the file, and no dbt output prints it.
+
+    So a recipe that writes either depends on `where`, or exports its own
+    `WAREHOUSE_PATH` and announces that itself — `test-pipeline` and the two
+    course recipes do the latter, and taking `where` as a dependency there would
+    print the *outer* value, which is worse than printing nothing.
+    """
+    silent = []
+    for name, (deps, body) in sorted(writing_recipes().items()):
+        if "where" in deps.split():
+            continue
+        if "export WAREHOUSE_PATH" in body:
+            continue
+        silent.append(name)
+    assert not silent, (
+        f"these recipes write to the warehouse or the landing zone without saying "
+        f"where: {silent}. Add `where` as their first dependency, or export "
+        f"WAREHOUSE_PATH in the body and echo it as `test-pipeline` does."
+    )
+
+
+def test_both_ways_of_announcing_are_actually_in_use():
+    """The test above passes a recipe on either of two conditions, so a tree
+    where every writing recipe took the same route would leave the other branch
+    unexercised and free to rot."""
+    by_dependency, by_own_export = [], []
+    for name, (deps, body) in writing_recipes().items():
+        (by_dependency if "where" in deps.split() else by_own_export).append(name)
+    assert by_dependency, "no recipe depends on `where`"
+    assert by_own_export, "no recipe exports its own WAREHOUSE_PATH any more"

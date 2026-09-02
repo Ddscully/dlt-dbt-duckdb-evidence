@@ -79,7 +79,7 @@ One DuckDB file, `data/warehouse.duckdb`:
 | `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`, `om_weather_daily`) |
 | `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain, except `stg_eu_electricity_prices_semiannual` (Eurostat's half-years), `stg_fx_rates` (`(rate_date, quote_currency)`) and `stg_retail_lines` (`(invoice, line_number)`) |
 | `intermediate` | dbt (views) | `int_*`, the derivations two models share or one model should be tested apart from: `int_country_year_observed` (the country-years the four country-stats sources report, read by both the spine and the wide fact), `int_cbam_default_factors` (Annex I's row-level fallback rule) and `int_retail_return_matches` (the returns-to-purchase inference). `private`, uncontracted, and not published as Parquet |
-| `marts` | dbt (tables) | `dim_country_year`, the country-year spine; `fct_emissions_energy`, the wide joined fact; `dim_grid_emission_factors`, grid factors packaged as a Scope 2 reference table; `fct_co2_estimate_versions`, revision history; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain; `fct_example_scope2_emissions`, the worked example over twelve invented sites; `fct_cbam_exposure`, the CBAM border cost per tonne by sourcing country; the FX and calendar tables (`dim_date`, `dim_currency`, `fct_fx_rates_*`); and the five retail models (`fct_retail_order_line`, `dim_retail_product`, `dim_retail_customer`, `fct_retail_returns`, `fct_retail_customer_cohorts`) |
+| `marts` | dbt (tables) | `dim_country`, the conformed country dimension — one row per `country_iso3`, and what every country key in the warehouse joins to; `dim_country_year`, that crossed with the years to make the country-year spine; `fct_emissions_energy`, the wide joined fact; `dim_grid_emission_factors`, grid factors packaged as a Scope 2 reference table; `fct_co2_estimate_versions`, revision history; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain; `fct_example_scope2_emissions`, the worked example over twelve invented sites; `fct_cbam_exposure`, the CBAM border cost per tonne by sourcing country; the FX and calendar tables (`dim_date`, `dim_currency`, `fct_fx_rates_*`); and the five retail models (`fct_retail_order_line`, `dim_retail_product`, `dim_retail_customer`, `fct_retail_returns`, `fct_retail_customer_cohorts`) |
 | `history` | dbt (snapshots) | `snap_co2_estimates` and `snap_grid_emission_factors`, SCD2 versions of OWID's CO₂ numbers and of the Scope 2 factors. The two tables a rebuild can't reproduce |
 | `analytics` | Polars | derived metrics (`co2_intensity`, `retail_rfm`) and the `pipeline_*` observability tables |
 
@@ -87,6 +87,21 @@ The country-year spine is the dominant grain but not a house rule.
 `fct_cbam_exposure` has no year in it (a regulatory schedule, not a time series),
 the FX tables have no country, and the five retail models sit below country
 grain.
+
+The country dimension itself is `marts.dim_country` — 228 rows, published, and
+`reference`-group because every domain joins to it. `staging.stg_country` is its
+cleaning model and not the dimension: two staging peers read it for the capital
+coordinates and the ISO2 map, which is the whole of why it is `protected`.
+
+Below country grain is not outside it. `fct_retail_order_line`,
+`fct_retail_returns`, `dim_retail_customer` and `analytics.retail_rfm` all carry
+`country_iso3` beside the source's own country label, resolved once in
+`stg_retail_lines` through the `retail_country_map` seed — so retail revenue can
+be grouped by `region` or `income_group`, or put beside the electricity price
+its market pays. The source spells nine of its 43 country labels in ways the
+dimension does not (`EIRE`, `RSA`, `USA`, `Korea`, `Czech Republic`,
+`Hong Kong`, and three that are not countries at all), which is why the
+resolution is a seed rather than a join on name.
 
 ## The lakehouse: `data/lakehouse/`
 

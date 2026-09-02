@@ -20,7 +20,8 @@ world_bank as (
         capital_city,
         -- try_cast: the API sends '' for territories with no coordinates
         try_cast(longitude as double) as longitude,
-        try_cast(latitude as double) as latitude
+        try_cast(latitude as double) as latitude,
+        false as is_manual_entry
     from source
     where region__value <> 'Aggregates'   -- keep only real countries
 ),
@@ -34,7 +35,12 @@ manual as (
         o.income_group,
         cast(null as varchar) as capital_city,
         cast(null as double) as longitude,
-        cast(null as double) as latitude
+        cast(null as double) as latitude,
+        -- Which branch a row came from, carried rather than inferred. It is the
+        -- answer to "why is `income_group` null here" — the World Bank does not
+        -- classify these territories — and it is not the same question as
+        -- `income_group is null`, because the seed fills Taiwan's.
+        true as is_manual_entry
     from country_overrides as o
     -- the World Bank wins if it ever starts publishing one of these
     -- (the `is not null` guards NOT IN's three-valued logic: a single null

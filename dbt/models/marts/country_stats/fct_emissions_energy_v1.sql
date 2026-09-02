@@ -16,7 +16,7 @@
 -- The rename is invisible inside this project (nothing refs this mart) and
 -- breaking outside it: the monthly data release ships the mart as a Parquet file
 -- to consumers who cannot be paged. That asymmetry is the whole reason for
--- `versions:` — `deprecation_date` in `_marts.yml` is the promise attached to it.
+-- `versions:` — `deprecation_date` in `_country_stats.yml` is the promise on it.
 --
 -- `select * exclude … , … as co2_per_gdp` puts the renamed column last rather
 -- than in its original position, which is deliberate: the contract for v1 is

@@ -42,7 +42,7 @@ select
     -- emissions, territorial (who burned it)
     c.co2_mt,
     c.co2_per_capita,
-    -- v2's one change: the basis is in the name. See `_marts.yml` and v1.
+    -- v2's one change: the basis is in the name. See `_country_stats.yml` and v1.
     c.co2_per_gdp as co2_kg_per_gdp_ppp_2011,
     c.share_global_co2,
     c.coal_co2,

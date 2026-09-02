@@ -376,7 +376,7 @@ levels barely move.
 
 ```bash
 sed -i 's/\* f\.avg_units_per_eur as electricity_price_usd_kwh/* f.period_end_units_per_eur as electricity_price_usd_kwh/' \
-  dbt/models/marts/fct_eu_electricity_prices_semiannual.sql
+  dbt/models/marts/country_stats/fct_eu_electricity_prices_semiannual.sql
 just course-rebuild
 ```
 
@@ -403,7 +403,7 @@ above the average about as often as below — while the mean *absolute* change i
 **Verification.**
 
 ```bash
-git checkout dbt/models/marts/fct_eu_electricity_prices_semiannual.sql
+git checkout dbt/models/marts/country_stats/fct_eu_electricity_prices_semiannual.sql
 just course-rebuild
 just course-query "
 select period, round(electricity_price_eur_kwh, 4) as eur, round(electricity_price_usd_kwh, 4) as usd

@@ -2,9 +2,10 @@ version: 2
 
 # Unit tests for `dim_date`'s fiscal arithmetic.
 #
-# Kept out of `_marts.yml` on purpose: that file is 1,246 lines of column
-# descriptions and contracts, and this is a different kind of assertion about one
-# model.
+# Kept out of the per-group ymls on purpose: those are column descriptions and
+# enforced contracts, and this is a different kind of assertion about one model.
+# They were a single 2,183-line `_marts.yml` until 2026-09-01; this file stayed
+# whole through that split, because it is one axis and they are four domains.
 #
 # Why these exist when the columns already carry data tests: `fiscal_quarter` is
 # guarded by `accepted_range 1-4`, `fiscal_month` by `1-12`, `fiscal_year` by
@@ -164,7 +165,7 @@ unit_tests:
           - {product_group: "Cement", year: 2026, markup_pct: 10}
           - {product_group: "Cement", year: 2027, markup_pct: 20}
           - {product_group: "Cement", year: 2028, markup_pct: 30}
-      - input: ref('stg_country')
+      - input: ref('dim_country')
         rows:
           - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
       - input: ref('dim_grid_emission_factors')
@@ -206,7 +207,7 @@ unit_tests:
           - {product_group: "Cement", year: 2026, markup_pct: 10}
           - {product_group: "Cement", year: 2027, markup_pct: 20}
           - {product_group: "Cement", year: 2028, markup_pct: 30}
-      - input: ref('stg_country')
+      - input: ref('dim_country')
         rows:
           - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
           - {country_iso3: "CHL", country_name: "Chile",  region: "Latin America & Caribbean", income_group: "High income"}
@@ -714,7 +715,7 @@ unit_tests:
   # | `cohort_month` off `lines`, not         | left-censored 955 -> 1,030; tenure +14,914 days   |
   # | `purchases`                             |                                                   |
   # | `first_order_gbp` over every line       | its 47 nulls become values; total +GBP 53,664     |
-  # | `min(country)` for `max(country)`       | 13 customers relabelled, silently                 |
+  # | `min(country)` for `max(country)`       | 13 customers relabelled — caught now, see below   |
   # | drop the sign flip on `return_rate_pct` | mean +5.89% -> -5.89%                             |
   # | `n_orders >= 1` for repeat customers    | 4,255 -> 5,881, i.e. everyone                     |
   # | `n_orders` counts every invoice type    | 36,975 -> 44,811 (+21%)                           |
@@ -742,10 +743,20 @@ unit_tests:
   # the rule was learned here, applied there, unit tested there, and left
   # unpinned here.
   #
-  # **Four of the eight are covered below. `min(country)`, the repeat-customer
-  # boundary and `n_orders`' invoice filter are still unguarded** — they are
-  # wrong-but-stable, where the four here are the ones that either move a
-  # published number or make the model disagree with itself between builds.
+  # **Five of the eight are covered below. The repeat-customer boundary and
+  # `n_orders`' invoice filter are still unguarded** — they are wrong-but-stable,
+  # where the others are the ones that either move a published number or make the
+  # model disagree with itself between builds.
+  #
+  # **The ninth defect was not found by mutating anything, and no mutation of
+  # this campaign would have reached it.** `max_by(country_iso3, country)` paired
+  # the code to the label — except that DuckDB's `arg_max` skips rows whose value
+  # argument is null, so a customer whose winning label was one of the three
+  # `not_a_country` seed rows got the *other* label's code. Every mutation above
+  # asks "what if this line said something else"; this line said the right thing
+  # and the aggregate underneath it did not. It came out of a code review, it was
+  # latent on all 13 multi-country customers, and it is now the third fixture
+  # below — which is also what finally pins `min(country)`.
   #
   # **Two fixtures, not one, and the reason is measured.** The tie-break and the
   # revenue filter both surface in the *same column* — `first_order_gbp` is the
@@ -893,12 +904,55 @@ unit_tests:
         - {customer_id: "C3", returned_gbp: null, return_rate_pct: null}
         - {customer_id: "C4", returned_gbp: null, return_rate_pct: null}
 
+  - name: customer_country_code_belongs_to_the_label_the_dimension_picked
+    model: dim_retail_customer
+    description: >
+      `country` and `country_iso3` are two aggregates over the same rows, and
+      the row is only coherent if they agree about which country won. The
+      pairing is what `max_by` is there for — but **`max_by` skips nulls**:
+      DuckDB's `arg_max` ignores rows whose value argument is null, and three
+      seed labels map to no code on purpose. So the plain
+      `max_by(country_iso3, country)` returned the code of a *different* label
+      whenever the winning one was `Unspecified`, `West Indies` or
+      `European Community`, which is precisely the mismatch the comment beside
+      it says it prevents. Wrapping the code in a struct keeps the row, because
+      a struct holding a null field is not itself null.
+
+      **A third fixture, and it is the only one that can see this.** All 13
+      multi-country customers in the extract use mapped labels, so the defect is
+      latent on today's data and no data test can reach it — `country_iso3` has
+      no `not_null` (the three labels are legitimately blank) and nothing
+      compares the two columns. The seed is exhaustive against the landing
+      table, so a new unmapped label from a re-ingest is the arrival path.
+
+      C5 is the pair that breaks: `Unspecified` sorts after `United Kingdom`, so
+      it wins the label and the code must come back null rather than `GBR`. C6
+      is the ordinary multi-country customer, present so the normal path is
+      asserted alongside the edge and so that swapping `max(country)` for
+      `min(country)` — a mutation the eight above left unguarded — fails here
+      too, on both rows.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          # C5 — one mapped label and one deliberately unmapped one. The
+          # unmapped label sorts last, so it wins, and its code is null.
+          - {invoice: "980", line_number: 1, customer_id: "C5", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 2, unit_price: 50.0, line_amount_gbp: 100.0, invoice_ts: "2024-04-01 09:00:00", invoice_date: "2024-04-01", invoice_month: "2024-04", country: "United Kingdom", country_iso3: "GBR", is_revenue_line: true}
+          - {invoice: "981", line_number: 1, customer_id: "C5", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 1, unit_price: 50.0, line_amount_gbp: 50.0, invoice_ts: "2024-04-02 09:00:00", invoice_date: "2024-04-02", invoice_month: "2024-04", country: "Unspecified", country_iso3: null, is_revenue_line: true}
+          # C6 — two mapped labels, so the code travels with the later one.
+          - {invoice: "990", line_number: 1, customer_id: "C6", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 2, unit_price: 30.0, line_amount_gbp: 60.0, invoice_ts: "2024-04-03 09:00:00", invoice_date: "2024-04-03", invoice_month: "2024-04", country: "France", country_iso3: "FRA", is_revenue_line: true}
+          - {invoice: "991", line_number: 1, customer_id: "C6", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 3, unit_price: 30.0, line_amount_gbp: 90.0, invoice_ts: "2024-04-04 09:00:00", invoice_date: "2024-04-04", invoice_month: "2024-04", country: "Germany", country_iso3: "DEU", is_revenue_line: true}
+    expect:
+      rows:
+        # The label wins and takes its own code with it — here, no code at all.
+        - {customer_id: "C5", country: "Unspecified", country_iso3: null, n_countries: 2, has_moved_country: true}
+        - {customer_id: "C6", country: "Germany", country_iso3: "DEU", n_countries: 2, has_moved_country: true}
+
   - name: weather_year_keeps_the_two_degree_day_conventions_apart
     model: fct_country_weather_year
     description: >
       The two `hdd` columns are the same shape, the same unit and the same order
       of magnitude, so swapping them in the final SELECT is a wrong answer that
-      is entirely legal — every data test on this mart passes on it. `_marts.yml`
+      is entirely legal — every data test on this mart passes on it. `_country_stats.yml`
       carried a comment claiming one convention is never colder than the other
       and that a test therefore caught the swap; both halves were false, and the
       expression under it was non-negativity that is invariant under the swap.

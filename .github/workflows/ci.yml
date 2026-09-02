@@ -46,7 +46,7 @@ jobs:
         run: |
           just dbt-parse
           uv run dagster definitions validate -m orchestration.definitions
-          uv run pytest tests/test_definitions.py tests/test_asset_checks.py tests/test_documented_counts.py
+          uv run pytest tests/test_definitions.py tests/test_asset_checks.py tests/test_documented_counts.py tests/test_additivity.py
 
       # Runs ingest -> dbt build + test -> Polars in asset-graph order, and
       # evaluates the asset checks alongside dbt's tests — all against fixtures.
@@ -70,7 +70,7 @@ jobs:
         env:
           PII_SALT: ci-not-a-release-salt
         run: |
-          uv run python -m scripts.export_warehouse
+          uv run python -m publish.export_warehouse
           cd data/export && sha256sum -c SHA256SUMS
 
       # The recipe, not a bare sqlfluff call: the paths (`models snapshots`) and

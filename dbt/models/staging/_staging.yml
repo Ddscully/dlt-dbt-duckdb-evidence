@@ -576,10 +576,21 @@ models:
   - name: stg_country
     config:
       group: reference
+      # `protected`, and the reason is smaller than it was. It used to be that
+      # marts in two other groups read this model directly for want of a
+      # published country dimension; `marts.dim_country` is that dimension now
+      # and they read it instead. What is left is two *staging* peers in
+      # `country_stats` — `stg_weather_daily` needs the capital coordinates and
+      # `stg_eu_electricity_prices_semiannual` needs the ISO2 -> ISO3 map — and
+      # pointing those at a mart would invert the layering to save an override.
       access: protected
     description: >
-      Country dimension, one row per country_iso3: World Bank `/country` plus
-      the `country_overrides` seed for the ISO3 codes it omits.
+      The World Bank `/country` endpoint cleaned, plus the `country_overrides`
+      seed for the ISO3 codes it omits. One row per country_iso3.
+
+      **`marts.dim_country` is the published country dimension; this is its
+      cleaning model.** Nothing outside `reference` should read this except the
+      two staging models named in the `access` comment above.
     columns:
       - name: country_iso3
         data_tests: [not_null, unique]
@@ -604,6 +615,12 @@ models:
                   - Upper middle income
                   - Lower middle income
                   - Low income
+      - name: is_manual_entry
+        description: >
+          True for the rows the `country_overrides` seed supplies. Carried
+          rather than inferred downstream, and not the same question as
+          `income_group is null` — the seed fills Taiwan's.
+        data_tests: [not_null]
       - name: latitude
         data_tests:
           - dbt_utils.accepted_range:
@@ -702,9 +719,29 @@ models:
         meta:
           pii: direct_identifier
       - name: country
+        description: >
+          The source's own label, 43 of them, kept as written. `relationships`
+          against `retail_country_map` is what makes a label the seed has never
+          seen loud: the resolution is a left join, so an unmapped label
+          otherwise lands as a null `country_iso3` and looks exactly like the
+          three labels that are deliberately unmappable.
         meta:
           pii: quasi_identifier
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('retail_country_map')
+                field: retail_country
+      - name: country_iso3
+        description: >
+          The conformed country key, resolved from `country` through
+          `retail_country_map`. Null on 871 lines (0.08%) whose label is an
+          aggregate or an absence rather than a place; deliberately *not*
+          `not_null` for that reason, and the seed test pins which rows may do
+          it.
+        meta:
+          pii: quasi_identifier
       - name: invoice_ts
         description: >
           Wall-clock shop time, stored naive. See `RETAIL_COLUMNS` in

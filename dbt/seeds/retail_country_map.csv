@@ -1,0 +1,44 @@
+retail_country,country_iso3,mapping_basis
+Australia,AUS,name_match
+Austria,AUT,name_match
+Bahrain,BHR,name_match
+Belgium,BEL,name_match
+Bermuda,BMU,name_match
+Brazil,BRA,name_match
+Canada,CAN,name_match
+Channel Islands,CHI,name_match
+Cyprus,CYP,name_match
+Czech Republic,CZE,alias
+Denmark,DNK,name_match
+EIRE,IRL,alias
+European Community,,not_a_country
+Finland,FIN,name_match
+France,FRA,name_match
+Germany,DEU,name_match
+Greece,GRC,name_match
+Hong Kong,HKG,alias
+Iceland,ISL,name_match
+Israel,ISR,name_match
+Italy,ITA,name_match
+Japan,JPN,name_match
+Korea,KOR,alias
+Lebanon,LBN,name_match
+Lithuania,LTU,name_match
+Malta,MLT,name_match
+Netherlands,NLD,name_match
+Nigeria,NGA,name_match
+Norway,NOR,name_match
+Poland,POL,name_match
+Portugal,PRT,name_match
+RSA,ZAF,alias
+Saudi Arabia,SAU,name_match
+Singapore,SGP,name_match
+Spain,ESP,name_match
+Sweden,SWE,name_match
+Switzerland,CHE,name_match
+Thailand,THA,name_match
+USA,USA,alias
+United Arab Emirates,ARE,name_match
+United Kingdom,GBR,name_match
+Unspecified,,not_a_country
+West Indies,,not_a_country

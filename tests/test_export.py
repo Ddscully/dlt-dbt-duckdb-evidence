@@ -1,4 +1,4 @@
-"""Unit tests for the publishable artifact (`scripts/export_warehouse.py`).
+"""Unit tests for the publishable artifact (`publish/export_warehouse.py`).
 
 These build a miniature warehouse in a tmp dir rather than reading
 `data/warehouse.duckdb` — no network, no fixtures, no dependency on whether the
@@ -32,8 +32,8 @@ from modern_data_stack import export as _export
 from modern_data_stack.db import scalar
 from modern_data_stack.ducklake import catalog_metadata, meta_alias, spec_version, version_key
 from modern_data_stack.export import storage_version
-from scripts import export_warehouse as _release
-from scripts.export_warehouse import (
+from publish import export_warehouse as _release
+from publish.export_warehouse import (
     ATTRIBUTION,
     MAX_PUBLISHED_LAKE_VERSION,
     MAX_PUBLISHED_STORAGE_VERSION,

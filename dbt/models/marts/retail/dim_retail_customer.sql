@@ -116,7 +116,26 @@ activity as (
         -- classic dimension bug, and 13 rows is exactly the size at which
         -- nobody notices.
         count(distinct country) as n_countries,
-        max(country) as country
+        max(country) as country,
+        -- `max_by`, not `max`: the code has to be the one belonging to the
+        -- label the line above picked. For the 13 customers who transact from
+        -- two countries a plain `max` on each column independently can name
+        -- one country and code another, which is a row that agrees with
+        -- nothing and reads as a mapping bug.
+        --
+        -- **The struct is load-bearing, because `max_by` skips nulls.**
+        -- DuckDB's `arg_max` ignores rows whose *value* argument is null, and
+        -- three seed labels map to no code on purpose (`Unspecified`,
+        -- `West Indies`, `European Community`, all `not_a_country`). So a
+        -- customer transacting from both `United Kingdom` and `Unspecified`
+        -- took the label `Unspecified` and the code `GBR` — exactly the
+        -- mismatch the paragraph above says this line prevents. A struct
+        -- holding a null field is not itself null, so the row survives the
+        -- aggregate and the pairing holds. Latent on current data: all 13
+        -- multi-country customers use mapped labels, which is why the guard is
+        -- a unit test rather than a data test.
+        (max_by({ 'country_iso3': country_iso3 }, country)).country_iso3
+            as country_iso3
     from lines
     group by customer_id
 )
@@ -124,6 +143,7 @@ activity as (
 select
     a.customer_id,
     a.country,
+    a.country_iso3,
     a.n_countries,
     a.n_countries > 1 as has_moved_country,
     f.first_order_date,

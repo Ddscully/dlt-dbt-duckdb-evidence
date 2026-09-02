@@ -67,7 +67,7 @@ markup as (
 ),
 
 countries as (
-    select * from {{ ref('stg_country') }}
+    select * from {{ ref('dim_country') }}
 ),
 
 -- The grid factor from `dim_grid_emission_factors`, purely as context. The

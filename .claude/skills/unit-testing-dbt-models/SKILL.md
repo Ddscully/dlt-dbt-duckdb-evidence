@@ -5,7 +5,7 @@ description: The twelve dbt models that carry unit tests and what mutating each 
 
 # Unit testing the models (`dbt/models/**/_unit_tests.yml`)
 
-Twenty-nine unit tests over twelve models. They exist because a data test cannot
+Thirty-one unit tests over twelve models. They exist because a data test cannot
 see a wrong answer that is a legal one, and every one of them was written after
 mutating the model and watching its data tests stay green. This file is the
 record of those mutations — what moved, what did not, and which fixture shapes
@@ -36,7 +36,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
 
 ## The twelve models, and what mutating each one proved
 
-- **There are twenty-nine unit tests, over twelve models, and they exist because a data
+- **There are thirty-one unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -57,7 +57,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   proves an answer is *in* the list, never that it is the right member of it. A
   misclassification moves money between buckets without changing any total, so no
   row-level constraint can see it. Mutated against a warehouse copy, running the
-  model's 19 data tests each time: dropping `upper()` from `stock_code` moves net
+  model's 20 data tests each time: dropping `upper()` from `stock_code` moves net
   revenue by **+GBP 1,702** and all 19 pass; sending `AMAZONFEE` to `product`
   moves it by **-GBP 260,764** and all 19 pass; removing
   `invoice_type <> 'adjustment'` from `is_revenue_line` changes **nothing at all**
@@ -122,7 +122,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
       gained a route, the row count held at 11,665 and the euro total held at
       EUR 2,462,927.40 to the cent. Every `accepted_range` and `not_null` on
       this mart is over a numeric column and the defect lived entirely in a
-      VARCHAR that no test named — `_marts.yml` gave it a `data_type` and
+      VARCHAR that no test named — `_compliance.yml` gave it a `data_type` and
       nothing else. A contract pins a column's shape; only a test pins its
       meaning.
     - **The mutation table missed it because a mutation can only break a rule
@@ -238,31 +238,60 @@ reasoning behind each is in `compliance-models`, `retail-models` and
       lowest line number, so `order by line_number, invoice` passed it too. It
       now puts the lowest line number on the highest invoice, and all three
       permutations fail.
-    - **…and that is still not enough: the test does not catch the tie-break
-      being deleted outright.** Separating the three *orderings* says nothing
-      about separating "ordered" from "not ordered at all". Delete the `qualify`
-      and `return_matches_break_a_tied_purchase_the_same_way_every_build` passes
-      — measured 2026-09-01, and measured at the commit *before* the test moved
-      to `int_retail_return_matches`, in a scratch `git worktree`, so it is the
-      test's own blind spot and not something the move introduced.
-      - The fixture is not the problem; the *harness* is. Loaded into a plain
-        DuckDB table the same four rows separate the cases cleanly — 700/5
-        without the tie-break, 700/3 with it — but dbt builds a mocked input as
-        a `union all` of literal selects, and in that shape the un-tie-broken
-        `asof join` happens to land on 700/3 anyway. So the test pins the
-        *answer* and not the *mechanism*, and the determinism it exists to guard
-        is unguarded.
-      - **The fix is a second tie group whose correct answer sits at a different
-        position** — first in one group, last in the other — so no single
-        positional bias can satisfy both, whatever order the harness feeds them
-        in. Do not "fix" it by reordering the existing rows: that pins the
-        current arbitrary pick, which is the bug wearing the fix's clothes.
+    - **…and that was still not enough: for a week the test did not catch the
+      tie-break being deleted outright.** Separating the three *orderings* says
+      nothing about separating "ordered" from "not ordered at all". Delete the
+      `qualify` and `return_matches_break_a_tied_purchase_the_same_way_every_build`
+      passed — measured 2026-09-01, and measured at the commit *before* the test
+      moved to `int_retail_return_matches`, so it was the test's own blind spot
+      and not something the move introduced. **Fixed the same day**, and the
+      repair is worth more than the defect, because the first diagnosis was wrong.
+      - **The mechanism is DuckDB's *parallel* asof join, not a deterministic
+        reordering.** The first reading was that dbt's `union all` of literal
+        selects fed the join in an order that made it land on the tie-break's
+        row anyway. It does not: over 300 runs of the compiled unit-test SQL the
+        un-tie-broken join returned **all three** tied rows — 135 / 86 / 79. At
+        `threads=1` it is deterministic and takes the first-listed row; at 2, 4
+        and 8 it spreads. So the old test was not blind, it was **flaky against
+        its own mutation**, passing 28.7% of runs (287/1,000) — which is how it
+        passed the two spot-checks that pronounced it broken-but-stable.
+      - **No fixture can make this certain, and that is a property of the bug.**
+        The mutated model returns *some* member of the tie group and the
+        tie-break's answer is always a member of that group, so every possible
+        expectation is reachable by luck. Row count cannot separate them either:
+        an `asof join` returns exactly one row per left row with or without the
+        `qualify` (50/50 runs, both ways). The test can only make a false pass
+        unlikely, and must say by how much.
+      - **Tie groups draw independently; extra probes into one group do not.**
+        Three return lines matching the *same* tied group gave identical picks
+        in 300/300 runs — the arbitrary choice is made once per group, so a
+        second return buys nothing and a second *group* multiplies. Four groups
+        take the false pass from 28.7% to **1.1%** (22/2,000), and to **0%**
+        single-threaded. The healthy model stays deterministic at 1, 2, 4 and 8
+        threads (100/100 each), so the strengthened test is never flaky in CI:
+        the nondeterminism exists only while the model is already broken.
+      - **Never list the winner first.** `dim_retail_customer`'s fixture below
+        puts its three winners last, first and in the middle, to defeat a
+        *positional rule* — right for a mutation that deterministically takes
+        one position (there, the first-listed row 92.5% of the time). Against a
+        random draw a winner-first group contributes almost nothing, because
+        first is exactly what the broken join picks. Vary the winner's position
+        among the **non-first** ones: 3rd of 3, 2nd of 3, 4th of 5, 2nd of 3.
+      - **The fix was already written on this page, for another model.** The
+        `dim_retail_customer` bullet below records "a test for a
+        non-determinism bug can itself be flaky" and the three-tied-customers
+        repair — learned there, and never carried across to the model whose
+        precedent it *was*. A lesson filed under one model is not a lesson
+        applied to the tree.
+      - Do not "fix" it by reordering the existing rows: that pins the current
+        arbitrary pick, which is the bug wearing the fix's clothes. Group 1 is
+        unchanged for exactly that reason; the other three were appended.
       - The general lesson is the one this whole page is built on, one turn
         further round: a mutation that a test survives is a finding about the
-        *test*. Run the mutation against the fixture's own data first — if the
-        model's real inputs separate the cases and the mocked ones do not, the
-        gap is the harness and no amount of fixture rows in the same shape will
-        close it.
+        *test* — and **a mutation it survives only sometimes is a finding about
+        what a single run can observe.** Re-run any mutation on a determinism
+        guard tens of times, not once; a single green run cannot tell a blind
+        test from a flaky one, and those need different repairs.
 - **`fct_retail_customer_cohorts` is the seventh, and the two things that define
   the triangle's *edge* were both untested.** Six mutations against its 11 data
   tests: `<=` to `<` on the ragged bound deletes the newest diagonal of every
@@ -287,6 +316,21 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   `>= 1` makes all 5,881 repeat customers, `n_orders` over every invoice type
   moves it 36,975 to 44,811, and dropping the sign flip takes the mean return
   rate from +5.89% to -5.89%.
+  - **The ninth defect was not reachable by mutation at all, and that is the
+    lesson.** `max_by(country_iso3, country)` pairs the code to the label
+    `max(country)` picked — but DuckDB's `arg_max` **skips rows whose value
+    argument is null**, and three seed labels map to no code on purpose
+    (`Unspecified`, `West Indies`, `European Community`). A customer
+    transacting from `United Kingdom` and `Unspecified` therefore took the
+    label `Unspecified` and the code `GBR`: a row that agrees with nothing, and
+    exactly what the comment beside the line claimed to prevent. Every mutation
+    in this campaign asks *what if this line said something else*; here the line
+    said the right thing and the aggregate underneath it did not — so the whole
+    method was blind to it, and a code review found it instead. Latent on all 13
+    multi-country customers, so no data test could reach it either. The fix is a
+    struct (`(max_by({ 'country_iso3': country_iso3 }, country)).country_iso3`),
+    because a struct holding a null field is not itself null; the guard is a
+    third fixture, which is also what finally pins `min(country)`.
   - **Dropping `, invoice` from `first_order_line`'s window makes the model
     non-reproducible**, exactly as `fct_retail_returns`' tied `asof` did. Four
     builds against byte-identical sources gave four different
@@ -317,7 +361,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     implementations *disagree*, which is the same lesson as the FX partitioning
     fixture and `lake_matches_warehouse`' two drift cases.
 - **`fct_country_weather_year` is the ninth, and it is the only one so far where
-  the *test's own premise* was the defect.** `_marts.yml` carried a
+  the *test's own premise* was the defect.** `_country_stats.yml` carried a
   `dbt_utils.expression_is_true` under a comment claiming the `(max + min)/2`
   degree-day convention "runs warmer than the mean-based one, never colder", by
   construction, and that this was therefore the one test catching the two totals

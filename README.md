@@ -13,47 +13,47 @@ dashboard.*
 ### 📊 [**See the live dashboard →**](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
 [![The Evidence dashboard: the Eight Findings page, with the site navigation, three headline figures and a scatter of the year each large emitter's CO₂ peaked](./docs/assets/dashboard.png)](https://ddscully.github.io/dlt-dbt-duckdb-evidence/findings)
+**A working data pipeline over seven public feeds, and a demonstration of the
+practices that keep a warehouse trustworthy.** It runs end to end — ingestion,
+modelling, tests, orchestration, a dashboard and a published data release — at
+two grains that are usually two different projects, because the modelling
+problems they pose are opposite.
 
-A data pipeline over seven public feeds, built at **two grains that are usually
-two different projects** — and deliberately kept in one warehouse, because the
-modelling problems they pose are opposite.
+- **Country-year**, the figures organisations are required to act on: the grid
+  carbon intensity behind every company's Scope 2 disclosure (30 g/kWh in Norway
+  against 717 in South Africa, a 24× spread on the same kilowatt-hour), what a
+  tonne of imported steel will cost at the EU border from 2026, and what
+  electricity actually costs in each EU market. Here the hard part is *coverage*:
+  which country is missing from which series, and what a join quietly drops.
+- **Transaction grain**, the questions annual averages cannot ask: one UK
+  wholesaler's complete 1.07M-line invoice log. Revenue depends on telling a
+  stock write-off from a customer return when both are a negative quantity;
+  returns are matched to their sale by inference, because nothing links them.
+  It is also the only source with a person in it, which is why
+  [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) exists.
 
-**Country-year: figures organisations are required to act on.** The grid carbon
-intensity that sits behind every company's Scope 2 disclosure (30 g/kWh in Norway
-against 717 in South Africa, a 24× spread on the same kilowatt-hour), what a
-tonne of imported steel will cost at the EU border from 2026, and what
-electricity actually costs in each EU market. Underneath those is the question
-the data was assembled for: how does a country's energy mix relate to its
-emissions and its people's wellbeing? CO₂, energy and development figures for
-~200 countries from [Our World in Data](https://github.com/owid/co2-data), the
+The feeds are [Our World in Data](https://github.com/owid/co2-data), the
 [World Bank](https://databank.worldbank.org/source/world-development-indicators),
-[Eurostat](https://ec.europa.eu/eurostat) and the
-[ECB](https://frankfurter.dev), cleaned, joined on ISO code and year, and
-charted. Here the hard part is coverage: which country is missing from which
-series, and what a join quietly drops.
+[Eurostat](https://ec.europa.eu/eurostat), the [ECB](https://frankfurter.dev),
+[Open-Meteo](https://open-meteo.com/) and
+[UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii),
+plus one EU regulatory annex that arrives as a seed — cleaned, joined on ISO code
+and year, and charted. [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) has the grains
+and schemas.
 
-**Transaction grain: the questions annual averages cannot ask.** One UK
-wholesaler's complete 1.07M-line invoice log
-([UCI Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)),
-the finest grain in the warehouse and the only source below a country. Revenue
-depends on telling a stock write-off from a customer return when both are a
-negative quantity; retention is a cohort triangle; returns are matched to the
-sale that produced them by inference, because nothing in the data links them. It
-is also the only source with a person in it, which is why
-[`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) exists.
-
-Every finding on the site names the decision it feeds, who makes that decision,
-and what it costs to get wrong.
+**👉 The practices are indexed in [`docs/PRACTICES.md`](./docs/PRACTICES.md)** —
+each one with the failure it prevents, the number that measures it, and a link to
+where it happens in the code. That is the shortest route into this repo if you
+are reading it as work rather than running it.
 
 No numbers are exported by hand. The whole thing rebuilds itself from the live
 sources on every push, so the site is never more than a week behind what those
-organisations publish.
+organisations publish, and every finding names the decision it feeds.
 
-<sub>Nothing to install to look at the numbers, just follow the link. The rest of
-this README is for people who want to run or read the pipeline, and if you're
-evaluating it as work, [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) is the
-short version: the SLA, what a run costs, what breaks at 1000×, and what I'd do
-differently.</sub>
+<sub>Nothing to install to look at the numbers, just follow the link above. The
+rest of this README is for people who want to run or read the pipeline; if you
+are evaluating it as work, [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md)
+answers the SLA, run-cost and what-breaks-at-1000× questions directly.</sub>
 
 ---
 
@@ -89,119 +89,58 @@ Want this shape for your own dataset?
 over unchanged, what has to be rewritten, and the four decisions that are
 expensive to revisit later.
 
-## The docs
-
-The README is the tour. The detail lives in six files:
-
-| | |
-|---|---|
-| [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the schemas they land in, and the Parquet lake beside them |
-| [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the Dagster asset graph, the three jobs, backfills and freshness policies |
-| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 440 dbt tests, the mart contracts, and the groups, exposures and model versions around them |
-| [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
-| [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
-| [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | SLA, run cost, what breaks at 1000×, what I'd do differently |
-
-And [`docs/course/`](./docs/course/) teaches the same warehouse as material for
-analytics engineers, built around the failures that stay green — a one-word join
-edit that drops two thirds of the countries with all 440 tests still passing, a
-cross-section that silently loses 115 of 205 countries. Modules 00–04 are
-written; 05–10 are outlined in the course index. It has its own sandbox
-(`just course-sandbox`) so the exercises can break things.
-
-Plus [`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) for SQL and model
-conventions, [`tests/README.md`](./tests/README.md) for the two test tiers,
-[`reports/README.md`](./reports/README.md) for the Evidence layer, and
-[`CLAUDE.md`](./CLAUDE.md) for every gotcha that cost more than an hour.
-
-## What's in it
-
-Seven feeds from five publishers, joined on **ISO country code + year**, plus one
-EU regulatory annex that arrives as a seed. Two decades of national emissions,
-energy mix, GDP and life expectancy; EU household electricity prices at their
-published half-year grain; the ECB's daily euro reference rates back to 1999; and
-one UK wholesaler's complete 1.07M-line transaction log, which is the only source
-here below country grain.
-
-`raw` lands as Parquet in the DuckLake catalog under `data/lakehouse/`. The
-other four schemas live in one DuckDB file: `staging` and `marts` (dbt),
-`history` (dbt snapshots) and `analytics` (Polars). Two things there no rebuild
-can reproduce — the snapshots in `history`, and `raw.om_weather_daily`, which
-costs more than a day of Open-Meteo's allowance — so both are carried forward
-from the previous release. Full detail in
-[`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md).
-
-The facts hang off an explicit country-year spine, `dim_country_year`, and not
-off whichever source happens to be widest. That's what makes coverage answerable:
-left-join the fact onto the spine and a gap comes back as a row you can count.
-
 ## Orchestration
 
-`just run` chains the steps in a shell. Dagster models the same pipeline as one
-asset graph, which is what lets you rebuild only what a change touched and see
-why a table is stale.
+`just run` chains the steps in a shell; Dagster models the same pipeline as one
+asset graph, which is what lets you rebuild only what a change touched.
 
 ```bash
 just dagster                              # UI on :3000: graph, runs, freshness, checks
 just materialize                          # whole graph, headless
-just materialize-site                     # ...plus the Evidence site (needs Node)
 just materialize-select 'raw/wb_wdi*'     # one source + everything downstream
 just backfill-wdi 1990 1995               # re-load WDI for a range of years
 ```
 
 Nothing declares the order by hand: dlt resource keys match the source keys
 dagster-dbt derives from `_sources.yml`, the model edges come from dbt's own
-`ref()` graph, and the Evidence site declares one dep per table its queries read.
-See [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) for the graph, the three
-jobs and the partitioned WDI backfill.
+`ref()` graph, and the site declares one dep per table its queries read. The
+graph, the three jobs and the partitioned backfill are
+[`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md).
 
-## Layout
+## The docs
 
-```
-.
-├── src/modern_data_stack/ # the domain-neutral half: paths, fixtures, lake,
-│                      #   ducklake, observability, export, carry-forward
-├── ingest/            # dlt pipeline: sources -> DuckLake (schema `raw`)
-├── orchestration/     # Dagster: the pipeline as an asset graph + schedule
-├── dbt/               # dbt-duckdb project
-│   ├── models/staging # 1:1 cleaned source views (stg_*)
-│   ├── models/marts   # the country-year spine (dim_*) + the facts (fct_*)
-│   ├── snapshots/     # SCD2 history: CO2 estimates + grid factors (schema `history`)
-│   └── macros/        # generate_schema_name -> clean schema names
-├── transform/         # Polars: derived metrics -> schema `analytics`
-├── lake/              # the DuckLake landing zone in data/lakehouse/:
-│                      #   where it is, and how to diff two snapshots
-├── tests/             # pytest + the recorded API fixtures CI runs against
-├── scripts/           # record_fixtures.py, export_warehouse.py (the release)
-├── reports/           # Evidence dashboard (BI as code)
-├── docs/              # the topic docs above, plus the style guide
-├── data/              # warehouse.duckdb lives here (gitignored)
-├── justfile           # orchestration recipes
-├── CLAUDE.md          # guidance for Claude Code / contributors
-├── .claude/           # agent skills for this repo + vendor plugin declarations
-└── .github/workflows  # CI
-```
+The README is the tour. The detail lives here:
 
-## Working on this with an AI agent
+| | |
+|---|---|
+| [`docs/PRACTICES.md`](./docs/PRACTICES.md) | **the practices this repo demonstrates, and where each one is in the code** |
+| [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the schemas they land in, and the Parquet lake beside them |
+| [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the Dagster asset graph, the three jobs, backfills and freshness policies |
+| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 460 dbt tests, the mart-model contracts, and the groups, exposures and model versions around them |
+| [`docs/DASHBOARD.md`](./docs/DASHBOARD.md) | the eleven dashboard pages, what each is for, and how the site is deployed |
+| [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
+| [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
+| [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | SLA, run cost, what breaks at 1000×, what I'd do differently |
+| [`docs/REUSING_THIS_STACK.md`](./docs/REUSING_THIS_STACK.md) | what carries over to a different dataset, and the decisions that are expensive to revisit |
 
-`.claude/settings.json` declares the official agent-skill plugins for the stack,
-[dbt](https://github.com/dbt-labs/dbt-agent-skills),
-[Dagster](https://github.com/dagster-io/skills),
-[Polars](https://github.com/polars-inc/skills),
-[DuckDB](https://github.com/duckdb/duckdb-skills) and
-[Astral](https://github.com/astral-sh/claude-code-plugins) (uv, ruff and ty), so
-Claude Code offers to install them the first time you trust the repo.
-`.claude/skills/` adds project-specific skills covering the seams the vendor
-ones can't know about — adding a source across five layers, the retail and
-compliance domains, and the Evidence layer, which has no vendor skill at all.
-See [CLAUDE.md](./CLAUDE.md#agent-skills) for the full picture.
+And [`docs/course/`](./docs/course/) teaches the same warehouse as material for
+analytics engineers, built around the failures that stay green — a one-word join
+edit that drops two thirds of the countries with all 460 tests still passing.
+Modules 00–04 are written; 05–10 are outlined in the course index.
+
+Plus [`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) for SQL conventions,
+[`tests/README.md`](./tests/README.md) for the two test tiers,
+[`reports/README.md`](./reports/README.md) for the Evidence layer, and
+[`CLAUDE.md`](./CLAUDE.md) for every gotcha that cost more than an hour —
+including the directory-by-directory map of what each layer is for. Working on
+this with an AI agent: `.claude/settings.json` declares the official skill
+plugins for the stack and `.claude/skills/` adds project-specific ones for the
+seams the vendor skills can't know about ([CLAUDE.md](./CLAUDE.md#agent-skills)).
 
 ## Quickstart
 
 Two things to install first. [uv](https://docs.astral.sh/uv/) manages Python and
-every dependency here; `just` runs the recipes, and uv is the tidiest way to get
-it — no system package manager, and it lands in the same place as your other uv
-tools:
+every dependency here; `just` runs the recipes.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh   # or `brew install uv`
@@ -215,37 +154,20 @@ just setup      # uv sync runtime + dev + orchestration groups
 just run        # ingest -> dbt build -> polars transform
 just dagster    # ...or the same pipeline as an asset graph, UI on :3000
 just sql        # poke around the warehouse in the DuckDB CLI
-just report     # build the Evidence dashboard
+just report     # build the Evidence dashboard (needs Node ≥ 18)
 ```
 
-No credentials at any point — every source is a public endpoint, and nothing but
-uv and `just` has to exist on the machine first: uv reads `.python-version` and
-fetches CPython 3.13 itself if you haven't got it.
+No credentials at any point — every source is a public endpoint, and uv reads
+`.python-version` and fetches CPython 3.13 itself if you haven't got it. The
+whole asset graph *including* the site took **3 minutes** here from a cold cache
+and `just run` alone is ~95 s; budget **~2.5 GB** on disk once built, all of it
+gitignored and regenerable (`just clean`, or `just clean deep` to drop
+`node_modules` too).
 
-For scale: the whole asset graph *including* the Evidence site took **3 minutes**
-here from a cold cache, most of it the one-off 45 MB retail workbook download,
-and `just run` on its own is ~95 s. Budget **~2.5 GB** on disk once everything is
-built — the venv is 807 MB and `reports/node_modules` another 694 MB, with the
-warehouse, the Parquet lake and the built site making up the rest. All of it is
-gitignored and all of it is regenerable: `just clean` reclaims the build output,
-`just clean deep` also drops `node_modules`.
-
-**On a plane, or don't want to hit seven public APIs?** `just test-pipeline`
-runs the entire pipeline offline in ~30 s against the fixtures in
-`tests/fixtures/ingest/`, into a throwaway warehouse — it is what CI runs.
-`just course-sandbox` does the same into a warehouse that persists, at
-`data/course/`, which is what the course exercises are built to break.
-
-One optional extra, wanted by exactly one recipe, so install it when you reach
-for it rather than up front:
-
-| | Needed by | Install |
-|---|---|---|
-| [Node](https://nodejs.org/) ≥ 18 | `just report`, `just materialize-site` | your package manager |
-
-`just sql` needs no separate install — the DuckDB CLI comes from the
-`duckdb-cli` dev dependency `just setup` already pulled in, pinned in
-`uv.lock` alongside the `duckdb` Python library.
+**On a plane, or don't want to hit seven public APIs?** `just test-pipeline` runs
+the entire pipeline offline in ~30 s against recorded fixtures, into a throwaway
+warehouse — it is what CI runs. `just course-sandbox` does the same into a
+warehouse that persists, which is what the course exercises are built to break.
 
 No `just`? The recipes map to plain commands; see the [`justfile`](./justfile).
 
@@ -257,58 +179,30 @@ just coverage       # the same, with line + branch coverage; gates nothing
 just test-pipeline  # the whole pipeline against recorded fixtures, ~30s
 ```
 
-Contributors should also run `uv run pre-commit install` once, for the ruff, SQL
-lint and whitespace hooks. CI runs the same hooks over every file, so a PR that
-skips them fails there instead.
-
 CI on a pull request runs both, plus the Dagster asset graph and the asset
-checks, entirely offline: `INGEST_FIXTURES=1` serves all seven sources from
-`tests/fixtures/ingest/`. A red build therefore means *this repo* broke, not that
-OWID was rate-limiting. A separate nightly workflow runs the same graph against
-the live endpoints and opens an issue when a source has moved, which is the cue
-to fix the pipeline and `just record-fixtures`. Details in
+checks, entirely offline — so a red build means *this repo* broke, not that a
+publisher was rate-limiting. A nightly workflow runs the same graph against the
+live endpoints and opens an issue when a source has moved, which is the cue to
+`just record-fixtures`. Contributors should run `uv run pre-commit install` once;
+CI runs the same hooks over every file. Details in
 [`tests/README.md`](./tests/README.md).
 
-Alongside them, `just dbt-build` runs 469 tests — 440 data tests and 29 unit
-tests — and enforces a schema contract on all 17 marts. What each gate catches,
-and the groups, exposures and model versions built around them, are in
-[`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md).
+Alongside them, `just dbt-build` runs 491 tests — 460 data tests and 31 unit
+tests — and enforces a schema contract on every mart model. What each gate catches is
+[`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md); why the gates are shaped that
+way is [`docs/PRACTICES.md`](./docs/PRACTICES.md).
 
 ## Published dashboard
 
 ### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-Eleven pages, built from the modelled layers. No year is hardcoded: every page reads
-the latest year each metric family can actually populate from
-`sources/warehouse/latest_years.sql`, because coverage doesn't end in the same
-year for all of them.
-
-| Page | What's on it |
-|------|--------------|
-| **Home** | A routing page: pick the analysis that matches what you're responsible for. |
-| **CBAM Exposure** | What a tonne of an imported CBAM good costs at the EU border, by where it was made: Annex I of Implementing Regulation (EU) 2025/2621, as corrected by (EU) 2026/1740, priced at a carbon price you choose. Semi-finished steel runs 63× from Azerbaijan to Indonesia, and the ranking sorts by *production route* rather than by the national grid, which is the opposite of the Scope 2 story. A screening tool, not a filing. |
-| **Scope 2 Factors** | The same grid carbon-intensity series read as what it also is: the location-based Scope 2 emission factor a company multiplies its metered kWh by for a CSRD, SECR or CDP disclosure. `marts.dim_grid_emission_factors` as a reference table with its vintage and lineage, a worked example over twelve *invented* sites, and the three caveats a practitioner checks first. |
-| **Retail Transactions** | One retailer's 1.07M invoice lines, the only page here below country grain. What counts as revenue when a negative quantity on a sale invoice is a stock write-off and not a return, cohort retention read as a triangle, what a customer's first order predicts about their lifetime value, RFM segmentation where SQL's `ntile` would split 3,227 customers away from their identical peers, and returns matched to their sale by inference. |
-| **Currency** | The ECB's daily euro reference rates, and the three problems an annual warehouse never has to answer. 30% of calendar days carry no rate, so the daily table carries the last fixing forward, capped, because the two interior gaps in the series are the Icelandic króna after 2008 and the Argentine peso in 2002, not long weekends. Spot against average, and what it changes about a number already on the site: EU household electricity rose 35% or 13.5% from 2021-S1 to 2022-S2 depending only on whether you counted in euros or dollars. |
-| **Weather** | Capital-city degree days as a control variable: "was it just a colder year" is the cheapest competing explanation for any energy or emissions movement, and this is the page that rules it in or out. Across 499 country-years of EU/EEA capitals the year-over-year change in heating demand explains 0.0% of the year-over-year change in household electricity price, and never more than 11.1% in any single year. Also: the two degree-day conventions disagreeing by up to 18.7%, the capital-as-proxy distance carried as a number, and why the current year is filtered out of every comparison. |
-| **Eight Findings** | Eight write-ups on the joined data: when each country's emissions peaked, that the cleanup happened in electricity and coal is most of it, real-terms decoupling, whether it's just offshoring (it isn't, mostly), emissions tracking income rather than headcount, cumulative vs. current responsibility, carbon intensity falling while absolute tonnes rise, and the gap between the cleanest and dirtiest grids refusing to close. |
-| **Country Explorer** | The same data with a year selector on it, for checking a specific country or year yourself instead of reading a conclusion. |
-| **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
-| **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. |
-| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 440 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
-
-`.github/workflows/pages.yml` builds it as a single `publish_site` job. The site
-is a node in the asset graph (`reports/evidence_site`), so the workflow
-materializes it instead of running npm itself. It builds against the **live**
-sources rather than the fixtures — a published dashboard showing the 17-country
-test slice would be worse than none — weekly, on demand, and on any push to
-`main` that touches something the site is built from. That last one is a
-`paths:` allowlist rather than a `paths-ignore`, because `reports/pages/` is
-markdown and ignoring markdown would stop republishing exactly when a page
-changed.
-
-Setting this up yourself takes three things nobody tells you about; they're in
-[`reports/README.md`](./reports/README.md#deploying-to-github-pages).
+Eleven pages built from the modelled layers, deployed by
+`.github/workflows/pages.yml` as a single Dagster job — the site is a node in the
+asset graph, so the workflow materializes it rather than running npm itself. It
+builds against the **live** sources, because a published dashboard showing the
+17-country test slice would be worse than none. What is on each page, and the
+three deployment things nobody tells you about, are in
+[`docs/DASHBOARD.md`](./docs/DASHBOARD.md).
 
 ## Published data
 
@@ -339,20 +233,10 @@ euro reference rates are the ECB's, under its
 [Open-Meteo](https://open-meteo.com/) under CC BY 4.0, generated using Copernicus
 Climate Change Service information (ECMWF ERA5).
 
-**Open-Meteo's data licence and its API terms are separate, and only one of them
-restricts you.** The CC BY 4.0 above governs the numbers, so the release
-redistributes them like every other source here. The *free API tier* is
-additionally limited to non-commercial use and to 10,000 calls a day — that
-binds this pipeline, which is why `raw.om_weather_daily` is paced and carried
-forward between releases rather than refetched, and it does not follow anyone
-who downloads the result.
-
-**One source was deliberately left out on licence grounds.** Annexes II and III
-of the CBAM regulation, the country electricity emission factors, are IEA data
-under CC BY-NC-SA 4.0. Ingesting them would put a non-commercial and share-alike
-restriction on a data release that is otherwise entirely permissive, so the
-warehouse uses its own OWID-derived `dim_grid_emission_factors` instead and the
-CBAM page says plainly that the two are not the same measurement.
+Two licence decisions shaped the warehouse rather than just its paperwork — one
+source left out entirely, and one whose data licence and API terms are different
+documents. Both are in
+[`docs/PRACTICES.md`](./docs/PRACTICES.md#6-the-boundary-outward).
 
 All six permit redistribution with attribution, which is what the data releases
 rely on. Every one ships an `ATTRIBUTION.md` naming the publisher and licence per

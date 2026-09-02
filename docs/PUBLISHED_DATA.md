@@ -7,6 +7,15 @@ too, so you can use the joined data without running any of this. Each release
 carries the whole DuckDB file plus a Parquet per modelled table, `manifest.json`
 (row counts, year coverage, SHA-256 per asset) and `SHA256SUMS`.
 
+**`manifest.json` also says which columns may be summed.** Its `additivity` map
+labels all 280 numeric columns of every published `marts` and `analytics` table
+`additive`, `semi_additive`, `non_additive` or `not_a_measure` — half of them
+are non-additive, and a Parquet file has no way
+of telling you that `sum(renewables_share_pct)` is nonsense that returns a
+number. Where a column is `semi_additive` its description says which direction
+fails: `population` adds across countries and gives person-years across years,
+`cumulative_co2` is a stock that recounts every earlier year.
+
 ## Querying it
 
 DuckDB reads a remote database over HTTPS, so you can query it where it sits:
@@ -27,7 +36,7 @@ SELECT * FROM read_parquet('https://github.com/Ddscully/dlt-dbt-duckdb-evidence/
 ```
 
 `.github/workflows/release-data.yml` builds it from the live sources monthly (the
-publishers update annually) or on demand, and `scripts/export_warehouse.py`
+publishers update annually) or on demand, and `publish/export_warehouse.py`
 packages it. `just export-data` does the same thing locally, into `data/export/`.
 Tags are dated, `data-YYYY-MM-DD`; `releases/latest/download/…` always resolves
 to the newest one, so the URLs above never go stale.
@@ -85,7 +94,7 @@ The Parquet files carry no such constraint, which is why both ship.
 from scratch each time. The two SCD2 snapshots — OWID's CO₂ estimates and the
 grid emission factors — can't be, since a revision only leaves a trace if you
 were holding the previous number. Each release downloads its predecessor and
-copies `history` in before it builds (`scripts/restore_history.py`), so the
+copies `history` in before it builds (`publish/restore_history.py`), so the
 releases accumulate a genuine revision log. `manifest.json` reports how much of
 one.
 
@@ -94,5 +103,5 @@ one.
 Releases redistribute upstream data, which the repository itself doesn't. All the
 sources permit it with attribution, so every release ships an `ATTRIBUTION.md`
 naming the publisher and licence per source, and the release notes repeat it.
-`ATTRIBUTION` in `scripts/export_warehouse.py` is the single source of truth for
+`ATTRIBUTION` in `publish/export_warehouse.py` is the single source of truth for
 both. Keep it in step with the README's licence section when a source is added.
