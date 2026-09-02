@@ -32,6 +32,29 @@ and [`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). Those files carry the
 start duplicating each other. A change to how a layer works usually needs an edit
 in `docs/` **and** here.
 
+[`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) (2026-09-02) is the one
+file in `docs/` that describes **something the repo has not built** — an
+always-on deployment, why it is a `just serve` recipe rather than a container,
+and publish-and-swap around the single-writer lock. It says so in its first
+paragraph, which is the only thing stopping a reader typing a recipe that does
+not exist: `tests/test_course.py` checks backticked paths and `just` recipes in
+the *course* and the *skills*, never in `docs/`, so a doc proposing unbuilt
+tooling fails no guard.
+
+**Writing it corrected a skill, which is the part worth carrying.**
+`querying-the-warehouse` said `just sql` "can sit alongside a build" because it
+opens read-only. Measured on the pinned DuckDB 1.5.5, across processes and in
+both directions, that is false: the rule is **one writer XOR many readers**, so a
+read-only connection fails while a build holds the file and a build fails while
+anyone is reading it. `read_only=True` buys compatibility with other *readers*,
+never with a build — the one read that genuinely works mid-build is
+`lake.lakehouse.read_only_connection()`, which opens the catalog and never the
+warehouse. The measured table lives in that skill; the second finding, that
+Evidence's `filename` can be redirected by `EVIDENCE_SOURCE__warehouse__filename`
+but is `path.join`ed onto the source directory so an absolute path is silently
+relocated, is in `building-evidence-reports`. Both are skill knowledge rather
+than a new section here.
+
 **[`PRACTICES.md`](docs/PRACTICES.md) is the odd one out and is the README's main
 entry point** (2026-09-01): not a topic but an *index over* the topics — each
 practice this repo demonstrates, the failure it prevents, the number that

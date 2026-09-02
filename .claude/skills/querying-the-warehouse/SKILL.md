@@ -29,9 +29,35 @@ a lock error. `read_only=True` costs nothing and avoids the whole class of
 problem. This is also why the Dagster graph uses `in_process_executor` and puts
 all five dlt resources in one op: parallel steps would just fight over the lock.
 
-For interactive poking, `just sql` opens the DuckDB CLI read-only, so it can sit
-alongside a build. `just sql write` takes the writer lock — close it before running the
-pipeline.
+For interactive poking, `just sql` opens the DuckDB CLI read-only, which is the
+right default — but **it does not let you sit alongside a build, and this skill
+said it did until 2026-09-02.** Measured on the pinned DuckDB 1.5.5 against
+`data/warehouse.duckdb` itself, driving the recipe rather than a library: `just
+sql` exits 1 with `Could not set lock on file … Conflicting lock is held`, and
+the Python client agrees. Both directions, across processes:
+
+| Held by another process | A read-only connection | A read-write connection |
+|---|---|---|
+| read-write | **fails** — this is `just sql` during a build | fails |
+| read-only | succeeds | **fails** — this is the next `just run` |
+
+The stand-in for the build was a read-write connection running no DML, which
+takes the identical lock; the file was byte-identical before and after, so the
+measurement costs nothing to repeat.
+
+So the rule is **one writer XOR many readers**, and `read_only=True` buys
+compatibility with *other readers*, never with a build. Both nuisances follow: a
+forgotten `just sql` blocks the next `just run`, not only a `just sql write` one,
+and a running build locks out every inspection until it finishes. Close the
+session before building, and use
+[`lake.lakehouse.read_only_connection()`](../../../lake/lakehouse.py) to query
+`raw` mid-build — that opens the catalog, never the warehouse, which is why it
+is the one read that genuinely does work alongside one.
+
+The way out is not a connection flag: it is to stop writing to the file anyone
+reads. [`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md)
+§4 designs that — build into a scratch warehouse and swap it in — for a
+deployment that has to serve reads and rebuild on a schedule.
 
 ## Schema names have no prefix
 
