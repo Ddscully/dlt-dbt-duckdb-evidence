@@ -87,9 +87,24 @@ serve: where dbt-parse
 
 Three things in that block are load-bearing:
 
-- **`dagster-webserver` and `dagster-daemon`, not `dagster dev`.** Dagster
-  documents `dagster dev` as a local-development entry point; it runs both in
-  one process tree with no supervision of either half.
+- **`dagster-webserver` and `dagster-daemon`, not `dagster dev`.** Checked
+  upstream rather than assumed, and in two places. The help text shipped with
+  the pinned Dagster (1.13.19) describes the command as starting "a **local**
+  deployment of Dagster, including dagster-webserver running on localhost and
+  the dagster-daemon running in the background" — local, and both in one
+  invocation. The docs go further, listing what dev mode does not give you:
+  authentication or web security, multiple webserver replicas, zero-downtime
+  deployment, and **automatic daemon restart**. That last one is exactly what
+  the systemd unit below supplies, which is the whole of why the split is worth
+  making.
+
+  **The wording to know about:** the explicit "intended for local development
+  *only*" warning is written on the docs page about **`dg dev`**, the newer
+  CLI's equivalent — and `dg` is a tool this project deliberately does not
+  install. The reasons it gives are about process architecture rather than about
+  which CLI typed them, and the shipped `dagster dev` help says "local
+  deployment" in its own words, so the conclusion carries. But the sentence
+  somebody will go looking for is not phrased about the command used here.
 - **`dbt-parse` as a dependency, not an afterthought.** `prepare_if_dev()` in
   [`orchestration/resources.py`](../orchestration/resources.py) fires only under
   the dev CLI, which sets `DAGSTER_IS_DEV_CLI`. Run the webserver directly and it
