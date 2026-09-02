@@ -249,9 +249,9 @@ that got *dirtier* did the same thing in reverse, Vietnam going from 21% coal to
 50% and Indonesia from 39% to 61%, while their absolute generation more than
 doubled.
 
-This is also the widest series in the warehouse. `carbon_intensity_elec_g_kwh`
-covers about 210 countries against 79 for `renewables_share_pct`, because OWID's
-broad-coverage energy series is the electricity mix rather than the
+This is also the widest series in the warehouse: grid carbon intensity covers
+about 210 countries against 79 for renewables' share of all energy, because
+OWID's broad-coverage energy series is the electricity mix and not the
 primary-energy mix. Of the 108 countries generating more than 10 TWh, **70% are
 cleaner per kWh than they were in 2005.**
 
@@ -273,10 +273,10 @@ decarbonisation that has gone well; it is not the whole of it.
 
 <Alert status=info>
 
-**So what.** `carbon_intensity_elec_g_kwh` is not only a climate statistic. It
-is the **location-based Scope 2 emission factor**, the number a multi-site
-company multiplies its metered kWh by to produce the electricity line in a CSRD,
-SECR or CDP disclosure. Across the largest grids in the table above it runs from
+**So what.** Grid carbon intensity is not only a climate statistic. It is the
+**location-based Scope 2 emission factor**, the number a multi-site company
+multiplies its metered kWh by to produce the electricity line in a CSRD, SECR or
+CDP disclosure. Across the largest grids in the table above it runs from
 Norway at 30 g/kWh to South Africa at 717 g/kWh, a **24× spread**: an identical
 100 GWh/year site reports roughly 3 kt CO₂e in one and 72 kt in the other, having
 changed nothing but its address.
@@ -872,9 +872,9 @@ chosen once and not moved to suit a chart.
 <small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
 <a href="https://github.com/owid/energy-data">OWID Energy</a>,
 <a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.
-Coverage caveats: the mart sits on a country-year spine, so a row exists wherever
-any source reports and the columns the others don't cover are null, so the charts
-above filter for what they need. The narrowest column used here is
-<code>consumption_co2</code> (~120 countries); <code>renewables_share_pct</code>
-covers 79 and <code>carbon_intensity_elec_g_kwh</code> about 210. 11 small
-territories have World Bank data but no OWID emissions.</small>
+Coverage caveats: a row exists wherever any source reports, with nulls in the
+columns the others don't cover, so the charts above filter for what they need.
+The narrowest column used here is <code>consumption_co2</code> (~120 countries);
+<code>renewables_share_pct</code> covers 79 and
+<code>carbon_intensity_elec_g_kwh</code> about 210. 11 small territories have
+World Bank data but no OWID emissions.</small>
