@@ -13,11 +13,11 @@ dashboard.*
 ### 📊 [**See the live dashboard →**](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
 [![The Evidence dashboard: the Eight Findings page, with the site navigation, three headline figures and a scatter of the year each large emitter's CO₂ peaked](./docs/assets/dashboard.png)](https://ddscully.github.io/dlt-dbt-duckdb-evidence/findings)
-**A working data pipeline over seven public feeds, and a demonstration of the
-practices that keep a warehouse trustworthy.** It runs end to end — ingestion,
-modelling, tests, orchestration, a dashboard and a published data release — at
-two grains that are usually two different projects, because the modelling
-problems they pose are opposite.
+
+A working pipeline over seven public feeds: ingestion, modelling, tests,
+orchestration, a dashboard and a published data release. It covers two grains
+that are usually two separate projects, because the modelling problems they pose
+are opposite.
 
 - **Country-year**, the figures organisations are required to act on: the grid
   carbon intensity behind every company's Scope 2 disclosure (30 g/kWh in Norway
@@ -37,56 +37,43 @@ The feeds are [Our World in Data](https://github.com/owid/co2-data), the
 [Eurostat](https://ec.europa.eu/eurostat), the [ECB](https://frankfurter.dev),
 [Open-Meteo](https://open-meteo.com/) and
 [UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii),
-plus one EU regulatory annex that arrives as a seed — cleaned, joined on ISO code
-and year, and charted. [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) has the grains
-and schemas.
+plus one EU regulatory annex that arrives as a seed. All of it is cleaned, joined
+on ISO code and year, and charted. [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) has
+the grains and schemas.
 
-**👉 The practices are indexed in [`docs/PRACTICES.md`](./docs/PRACTICES.md)** —
-each one with the failure it prevents, the number that measures it, and a link to
-where it happens in the code. That is the shortest route into this repo if you
-are reading it as work rather than running it.
+[`docs/PRACTICES.md`](./docs/PRACTICES.md) indexes the practices this repo
+demonstrates: each with the failure it prevents, the number that measures it,
+and a link to where it happens in the code. It is the shortest route in if you
+are reading the repo rather than running it.
 
-No numbers are exported by hand. The whole thing rebuilds itself from the live
-sources on every push, so the site is never more than a week behind what those
-organisations publish, and every finding names the decision it feeds.
+No numbers are exported by hand: the site rebuilds from the live sources on every
+push, so it is never more than a week behind what the publishers release.
 
-<sub>Nothing to install to look at the numbers, just follow the link above. The
-rest of this README is for people who want to run or read the pipeline; if you
-are evaluating it as work, [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md)
-answers the SLA, run-cost and what-breaks-at-1000× questions directly.</sub>
+<sub>Nothing to install to look at the numbers; follow the link above. The rest
+of this README is for running or reading the pipeline;
+[`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) answers the SLA, run-cost and
+what-breaks-at-1000× questions.</sub>
 
 ---
 
 > ### ⚠️ What this project has and has not done yet
 >
-> **The work so far has gone into the engineering, not the analysis.** The
-> deliberate goal was to get an initial stack and a set of working methods in
-> place — ingestion, modelling, contracts, tests, lineage, orchestration, a
-> publication boundary — and that is what has been built and measured. It was
-> done largely during a period of promotional access to Claude, so the pace
-> reflects the tooling available at the time rather than a sustained
-> engineering effort.
+> - **The engineering is built and measured**: ingestion, modelling, contracts,
+>   tests, lineage, orchestration, a publication boundary. Judge that.
+> - **The analysis has not had the same scrutiny.** The pipeline does what it
+>   says; whether the questions are the right ones is untested. Treat the
+>   conclusions as illustrative.
+> - **`fct_example_scope2_emissions` is fabricated data** over twelve invented
+>   sites, and it ships in the public release.
+> - **Coverage thins unevenly per column.** Several cross-source comparisons rest
+>   on it and no chart restates it.
 >
-> **The validity of the results and the quality of the analysis are still
-> outstanding.** The figures on the dashboard are computed correctly from the
-> sources in the sense that the pipeline does what it says — the transformations
-> are tested, the grains are enforced and the numbers are reproducible. What has
-> *not* had the same scrutiny is whether the questions are the right ones,
-> whether the indicators chosen actually answer them, and whether the
-> interpretations on the findings pages survive contact with a domain expert.
-> Treat the analytical conclusions as illustrative of what the stack can express,
-> not as claims to rely on.
->
-> Two specifics worth naming rather than burying: `fct_example_scope2_emissions`
-> is **fabricated data** over twelve invented sites, included so the Scope 2
-> model has something to demonstrate on, and it ships in the public release;
-> and several cross-source comparisons rest on coverage that thins unevenly per
-> column, which [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) documents but no chart
-> restates.
+> Why each of those, at length:
+> [`docs/FOR_REVIEWERS.md` §0](./docs/FOR_REVIEWERS.md#0-what-this-is-not-yet).
 
 ---
 
-The stack is deliberately **lightweight**. Everything runs locally with `uv`:
+The stack is deliberately lightweight. Everything runs locally with `uv`:
 raw lands as Parquet in a DuckLake catalog, and dbt builds into a single DuckDB
 file — no cloud warehouse, no credentials, no bill.
 
@@ -161,7 +148,7 @@ Modules 00–04 are written; 05–10 are outlined in the course index.
 Plus [`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) for SQL conventions,
 [`tests/README.md`](./tests/README.md) for the two test tiers,
 [`reports/README.md`](./reports/README.md) for the Evidence layer, and
-[`CLAUDE.md`](./CLAUDE.md) for every gotcha that cost more than an hour —
+[`CLAUDE.md`](./CLAUDE.md) for every gotcha that cost more than an hour,
 including the directory-by-directory map of what each layer is for. Working on
 this with an AI agent: `.claude/settings.json` declares the official skill
 plugins for the stack and `.claude/skills/` adds project-specific ones for the
@@ -187,17 +174,17 @@ just sql        # poke around the warehouse in the DuckDB CLI
 just report     # build the Evidence dashboard (needs Node ≥ 18)
 ```
 
-No credentials at any point — every source is a public endpoint, and uv reads
+No credentials at any point; every source is a public endpoint. uv reads
 `.python-version` and fetches CPython 3.13 itself if you haven't got it. The
 whole asset graph *including* the site took **3 minutes** here from a cold cache
 and `just run` alone is ~95 s; budget **~2.5 GB** on disk once built, all of it
 gitignored and regenerable (`just clean`, or `just clean deep` to drop
 `node_modules` too).
 
-**On a plane, or don't want to hit seven public APIs?** `just test-pipeline` runs
-the entire pipeline offline in ~30 s against recorded fixtures, into a throwaway
-warehouse — it is what CI runs. `just course-sandbox` does the same into a
-warehouse that persists, which is what the course exercises are built to break.
+Offline, or would rather not hit the public endpoints? `just test-pipeline` runs
+the whole pipeline in ~30 s against recorded fixtures, into a throwaway
+warehouse. `just course-sandbox` does the same into a warehouse that persists,
+which is what the course exercises are built to break.
 
 No `just`? The recipes map to plain commands; see the [`justfile`](./justfile).
 
@@ -217,26 +204,26 @@ live endpoints and opens an issue when a source has moved, which is the cue to
 CI runs the same hooks over every file. Details in
 [`tests/README.md`](./tests/README.md).
 
-Alongside them, `just dbt-build` runs 491 tests — 460 data tests and 31 unit
-tests — and enforces a schema contract on every mart model. What each gate catches is
-[`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md); why the gates are shaped that
-way is [`docs/PRACTICES.md`](./docs/PRACTICES.md).
+Alongside them, `just dbt-build` runs 491 tests (460 data tests and 31 unit
+tests) and enforces a schema contract on every mart model. What each gate catches
+is [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md); why the gates are shaped
+that way is [`docs/PRACTICES.md`](./docs/PRACTICES.md).
 
 ## Published dashboard
 
-### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
+### [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
 Eleven pages built from the modelled layers, deployed by
-`.github/workflows/pages.yml` as a single Dagster job — the site is a node in the
+`.github/workflows/pages.yml` as a single Dagster job. The site is a node in the
 asset graph, so the workflow materializes it rather than running npm itself. It
 builds against the **live** sources, because a published dashboard showing the
 17-country test slice would be worse than none. What is on each page, and the
-three deployment things nobody tells you about, are in
+three deployment gotchas behind it, are in
 [`docs/DASHBOARD.md`](./docs/DASHBOARD.md).
 
 ## Published data
 
-### 👉 [Latest snapshot](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest)
+### [Latest snapshot](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest)
 
 The dashboard is one consumer of the warehouse. The warehouse itself is published
 monthly, so you can use the joined data without running any of this: the whole
@@ -263,15 +250,15 @@ euro reference rates are the ECB's, under its
 [Open-Meteo](https://open-meteo.com/) under CC BY 4.0, generated using Copernicus
 Climate Change Service information (ECMWF ERA5).
 
-Two licence decisions shaped the warehouse rather than just its paperwork — one
+Two licence decisions shaped the warehouse rather than just its paperwork: one
 source left out entirely, and one whose data licence and API terms are different
 documents. Both are in
 [`docs/PRACTICES.md`](./docs/PRACTICES.md#6-the-boundary-outward).
 
-All six permit redistribution with attribution, which is what the data releases
-rely on. Every one ships an `ATTRIBUTION.md` naming the publisher and licence per
-source. Attribute them, not this repo, for the numbers; the joins and derived
-metrics are the only part that's ours. Nothing upstream is redistributed in the
-repository *itself*: the pipeline fetches it at run time, and the checked-in
-fixtures under `tests/fixtures/ingest/` are small excerpts kept for offline
-testing.
+Every one permits redistribution with attribution, which is what the data
+releases rely on; each release ships an `ATTRIBUTION.md` naming the publisher
+and licence per source. Attribute them, not this repo, for the numbers; the
+joins and derived metrics are the only part that's ours. Nothing upstream is
+redistributed in the repository *itself*: the pipeline fetches it at run time,
+and the checked-in fixtures under `tests/fixtures/ingest/` are small excerpts
+kept for offline testing.

@@ -62,6 +62,27 @@ not a fixed record.
 
 **[Pipeline](/pipeline)** reports the operational state of the load itself.
 
+## What this project has and has not done yet
+
+<Alert status=warning>
+
+- **The engineering is built and measured**: ingestion, modelling, contracts,
+  tests, lineage, orchestration, a publication boundary.
+- **The analysis has not had the same scrutiny.** The pipeline does what it says;
+  whether these are the right questions is untested. Treat the conclusions on
+  these pages as illustrative, not as claims to rely on.
+- **The Scope 2 worked example is fabricated data** over twelve invented sites,
+  present so the model has something to demonstrate on. Every other figure on
+  this site is a live query against a public source.
+- **Coverage thins unevenly per column.** Several cross-source comparisons rest
+  on it and no chart restates it, which is what
+  **[Coverage](/coverage)** is for.
+
+</Alert>
+
+Why each of those, at length: [what this is not,
+yet](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/docs/FOR_REVIEWERS.md#0-what-this-is-not-yet).
+
 ---
 
 <small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
