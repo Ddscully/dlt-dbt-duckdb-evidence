@@ -17,6 +17,37 @@ own CI history — none of it is estimated.
 
 ---
 
+## 0. What this is not, yet
+
+**Judge the engineering; the analysis is not finished.** The work so far has
+deliberately gone into getting an initial stack and a set of working methods in
+place — ingestion, modelling, contracts, tests, lineage, orchestration and a
+publication boundary. That is what the numbers on this page measure, and it is
+what the repo is asking to be read as. It was built largely during a period of
+promotional access to Claude, so the throughput reflects the tooling available
+at the time rather than a sustained engineering effort.
+
+**What has not had the same scrutiny is the analysis itself.** The pipeline is
+correct in the sense that it does what it says: the transformations are tested,
+the grains are enforced and the figures are reproducible from the sources. Not
+yet established is whether the questions are the right ones, whether the chosen
+indicators answer them, and whether the interpretations survive contact with a
+domain expert. §1 below describes decisions this warehouse is *shaped to serve*
+— read it as the design intent, not as a claim that the conclusions are
+validated.
+
+Two things named here rather than left to be discovered:
+`marts.fct_example_scope2_emissions` is **fabricated data** over twelve invented
+sites, present so the Scope 2 model has something to demonstrate on, and it
+ships in the public release; and several cross-source comparisons rest on
+coverage that thins unevenly per column
+([`WAREHOUSE.md`](WAREHOUSE.md) documents it, no chart restates it).
+
+§5 is the engineering counterpart to this section — what I would do differently
+about how it was built, rather than about what it concludes.
+
+---
+
 ## 1. What decision does this serve?
 
 Four real ones, and they are the reason the "So what" boxes exist on the

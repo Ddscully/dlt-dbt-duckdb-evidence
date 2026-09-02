@@ -1102,6 +1102,31 @@ the point of the layer is that none of it is a comment.
     project does not install). `dagster asset list --select '<sel>'` is the
     read-only way to see what a selection resolves to before materialising it.
 
+- **The bus matrix is derived from the manifest, never written**
+  (`modern_data_stack.bus_matrix`, `publish/bus_matrix.py`, `just bus-matrix`),
+  and it renders into a marked block in `docs/WAREHOUSE.md`. Business processes
+  down, conformed dimensions across — the one thing groups, exposures and
+  contracts do not say, which is why retail sat beside the country domain for
+  months with no joinable key. Three things it cost to get right:
+  - **A uniqueness test carrying a `where` is not a grain.**
+    `dim_grid_emission_factors` asserts one row per `country_iso3` *where
+    `is_latest_available`*. Read as a grain it becomes a conformed country
+    dimension and every country fact appears to conform to it — a column of
+    marks that mean nothing. `declared_grains` skips filtered tests.
+  - **Conformance is exact column-name matching, deliberately.** An alias list
+    would hide the defect the matrix exists to expose: `fct_fx_rates_periods`
+    and `fct_fx_rates_published` carry `quote_currency` where `dim_currency`
+    publishes `currency_code`, and `fct_fx_rates_daily` spells it the conformed
+    way. Rendering that as a tidy row would be the matrix arguing against
+    itself. A hole is a question, not a bug in the derivation.
+  - **The rendered block is guarded, not just generated.**
+    `tests/test_bus_matrix.py` regenerates and compares, so a mart added without
+    `just bus-matrix` fails rather than leaving a confidently wrong table. Its
+    orphan set is compared *both ways* against `KNOWN_UNCONFORMED`, so fixing an
+    orphan without deleting its entry fails too. Being manifest-gated, it had to
+    be added to `ci.yml`'s post-parse step — `tests/test_workflows.py` caught
+    that omission, which is the guard working rather than a near miss.
+
 ## Pipeline observability (`transform/pipeline_status.py`)
 
 `just pipeline-status` writes three flat tables into `analytics` —
@@ -1145,7 +1170,7 @@ leave the other free to land after the inventory meant to count it.
   bare names.
 - **It excludes its own output from the inventory.** Otherwise the table count
   jumps by three on every build after the first, for no change in the warehouse
-  (35 tables today, not 38).
+  (36 tables today, not 39).
 - **It must run after `dbt build`** — it reads `dbt_test__audit` and the
   manifest, neither of which exists before one.
 
@@ -1438,12 +1463,23 @@ Two tiers, and the split is the point — see [`tests/README.md`](tests/README.m
     phrase was genuinely ambiguous to a human reader too. Phrase a pytest count
     as "the whole suite" or "pytest cases", never as a bare number in front of
     that noun.
-- `just coverage` — line and branch coverage of that tier, ~18s, at 70% branch /
-  73% statement today. Reports and gates nothing (no `fail_under`, not in CI,
+- `just coverage` — line and branch coverage of that tier, ~18s, at 67% branch /
+  78% statement today. Reports and gates nothing (no `fail_under`, not in CI,
   no plugin loaded into `addopts`) for ty's reason. Read it with the two caveats
   in `[tool.coverage.report]`: it measures the mocked tier only, so the
   transform and lake layers read low while `just test-pipeline` exercises them
   end to end, and some of what is uncovered is uncovered deliberately.
+  - **`[tool.coverage.run] source` is a hand-maintained list of directories, and
+    the 2026-09-01 split left it behind.** `publish/` was carved out of
+    `scripts/` and the source list kept naming only `scripts` — so the
+    publication boundary (the personal-data policy, the storage ceiling,
+    `build_report`, `restore_history`: 342 statements) was measured by nothing,
+    while the directory this file calls "genuinely one-off" still was. The same
+    move updated `pages.yml`'s allowlist, which `tests/test_workflows.py` guards;
+    nothing guards this list, so it went quiet instead. **Adding it moved the
+    numbers *up*** — 77.6% → 78.5% statement, 62.9% → 67.1% branch — because
+    `export_warehouse.py` is at 83%: the blind spot was hiding well-covered code,
+    which is why no one noticed a number that looked plausible.
   - **It is `coverage run -m pytest`, not `pytest --cov`, and that was
     measured.** `pytest-cov` was added first and dropped the same day: identical
     total, identical runtime to within 0.02s, one more package. Everything under

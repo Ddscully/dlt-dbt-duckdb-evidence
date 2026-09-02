@@ -57,6 +57,35 @@ answers the SLA, run-cost and what-breaks-at-1000× questions directly.</sub>
 
 ---
 
+> ### ⚠️ What this project has and has not done yet
+>
+> **The work so far has gone into the engineering, not the analysis.** The
+> deliberate goal was to get an initial stack and a set of working methods in
+> place — ingestion, modelling, contracts, tests, lineage, orchestration, a
+> publication boundary — and that is what has been built and measured. It was
+> done largely during a period of promotional access to Claude, so the pace
+> reflects the tooling available at the time rather than a sustained
+> engineering effort.
+>
+> **The validity of the results and the quality of the analysis are still
+> outstanding.** The figures on the dashboard are computed correctly from the
+> sources in the sense that the pipeline does what it says — the transformations
+> are tested, the grains are enforced and the numbers are reproducible. What has
+> *not* had the same scrutiny is whether the questions are the right ones,
+> whether the indicators chosen actually answer them, and whether the
+> interpretations on the findings pages survive contact with a domain expert.
+> Treat the analytical conclusions as illustrative of what the stack can express,
+> not as claims to rely on.
+>
+> Two specifics worth naming rather than burying: `fct_example_scope2_emissions`
+> is **fabricated data** over twelve invented sites, included so the Scope 2
+> model has something to demonstrate on, and it ships in the public release;
+> and several cross-source comparisons rest on coverage that thins unevenly per
+> column, which [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) documents but no chart
+> restates.
+
+---
+
 The stack is deliberately **lightweight**. Everything runs locally with `uv`:
 raw lands as Parquet in a DuckLake catalog, and dbt builds into a single DuckDB
 file — no cloud warehouse, no credentials, no bill.
@@ -120,7 +149,7 @@ The README is the tour. The detail lives here:
 | [`docs/DASHBOARD.md`](./docs/DASHBOARD.md) | the eleven dashboard pages, what each is for, and how the site is deployed |
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
-| [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | SLA, run cost, what breaks at 1000×, what I'd do differently |
+| [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | what is and is not finished, the SLA, run cost, what breaks at 1000×, and what I'd do differently |
 | [`docs/REUSING_THIS_STACK.md`](./docs/REUSING_THIS_STACK.md) | what carries over to a different dataset, and the decisions that are expensive to revisit |
 
 And [`docs/course/`](./docs/course/) teaches the same warehouse as material for

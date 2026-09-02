@@ -100,7 +100,7 @@ addopts = "-q"
 # Here rather than on the recipe, so an ad-hoc run measures the same thing.
 # `modern_data_stack` is the installed package; the rest are top-level
 # directories — the split `pythonpath` above exists for.
-source = ["ingest", "transform", "lake", "orchestration", "scripts", "modern_data_stack"]
+source = ["ingest", "transform", "lake", "orchestration", "publish", "scripts", "modern_data_stack"]
 # This repo argues about deliberately-unreachable branches in prose; branch
 # coverage makes them a number.
 branch = true
