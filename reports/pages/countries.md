@@ -5,8 +5,8 @@ sidebar_position: 7
 ---
 
 Emissions, energy mix, electricity prices and living standards for every country,
-for any year you pick. Nothing here is a fixed conclusion — the charts re-query
-on each selection, so this is the page for checking a country or a year yourself.
+for any year you pick. Nothing here is a fixed conclusion. The charts re-query on
+each selection, so this is the page for checking a country or a year yourself.
 
 For the write-ups that draw conclusions from the same data, see the
 [eight findings](/findings).
@@ -210,7 +210,7 @@ Household electricity prices (including all taxes, from Eurostat) against each E
 country's low-carbon share of electricity. The relationship is messy; grid, tax
 and policy choices dominate. Using the electricity share rather than the
 primary-energy one keeps all 39 priced countries in the chart, since nine of them
-have no `renewables_share_pct` at all.
+have no renewables figure at all.
 
 {#if partial_price_years.length > 0 && partial_price_years[0].n_partial > 0}
 
@@ -315,12 +315,10 @@ order by period_start_date
 />
 
 Eurostat publishes household prices **twice a year**, and every chart above uses
-an annual average of the two halves. That is what the `(country_iso3, year)`
-grain costs, and the average is not a neutral summary.
-`marts.fct_eu_electricity_prices_semiannual` keeps the published grain beside it,
-and the difference is the 2021–23 energy crisis: the mean absolute half-over-half
-change was **19%** across countries in 2022 and 13% in 2023, against 3–4% through
-the 2010s.
+an annual average of the two halves. That average is not a neutral summary, which
+is why the warehouse keeps the published half-years beside it. The difference is
+the 2021–23 energy crisis: the mean absolute half-over-half change was **19%**
+across countries in 2022 and 13% in 2023, against 3–4% through the 2010s.
 
 The spikes above are single half-years. Averaged into an annual figure they
 become a smooth rise, which reads as a gradual squeeze rather than the step
@@ -354,8 +352,7 @@ The Netherlands is the clearest case, and the one that should make you distrust
 any annual number here: €0.034/kWh in 2022-S1 against €0.142 in S2, as that
 year's energy-tax cuts landed in the first half. The annual average of €0.088 is
 a price no Dutch household paid in either half. The low figure is real and
-published rather than an ingest bug, which is why the staging test on this column
-has a floor of zero and no minimum above it.
+published, not a loading error, which is why the tests on this column allow it.
 
 ---
 

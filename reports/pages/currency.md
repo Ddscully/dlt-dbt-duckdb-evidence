@@ -79,10 +79,10 @@ for the millennium changeover.)
 option here is a modelling decision, not a lookup. Interpolating between Friday
 and Monday invents a rate nobody could have dealt at, and it needs the future to
 compute the past. Leaving the rate null pushes the same decision into every
-downstream query, to be answered differently each time. So
-`marts.fct_fx_rates_daily` carries the last fixing forward, which is what a
-finance system does, and records `rate_source_date` on every row so you can see
-which fixing you are quoting.
+downstream query, to be answered differently each time. So the daily table
+carries the last fixing forward, which is what a finance system does, and records
+the date of the fixing it used on every row, so you can always see which rate you
+are quoting.
 
 </Alert>
 
@@ -144,7 +144,7 @@ crises rather than calendars. The Icelandic króna has no reference rate for 3,3
 days between the 2008 banking collapse and February 2018, and the Argentine peso
 none for 34 days after the January 2002 breaking of the dollar peg.
 
-Those <Value data={coverage} column=n_stale fmt='#,##0'/> rows exist with a null rate and `is_rate_stale` set, giving an absence you can count instead of nine years of a rate that had stopped being real.
+Those <Value data={coverage} column=n_stale fmt='#,##0'/> rows exist with a null rate and a flag saying so, giving an absence you can count instead of nine years of a rate that had stopped being real.
 
 ## Spot or average
 
@@ -208,10 +208,10 @@ For {inputs.ccy.label}, the year where the two answers diverge most is <Value da
 Averaging the gap-filled daily table would count every Friday three times, since
 Friday, Saturday and Sunday all carry Friday's rate, and four or five times
 around a holiday weekend. That weights the mean toward whichever weekday sits
-next to a closure. There is a second trap in the same model: `avg_eur_per_unit`
-is not 1 / `avg_units_per_eur`, because the mean of reciprocals is not the
-reciprocal of the mean. For EUR/USD the two disagree by 0.07% in a calm year and
-0.53% in 2008.
+next to a closure. There is a second trap in the same table: the average of
+euros-per-unit is not one divided by the average of units-per-euro, because the
+mean of reciprocals is not the reciprocal of the mean. For EUR/USD the two
+disagree by 0.07% in a calm year and 0.53% in 2008.
 
 </Alert>
 
@@ -304,14 +304,13 @@ against the dollar. It is a column now, not a paragraph.
 - **The reference rate is not a dealable rate.** The ECB publishes it at 16:00
   CET for information, and nobody transacts at it. Use it for reporting and
   translation, not for pricing a trade.
-- **The fiscal calendar in `dim_date` is a policy, not a fact.** It comes from a
-  project variable, set to April for the UK and Japanese convention, and the
-  value used is carried on every row. The same Tuesday belongs to a different
-  fiscal year under a US federal October or a continental January start.
-- **`dim_date` is a calendar, not a market calendar.** It knows weekends. It does
-  not know trading days, settlement days or public holidays in any jurisdiction,
-  and where this warehouse needs those it reads them out of the observed
-  fixings.
+- **The fiscal year is a policy, not a fact.** It is set to April here, for the
+  UK and Japanese convention, and every row carries the value it was built with.
+  The same Tuesday belongs to a different fiscal year under a US federal October
+  or a continental January start.
+- **The calendar is not a market calendar.** It knows weekends. It does not know
+  trading days, settlement days or public holidays in any jurisdiction, and
+  where this warehouse needs those it reads them out of the observed fixings.
 
 The tables are `marts.dim_date`, `marts.dim_currency`,
 `marts.fct_fx_rates_published` (the fixings as published, and the only

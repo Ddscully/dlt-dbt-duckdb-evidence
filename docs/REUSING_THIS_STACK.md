@@ -1,7 +1,7 @@
 # Reusing this stack
 
-How to start a *new* project on this shape — dlt → DuckDB → dbt → Polars →
-Evidence, orchestrated by Dagster — using this repo as the reference
+How to start a *new* project on this shape (dlt → DuckDB → dbt → Polars →
+Evidence, orchestrated by Dagster), using this repo as the reference
 implementation.
 
 This is not a checklist for adding a source to *this* warehouse; that's
@@ -10,7 +10,7 @@ It's the layer above: what carries over to a different dataset, what has to be
 rewritten, and the handful of decisions that are expensive to change later.
 
 **Most of what makes this repo work is not transferable code.** The pipeline is
-~4,000 lines and the part with nothing domain-specific in it is maybe a third —
+~4,000 lines and the part with nothing domain-specific in it is maybe a third:
 the layout, the wiring conventions, the CI shape, the lint config. The rest is a
 worked example. The fastest way to reuse it is to copy the tree, keep the
 skeleton and delete the emissions.
@@ -67,8 +67,8 @@ justfile recipes and the asset graph all still call the same names.
   single target here because the environment *is* the file: `WAREHOUSE_PATH`
   swaps the whole database, so a second output would differ in name only. On
   Snowflake, BigQuery or Postgres the *schema* is the environment, which is
-  exactly what a target separates — the reasoning written beside that output
-  inverts, and `generate_schema_name.sql` below has to be reconsidered with it.
+  exactly what a target separates, so the reasoning written beside that output
+  inverts and `generate_schema_name.sql` below has to be reconsidered with it.
 - `orchestration/resources.py` and `orchestration/definitions.py` — the dbt/dlt
   resource handles and the two-job split (`full_refresh` without the site,
   `publish_site` with it). Both are about Node, not about your data.
@@ -88,7 +88,7 @@ justfile recipes and the asset graph all still call the same names.
 - `.github/workflows/pages.yml` and `release-data.yml` — paths and the basePath
   step are generic; the snapshot carry-forward only matters if you have a
   snapshot. The one part to re-derive rather than copy is `pages.yml`'s `paths:`
-  allowlist, which names this repo's directories — and `tests/test_workflows.py`
+  allowlist, which names this repo's directories, and `tests/test_workflows.py`
   with it, since that is what stops the allowlist drifting from your tree.
 - `reports/sources/warehouse/connection.yaml` — the relative path to the DuckDB
   file, nothing else.
@@ -98,8 +98,8 @@ justfile recipes and the asset graph all still call the same names.
 
 ### Delete — this is the example, not the framework
 
-All of `ingest/sources/` — that is one module per publisher and every one of
-them is this example's domain. Keep `ingest/http.py` and, in
+All of `ingest/sources/`: one module per publisher, and every one of them is
+this example's domain. Keep `ingest/http.py` and, in
 `ingest/pipeline.py`, `load_groups`, `build_pipeline`, `pipeline_name` and the
 `REFRESH` constant: that file is coordination, and what it coordinates is the
 list you are replacing. Then all of `dbt/models`,
@@ -125,14 +125,14 @@ or stale.
 
 **The asset key is the only join between EL and T.** `raw/<resource>` from the dlt
 side, `raw/<source table>` from the dbt side. Get it wrong and both halves still
-materialize, side by side, unconnected, with no error anywhere —
+materialize, side by side, unconnected, with no error anywhere, and
 `dagster definitions validate` passes too. Only the graph shows it, so look at
 the graph every time you add or rename a resource.
 
 **The DuckDB file stem becomes a catalog name.** dbt writes staging views with
 fully-qualified SQL, so `warehouse.duckdb` produces views that say
 `warehouse.raw.owid_co2`. Rename the file, or `ATTACH … AS wh`, and the views
-raise `Catalog "warehouse" does not exist` while the tables keep working — a
+raise `Catalog "warehouse" does not exist` while the tables keep working, a
 half-broken artifact that looks fine until someone queries staging. Pick the file
 name once, and pin it with a test if you publish the file.
 
@@ -149,7 +149,7 @@ first staging model. Then hold every staging model to it. When a source publishe
 at a different grain, model it at *its* grain and derive the project grain from
 that rather than flattening at the edge. This repo does it once, for Eurostat's
 half-years, because the averaging step that reaches the annual grain destroys
-real signal — so both grains are modelled and the docs say which one to chart.
+real signal, so both grains are modelled and the docs say which one to chart.
 
 ### What decides an entity exists
 
@@ -165,7 +165,7 @@ rows with nulls. Build the dimension first, even if it's a seed file.
 ### Which resource is incremental
 
 Default to `write_disposition="replace"` and `refresh="drop_resources"`. Reach for
-`merge` only when a full pull is expensive, and take the whole package with it —
+`merge` only when a full pull is expensive, and take the whole package with it,
 all five of:
 
 1. a primary key that really is the grain,
@@ -176,13 +176,13 @@ all five of:
 4. per-key watermarks if the resource is a union of series, so a newly added key
    still pulls its full history,
 5. a separate `run()` call, because `refresh` is an argument to the run and not a
-   property of the resource — one refreshing call would drop the incremental
+   property of the resource: one refreshing call would drop the incremental
    table and its watermark along with it.
 
 ### What is state rather than a build artifact
 
-If any part of your warehouse can't be recomputed from the sources — a dbt
-snapshot is the usual case — decide on day one how it survives. Every workflow
+If any part of your warehouse can't be recomputed from the sources (a dbt
+snapshot is the usual case), decide on day one how it survives. Every workflow
 builds from an empty file, so without a carry-forward step every published copy
 holds one version per row forever and looks broken. `publish/restore_history.py`
 is the shape: download the previous release, copy the schema in *before* the graph
@@ -199,7 +199,7 @@ anything built this way:
 - **`WAREHOUSE_PATH` must be absolute.** dbt resolves it from `dbt/`, the Python
   layers from the project root. A relative override gives you two different
   warehouses and no error. Every layer here gets the answer from
-  `modern_data_stack.paths` so they can't disagree — it used to come from a
+  `modern_data_stack.paths` so they can't disagree. It used to come from a
   `REPO_ROOT` in `ingest/pipeline.py` that meant "the parent of `ingest/`", which
   made the landing zone and the exporter depend on where the *ingestion* layer
   sat.
@@ -213,7 +213,7 @@ anything built this way:
   Delete the directory first.
 - **Evidence caches each source's schema keyed on the source SQL.** A `select *`
   that gained a column looks unchanged, and validation fails against the stale
-  schema — hence `just report-clean` after any mart change.
+  schema, hence `just report-clean` after any mart change.
 - **`evidence build` exits 0 for a site missing a page.** Check rendered file
   *size*, not exit status: the pages here render at 17–74 kB and the check's floor
   is 8 kB, which catches a route that emitted nothing but the framework shell.
@@ -260,7 +260,7 @@ Each step leaves the repo runnable, so a failure has one plausible cause.
 ## 7. What to drop if you want less
 
 Four layers are optional, and independent of each other. **The landing zone
-(`lake/`) is no longer one of them** — it used to be a hive-partitioned Parquet
+(`lake/`) is no longer one of them.** It used to be a hive-partitioned Parquet
 archive written *beside* the warehouse, droppable for anyone who did not want
 cross-run diffability, and it is now the DuckLake catalog `raw` actually lives
 in. dbt attaches it and every staging model reads through it, so dropping it is
@@ -286,7 +286,7 @@ without it), but dlt, DuckDB, dbt and Evidence each assume the previous one.
 
 ## 8. What doesn't transfer
 
-- **The gotchas that are about the sources**, and there are a lot of them here —
+- **The gotchas that are about the sources**, and there are a lot of them here:
   padded region names, ISO2 exceptions, per-metric coverage curves, which GDP
   series to divide by. Your sources have an equally long list and it will be
   completely different. The transferable part is the *habit* of writing them down
@@ -296,13 +296,13 @@ without it), but dlt, DuckDB, dbt and Evidence each assume the previous one.
   honest range would make the test pass everything. Copying a threshold is copying
   someone else's data.
 - **The Evidence pages.** Layout ideas travel; queries don't.
-- **`CLAUDE.md`.** The structure travels — schemas, conventions, gotchas, the
-  per-layer sections — and about half the content is specific enough to delete.
+- **`CLAUDE.md`.** The structure travels (schemas, conventions, gotchas, the
+  per-layer sections) and about half the content is specific enough to delete.
   Keep the sections about tooling (the sqlfluff pin, the ruff defaults, dependabot,
   the `dbt deps` prerequisite); those are the same on any project using them.
 
 To *share* `src/modern_data_stack/` between projects rather than copying it, add
 this repo as a git dependency and delete the copy. Nothing in the package imports
-the layers above it, so that works today — but copying is the better default
+the layers above it, so that works today, but copying is the better default
 until you have two projects that actually disagree about something. A shared
 package with one consumer is just a longer import path.

@@ -86,9 +86,9 @@ from warehouse.retail_line_types
 <Alert status=info>
 
 **So what.** These are not edge cases to filter out at the end. They decide
-whether a revenue figure means anything, so each classification is a `case`
-expression in `stg_retail_lines` with a test against it. A caveat in a README
-would not have stopped anyone summing the column.
+whether a revenue figure means anything, so each one is classified in the model
+itself and tested there. A caveat in a README would not have stopped anyone
+summing the column.
 
 </Alert>
 
@@ -268,8 +268,8 @@ The triangle is ragged: a cohort formed in November 2011 has no month-12 row
 because the extract ends in December, and those cells are missing, not zero, so
 rows exist only for months that could have been observed. The first cohort is
 also left-censored, since December 2009 is the extract's opening month and its
-"new" customers include anyone who had been buying for years already.
-`is_left_censored_cohort` keeps them out of every chart on this page.
+"new" customers include anyone who had been buying for years already, and every
+chart on this page leaves that cohort out.
 
 </Alert>
 
@@ -350,8 +350,8 @@ from ranked
     <BigValue data={concentration_stats} value=top_20 fmt='0.0"%"' title="…from the top 20%"/>
 </Grid>
 
-The distance between the curve and the dashed line is what there is to read here.
-The classic Pareto shorthand is 80/20; this business is steeper than that, at
+The distance between the curve and the dashed line is the concentration. The
+classic Pareto shorthand is 80/20; this business is steeper than that, at
 roughly 77/20, and far steeper still at the very top.
 
 Fifty-eight customers out of <Value data={concentration_stats} column=n_customers fmt="#,##0"/> account for just under a third of everything sold, and the bottom half of the base accounts for the last 6.6%.
@@ -595,19 +595,19 @@ Champions are <Value data={champions} column=pct_customers fmt='0.0"%"'/> of the
 
 <Alert status=info>
 
-**Why this is in Polars and not in SQL.** The operation is cutting a column into
-quintiles. SQL's primitive for that is `ntile(5)`, which fills five buckets of
-equal size, so a run of tied values gets cut wherever the bucket boundary
-happens to land. Frequency is a small integer with heavy ties: 1,626 customers
-have placed exactly one order, and `ntile` splits them across quintiles 1 and 2.
-Counting the four tied values that straddle a boundary, 3,227 of 5,881 customers
-could be scored differently from someone whose behaviour is identical to theirs.
+**Two customers who behave identically must score the same.** The standard way
+to cut a column into quintiles fills five buckets of equal size, so a run of tied
+values gets split wherever the boundary happens to land. Frequency is a small
+integer with heavy ties: 1,626 customers have placed exactly one order, and that
+method puts them in two different quintiles. Counting the four tied values that
+straddle a boundary, 3,227 of 5,881 customers could be scored differently from
+someone whose behaviour is identical to theirs.
 
-Polars' `qcut` cuts on the break points, so equal values always score equally.
-The buckets then come out uneven, which is a fact about the customer base and not
-about the method. A Dagster asset check counts any value carrying more than one
-score, since reverting to `ntile` would still produce five tidy buckets and a
-believable segment mix.
+Cutting on the break points instead keeps equal values together. The buckets
+then come out uneven, which is a fact about the customer base and not about the
+method. A pipeline check counts any value carrying more than one score, because
+the tidier method would still produce five neat buckets and a believable segment
+mix. (It is why this step is a Polars `qcut` rather than SQL's `ntile`.)
 
 </Alert>
 

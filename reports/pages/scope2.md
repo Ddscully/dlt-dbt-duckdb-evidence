@@ -71,9 +71,8 @@ inside a number an assurance provider signs.
 
 ## The reference table
 
-The current factor for every country that has one. `is_latest_available` is the
-filter that produces this cross-section. See the vintage section below for why
-it is a filter and not a year.
+The current factor for every country that has one. Which year that is differs
+from country to country, and the vintage section below is why.
 
 ```sql latest_factors
 select
@@ -313,8 +312,8 @@ taken, sitting in a number that has to be published.
 A disclosure is filed against the factor published *at the time*. When the
 publisher revises that year afterwards, the filing does not become wrong. It
 becomes a filing against a superseded factor, which is something you have to be
-able to demonstrate. `history.snap_grid_emission_factors` is the SCD2 snapshot
-that keeps the versions, from 2015 on.
+able to demonstrate. This warehouse keeps every version of every factor from 2015
+on, so the number you filed against is still there to point at.
 
 ```sql restatements
 select
@@ -356,14 +355,11 @@ answer rather than a broken query: a snapshot can only record a revision it was
 present for. The first run stores version 1 of every factor, and a row becomes
 restated the first time a later run finds a different number.
 
-That makes the snapshot the one part of this table a rebuild cannot reproduce,
-which is why it is carried in rather than recomputed: the
-[Pages build](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/pages.yml)
-copies `history` out of the most recent
+That version history is the one part of this table a rebuild cannot reproduce, so
+every build carries it forward from the previous
 [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases)
-before it builds, and the release does the same from the release before it. The
-[Restatements page](/restatements) is the same mechanism pointed at OWID's CO₂
-estimates.
+instead of recomputing it. The [Restatements page](/restatements) does the same
+for OWID's CO₂ estimates, and describes the mechanism.
 
 {/if}
 
@@ -395,10 +391,10 @@ consumed mix, and an exporter of coal power looks dirtier.
 
 One more, from the warehouse and not from the standard: five territories in
 OWID's energy data (Guadeloupe, Martinique, Réunion, French Guiana and the
-Falklands) do not exist in the country dimension, so they carry no factor here.
-The dimension is authoritative for what a country is throughout this warehouse,
-which is also what keeps World Bank aggregates like `WLD` out of every fact. The
-[coverage page](/coverage) is where absences are rows.
+Falklands) are not countries in this warehouse's country list, so they carry no
+factor here. That list is what counts as a country throughout, and it is also
+what keeps World Bank groupings like "World" and "European Union" out of every
+total. The [coverage page](/coverage) is where absences are rows.
 
 ---
 

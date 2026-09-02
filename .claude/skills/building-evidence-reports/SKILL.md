@@ -86,6 +86,31 @@ A file at `sources/warehouse/emissions_energy.sql` is referenced in pages as
 `warehouse.emissions_energy`. Adding a new source query means adding a `.sql`
 file there, then `npm run sources`.
 
+### Pointing a build at a different warehouse
+
+`connection.yaml`'s `filename` is not the last word: Evidence merges
+`EVIDENCE_SOURCE__<source>__<option>` over it, so
+`EVIDENCE_SOURCE__warehouse__filename` redirects a build without touching the
+committed file. That is the lever a scratch-warehouse build needs — see
+[`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md).
+
+**It must be relative to `sources/warehouse/`, and an absolute path fails in the
+worst way.** The DuckDB connector resolves it with `path.join(sourceDirectory,
+filename)`, and `path.join` does not respect a leading slash — so an absolute
+path like `/srv/scratch/warehouse.duckdb` is opened with its leading slash eaten
+and the source directory pasted on the front, and the error names a path nobody
+typed. (Spelling that joined path out in full here is what the citation guard in
+`tests/test_course.py` reads as a claim that it exists, which is why it is
+described rather than quoted.) Same shape as the `LAKEHOUSE_DIR` trap, one layer
+out. Verify
+a redirect by pointing it at an *empty* database rather than a missing one: every
+query then fails with `Table … does not exist`, which proves the extraction read
+somewhere else, where a missing file only proves it tried.
+
+The connector opens the file `READ_ONLY`, so a site build never takes the writer
+lock — but it is still a *reader*, and a build holding the warehouse read-write
+locks it out entirely (`querying-the-warehouse` has the measured table).
+
 ## Writing a page
 
 SQL blocks are named and become queryable results:

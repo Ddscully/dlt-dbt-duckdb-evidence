@@ -8,10 +8,10 @@ Every other page here answers *what happened*. This one exists to answer *was it
 just colder*, which is the question you have to dispose of before an energy or
 price movement can be credited to anything else.
 
-It is the only source in this warehouse with a finite budget — Open-Meteo meters
-requests rather than rows — so the scope is deliberately narrow: daily ERA5
-reanalysis for the capital city of each EU/EEA country, aggregated to the year
-and turned into degree days.
+It is the only source in this warehouse with a finite budget (Open-Meteo meters
+requests, not rows), so the scope is deliberately narrow: daily ERA5 reanalysis
+for the capital city of each EU/EEA country, aggregated to the year and turned
+into degree days.
 
 ```sql panel
 select
@@ -207,7 +207,7 @@ The fit is <Value data={trend} column=fit fmt='0.00'/> on that pooled average, w
 {:else}
 
 The archive here is <Value data={trend} column=n_years/> complete years deep, which is enough to compare one year against another and not enough to fit a
-trend through. A published release carries the archive forward rather than
+trend through. A published release carries the archive forward instead of
 refetching it, so this section gets stronger every month rather than resetting.
 
 {/if}
@@ -250,10 +250,10 @@ order by w.hdd_total desc
 ## Two degree-day conventions, and they disagree
 
 A degree day needs a daily temperature, and there are two answers to what that
-is. `hdd_total` uses the day's mean; `hdd_minmax_total` uses the midpoint of the
-day's maximum and minimum, which is what a station-based series reports because
-it is all a max/min thermometer can record. Neither is more correct, and this
-warehouse ships both rather than picking one silently.
+is. One convention uses the day's mean; the other uses the midpoint of the day's
+high and low, which is what a station-based series reports because it is all a
+max/min thermometer can record. Neither is more correct, and this warehouse ships
+both rather than picking one silently.
 
 ```sql conventions
 select
@@ -298,12 +298,11 @@ more — the widest gap is <Value data={conventions} column=widest_with_heating_
 
 <Alert status=warning>
 
-**A degree-day total lifted out of this warehouse is meaningless without its
-base and its convention.** Both are carried on every row for that reason —
-`heating_base_c` and the two separate totals — rather than being settled once in
-a project config file that the number then travels away from. The same reasoning
-puts `fiscal_year_start_month` on every row of `dim_date` rather than in a
-project variable the number then travels away from.
+**A degree-day total lifted out of this warehouse is meaningless without its base
+and its convention.** Both travel on every row for that reason: the base
+temperature as a column of its own, and each convention as its own total. Settle
+either one in a config file instead and the number walks away from the only thing
+that says what it means.
 
 </Alert>
 
@@ -379,22 +378,22 @@ The archive stops a few days short of today, so the current year is always
 partial and an annual degree-day total over a partial year is not comparable with
 a whole one.
 
-As of <Value data={partial} column=last_day/> the current year holds <Value data={partial} column=n_days/> days and <Value data={partial} column=hdd_total fmt='#,##0'/> heating degree days, which is <Value data={partial_vs_full} column=share_of_last_full_year fmt='0.0"%"'/> of last complete year's total. Charted beside the complete years it would read as a collapse in heating demand, and every bar chart on this page filters it out through `year_is_complete` rather than trimming a year off by hand.
+As of <Value data={partial} column=last_day/> the current year holds <Value data={partial} column=n_days/> days and <Value data={partial} column=hdd_total fmt='#,##0'/> heating degree days, which is <Value data={partial_vs_full} column=share_of_last_full_year fmt='0.0"%"'/> of last complete year's total. Charted beside the complete years it would read as a collapse in heating demand, and every bar chart on this page filters it out on a flag rather than trimming a year off by hand.
 
 {:else}
 
-Every year in the archive is a complete calendar year, so nothing here needs the
-`year_is_complete` filter today. The models apply it anyway — the current year
-becomes partial the moment the archive is refreshed.
+Every year in the archive is a complete calendar year, so nothing here needs that
+filter today. The models apply it anyway, because the current year becomes
+partial the moment the archive is refreshed.
 
 {/if}
 
 ## Limitations
 
-- **EU/EEA only.** The scope was chosen to match
-  `marts.fct_eu_electricity_prices_semiannual` exactly, so the two join with no
-  gaps. Joining this to `marts.fct_emissions_energy` leaves the rest of the world
-  null, the same way the electricity price column already does.
+- **EU/EEA only.** The scope was chosen to match the Eurostat electricity price
+  series exactly, so the two join with no gaps. Joined to the global emissions
+  data it leaves the rest of the world null, the same way the electricity price
+  column already does.
 - **One cell per country.** See above: fine for a country against itself, weak
   for one country against another. A population-weighted average over many cells
   is the honest version and costs many times the API budget this source has.

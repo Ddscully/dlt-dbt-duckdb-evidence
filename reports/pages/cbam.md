@@ -305,7 +305,7 @@ which sourcing lanes are worth the effort of going to get that data.
 
 </Alert>
 
-Three more limits, stated plainly because a practitioner will check them first:
+Four more limits, stated plainly because a practitioner will check them first:
 
 - **A CN code alone does not always identify a row.** It used to be reliably
   untrue: 2523 10 00 was both white clinker and grey clinker, whose default
