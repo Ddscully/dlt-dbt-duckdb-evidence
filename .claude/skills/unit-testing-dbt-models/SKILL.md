@@ -5,7 +5,7 @@ description: The twelve dbt models that carry unit tests and what mutating each 
 
 # Unit testing the models (`dbt/models/**/_unit_tests.yml`)
 
-Thirty unit tests over twelve models. They exist because a data test cannot
+Thirty-one unit tests over twelve models. They exist because a data test cannot
 see a wrong answer that is a legal one, and every one of them was written after
 mutating the model and watching its data tests stay green. This file is the
 record of those mutations — what moved, what did not, and which fixture shapes
@@ -36,7 +36,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
 
 ## The twelve models, and what mutating each one proved
 
-- **There are thirty unit tests, over twelve models, and they exist because a data
+- **There are thirty-one unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -316,6 +316,21 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   `>= 1` makes all 5,881 repeat customers, `n_orders` over every invoice type
   moves it 36,975 to 44,811, and dropping the sign flip takes the mean return
   rate from +5.89% to -5.89%.
+  - **The ninth defect was not reachable by mutation at all, and that is the
+    lesson.** `max_by(country_iso3, country)` pairs the code to the label
+    `max(country)` picked — but DuckDB's `arg_max` **skips rows whose value
+    argument is null**, and three seed labels map to no code on purpose
+    (`Unspecified`, `West Indies`, `European Community`). A customer
+    transacting from `United Kingdom` and `Unspecified` therefore took the
+    label `Unspecified` and the code `GBR`: a row that agrees with nothing, and
+    exactly what the comment beside the line claimed to prevent. Every mutation
+    in this campaign asks *what if this line said something else*; here the line
+    said the right thing and the aggregate underneath it did not — so the whole
+    method was blind to it, and a code review found it instead. Latent on all 13
+    multi-country customers, so no data test could reach it either. The fix is a
+    struct (`(max_by({ 'country_iso3': country_iso3 }, country)).country_iso3`),
+    because a struct holding a null field is not itself null; the guard is a
+    third fixture, which is also what finally pins `min(country)`.
   - **Dropping `, invoice` from `first_order_line`'s window makes the model
     non-reproducible**, exactly as `fct_retail_returns`' tied `asof` did. Four
     builds against byte-identical sources gave four different

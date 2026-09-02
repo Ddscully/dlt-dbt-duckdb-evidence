@@ -122,7 +122,20 @@ activity as (
         -- two countries a plain `max` on each column independently can name
         -- one country and code another, which is a row that agrees with
         -- nothing and reads as a mapping bug.
-        max_by(country_iso3, country) as country_iso3
+        --
+        -- **The struct is load-bearing, because `max_by` skips nulls.**
+        -- DuckDB's `arg_max` ignores rows whose *value* argument is null, and
+        -- three seed labels map to no code on purpose (`Unspecified`,
+        -- `West Indies`, `European Community`, all `not_a_country`). So a
+        -- customer transacting from both `United Kingdom` and `Unspecified`
+        -- took the label `Unspecified` and the code `GBR` — exactly the
+        -- mismatch the paragraph above says this line prevents. A struct
+        -- holding a null field is not itself null, so the row survives the
+        -- aggregate and the pairing holds. Latent on current data: all 13
+        -- multi-country customers use mapped labels, which is why the guard is
+        -- a unit test rather than a data test.
+        (max_by({ 'country_iso3': country_iso3 }, country)).country_iso3
+            as country_iso3
     from lines
     group by customer_id
 )

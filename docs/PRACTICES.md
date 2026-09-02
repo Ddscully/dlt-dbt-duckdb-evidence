@@ -155,7 +155,7 @@ the release notes, because the consumers who need it never read a dbt log.
 quarter is range-checked 1–4, which caught a float-division bug at quarter 5.
 Change the same expression from `/ 3` to `/ 4` and every fiscal quarter in the
 warehouse is wrong while **all 19 data tests on the model pass** — measured, not
-argued. Three unit tests fail on it. There are 30 unit tests over twelve models,
+argued. Three unit tests fail on it. There are 31 unit tests over twelve models,
 and each exists because of a specific mutation the data tests could not see.
 → [`dbt/models/marts/_unit_tests.yml`](../dbt/models/marts/_unit_tests.yml)
 

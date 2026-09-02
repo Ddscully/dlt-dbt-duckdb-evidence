@@ -98,22 +98,32 @@ models:
           arguments:
             expression: "length(country_iso3) = 3"
       # The dimension and the spine must know the same countries. `dim_country_year`
-      # is this crossed with the years, so a country in one and not the other is
-      # either a spine that lost a row or a dimension that gained one — and both
-      # are silent: the spine would simply carry fewer country-years, and every
-      # `not_null` on it would still pass.
+      # is this crossed with the years, which is what makes the interesting failure
+      # wholesale rather than per-row: no single country can go missing from one
+      # side, but an empty `int_country_year_observed` collapses the *whole* spine,
+      # and that is silent everywhere else — `not_null` and
+      # `unique_combination_of_columns` both pass on zero rows, and
+      # `fct_emissions_energy` inner-joins the spine, so the country-stats mart
+      # empties out with nothing red.
+      #
+      # **Every `except` here has to be parenthesised, and this test could not fail
+      # for want of it.** `EXCEPT` and `UNION` share a precedence level in ANSI SQL
+      # and associate left, so `A except B union all B except A` parses as
+      # `((A−B) ∪ B) − A`, which is `B \ A` — the one direction the cross join
+      # makes impossible. Measured against the warehouse with the spine forced
+      # empty: the unparenthesised form returns 0 and the parenthesised one 228.
       - dbt_utils.expression_is_true:
           name: dim_country_holds_exactly_the_countries_the_spine_does
           arguments:
             expression: >
               (select count(*) from (
-                  select country_iso3 from {{ ref('dim_country') }}
-                  except
-                  select country_iso3 from {{ ref('dim_country_year') }}
+                  (select country_iso3 from {{ ref('dim_country') }}
+                   except
+                   select country_iso3 from {{ ref('dim_country_year') }})
                   union all
-                  select country_iso3 from {{ ref('dim_country_year') }}
-                  except
-                  select country_iso3 from {{ ref('dim_country') }})) = 0
+                  (select country_iso3 from {{ ref('dim_country_year') }}
+                   except
+                   select country_iso3 from {{ ref('dim_country') }}))) = 0
 
   - name: dim_date
     config:

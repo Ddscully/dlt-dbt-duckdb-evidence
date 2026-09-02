@@ -32,6 +32,7 @@ LABELS = {"direct_identifier", "quasi_identifier", "non_personal"}
 
 MARTS_DIR = project_root() / "dbt" / "models" / "marts"
 STAGING_YML = project_root() / "dbt" / "models" / "staging" / "_staging.yml"
+GROUPS_YML = project_root() / "dbt" / "models" / "_groups.yml"
 SOURCES_YML = project_root() / "dbt" / "models" / "staging" / "_sources.yml"
 
 # The shape the boundary has to survive: a landing table, dlt's undeclared copy
@@ -228,11 +229,29 @@ def yml_classifications(path) -> dict[tuple[str, str], str]:
 
 
 def yml_columns(path) -> dict[str, dict]:
-    """`{model: {"group": …, "columns": [names]}}`."""
+    """`{model: {"group": …, "columns": [names]}}`.
+
+    **A mart's group comes from its folder and a staging model's from its yml,
+    and that asymmetry is dbt's rather than this file's.** `+group:` is set once
+    per `marts/<group>/` folder in `dbt_project.yml`, so a mart's yml block does
+    not carry one at all; the nine staging models share a single folder and span
+    three groups, so theirs has to be declared per model.
+
+    **Reading `config.group` for both is what this did until 2026-09-02, and it
+    went silently blind the day the marts layer was subdivided.** Every mart
+    then reported `group: None`, so the name-collision test below narrowed to
+    the one staging model that still declared a group and stopped seeing
+    `dim_retail_product` — the exact column pair it exists for — while staying
+    green. Deriving it from the path keeps the whole coverage half free of the
+    dbt manifest, which is the constraint the module docstring describes; the
+    guard against this going quiet a second time is
+    `test_the_group_filter_still_reaches_the_mart_models`.
+    """
     parsed = yaml.safe_load(path.read_text())
+    folder_group = path.parent.name if path.parent.parent == MARTS_DIR else None
     return {
         model["name"]: {
-            "group": (model.get("config") or {}).get("group"),
+            "group": folder_group or (model.get("config") or {}).get("group"),
             "columns": [c["name"] for c in model.get("columns") or []],
         }
         for model in parsed["models"]
@@ -309,6 +328,45 @@ def test_the_label_vocabulary_is_closed():
     them; a fourth appearing here without a decision behind it is how a
     classification becomes decoration."""
     assert set(declared().values()) | set(EXTRA_CLASSIFICATIONS.values()) == LABELS
+
+
+def declared_groups() -> set[str]:
+    """The four groups `_groups.yml` declares — the authority a folder name has
+    to match now that `marts/<group>/` is where a mart's group comes from."""
+    return {g["name"] for g in yaml.safe_load(GROUPS_YML.read_text())["groups"]}
+
+
+def test_the_group_filter_still_reaches_the_mart_models():
+    """The vacuity guard for the group in `yml_columns`, and it arrived a
+    refactor late.
+
+    The test below filters on `group == "retail"` and then asserts an
+    *absence*, which is the combination that fails open: narrow the filter to
+    nothing and there is nothing left to be missing. That is exactly what
+    happened when `+group:` moved out of the mart ymls into `dbt_project.yml` —
+    every mart resolved to `None`, the filter kept only `stg_retail_lines`, and
+    deleting a label from `dim_retail_product` left the suite green.
+
+    Two assertions, because they catch different mistakes. Every mart must
+    resolve to a group `_groups.yml` actually declares, which catches a folder
+    renamed or added without a group behind it; and the specific pair the
+    collision test exists for must be inside the filter, which catches the
+    filter being narrowed by any other means.
+    """
+    models = merged(yml_columns)
+    groups = declared_groups()
+
+    unresolved = sorted(m for m, spec in models.items() if spec["group"] not in groups)
+    assert not unresolved, (
+        f"models whose group is not one of {sorted(groups)}: {unresolved} — "
+        "a mart takes its group from its folder, a staging model from its yml"
+    )
+
+    retail = {m for m, spec in models.items() if spec["group"] == "retail"}
+    assert {"dim_retail_customer", "dim_retail_product"} <= retail, (
+        "the collision test below filters on `group == 'retail'`, so the pair it "
+        f"exists for has to be in that set; it currently holds {sorted(retail)}"
+    )
 
 
 def test_a_column_named_like_a_classified_one_is_never_left_unlabelled():

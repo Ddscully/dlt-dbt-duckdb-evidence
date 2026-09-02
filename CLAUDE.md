@@ -148,7 +148,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (31 models, 2 snapshots, 7 seeds + 460 data tests + 30 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (31 models, 2 snapshots, 7 seeds + 460 data tests + 31 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -818,7 +818,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are thirty unit tests, over twelve models, and they exist because a data
+- **There are thirty-one unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -865,7 +865,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  thirty cost 4.3s. A broken fiscal calendar should stop `release-data.yml`,
+  thirty-one cost 4.4s. A broken fiscal calendar should stop `release-data.yml`,
   not ride along in it. `just dbt-unit-test` is the inner loop — 4.3s of dbt's
   own time, ~10s wall once `dbt deps` and startup are counted.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
