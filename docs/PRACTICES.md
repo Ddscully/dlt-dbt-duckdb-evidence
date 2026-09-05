@@ -124,7 +124,7 @@ so the boundary is the one dbt itself can check rather than a filing convention
 
 **Say what a measure means under `sum()`.** A contract states a column's type
 and a test states that it is correct; neither says whether adding it up is
-meaningful. 117 of the 226 numeric mart columns are non-additive: ratios, rates,
+meaningful. 118 of the 227 numeric mart columns are non-additive: ratios, rates,
 prices, averages or extrema, where a sum is nonsense that comes back as a number.
 Every one carries `meta: {additivity: …}` from a closed four-value vocabulary,
 the 16 `semi_additive` ones have to say in prose *which* direction fails
@@ -175,7 +175,7 @@ release notes, because the consumers who need it never read a dbt log.
 quarter is range-checked 1–4, which caught a float-division bug at quarter 5.
 Change the same expression from `/ 3` to `/ 4` and every fiscal quarter in the
 warehouse is wrong while **all 19 data tests on the model pass** — measured, not
-argued. Three unit tests fail on it. There are 31 unit tests over twelve models,
+argued. Three unit tests fail on it. There are 32 unit tests over twelve models,
 and each exists because of a specific mutation the data tests could not see.
 → [`dbt/models/marts/_unit_tests.yml`](../dbt/models/marts/_unit_tests.yml)
 

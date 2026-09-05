@@ -168,6 +168,25 @@ where period_type = 'year' and quote_currency = '${inputs.ccy.value}' and period
 order by period_start_date
 ```
 
+```sql stale_years
+-- Years whose closing rate is a fixing older than the carry `fct_fx_rates_daily`
+-- allows. Not a headline for any currency in the dropdown — the worst
+-- divergence is always a real crisis with a same-day fixing — but the year-end
+-- point is drawn on the chart below like any other, and it is not like any
+-- other.
+select
+    period_label,
+    period_end_stale_days,
+    last_rate_date,
+    period_end_units_per_eur
+from warehouse.fx_periods
+where period_type = 'year'
+  and quote_currency = '${inputs.ccy.value}'
+  and period_is_complete
+  and period_end_is_stale
+order by period_start_date
+```
+
 ```sql ccy_list
 select
     quote_currency as value,
@@ -201,6 +220,28 @@ For {inputs.ccy.label}, the year where the two answers diverge most is <Value da
     yFmt='0.000'
     xFmt='yyyy'
 />
+
+<!-- The first paragraph below wraps and carries <Value> components, so its
+markdown stops processing at the first line break (see the one-source-line
+rule in .claude/skills/building-evidence-reports). Emphasis and code marks
+past line one render as literal characters, silently. The flag name is in a
+second, component-free paragraph for that reason, where marks do work. -->
+{#if stale_years.length > 0}
+
+<Alert status=warning>
+
+**{inputs.ccy.label}'s year-end rate is stale in <Value data={stale_years} column=period_label/>.** The closing
+value the chart plots for that year is the fixing of <Value data={stale_years} column=last_rate_date fmt='d mmm yyyy'/> —
+<Value data={stale_years} column=period_end_stale_days/> days before the year ended — because the ECB stopped
+publishing this currency partway through it. The number is a true statement about converting at the last
+available rate, which is why it is shown rather than blanked, but it is not a year-end rate in the sense the
+other points on this line are.
+
+The published data carries a `period_end_is_stale` flag on it.
+
+</Alert>
+
+{/if}
 
 <Alert status=warning>
 

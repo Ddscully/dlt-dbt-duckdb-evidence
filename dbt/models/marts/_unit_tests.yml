@@ -358,15 +358,17 @@ unit_tests:
   # ---------------------------------------------------------------------------
   # fct_fx_rates_periods — the aggregation.
   #
-  # Five mutations against a warehouse copy. The model has 20 data tests and
+  # Seven mutations against a warehouse copy. The model has 23 data tests and
   # only one of them notices anything:
   #
-  # | mutation                                    | 20 data tests | effect                                        |
+  # | mutation                                    | 23 data tests | effect                                        |
   # |---------------------------------------------|---------------|-----------------------------------------------|
   # | `avg_eur_per_unit` = 1 / `avg_units_per_eur`| all pass      | USD 2008 0.683499 -> 0.679923; ISK 2008 off 11.9% |
   # | `max()` for `arg_max(.., rate_date)`        | all pass      | USD 2014 period end 1.2141 -> 1.3953, `period_end_vs_avg_pct` **flips** -8.61% -> +5.03% |
   # | `min()` for `arg_min(.., rate_date)`        | all pass      | `period_start_units_per_eur` wrong on 16,975 rows (85.9%) |
   # | `period_is_complete` `<` instead of `<=`    | all pass      | **nothing at all** — no period ends on the series end |
+  # | `period_end_is_stale` `>=` instead of `>`   | all pass      | **nothing at all** — no period-end sits on the cap |
+  # | staleness clock to `period_end_date`        | all pass      | 87 of the 116 open periods become stale, every one a false alarm |
   # | average over dense `fct_fx_rates_daily`     | **1 fails**   | caught by `fx_periods_annual_buckets_cover_every_fixing` |
   #
   # The one that fails is the reason to keep that model-level test: summing
@@ -374,6 +376,14 @@ unit_tests:
   # row count is what makes averaging the gap-filled table impossible to miss.
   # Everything else here is a number that is positive, non-null and inside every
   # range, which is all the column tests can ask.
+  #
+  # **The staleness distribution is bimodal and the cap sits in the gap**, which
+  # is why its boundary joins `period_is_complete`'s in the unreachable column:
+  # 19,743 period-ends are 0-3 days old, then nothing at all until 22, and the
+  # remaining 22 run 22 / 30 / 62 / 121 / 184 / 305. Any cap from 4 to 21 selects
+  # the same 22 rows, so `fx_max_carry_forward_days` is not finely tuned here —
+  # it is a threshold in an 18-day-wide empty band, which is a better defence of
+  # the number than precision would have been.
 
   - name: fx_periods_takes_the_last_fixing_of_a_period_not_the_highest
     model: fct_fx_rates_periods
@@ -414,7 +424,7 @@ unit_tests:
     description: >
       The mean of the reciprocals is not the reciprocal of the mean, and
       `avg_eur_per_unit` is the former. Writing it as `1 / avg_units_per_eur` is
-      the natural-looking simplification and it passes all 20 data tests: the
+      the natural-looking simplification and it passes all 23 data tests: the
       number stays positive and non-null, and it is only 0.07% out in a calm
       year. The gap grows with how far the rate moved inside the period — 0.52%
       for EUR/USD in 2008 and **11.9% for the Icelandic krona that same year** —
@@ -470,6 +480,72 @@ unit_tests:
         - {period_type: "quarter", period_end_date: "2024-03-31", period_is_complete: false}
         - {period_type: "half",    period_end_date: "2024-06-30", period_is_complete: false}
         - {period_type: "year",    period_end_date: "2024-12-31", period_is_complete: false}
+
+  - name: fx_periods_ages_the_closing_fixing_against_the_last_date_it_speaks_for
+    model: fct_fx_rates_periods
+    description: >
+      `period_end_is_stale` is this model's half of the staleness policy
+      `fct_fx_rates_daily` has always had, and both of its plausible
+      implementations are wrong in a way no data test can see — the column stays
+      a non-null boolean either way.
+
+      **Reading `is_rate_stale` off the sibling instead of computing it here**
+      catches 5 of the warehouse's 22 stale period-ends. The daily model stops
+      emitting rows once a currency leaves the ECB's panel, so the 17 rows that
+      most need the flag have nothing to join to and a left join calls them
+      clean. That mutation is unreachable from a unit test — it is a missing
+      join, not a wrong value — which is why the model comment carries the
+      argument and this fixture pins what is left.
+
+      **Ageing the fixing against `period_end_date` alone** is the reachable one,
+      and it flags 87 of the warehouse's 116 open periods: a period that has not
+      finished has a period end in the future, so every current month, quarter,
+      half and year is stale by construction. `least(period_end_date,
+      series_end_date)` asks how old the fixing is relative to the last date the
+      value could be speaking for. LIV's half and year below are the pin — both
+      incomplete, both quoting a fixing that *is* the series end, both fresh.
+
+      The third mutation is the cap boundary, and **no row in the warehouse sits
+      on it** — the staleness distribution stops at 3 days and resumes at 22, so
+      `>=` for `>` moves nothing at all and only a fixture can pose the
+      question. CAP therefore publishes its last fixing seven days before its
+      month ends: at the cap and so **not** stale, the same `<=` the daily model
+      uses. CAP's longer periods run past the cap and are stale while
+      incomplete, which is the case the flag exists to catch early — a currency
+      that stops publishing mid-period, before it has aged into a finished
+      one.
+    given:
+      - input: ref('fct_fx_rates_published')
+        rows:
+          # CAP leaves the panel on 24 January; LIV publishes on to 31 March and
+          # so sets the series end for both.
+          - {rate_date: "2024-01-24", quote_currency: "CAP", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-01-31", quote_currency: "LIV", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-03-31", quote_currency: "LIV", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-01-24", year: 2024, quarter: 1, half: 1, month_start_date: "2024-01-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-01-31", year: 2024, quarter: 1, half: 1, month_start_date: "2024-01-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-03-31", year: 2024, quarter: 1, half: 1, month_start_date: "2024-03-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+    expect:
+      rows:
+        # CAP's month ends 7 days after its last fixing — on the cap, not past
+        # it. `>=` would flip this row and nothing else here.
+        - {quote_currency: "CAP", period_type: "month",   period_label: "2024-01",  period_is_complete: true,  period_end_stale_days: 7,  period_end_is_stale: false}
+        # 24 Jan to 31 Mar is 7 + 29 + 31 = 67 days. The quarter has finished;
+        # the half and the year have not, and are stale all the same because the
+        # currency stopped rather than the calendar.
+        - {quote_currency: "CAP", period_type: "quarter", period_label: "2024-q1", period_is_complete: true,  period_end_stale_days: 67, period_end_is_stale: true}
+        - {quote_currency: "CAP", period_type: "half",    period_label: "2024-1",  period_is_complete: false, period_end_stale_days: 67, period_end_is_stale: true}
+        - {quote_currency: "CAP", period_type: "year",    period_label: "2024",    period_is_complete: false, period_end_stale_days: 67, period_end_is_stale: true}
+        # LIV is current in every period. Its half and year are incomplete and
+        # fresh — the two rows that fail if the clock runs to `period_end_date`
+        # instead of stopping at the series end.
+        - {quote_currency: "LIV", period_type: "month",   period_label: "2024-01",  period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
+        - {quote_currency: "LIV", period_type: "month",   period_label: "2024-03",  period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
+        - {quote_currency: "LIV", period_type: "quarter", period_label: "2024-q1", period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
+        - {quote_currency: "LIV", period_type: "half",    period_label: "2024-1",  period_is_complete: false, period_end_stale_days: 0,  period_end_is_stale: false}
+        - {quote_currency: "LIV", period_type: "year",    period_label: "2024",    period_is_complete: false, period_end_stale_days: 0,  period_end_is_stale: false}
 
   # ---------------------------------------------------------------------------
   # fct_retail_returns — the inferred join.

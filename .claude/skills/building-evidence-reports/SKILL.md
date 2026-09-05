@@ -175,6 +175,18 @@ where year = ${inputs.year.value}
   paragraph that has a component in it stops processing markdown at the wrap, so
   a `[link](/foo)` later in the same paragraph renders as literal brackets. Long
   lines are the price; a following paragraph with no component is unaffected.
+  - **It is every mark, not just links** — `**bold**` and `` `code` `` go
+    literal the same way, and the asymmetry inside one paragraph is what makes
+    it hard to see: `currency.md`'s staleness alert opens with `**…**` that
+    renders as `<strong>` and closes, four wrapped lines later, with marks that
+    do not. Same block, same syntax, different treatment, no error.
+  - **Inside an `<Alert>` it is easier to miss again**, because the callout
+    still looks deliberate — a reader reads stray asterisks as typing rather
+    than as a build fault, and nothing appears in the build log.
+  - **The fix when the paragraph must wrap is a second paragraph with no
+    component in it**, which processes normally. That is where to put a flag or
+    column name you want in code marks. Confirmed by render, not by reading:
+    the split sentence comes back as `<code class="markdown">`.
 - Don't hardcode the upper bound of a year selector (`where year between 1990
   and 2022`) — it silently pins the dashboard to whatever year the warehouse
   held the day it was written. `where year >= 1990` tracks the data.

@@ -597,6 +597,11 @@ models:
       and more over a holiday weekend. And `avg_eur_per_unit` is not
       1 / `avg_units_per_eur` — the mean of reciprocals is not the reciprocal of
       the mean, and the two differ by 0.07% in a calm year and 0.53% in 2008.
+
+      **Check `period_end_is_stale` before converting a stock.** A period end is
+      the last fixing published inside the period however old that is, so a
+      currency that left the ECB's panel mid-period still gets a closing rate —
+      the rouble's 2022 year end is a fixing from 1 March, 305 days earlier.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -723,4 +728,31 @@ models:
           False where the period has not finished, so the current year's average
           is over the months that have happened. The `price_is_partial_year`
           lesson from the Eurostat models, arriving again.
+        data_tests: [not_null]
+      - name: period_end_stale_days
+        data_type: BIGINT
+        meta:
+          additivity: non_additive
+        description: >
+          Age in days of the fixing behind `period_end_*`, measured to the last
+          date that value could be speaking for — the period end, or the end of
+          the series where the period has not finished. Zero on the 69% of
+          period-ends that fall on a publishing day.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+      - name: period_end_is_stale
+        data_type: BOOLEAN
+        description: >
+          True where `period_end_stale_days` exceeds `fx_max_carry_forward_days`
+          (7), the same cap `fct_fx_rates_daily` applies. **The value is
+          disclosed, not nulled** — 290.00 ISK/EUR was the last real fixing of
+          2008 and a balance closed on 31 December would have converted at it;
+          what the reader needs is that it was three weeks old because the
+          currency had stopped trading. True on 22 complete period-ends across 7
+          currencies, of which 16 are currencies that left the ECB's panel (RUB
+          2022-03-01; ARS, DZD, MAD and TWD together on 2020-10-30), 5 are the
+          two currency crises and 1 is the ROL redenomination. The worst is the
+          rouble's 2022 year end at 305 days, not the krona's famous 2008 at 22.
         data_tests: [not_null]

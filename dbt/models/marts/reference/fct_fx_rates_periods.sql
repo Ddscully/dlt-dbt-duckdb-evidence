@@ -42,17 +42,38 @@
 --
 -- **For a rate on a *given date*, use `fct_fx_rates_daily`** — it gap-fills the
 -- 30% of calendar days the ECB does not publish on, which this model does not
--- attempt. Where the two meet they agree, with one exception worth knowing
--- about: `period_end_*` is `arg_max` over *published* fixings and so has no
--- notion of staleness, while `fct_fx_rates_daily` caps the carry at
--- `fx_max_carry_forward_days` and returns null past it. Of the 19,616 complete
--- period-ends the two share, **19,611 hold the same number**, and 6,002 (31%)
--- fall on a day with no fixing at all. The five that disagree are both of the
--- currency crises: the krona's 2008 year end here is its last pre-collapse
--- fixing, 22 days stale — and lands on the month, quarter, half and year alike —
--- and the Argentine peso's January 2002 is the same, where the daily model
--- refuses to quote either. `last_rate_date` is the column that says which case
--- a row is in.
+-- attempt. Where the two meet they agree: of the 19,649 complete period-ends,
+-- 6,035 (31%) fall on a day with no fixing at all and the carried value is the
+-- same in both.
+--
+-- **`period_end_is_stale` is this model's half of the staleness policy, and it
+-- has to be computed here rather than read off the sibling.** `period_end_*` is
+-- `arg_max` over *published* fixings, so on its own it has no notion of
+-- staleness and will quote a fixing of any age as a period close;
+-- `fct_fx_rates_daily` caps its carry at `fx_max_carry_forward_days` and nulls
+-- the rate past it. The obvious way to mirror that — join the sibling and read
+-- `is_rate_stale` — **reproduces the defect it is meant to catch**, because the
+-- daily model stops emitting rows entirely once a currency leaves the panel: 17
+-- of the 22 stale period-ends have no daily row to join to, so a left join
+-- flags 5 of 22 and calls the rest clean. The flag below asks the question
+-- directly instead, of `last_rate_date` alone.
+--
+-- **22 complete period-ends across 7 currencies are stale, and they have three
+-- causes rather than one.** Sixteen are currencies that simply left the ECB's
+-- panel and whose retirement `dim_currency` deliberately does not guess at —
+-- the rouble on 2022-03-01, and the peso, dinar, dirham and Taiwan dollar
+-- together on 2020-10-30, one panel change rather than four events. Five are
+-- the currency crises (the krona's 2008, which lands on month, quarter, half
+-- and year alike; the peso's January 2002). One is a redenomination the seed
+-- *does* record, ROL in 2005 — and it is still stale here, because this model
+-- reads fixings and not the seed.
+--
+-- The worst is not the most famous. The krona's +98.3% in 2008 is quoted
+-- everywhere in this project and is 22 days stale; **the rouble's 2022 year end
+-- is 305 days stale**, a 117.201 close against an 88.397 average, because the
+-- ECB stopped publishing RUB ten months before the year ended. Both numbers are
+-- true statements about converting at the last available fixing, which is why
+-- the flag discloses rather than nulls — see `period_end_is_stale`.
 with published as (
     select * from {{ ref('fct_fx_rates_published') }}
 ),
@@ -131,18 +152,33 @@ aggregated as (
         max(units_per_eur) as max_units_per_eur
     from keyed
     group by period_type, period_start_date, period_label, quote_currency
+),
+
+-- The period end, and the last date any value in this row could be speaking
+-- for. Computed once here because three columns below need it, and because the
+-- staleness clock has to stop at the end of the *series* for a period that has
+-- not finished: measured against `period_end_date` alone, every unfinished
+-- period is stale by construction, which is 87 of the 116 open periods and no
+-- information at all.
+bounded as (
+    select
+        a.*,
+        case a.period_type
+            when 'month' then last_day(a.period_start_date)
+            when 'quarter' then (a.period_start_date + interval 3 month) - interval 1 day
+            when 'half' then (a.period_start_date + interval 6 month) - interval 1 day
+            else (a.period_start_date + interval 1 year) - interval 1 day
+        end as period_end_date,
+        s.series_end_date
+    from aggregated as a
+    cross join series as s
 )
 
 select
     a.period_type,
     a.period_start_date,
     a.period_label,
-    case a.period_type
-        when 'month' then last_day(a.period_start_date)
-        when 'quarter' then (a.period_start_date + interval 3 month) - interval 1 day
-        when 'half' then (a.period_start_date + interval 6 month) - interval 1 day
-        else (a.period_start_date + interval 1 year) - interval 1 day
-    end as period_end_date,
+    a.period_end_date,
     cast(date_part('year', a.period_start_date) as integer) as year,
     a.quote_currency,
     a.base_currency,
@@ -170,11 +206,16 @@ select
     a.n_published_days,
     a.first_rate_date,
     a.last_rate_date,
-    case a.period_type
-        when 'month' then last_day(a.period_start_date)
-        when 'quarter' then (a.period_start_date + interval 3 month) - interval 1 day
-        when 'half' then (a.period_start_date + interval 6 month) - interval 1 day
-        else (a.period_start_date + interval 1 year) - interval 1 day
-    end <= s.series_end_date as period_is_complete
-from aggregated as a
-cross join series as s
+    a.period_end_date <= a.series_end_date as period_is_complete,
+
+    -- How old the fixing behind `period_end_*` is, relative to the last date
+    -- that value could be speaking for, and whether that exceeds the carry
+    -- `fct_fx_rates_daily` allows. The flag discloses and does not null: 290.00
+    -- ISK/EUR *was* the last real fixing of 2008 and a finance system closing an
+    -- ISK balance on 31 December would have used it. What the reader needs is
+    -- that it was three weeks old because the currency had stopped trading.
+    date_diff('day', a.last_rate_date, least(a.period_end_date, a.series_end_date))
+        as period_end_stale_days,
+    -- DuckDB resolves a select-list alias laterally, so the age is written once.
+    period_end_stale_days > {{ var('fx_max_carry_forward_days') }} as period_end_is_stale
+from bounded as a

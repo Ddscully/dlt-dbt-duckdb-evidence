@@ -85,15 +85,19 @@ follows from that rather than from the numbers.
     `is_quoted` assertion: 47 rows, 46 quoted, EUR the one exception.
 ### Both directions, and spot against average
 
-- **`fct_fx_rates_periods` has 20 data tests and four of five mutations pass
+- **`fct_fx_rates_periods` has 23 data tests and six of seven mutations pass
   every one of them.** `avg_eur_per_unit` as `1 / avg_units_per_eur` (USD 2008
   0.683499 -> 0.679923), `max()` for `arg_max(.., rate_date)` (USD 2014's period
   end 1.2141 -> 1.3953, and `period_end_vs_avg_pct` **flips sign**, -8.61% ->
   +5.03%), `min()` for `arg_min` (85.9% of `period_start_units_per_eur` wrong),
-  and `period_is_complete` on `<` (nothing moves — no period ends on the series
-  end date). The fifth, averaging the dense daily table, is caught by
-  `fx_periods_annual_buckets_cover_every_fixing`, which pins the input's shape
-  rather than any value and catches this for free. The three unit tests in
+  `period_is_complete` on `<` (nothing moves — no period ends on the series end
+  date), `period_end_is_stale` on `>=` (nothing moves either — no period-end
+  sits on the cap), and ageing the closing fixing against `period_end_date`
+  rather than `least(period_end_date, series_end_date)` (87 of the 116 open
+  periods turn stale, every one a false alarm). The seventh, averaging the dense
+  daily table, is caught by `fx_periods_annual_buckets_cover_every_fixing`, which
+  pins the input's shape rather than any value and catches this for free. The
+  four unit tests in
   `dbt/models/marts/_unit_tests.yml` hold the other four — so between them all
   five are covered, but the fifth rests on that one data test alone. Deleting it
   as redundant would leave the only mutation the existing suite catches
@@ -124,18 +128,42 @@ follows from that rather than from the numbers.
       (10.4 non-publishing days, 0.073%), April (10.2, 0.072%), May (9.6,
       0.070%), January (9.4, 0.066%) at the top and October (8.8, 0.039%) at the
       bottom — Christmas, Easter, 1 May, New Year.
-  - **The two models disagree about staleness, and only the daily one has a
-    policy.** `period_end_*` is `arg_max` over *published* fixings, so it has no
-    cap; `fct_fx_rates_daily` nulls a rate carried past
-    `fx_max_carry_forward_days`. Of the 19,616 complete period-ends they share,
-    19,611 agree and 6,002 (31%) fall on a day with no fixing at all. The five
-    that disagree are the two currency crises — the krona's 2008 year end (22
-    days stale, and it lands on month, quarter, half and year alike) and the
-    peso's January 2002 — where `fct_fx_rates_periods` quotes the last fixing
-    and `fct_fx_rates_daily` refuses to quote anything. Neither is wrong for its
-    own question and `last_rate_date` discloses it, but a consumer joining the
-    two gets a rate from one and a null from the other on the same day. Both
-    models now cross-reference each other and say so.
+  - **Both models have a staleness policy now, and the second one could not be
+    borrowed from the first.** `period_end_*` is `arg_max` over *published*
+    fixings, so on its own it quotes a fixing of any age as a period close;
+    `fct_fx_rates_daily` nulls a rate carried past `fx_max_carry_forward_days`.
+    `period_end_is_stale` / `period_end_stale_days` close that, and the way they
+    are computed is the point: **the obvious implementation — join the sibling,
+    read `is_rate_stale` — reproduces the defect.** The daily model stops
+    emitting rows once a currency leaves the ECB's panel, so 17 of the 22 stale
+    period-ends have no row to join to and a left join flags 5 of 22 and calls
+    the rest clean. That was measured, and it is also **how the finding was
+    originally undersized**: sizing the problem by what the two models *share*
+    (19,616 of 19,649 complete period-ends) excludes exactly the currencies that
+    have the problem. The flag ages `last_rate_date` directly instead.
+  - **22 complete period-ends across 7 currencies are stale, from three causes.**
+    Sixteen are panel exits `dim_currency` deliberately records no retirement
+    for — RUB on 2022-03-01, and ARS, DZD, MAD and TWD together on 2020-10-30,
+    which is one panel change rather than four events. Five are the currency
+    crises (ISK 2008 across month, quarter, half and year; ARS January 2002).
+    One is ROL's 2005 redenomination, which the seed *does* record and which is
+    stale here anyway, because the model reads fixings and not the seed.
+    - **The worst is not the famous one.** ISK 2008's +98.3% is quoted all over
+      this project and is 22 days stale; **RUB's 2022 year end is 305 days
+      stale** — a 117.201 close against an 88.397 average, because the ECB
+      stopped publishing the rouble ten months before the year ended.
+    - **The flag discloses and does not null**, unlike the daily model's cap.
+      290.00 ISK/EUR *was* the last real fixing of 2008 and a balance closed on
+      31 December would have converted at it; nulling would delete the project's
+      own flagship spot-vs-average example from the mart, the prose and the
+      Evidence page. What the reader needs is that the number was three weeks
+      old because the currency had stopped trading — which makes it a *stronger*
+      example, not a retracted one.
+    - **The distribution is bimodal and the cap sits in the gap**: 19,743
+      period-ends are 0-3 days old, nothing at all between 4 and 21, then the 22.
+      Any cap from 4 to 21 selects the same rows, so `>` versus `>=` moves
+      nothing in the warehouse and only the unit test can pose it — the same
+      unreachable-boundary category as `period_is_complete`'s `<=`.
   - **`avg_eur_per_unit` is not `1 / avg_units_per_eur`** — the mean of
     reciprocals is not the reciprocal of the mean. 0.07% apart in a calm year,
     0.53% in 2008. Each column is the mean of its own series; the period-*end*

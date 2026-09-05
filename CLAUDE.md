@@ -202,7 +202,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 7 seeds + 460 data tests + 31 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 7 seeds + 463 data tests + 32 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -901,7 +901,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are thirty-one unit tests, over twelve models, and they exist because a data
+- **There are thirty-two unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -948,7 +948,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  thirty-one cost 4.4s. A broken fiscal calendar should stop `release-data.yml`,
+  thirty-two cost 4.4s. A broken fiscal calendar should stop `release-data.yml`,
   not ride along in it. `just dbt-unit-test` is the inner loop — 4.3s of dbt's
   own time, ~10s wall once `dbt deps` and startup are counted.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
@@ -1067,11 +1067,11 @@ the point of the layer is that none of it is a comment.
 - **Every numeric mart column declares `meta: {additivity: …}`**, from a closed
   four-value vocabulary — `additive`, `semi_additive`, `non_additive`,
   `not_a_measure` — because a contract states a type and a test states
-  correctness, and neither says whether `sum()` means anything. 117 of the 226
+  correctness, and neither says whether `sum()` means anything. 118 of the 227
   are non-additive. **Counted as dbt resolves them, which is the basis every
   figure in this section uses** — `fct_emissions_energy_v1` inherits 36 labels
-  through `include: all` and declares one, so the ymls carry 190 literal
-  `additivity:` entries where the manifest carries 226 labelled columns (189 +
+  through `include: all` and declares one, so the ymls carry 191 literal
+  `additivity:` entries where the manifest carries 227 labelled columns (190 +
   v1's 37). Quoting the yml count while naming the manifest one is how a stale
   pair survived into a release — described in words rather than digits here,
   because the guard cannot tell a quotation from an assertion and should not
@@ -1094,7 +1094,7 @@ the point of the layer is that none of it is a comment.
   - **`gdp_usd` is `semi_additive` and `gdp_constant_usd` is `additive`**, which
     is the current-vs-constant-dollar gotcha under *Conventions & gotchas*
     expressed as metadata rather than as prose somebody has to have read.
-  - **The labels ship**, in `manifest.json`'s `additivity` map — 282 columns
+  - **The labels ship**, in `manifest.json`'s `additivity` map — 283 columns
     across 25 relations — for the reason `direct_identifier` is real: a label
     with no consequence is decoration, and a Parquet consumer has the types and
     nothing else. The five `analytics` tables are invisible to dbt, so their 56
@@ -1212,7 +1212,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 438 of the 460 tests use the default. `severity` comes across
+  is what dbt does; 438 of the 463 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the
@@ -1603,6 +1603,21 @@ Gotchas:
     catalog too. It asserts the *count* now, which is the assertion that
     notices — the same shape as an export test that passed because the machine
     happened not to have ingested.
+- **A measurement can inherit the blind spot of the thing it measures, and
+  sizing a cross-model defect by what the two models *share* is the shape to
+  watch for.** `fct_fx_rates_periods` had no staleness policy where
+  `fct_fx_rates_daily` has one; the gap was sized by comparing the period-ends
+  the two hold in common — 19,611 of 19,616 agreeing, so **five** rows — and
+  built as `period_end_is_stale` a year later against **22**, across seven
+  currencies. The daily model stops emitting rows once a currency leaves the ECB
+  panel, so the 17 worst rows had nothing to join to and left the numerator and
+  the denominator together. The same trap is a *design* one: implementing the
+  flag as a left join to the sibling reproduces it exactly, and no data test can
+  see that, because the column is a non-null boolean either way. The worst row
+  is the rouble's 2022 year end — a closing rate 305 days old — where the prose
+  everywhere named the krona's famous 2008 at 22. **A join is not a census**;
+  when the question is "how often do these two disagree", count the rows only
+  one of them has first.
 - **The way a test here earns its place is mutation**: break the model in a
   plausible way against a *copy* of the warehouse, run its full data-test suite,
   and record the number that moves. "Nothing went red" is the finding, not the

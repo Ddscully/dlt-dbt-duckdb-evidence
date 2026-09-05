@@ -5,7 +5,7 @@ description: The twelve dbt models that carry unit tests and what mutating each 
 
 # Unit testing the models (`dbt/models/**/_unit_tests.yml`)
 
-Thirty-one unit tests over twelve models. They exist because a data test cannot
+Thirty-two unit tests over twelve models. They exist because a data test cannot
 see a wrong answer that is a legal one, and every one of them was written after
 mutating the model and watching its data tests stay green. This file is the
 record of those mutations — what moved, what did not, and which fixture shapes
@@ -36,7 +36,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
 
 ## The twelve models, and what mutating each one proved
 
-- **There are thirty-one unit tests, over twelve models, and they exist because a data
+- **There are thirty-two unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -166,16 +166,21 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     converts at a rate 132% and 98% from the next real quote. That is the
     argument for the cap being 7 rather than generous.
 - **`fct_fx_rates_periods` is the fifth, and the only model so far where an
-  existing test caught one of the mutations.** 20 data tests; five mutations,
-  four of them green on every one. `avg_eur_per_unit` written as
+  existing test caught one of the mutations.** 23 data tests; seven mutations,
+  six of them green on every one. `avg_eur_per_unit` written as
   `1 / avg_units_per_eur` moves USD 2008 from 0.683499 to 0.679923; `max()` in
   place of `arg_max(.., rate_date)` takes USD 2014's period end from 1.2141 to
   1.3953 and **flips the sign of `period_end_vs_avg_pct`, -8.61% to +5.03%**;
   `min()` for `arg_min` puts the wrong `period_start_units_per_eur` on 16,975
   rows (85.9%); and `period_is_complete` on `<` instead of `<=` changes nothing
-  at all. Averaging the dense `fct_fx_rates_daily` instead of the published
-  fixings is the one that fails, on
-  `fx_periods_annual_buckets_cover_every_fixing`.
+  at all. The two staleness mutations added with `period_end_is_stale` are the
+  same shape: `>=` for `>` on the cap changes nothing (the distribution stops at
+  3 days and resumes at 22, so no row sits on it), and ageing the closing fixing
+  against `period_end_date` instead of `least(period_end_date,
+  series_end_date)` turns 87 of the 116 open periods stale — a period that has
+  not finished has a period end in the future. Averaging the dense
+  `fct_fx_rates_daily` instead of the published fixings is the one that fails,
+  on `fx_periods_annual_buckets_cover_every_fixing`.
   - **That test is the model to copy.** It sums `n_published_days` over the year
     buckets and compares it with the row count of `fct_fx_rates_published`, so
     the *shape* of the input is pinned rather than any value. It was written to
