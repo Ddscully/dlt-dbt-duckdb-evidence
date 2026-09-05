@@ -17,7 +17,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
 
 ## The method
 
-- **The way a test here earns its place is mutation, and the method has two
+- **The way a test here earns its place is mutation, and the method has three
   traps.** Break the model in a plausible way against a *copy* of the warehouse
   (`WAREHOUSE_PATH` at an absolute path — `just dbt-build` targets the real
   one), run its full data-test suite, and record the number that moves. "Nothing
@@ -33,6 +33,16 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   - **Restore from a copy, never `git checkout <file>`.** During this work the
     tree is dirty by definition; `git checkout` is a revert to HEAD, not an
     undo, and it destroyed a round of uncommitted edits to three files.
+  - **`dbt build --select <model>` cannot tell you which tests caught a
+    mutation.** A failing unit test skips everything downstream of it, the
+    model included — so the run stops after the first red one and reports
+    `SKIP=25`. Reading that as "one test caught it" is wrong twice over: it
+    names an arbitrary member of the red set, and it hides how many others
+    fired. Measured here on the CBAM grid join, where the single name reported
+    was a *different* test on two consecutive runs. Run the two phases
+    separately — `dbt test --select <model>,test_type:unit`, which has no model
+    build to skip and so runs every one, then `dbt build --select <model>
+    --exclude test_type:unit` for the data tests against the mutated model.
 
 ## The twelve models, and what mutating each one proved
 
