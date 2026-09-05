@@ -202,7 +202,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 7 seeds + 464 data tests + 33 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 7 seeds + 464 data tests + 36 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -901,7 +901,7 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
   petrostates legitimately reach 780 t/person). Before tightening a bound,
   check the actual distribution — the fixture slice is 17 countries and will
   happily pass a threshold the full 200+ would break.
-- **There are thirty-three unit tests, over twelve models, and they exist because a data
+- **There are thirty-six unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -948,9 +948,9 @@ under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epo
 - **Unit tests run inside `dbt build`, and they are deliberately left there.**
   dbt Labs recommends excluding them from production runs to save compute; that
   argument is about warehouse spend and this is a local DuckDB build where all
-  thirty-three cost 4.5s. A broken fiscal calendar should stop `release-data.yml`,
-  not ride along in it. `just dbt-unit-test` is the inner loop — 4.3s of dbt's
-  own time, ~10s wall once `dbt deps` and startup are counted.
+  thirty-six cost 4.8s. A broken fiscal calendar should stop `release-data.yml`,
+  not ride along in it. `just dbt-unit-test` is the inner loop — 4.8s of dbt's
+  own time, ~10.5s wall once `dbt deps` and startup are counted.
 - **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
   stamped at ingest, so a freshness failure means the pipeline stopped running.
   It is tautologically green in CI (which loads and then checks), which is why
@@ -1638,6 +1638,22 @@ Gotchas:
   all-clear — across the seven models mutated this way, 38 mutations were run and
   the data tests caught 5. The method's two traps, and every model's findings,
   are the `unit-testing-dbt-models` skill.
+  - **Counting which tests went red over-counts the guards, and an input mocked
+    `rows: []` is how.** All three `fct_cbam_exposure` unit tests failed when
+    its grid join was made inner — none of them guards that join. Their grid
+    input is empty, so an inner join against nothing deletes their whole
+    fixture; give any of them one real row and they stop noticing. Read a red
+    set as a list of candidates and check each one *poses* the thing it caught,
+    or a fixture accident is filed as coverage.
+- **A correct number reused for a different claim is a wrong number, and
+  "verified" in a review usually means read rather than recomputed.** Issue #13
+  said 70,174 of 802,716 purchase lines were dropped by the tie-break, under a
+  heading promising every figure was checked against the warehouse. 70,174 is
+  real and is exactly what the model's comment says — the lines *in* a tied
+  group. The lines dropped are that minus one per group: **36,656, 4.6%**, which
+  the review's own source never claimed. Nothing was stale and nothing was
+  fabricated; the number changed meaning when it changed sentence, and a scanner
+  that checks totals against the manifest cannot see that at all.
 - **Every hand-maintained list here is asserted against the authority it
   copies** — `SOURCE_TABLES`, `RAW_DESCRIPTIONS`, `WB_WDI_INDICATORS`,
   `ATTRIBUTION`, `pages.yml`'s path allowlist, the seven `@dg.asset_check`

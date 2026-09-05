@@ -298,6 +298,86 @@ unit_tests:
         - {country_or_territory: "Norway", country_iso3: "NOR", certificates_2026_t_co2e_per_t: 11.0, excess_over_cleanest_source_t_co2e_per_t: 0.0}
         - {country_or_territory: "Chile",  country_iso3: "CHL", certificates_2026_t_co2e_per_t: 22.0, excess_over_cleanest_source_t_co2e_per_t: 11.0}
 
+  - name: cbam_exposure_takes_each_country_latest_grid_factor_and_keeps_the_rest
+    model: fct_cbam_exposure
+    description: >
+      The grid join was mocked `rows: []` by all three CBAM tests above, so
+      `grid_factor_year`, `grid_factor_t_co2_per_mwh` and the
+      `where is_latest_available` filter were never once exercised — three
+      columns of the shipped mart reaching the release untested.
+
+      Two of its three rules are invisible to every data test on this model.
+
+      **"Latest" is per country, not a year.** The mart's factors carry three
+      different years — 2025 on 60 countries, 2024 on 59 and 2022 on one — so a
+      `where year = 2025` written for the same job looks right and strips the
+      factor off **2,584 rows that had one** (the null count goes 261 to 2,845).
+      Measured against a warehouse copy: **PASS=22, ERROR=0**. Norway and Chile
+      here carry different latest years for that reason, and Norway carries a
+      second, dearer row marked `is_latest_available: false`, so taking the
+      whole series or the wrong end of it is a different answer rather than the
+      same one by luck.
+
+      **The join is left, in both of the ways it can stop being.** The fallback
+      table has no `country_iso3` at all and Curaçao is a listed country the
+      factor dimension does not cover; an inner join drops both — 11,665 rows to
+      11,404, and **all 260 of the "other countries and territories" rows** that
+      `reports/pages/cbam.md` reads for its fallback-penalty figure. Also
+      **PASS=22, ERROR=0**: uniqueness holds on what is left, no `not_null`
+      fires on rows that are gone, and this model has no row-count test.
+
+      The three tests above go red on that same mutation and **not one of them
+      is a guard against it** — their grid input is `rows: []`, so an inner join
+      against an empty table deletes their whole fixture. Give any of them a
+      single factor row and they stop noticing, which is the same trap
+      `..._keeps_a_line_whose_country_the_map_has_never_seen` records for the
+      country map. This one fails on the rows that matter.
+
+      The third rule, the filter's *presence*, is the one a data test does
+      catch: dropping it fans 11,665 rows out to 306,276 and
+      `unique_combination_of_columns` on (country_or_territory, good_key) fails
+      immediately. Recorded because knowing which half is already guarded is
+      worth as much as the fixture, not because it is why this test exists.
+    given:
+      - input: ref('int_cbam_default_factors')
+        rows:
+          - {country_or_territory: "Other countries and territories", country_iso3: null, good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 4.5, indirect_t_co2e_per_t: 0.5, total_t_co2e_per_t: 5.0, production_route_code: "F", is_fallback_table: true, is_country_specific: true}
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 9.0,  indirect_t_co2e_per_t: 1.0, total_t_co2e_per_t: 10.0, production_route_code: "A", is_fallback_table: false, is_country_specific: true}
+          - {country_or_territory: "Chile",  country_iso3: "CHL", good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 18.0, indirect_t_co2e_per_t: 2.0, total_t_co2e_per_t: 20.0, production_route_code: "A", is_fallback_table: false, is_country_specific: true}
+          - {country_or_territory: "Curaçao", country_iso3: "CUW", good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 27.0, indirect_t_co2e_per_t: 3.0, total_t_co2e_per_t: 30.0, production_route_code: "A", is_fallback_table: false, is_country_specific: true}
+      - input: ref('cbam_goods')
+        rows:
+          - {good_key: "2523100090-other-clinker", product_group: "Cement", cn_code: "2523 10 00 90", goods_description: "Other clinker, including grey clinker"}
+      - input: ref('cbam_markup_schedule')
+        rows:
+          - {product_group: "Cement", year: 2026, markup_pct: 10}
+          - {product_group: "Cement", year: 2027, markup_pct: 20}
+          - {product_group: "Cement", year: 2028, markup_pct: 30}
+      - input: ref('dim_country')
+        rows:
+          - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
+          - {country_iso3: "CHL", country_name: "Chile",  region: "Latin America & Caribbean", income_group: "High income"}
+          - {country_iso3: "CUW", country_name: "Curaçao", region: "Latin America & Caribbean", income_group: "High income"}
+      - input: ref('dim_grid_emission_factors')
+        rows:
+          # Norway's superseded year. Dearer than the latest, so a join that
+          # takes the whole series or the earliest row gives a different number
+          # rather than the same one by luck.
+          - {country_iso3: "NOR", year: 2024, emission_factor_t_co2_per_mwh: 0.300, is_latest_available: false}
+          - {country_iso3: "NOR", year: 2025, emission_factor_t_co2_per_mwh: 0.020, is_latest_available: true}
+          # Chile's latest is an older year than Norway's, which is the whole
+          # point: "latest available" is a per-country fact.
+          - {country_iso3: "CHL", year: 2022, emission_factor_t_co2_per_mwh: 0.400, is_latest_available: true}
+          # No row for CUW, and none for the fallback's null key.
+    expect:
+      rows:
+        # Both uncovered rows survive, with a null factor and a null year — the
+        # assertion an inner join fails by deleting them.
+        - {country_or_territory: "Other countries and territories", country_iso3: null,  grid_factor_year: null, grid_factor_t_co2_per_mwh: null}
+        - {country_or_territory: "Norway",  country_iso3: "NOR", grid_factor_year: 2025, grid_factor_t_co2_per_mwh: 0.020}
+        - {country_or_territory: "Chile",   country_iso3: "CHL", grid_factor_year: 2022, grid_factor_t_co2_per_mwh: 0.400}
+        - {country_or_territory: "Curaçao", country_iso3: "CUW", grid_factor_year: null, grid_factor_t_co2_per_mwh: null}
+
   # ---------------------------------------------------------------------------
   # fct_fx_rates_daily — the carry-forward.
   #
@@ -651,8 +731,10 @@ unit_tests:
   #
   # Four of those six mutations are on the matching rule rather than on the
   # classification, and they are pinned in `int_retail_return_matches` now — the
-  # `item_type` filter, the asof boundary, the tie-break and the dead
-  # `quantity > 0`. The table is kept whole here because it was measured whole:
+  # `item_type` filter, the asof boundary, the tie-break and, since 2026-09-05,
+  # the dead `quantity > 0` (`..._never_point_at_a_stock_write_off`, which is
+  # the only one of the four that needed a row the source has never sent).
+  # The table is kept whole here because it was measured whole:
   # splitting it would leave each half quoting numbers the other half's model
   # produced. What is left below is the `case`, mocked on matched rows.
 
@@ -724,9 +806,15 @@ unit_tests:
   # `revenue_per_active_customer_gbp` and not its numerator.
   #
   # `quantity > 0` is dead here for the reason it is dead in
-  # `fct_retail_returns`' `purchases`: every stock write-off is anonymous, so
-  # `customer_id is not null` has already excluded them. It stays because it
-  # states the intent.
+  # `int_retail_return_matches`' `purchases`: every stock write-off is
+  # anonymous, so `customer_id is not null` has already excluded them. It stays
+  # because it states the intent. Only the other one is posed by a fixture —
+  # `..._never_point_at_a_stock_write_off` — and that is a judgement about
+  # consequence rather than an oversight: a write-off admitted to the *matching*
+  # rule makes a return point at a sale that never happened and writes five
+  # `original_*` columns off it, which is a wrong answer rather than a missing
+  # one. What it would do to this model has not been measured, so nothing here
+  # claims it is harmless.
   #
   # **One fixture, four tests, each asserting a different column set**, so a
   # failure names which edge moved. Its shape is doing three jobs at once: the

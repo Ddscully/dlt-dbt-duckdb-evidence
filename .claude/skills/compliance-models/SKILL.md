@@ -325,6 +325,27 @@ mutation in this table:
   the flag keys on "this row has a total of its own" and the fallback does.
   `is_fallback_table` is the column that identifies it. Reads oddly, so it is
   pinned rather than left to be rediscovered.
+- **A fallen-back row is indistinguishable from a country's own value unless the
+  page says so, and 2026-09-05 is when it started saying so.**
+  `reports/pages/cbam.md` selected `is_country_specific` and rendered every other
+  column but that one, so 221 of the 10,785 rows the dropdown can reach — over 40
+  of its 252 goods — showed a tonnage, a cost and (on 36 of them) a production
+  route that belong to the catch-all. Grey hydraulic cements is the clearest
+  case: 24 of that good's 100 sourcing countries share one identical tonnage
+  where the other 76 carry 39 distinct values. The `Value basis` column is the
+  fix, and it is the same fallback-is-not-a-source distinction the mart already
+  enforces on `excess_over_cleanest_source_t_co2e_per_t` — one policy in three
+  places now (model, page filter, page column) rather than one place and two
+  omissions.
+- **The join to `dim_grid_emission_factors` filters `is_latest_available`, which
+  is per country and not a year.** 2025 for 60 countries, 2024 for 59 and 2022
+  for one, so a `where year = <literal>` written for the same job strips the
+  factor off 2,584 rows and passes every data test. It is also a **left** join in
+  earnest: the fallback row has no `country_iso3` and Curaçao has no factor, so
+  an inner join silently deletes 261 rows — the fallback's 260 among them, which
+  the page's headline ratio reads. Both are held by
+  `cbam_exposure_takes_each_country_latest_grid_factor_and_keeps_the_rest`; until
+  it existed, every CBAM unit test mocked that input as `rows: []`.
 
 ### Licence and scope limits
 

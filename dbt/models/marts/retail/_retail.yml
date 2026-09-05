@@ -435,6 +435,17 @@ models:
       recent prior purchase of the same product, and the model reports how often
       that failed: 87.6% match cleanly, 2.0% match to a smaller purchase, 8.4%
       have no prior purchase in the window and 1.9% have no customer id.
+
+      **The `original_*` columns are the output of a tie-break, and this file is
+      where a consumer of the release finds that out.** A customer can buy the
+      same product twice in one instant, and an `asof join` given several rows
+      tied on its inequality key picks among them arbitrarily — so until
+      2026-08-24 three of these columns changed between builds with no upstream
+      change at all, and this table ships as Parquet every month to people who
+      cannot be paged. `int_retail_return_matches` settles it by keeping the
+      lowest invoice then the lowest line number, and carries the measurements;
+      what matters here is that the choice is *fixed and arbitrary*, not that
+      the chosen line is the better match.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments: {combination_of_columns: [invoice, line_number]}
@@ -503,10 +514,25 @@ models:
         meta:
           additivity: additive
       - name: original_invoice
+        description: >
+          The inferred purchase, not a recorded one: the source carries no link
+          between a return and its order. Null on the 1,888 unmatched rows, and
+          `is_matched` is the column to filter on rather than this one.
         data_type: VARCHAR
         meta:
           pii: quasi_identifier
       - name: original_line_number
+        description: >
+          Which line of `original_invoice`, and **the column the tie-break
+          decides**. Where a customer bought the same product more than once in
+          the same instant this is the lowest `(invoice, line_number)` of the
+          tied group — stable between builds since 2026-08-24, arbitrary within
+          the group, and not a claim that the other lines are worse candidates.
+          Diffing this column against an earlier release is the one place that
+          choice becomes visible, so a row that moves with no upstream change is
+          the tie-break and not a restatement. `int_retail_return_matches`
+          carries the rule, how many rows it decides and what it costs; this
+          description deliberately does not restate those figures.
         data_type: BIGINT
         meta:
           additivity: not_a_measure

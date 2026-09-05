@@ -56,7 +56,15 @@ renamed as (
         -- a real sale nobody was signed in for. Nulled explicitly so it joins as
         -- an absence rather than as an empty-string customer.
         nullif(trim(customer_id), '') as customer_id,
-        trim(country) as country,
+        -- `nullif` for the same reason as `description` and `customer_id` above,
+        -- and unreachable for the same reason as several other clauses here:
+        -- the workbook read returns NULL for an empty cell, so all 1,067,371
+        -- rows carry a country and none of them is blank. An empty string
+        -- would otherwise survive the trim and join to the seed as its own
+        -- country — a 44th label the map has never seen, indistinguishable in
+        -- `relationships` from a real one. Pinned by fixture in
+        -- `_unit_tests.yml` rather than left to the reader.
+        nullif(trim(country), '') as country,
         invoice_ts,
         cast(invoice_ts as date) as invoice_date,
         invoice_month

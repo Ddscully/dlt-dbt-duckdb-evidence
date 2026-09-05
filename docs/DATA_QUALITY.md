@@ -1,6 +1,6 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 497 tests alongside the models — 464 data tests and 33 unit
+`just dbt-build` runs 500 tests alongside the models — 464 data tests and 36 unit
 tests. Dagster surfaces the data tests as asset checks on the models they guard.
 For the pytest side, see [`tests/README.md`](../tests/README.md).
 
@@ -27,11 +27,12 @@ happily pass a threshold the full 200+ would break.
 
 ## Unit tests
 
-Thirty-three of those tests are dbt *unit* tests, over twelve models — `dim_date`,
+Thirty-six of those tests are dbt *unit* tests, over twelve models — `dim_date`,
 `stg_retail_lines`, `stg_weather_daily`, `fct_cbam_exposure`,
 `fct_country_weather_year`, `fct_fx_rates_daily`, `fct_fx_rates_periods`,
-`fct_retail_returns`, `fct_retail_customer_cohorts` and
-`dim_retail_customer`. They run a model against fixed input rows and compare the
+`fct_retail_returns`, `fct_retail_customer_cohorts`, `dim_retail_customer` and
+the two intermediate models, `int_cbam_default_factors` and
+`int_retail_return_matches`. They run a model against fixed input rows and compare the
 entire output, rather than asserting a property of whatever the warehouse happens
 to hold — which is what lets them reach two things a data test structurally
 cannot.
@@ -56,7 +57,13 @@ instead is the rules: hardcoding the phase-in mark-up at 10/20/30% moves the
 fertiliser average from €105.76 to €115.18 a tonne — fertilisers carry a flat 1%
 food-security carve-out — with every data test on the model green, and measuring
 `excess_over_cleanest_source` against the product group instead of the good takes
-the total from 18,153 to 29,469 tonnes, also with every one green.
+the total from 18,153 to 29,469 tonnes, also with every one green. Its join to
+`dim_grid_emission_factors` was mocked `rows: []` by every one of those tests
+until 2026-09-05, so three shipped columns were reaching the release untested:
+turning that left join inner deletes 261 rows including all 260 fallback rows,
+and replacing `where is_latest_available` with the current year strips the
+factor off 2,584 more — **PASS=22, ERROR=0** either way, because this model has
+no row-count test and a missing factor is a legal null.
 
 **Logic no data reaches.** `fiscal_year_start_month` is a project var and the
 warehouse only ever builds `4`, so eleven of the twelve fiscal policies the model
@@ -64,7 +71,12 @@ supports are untested by construction; `overrides.vars` is the only way in, and
 the tests pin April, January and July. In `stg_retail_lines`, no `A` invoice has
 ever carried a product code, so `is_revenue_line`'s `invoice_type <> 'adjustment'`
 term has never once been the deciding one — removing it changes nothing in the
-warehouse at all. In `fct_cbam_exposure` the fallback rule is the same story: the
+warehouse at all, and neither does removing the `nullif` from `country` (no row
+is blank) or `quantity > 0` from the purchase universe behind
+`int_retail_return_matches` (every stock write-off is anonymous, so the customer
+filter has already excluded all 3,457). Each is posed by a fixture instead: a
+blank country, and a write-off carrying a customer id, which an unfiltered
+purchase universe turns into a matched sale with a negative quantity. In `fct_cbam_exposure` the fallback rule is the same story: the
 regulation sends a listed country with no value for a good to the "other
 countries" row *as a whole line*, and resolving it column by column instead
 produces a figure that exists nowhere in the regulation — but the row that once
@@ -88,7 +100,7 @@ it, and is the one thing here a data test can hold.
 Fixtures live in `dbt/tests/fixtures/` (dbt's `test-paths`, not the pytest
 fixtures). `dim_date` needs CSV files there because it generates its own rows —
 one input year expands to a whole calendar year, and `expect` is full-set
-equality over all 366. The other seven are 1:1 on their inputs, or close enough
+equality over all 366. The other eleven are 1:1 on their inputs, or close enough
 that posing the rows directly is clearer, so their cases are inline. `fct_cbam_exposure`'s fixtures also pick totals that are float-exact
 under the mark-up, because `markup_2026_pct` is a ratio of two doubles and the
 warehouse holds three distinct values of it that all print as `10.0`.
@@ -96,7 +108,7 @@ warehouse holds three distinct values of it that all print as `10.0`.
 They run inside `dbt build` rather than being excluded from it. dbt Labs
 recommends keeping unit tests out of production runs to save warehouse spend;
 that argument is about a cloud warehouse, and this is a local DuckDB build where
-all thirty-three cost 4.5 seconds. `just dbt-unit-test` is the inner loop.
+all thirty-six cost 4.8 seconds. `just dbt-unit-test` is the inner loop.
 
 ## Which measures may be summed
 

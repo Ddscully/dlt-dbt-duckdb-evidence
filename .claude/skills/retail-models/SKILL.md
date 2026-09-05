@@ -58,23 +58,31 @@ one; the page is `retail.md`.
   median return comes back in 10 days, which is the evidence the rule isn't
   latching onto arbitrary sales.
 - **`fct_retail_returns` was not reproducible between builds until
-  2026-08-24.** Three consecutive runs against byte-identical sources: `matched`
-  16,031 / 16,032 / 16,030, `sum(original_quantity)` 637,411 / 636,410 /
-  636,208. An `asof join` picks arbitrarily among rows tied on its inequality
-  key, and **33,518 groups share a (customer, product, instant)** — 70,174 of
-  802,716 purchase lines, 8.7% — with 604 returns (3.68%) landing on one, up to
-  20 deep. `purchases` now carries a `qualify row_number()` on
+  2026-08-24.** An `asof join` picks arbitrarily among rows tied on its
+  inequality key, and a customer buying the same product twice in one instant is
+  common enough here that `matched` and `sum(original_quantity)` both moved
+  between builds against byte-identical sources. `int_retail_return_matches`
+  settles it in a `match_candidates` CTE — a `qualify row_number()` on
   `(invoice, line_number)`, the same settlement `dim_retail_customer` reached by
   ranking on `min(invoice_ts)` then `invoice`. Unrelated to the
   float-aggregation instability on `net_revenue_gbp` — that is `sum()` over
   doubles, this is row selection.
-  - **'matched, quantity exceeds purchase' is an upper bound, not a count.** Of
-    the 604 tied matches, 63 carry that flag and **56 would be plain matches if
-    the tied lines were summed** — the customer bought that many across two
-    lines of one order. 15% of the bucket. Summing is a re-specification of the
-    rule and was deliberately kept out of the determinism fix.
+  - **How many groups are tied, how many returns land on one, and what
+    choosing one line instead of summing them costs are measured in the comment
+    above `match_candidates`, and only there.** That set of figures was written
+    out in four places once, so a single re-measurement took four edits and the
+    first one to be missed would have been indistinguishable from the rest.
+    Quote it from the model.
+  - **'matched, quantity exceeds purchase' is an upper bound, not a count**, and
+    that is the one consequence worth carrying without opening the model: most
+    of the tied rows in that bucket would be plain matches if the tied lines were
+    added up — the customer bought that many across two lines of one order.
+    Summing is a re-specification of the rule and was deliberately kept out of
+    the determinism fix.
   - The tie-break is stable, not meaningful: `invoice` is a string so the order
-    is lexicographic, and nothing claims the chosen line is the better match.
+    is lexicographic, and nothing claims the chosen line is the better match. It
+    is documented in `_retail.yml` as well as in the model, because
+    `original_line_number` ships as Parquet to consumers who never see either.
 - **`fct_retail_returns` has ten data tests; six mutations, none caught** (`dbt/models/marts/_unit_tests.yml`
   holds the three that do). The `accepted_values` on `match_status` is the same
   trap as `item_type`: reordering the `case` so "no prior purchase" is tested
@@ -83,7 +91,11 @@ one; the page is `retail.md`.
   5,613, which is **34% of all matches**, because a complete return is ordinary.
   Dropping `item_type = 'product'` from the `returns` CTE adds 1,207 cancelled
   postage and fee lines. Dropping `quantity > 0` from `purchases` does nothing —
-  every write-off is anonymous, so the customer filter already excludes them.
+  every write-off is anonymous, so the customer filter already excludes them,
+  and `return_matches_never_point_at_a_stock_write_off` is the fixture that
+  reaches it anyway (a write-off carrying a customer id, which the source has
+  never sent, becomes the matched "purchase" and reports a negative
+  `original_quantity`).
 - **`dim_retail_customer` covers a subset of the business and says so.** 22.8%
   of lines have no customer id — £2.67M, 13.8% of revenue. The two shares differ
   because an order nobody signed in for is a smaller order, and quoting the line

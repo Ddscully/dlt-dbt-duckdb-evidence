@@ -204,7 +204,7 @@ live endpoints and opens an issue when a source has moved, which is the cue to
 CI runs the same hooks over every file. Details in
 [`tests/README.md`](./tests/README.md).
 
-Alongside them, `just dbt-build` runs 497 tests (464 data tests and 33 unit
+Alongside them, `just dbt-build` runs 500 tests (464 data tests and 36 unit
 tests) and enforces a schema contract on every mart model. What each gate catches
 is [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md); why the gates are shaped
 that way is [`docs/PRACTICES.md`](./docs/PRACTICES.md).
