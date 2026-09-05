@@ -409,6 +409,121 @@ report-clean:
     uv run python -m publish.build_report --clean
 
 # ---------------------------------------------------------------------------
+# Running as a service (docs/RUNNING_AS_A_SERVICE.md)
+# ---------------------------------------------------------------------------
+
+# Where `just serve` serves the dashboard from, and `env(...)` for the reason
+# DAGSTER_HOME is: a deployment's answer lives in the systemd unit's
+# EnvironmentFile and has to win over this one.
+#
+# `reports/build` is the fixed path `publish/build_report.py` writes to, which is
+# also why it is a starting point rather than the end state: that module clears
+# the directory on every run, `--clean` or not, so the site is *down* for the
+# length of a rebuild. §4 of the design points this at a `current` symlink
+# flipped after the build instead. Nothing below assumes either shape.
+export SITE_ROOT := env("SITE_ROOT", justfile_directory() / "reports/build")
+
+# The always-on shape: the asset graph scheduling itself and the dashboard served
+# without a deploy step. Three processes and no container — §2 of
+# docs/RUNNING_AS_A_SERVICE.md has the argument, and the short version is that
+# this file is already the single definition of the environment, so a Dockerfile
+# would be a fifth restatement of it that `tests/test_workflows.py` cannot guard.
+#
+# **`dagster-webserver` + `dagster-daemon`, not `dagster dev`.** The shipped help
+# calls dev a "local deployment", and the docs list what it does not give you —
+# chiefly *automatic daemon restart*, which is the systemd unit's whole job.
+# Splitting the two is what leaves room for a supervisor.
+#
+# **`dbt-parse` is the dependency that actually breaks.** `prepare_if_dev()`
+# fires only under the dev CLI (it reads DAGSTER_IS_DEV_CLI), so running the
+# webserver directly does not prepare the dbt project, and `dbt/target/` is
+# gitignored — so it bites on every fresh deploy. The trap is that **the
+# webserver comes up healthy either way**: it answers HTTP and the daemon keeps
+# running while the code location inside it is dead with
+# DagsterDbtManifestNotFoundError. A liveness probe on the port calls that fine;
+# `uv run dagster definitions validate -m orchestration.definitions` is what
+# tells the two apart, and it names the cause.
+#
+# **All three carry `--group orchestration`, and the file server is the one that
+# proves why.** It does not import Dagster and does not need the group; what it
+# needs is to not *change* the venv underneath the other two. `uv run` syncs
+# before it executes, and `default-groups` is deliberately unset in
+# pyproject.toml, so a bare `uv run` resolves to `dev` alone — measured,
+# `uv sync --dry-run` here would uninstall 46 packages, `dagster`,
+# `dagster-webserver` and `grpcio` among them. The three jobs start milliseconds
+# apart and uv serialises on the venv lock, so which sync lands last is a race.
+# When the strip wins, the webserver and daemon survive on imports they already
+# hold in memory and everything they *fork later* dies: the grpc code servers,
+# and the run worker the daemon forks per schedule tick. The ports answer,
+# `wait -n` never returns, `Restart=on-failure` never fires, and nothing
+# materialises. **It is reachable from outside this recipe too** — any recipe
+# here without the group (`just report`, `just test`, `just sql`) strips the
+# venv under a running service, which is why §10 says to stop it first.
+#
+# **The ports.** 3000 is `just dagster`'s and `evidence dev`'s alike, so the site
+# gets its own. It is a *static* site — `evidence build` renders HTML that
+# queries Parquet in the browser with DuckDB-WASM and never opens
+# data/warehouse.duckdb — so a plain file server is the entire requirement, and
+# `evidence dev` (a hot-reloading dev server) is the wrong tool for it. Dagster
+# binds to localhost because its webserver has no authentication; the site binds
+# everywhere because §6 judges it safe to expose, remembering that it ships the
+# underlying Parquet to the browser, so "the site is public" means "these tables
+# are public".
+#
+# **A dead child has to take the unit down**, which is `wait -n` and not `wait`:
+# plain `wait` returns only once *every* child has exited, so a webserver that
+# died would leave this recipe running, systemd seeing a healthy unit and nothing
+# materialising. That is the paragraph above one level out, and `Restart=on-failure`
+# means nothing without it.
+#
+# **`kill` the recorded PIDs, not `kill 0`.** Measured: `uv run` forwards SIGTERM
+# to the process it spawned and the cascade carries on down to the grpc code
+# servers, so the three PIDs are enough to stop twelve processes.
+# `kill 0` signals the whole group including this shell, which would then die
+# *by SIGTERM* — and systemd's `Restart=on-failure` excludes SIGHUP, SIGINT,
+# SIGTERM and SIGPIPE, so the unit would exit looking clean and never come back.
+#
+# **It does not start the schedule.** `daily_refresh` ships STOPPED, and starting
+# it is instance state under DAGSTER_HOME rather than code:
+# `uv run dagster schedule start -m orchestration.definitions daily_refresh`,
+# once per instance and again if that directory is ever wiped. Skipping it looks
+# exactly like a working service that serves an ageing site and ingests nothing.
+# (`just --list` renders only the line directly above a recipe.)
+# Run the graph and the dashboard as one always-on service (blocks; ctrl-c to stop)
+serve dagster_port="3000" site_port="8081": where dbt-parse
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$DAGSTER_HOME"
+    test -d "$SITE_ROOT" || { echo "no site at $SITE_ROOT — run: just report" >&2; exit 1; }
+
+    pids=()
+    stop() {
+        trap - EXIT INT TERM
+        [ ${#pids[@]} -eq 0 ] || kill "${pids[@]}" 2>/dev/null || true
+        wait 2>/dev/null || true
+    }
+    # A signal is somebody stopping the service; a child exiting on its own is
+    # the service failing. A supervisor has to tell those apart, so they leave
+    # different exit statuses behind — `systemctl stop` is not a restart trigger
+    # and a dead webserver is.
+    trap 'stop; exit 0' INT TERM
+    trap stop EXIT
+
+    uv run --group orchestration dagster-webserver -h 127.0.0.1 -p {{ dagster_port }} &
+    pids+=($!)
+    uv run --group orchestration dagster-daemon run &
+    pids+=($!)
+    uv run --group orchestration python -m http.server {{ site_port }} --directory "$SITE_ROOT" &
+    pids+=($!)
+
+    echo "dagster: http://127.0.0.1:{{ dagster_port }} (localhost)    site: http://0.0.0.0:{{ site_port }} (every interface) — $SITE_ROOT"
+
+    status=0
+    wait -n || status=$?
+    echo "serve: a child process exited (status $status) — stopping the rest" >&2
+    exit 1
+
+# ---------------------------------------------------------------------------
 # Course (docs/course/) — the sandbox the exercises break on purpose
 # ---------------------------------------------------------------------------
 
