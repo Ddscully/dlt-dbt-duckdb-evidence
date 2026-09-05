@@ -104,7 +104,10 @@ order by cbam_cost_2026_eur_per_t
 ```sql ranked_span
 -- The fallback table stays on the chart below, where it is a useful reference
 -- line, but it is not a sourcing country and must not be counted as one or
--- become the "cheapest source" of anything.
+-- become the "cheapest source" of anything. The mart enforces the same rule on
+-- `excess_over_cleanest_source_t_co2e_per_t` now — kept out of the window and
+-- null on its own row — so this filter and that one are one policy stated in
+-- two places, rather than a page working around a model that disagrees.
 select
     count(*)                                                    as n,
     min(cbam_cost_2026_eur_per_t)                               as cheapest,

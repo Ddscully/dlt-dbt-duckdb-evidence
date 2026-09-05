@@ -1,6 +1,6 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 495 tests alongside the models — 463 data tests and 32 unit
+`just dbt-build` runs 497 tests alongside the models — 464 data tests and 33 unit
 tests. Dagster surfaces the data tests as asset checks on the models they guard.
 For the pytest side, see [`tests/README.md`](../tests/README.md).
 
@@ -27,7 +27,7 @@ happily pass a threshold the full 200+ would break.
 
 ## Unit tests
 
-Thirty-two of those tests are dbt *unit* tests, over twelve models — `dim_date`,
+Thirty-three of those tests are dbt *unit* tests, over twelve models — `dim_date`,
 `stg_retail_lines`, `stg_weather_daily`, `fct_cbam_exposure`,
 `fct_country_weather_year`, `fct_fx_rates_daily`, `fct_fx_rates_periods`,
 `fct_retail_returns`, `fct_retail_customer_cohorts` and
@@ -48,14 +48,15 @@ arrive lowercase, into product with the same 19 green.
 
 `fct_cbam_exposure` is the hardest of them. Its numbers are transcribed from
 a legal instrument, so there is nothing independent to check them against and its
-20 data tests are almost all `not_null` and generous ranges — 19 of them when
-the mutations below were run, the twentieth being the route test that came out
-of them. What a unit test reaches
+21 data tests are almost all `not_null` and generous ranges. The two that are
+not — the production-route test and the one holding the fallback out of the
+excess window — both came out of mutations rather than out of review. What a
+unit test reaches
 instead is the rules: hardcoding the phase-in mark-up at 10/20/30% moves the
 fertiliser average from €105.76 to €115.18 a tonne — fertilisers carry a flat 1%
-food-security carve-out — with all 19 green, and measuring
+food-security carve-out — with every data test on the model green, and measuring
 `excess_over_cleanest_source` against the product group instead of the good takes
-the total from 18,989 to 30,599 tonnes, also with all 19 green.
+the total from 18,153 to 29,469 tonnes, also with every one green.
 
 **Logic no data reaches.** `fiscal_year_start_month` is a project var and the
 warehouse only ever builds `4`, so eleven of the twelve fiscal policies the model
@@ -70,6 +71,20 @@ produces a figure that exists nowhere in the regulation — but the row that onc
 proved it was corrected out of the annex in July 2026, so today the mutation
 changes not one number in the warehouse.
 
+The same model carries a second one, and it is the cleaner example because
+nothing was ever corrected away. `excess_over_cleanest_source` measures a
+country against the cheapest **listed** source of the good, and letting the
+annex's "other countries and territories" row into that window moves not one
+cell: the fallback has never been below the cheapest listed source, and for 48
+of the 260 goods it cannot be, because the resolution rule copies the fallback
+onto every listed country the annex prints "-" for and so guarantees a tie. The
+other 212 are safe by the shape of this month's annex alone — the fallback is
+dearer than 87.5% of listed sources at the median good. A fixture pricing the
+fallback below both listed countries is the only possible witness to that
+window, which is what the test does. The other half of the same policy — that
+the fallback row carries no excess of its own — *is* observable, 260 nulls of
+it, and is the one thing here a data test can hold.
+
 Fixtures live in `dbt/tests/fixtures/` (dbt's `test-paths`, not the pytest
 fixtures). `dim_date` needs CSV files there because it generates its own rows —
 one input year expands to a whole calendar year, and `expect` is full-set
@@ -81,7 +96,7 @@ warehouse holds three distinct values of it that all print as `10.0`.
 They run inside `dbt build` rather than being excluded from it. dbt Labs
 recommends keeping unit tests out of production runs to save warehouse spend;
 that argument is about a cloud warehouse, and this is a local DuckDB build where
-all twenty-eight cost 4.2 seconds. `just dbt-unit-test` is the inner loop.
+all thirty-three cost 4.5 seconds. `just dbt-unit-test` is the inner loop.
 
 ## Which measures may be summed
 

@@ -5,7 +5,7 @@ description: The twelve dbt models that carry unit tests and what mutating each 
 
 # Unit testing the models (`dbt/models/**/_unit_tests.yml`)
 
-Thirty-two unit tests over twelve models. They exist because a data test cannot
+Thirty-three unit tests over twelve models. They exist because a data test cannot
 see a wrong answer that is a legal one, and every one of them was written after
 mutating the model and watching its data tests stay green. This file is the
 record of those mutations — what moved, what did not, and which fixture shapes
@@ -36,7 +36,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
 
 ## The twelve models, and what mutating each one proved
 
-- **There are thirty-two unit tests, over twelve models, and they exist because a data
+- **There are thirty-three unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -80,23 +80,42 @@ reasoning behind each is in `compliance-models`, `retail-models` and
 - **`fct_cbam_exposure` is the third, and the hardest of the three to test any
   other way.** It is a table of euro costs with a statutory deadline whose every
   figure is plausible, transcribed from a legal instrument — so there is no
-  independent quantity to check the numbers against and its 20 data tests are
+  independent quantity to check the numbers against and its 21 data tests are
   `not_null` and `accepted_range` with bounds that have to be generous, bar the
-  one added with the route fix below. What is
+  two added with the route fix and the excess-window fix below. What is
   left to test is the *rules*. Mutated against a warehouse copy: resolving the
   fallback **per column instead of per row** changes not one number in the
-  warehouse and all 19 pass; **hardcoding the mark-up at 10/20/30** moves the
-  fertiliser average from EUR 105.76 to EUR 115.18 a tonne and all 19 pass;
+  warehouse and every data test passes; **letting the annex's fallback row into
+  the `excess_over_cleanest_source` window** also changes not one number, and
+  every data test passes; **hardcoding the mark-up at 10/20/30** moves the
+  fertiliser average from EUR 105.76 to EUR 115.18 a tonne, all passing;
   partitioning `excess_over_cleanest_source` **by product group instead of by
-  good** takes the total from 18,989 t to 30,599 t and all 19 pass. Only
-  `count(*)` in place of `count(<total>)` in `priced_goods` goes red, on seven
-  `not_null`s, because the 875 heading rows it lets through have no price at all.
+  good** takes the total from 18,153 t to 29,469 t, all passing. Two go red.
+  `count(*)` in place of `count(<total>)` in `priced_goods` fails seven
+  `not_null`s, because the 875 heading rows it lets through have no price at all;
+  and **giving the fallback row an excess of its own** fails exactly one test,
+  the both-directions `expression_is_true` written for it.
   It is caught because it is the only one of the four with **no near-miss**:
   `having count(*) > 0` is a tautology over a `group by` (283 goods out, not
   260), so it deletes the filter rather than weakening it. A rule that is binary
-  has no plausible wrong answer; the other three do, which is the whole table.
+  has no plausible wrong answer; the other four do, which is the whole table.
   The unit test is still worth having, because the seven `not_null`s name the
   symptom — 875 nulls in three columns — and it names the heading rows.
+  - **The excess window is the strongest unreachable-branch case here, because
+    the mutation moves nothing *and* the reason it moves nothing is structural.**
+    For 48 of the 260 goods the fallback cannot be strictly cheapest at all — the
+    resolution rule copies it onto every listed country the annex prints "-" for,
+    so a tie is guaranteed — and across the other 212 it is dearer than 87.5% of
+    listed sources at the median good, narrowest margin 72%. The fixture has to
+    price the fallback *below* both listed countries, which is a shape the
+    regulation does not publish and, given what the mark-up is for, never should.
+  - **Nulling is what made half of that rule data-testable, and the choice was
+    the deliverable.** The open question the defect was filed with was whether
+    the fallback should keep its own excess or lose it. Keeping it leaves the
+    whole rule invisible to every data test forever; nulling it puts 260 cells
+    in the warehouse that a test can read, and one `expression_is_true`
+    (`is null = is_fallback_table`) then holds it. **Where a fix is otherwise
+    unobservable, look for the half of it that can be made to show.**
   - **`markup_2026_pct` cannot be unit tested and that is the finding.** It is a
     ratio of two doubles, and the warehouse holds three distinct values of it
     that all print as `10.0` — 9.99999999999998578915, 10.00000000000000888178

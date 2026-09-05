@@ -483,13 +483,31 @@ models:
         meta:
           additivity: non_additive
         description: >
-          This country's 2026 certificates per tonne minus the cheapest listed
+          This country's 2026 certificates per tonne minus the cheapest *listed*
           source of the same good. The procurement number: the same tonne of steel
           carries a different border cost depending only on which country smelted
           it.
+
+          **Null on the fallback row**, all 260 of them, because "excess over the
+          cleanest source" presupposes the row is a source and the annex's "other
+          countries and territories" table is a rule rather than a place. The
+          exclusion runs in both directions — the fallback does not set the
+          baseline for the listed countries either. Its own penalty against them
+          is `certificates_2026_t_co2e_per_t` minus that same minimum, one
+          subtraction away for anyone who wants it.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
+          # Both directions in one expression, because either alone passes for
+          # the wrong reason: a `not_null` scoped to the listed rows says nothing
+          # about the fallback carrying a figure it should not have, and a null
+          # check on the fallback says nothing about a listed country losing one.
+          # `is null` binds tighter than `=` in DuckDB, so the column name
+          # dbt_utils prefixes to this reads as `(<column> is null) =
+          # is_fallback_table`.
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "is null = is_fallback_table"
       - name: grid_factor_year
         data_type: INTEGER
         meta:

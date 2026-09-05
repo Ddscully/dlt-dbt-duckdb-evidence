@@ -102,8 +102,29 @@ unit_tests:
 # **Two of those four rules moved out with the model that decides them.** The
 # row-level fallback and the heading filter belong to `int_cbam_default_factors`
 # and are tested there, against the seed alone; what stays here is the mark-up
-# and the window partition, which are what this model adds. Both tests below
-# used to declare five inputs to reach a rule that touched two of them.
+# and the excess window — what it partitions by, and which rows are allowed
+# inside it — which is what this model adds. The two tests that stayed used to
+# declare five inputs to reach a rule that touched two of them.
+#
+# **Four mutations of that window against a warehouse copy, and the split
+# between them is the argument for the policy the third test pins:**
+#
+# | mutation                                    | 21 data tests | effect on the warehouse       |
+# |---------------------------------------------|---------------|-------------------------------|
+# | window loses `filter (where not p.is_fallback_table)` | all pass | **not one cell moves**   |
+# | the `case` goes, so the fallback keeps a figure       | 1 fails  | 260 nulls become numbers |
+# | both — the expression exactly as it shipped          | 1 fails  | the same 260, +836 t     |
+# | partition by product group instead of good           | all pass | 18,153 t -> 29,469 t     |
+#
+# The first row is the defect that was filed, and it changes nothing, because
+# the fallback has never been below the cheapest listed source of a good: for 48
+# of the 260 goods it cannot be, and across the other 212 it is dearer than
+# 87.5% of listed sources at the median. So no data test could ever see it and
+# the fixture is the entire guard. The second row is the half that *is*
+# observable, and only because the policy nulls the fallback's figure rather
+# than keeping it — one of the 21 data tests fires, the both-directions
+# `expression_is_true` on the column, and it is the only one that can. Choosing
+# to null is what gave half of this rule a data test at all.
 #
 # The tests that moved pose rows the source does not contain, deliberately:
 # `is_country_specific` and the fallback are reachable only through shapes the
@@ -223,6 +244,59 @@ unit_tests:
         # a group-wide minimum of 11.0 would make it 33.0.
         - {country_or_territory: "Norway", good_key: "2523290000-portland-cement", certificates_2026_t_co2e_per_t: 44.0, excess_over_cleanest_source_t_co2e_per_t: 0.0}
         - {country_or_territory: "Chile",  good_key: "2523290000-portland-cement", certificates_2026_t_co2e_per_t: 88.0, excess_over_cleanest_source_t_co2e_per_t: 44.0}
+
+  - name: cbam_exposure_keeps_the_fallback_table_out_of_the_cheapest_source
+    model: fct_cbam_exposure
+    description: >
+      The annex's "other countries and territories" row is a rule covering every
+      country the regulation does not name, not a place goods are made, so it is
+      excluded from `excess_over_cleanest_source_t_co2e_per_t` in **both**
+      directions: it cannot set the baseline the listed countries measure
+      against, and it does not receive a figure of its own.
+
+      **Only a fixture can pose this.** The window ran unfiltered for a year and
+      no number in the warehouse was ever wrong for it, because the fallback has
+      never been below the cheapest listed source of a good. For 48 of the 260
+      goods it cannot be — the resolution rule copies the fallback row onto every
+      listed country the annex prints "-" for, so a tie is guaranteed and strict
+      undercutting is unreachable — and across the other 212 the fallback is
+      dearer than 87.5% of listed sources at the median good, the narrowest
+      margin being 72%. That is a fact about this month's regulation, and the
+      mark-up's design intent besides: being unlisted is meant to cost you. So
+      the fixture prices the fallback *below* both listed countries, which is the
+      only shape that separates the two windows, and it moves all three rows —
+      unfiltered, Norway's excess is 5.5 rather than 0, Chile's 16.5 rather than
+      11, and the fallback's own is 0 rather than absent.
+    given:
+      - input: ref('int_cbam_default_factors')
+        rows:
+          - {country_or_territory: "Other countries and territories", country_iso3: null, good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 4.5, indirect_t_co2e_per_t: 0.5, total_t_co2e_per_t: 5.0, production_route_code: "F", is_fallback_table: true, is_country_specific: true}
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 9.0,  indirect_t_co2e_per_t: 1.0, total_t_co2e_per_t: 10.0, production_route_code: "A", is_fallback_table: false, is_country_specific: true}
+          - {country_or_territory: "Chile",  country_iso3: "CHL", good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 18.0, indirect_t_co2e_per_t: 2.0, total_t_co2e_per_t: 20.0, production_route_code: "A", is_fallback_table: false, is_country_specific: true}
+      - input: ref('cbam_goods')
+        rows:
+          - {good_key: "2523100090-other-clinker", product_group: "Cement", cn_code: "2523 10 00 90", goods_description: "Other clinker, including grey clinker"}
+      - input: ref('cbam_markup_schedule')
+        rows:
+          - {product_group: "Cement", year: 2026, markup_pct: 10}
+          - {product_group: "Cement", year: 2027, markup_pct: 20}
+          - {product_group: "Cement", year: 2028, markup_pct: 30}
+      - input: ref('dim_country')
+        rows:
+          - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
+          - {country_iso3: "CHL", country_name: "Chile",  region: "Latin America & Caribbean", income_group: "High income"}
+      - input: ref('dim_grid_emission_factors')
+        rows: []
+    expect:
+      rows:
+        # The cheapest row in the table by construction, and it still carries no
+        # excess: the column presupposes a sourcing country and this row is not
+        # one. `accepted_range min_value 0` would have passed a 0.0 here.
+        - {country_or_territory: "Other countries and territories", country_iso3: null, certificates_2026_t_co2e_per_t: 5.5, excess_over_cleanest_source_t_co2e_per_t: null}
+        # The cheapest *listed* source, so zero — which is the assertion that
+        # fails when the fallback is allowed into the window.
+        - {country_or_territory: "Norway", country_iso3: "NOR", certificates_2026_t_co2e_per_t: 11.0, excess_over_cleanest_source_t_co2e_per_t: 0.0}
+        - {country_or_territory: "Chile",  country_iso3: "CHL", certificates_2026_t_co2e_per_t: 22.0, excess_over_cleanest_source_t_co2e_per_t: 11.0}
 
   # ---------------------------------------------------------------------------
   # fct_fx_rates_daily — the carry-forward.

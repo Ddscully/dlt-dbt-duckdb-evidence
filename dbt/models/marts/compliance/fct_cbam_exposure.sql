@@ -104,6 +104,20 @@ priced as (
     from resolved as r
     inner join goods as g on r.good_key = g.good_key
     left join markup as m on g.product_group = m.product_group
+),
+
+-- The cheapest *listed* source of each good, which is the baseline the
+-- procurement column below measures against. Named here rather than inlined
+-- into that column because the exclusion is the whole content of it, and a
+-- `filter` clause buried inside a window inside a `case` reads as an
+-- afterthought.
+benchmarked as (
+    select
+        p.*,
+        min(p.certificates_2026_t_co2e_per_t)
+        filter (where not p.is_fallback_table)
+            over (partition by p.good_key) as cheapest_listed_2026_t_co2e_per_t
+    from priced as p
 )
 
 select
@@ -155,10 +169,38 @@ select
     p.certificates_2027_t_co2e_per_t * {{ var('eu_ets_price_eur_per_t') }} as cbam_cost_2027_eur_per_t,
     p.certificates_2028_t_co2e_per_t * {{ var('eu_ets_price_eur_per_t') }} as cbam_cost_2028_eur_per_t,
     -- How this country compares with the cheapest source of the same good, which
-    -- is the procurement question. Over the annex's listed countries only.
-    p.certificates_2026_t_co2e_per_t
-    - min(p.certificates_2026_t_co2e_per_t) over (partition by p.good_key)
-        as excess_over_cleanest_source_t_co2e_per_t,
+    -- is the procurement question. Over the annex's listed countries only, and
+    -- in both directions: the fallback table cannot *set* the baseline, and it
+    -- does not *get* a figure, because "excess over the cleanest source"
+    -- presupposes the row is a source and this one is a rule covering every
+    -- country the annex does not name. `reports/pages/cbam.md` has drawn that
+    -- line since it was written — the fallback "must not become the cheapest
+    -- source of anything" — and this comment asserted it for a year while the
+    -- window did not implement it.
+    --
+    -- Filtering the window moves no number in the warehouse, and that is not the
+    -- argument against it. The fallback is below the cheapest listed source for
+    -- none of the 260 goods, and for 48 of them it cannot be: the resolution
+    -- rule copies the fallback row onto every listed country the annex prints
+    -- "-" for, so those goods carry a guaranteed tie and strict undercutting is
+    -- unreachable by construction. The other 212 are safe only by the shape of
+    -- this month's annex — the fallback is dearer than 87.5% of listed sources
+    -- at the median good and the narrowest margin is 72% — which is a fact
+    -- about the regulation and not about this model.
+    --
+    -- Nulling the fallback's own figure is what makes the rule observable: it is
+    -- the only half of this that changes data, 260 cells of it, so the policy
+    -- can be read out of the warehouse instead of out of a comment. Nothing is
+    -- lost with it: the fallback's penalty against listed countries is one
+    -- subtraction away in `certificates_2026_t_co2e_per_t`, and the Evidence
+    -- page already computes a better version of it against the median rather
+    -- than the minimum.
+    case
+        when not p.is_fallback_table
+            then
+                p.certificates_2026_t_co2e_per_t
+                - p.cheapest_listed_2026_t_co2e_per_t
+    end as excess_over_cleanest_source_t_co2e_per_t,
     grid.grid_factor_year,
     grid.grid_factor_t_co2_per_mwh,
     -- Lineage, constant per row and deliberately so — this table ships as a
@@ -167,6 +209,6 @@ select
     'Implementing Regulation (EU) 2025/2621, Annex I, '
     || 'as corrected by (EU) 2026/1740' as source_instrument,
     'location-based, administrative default' as factor_basis
-from priced as p
+from benchmarked as p
 left join countries as c on p.country_iso3 = c.country_iso3
 left join grid on p.country_iso3 = grid.country_iso3

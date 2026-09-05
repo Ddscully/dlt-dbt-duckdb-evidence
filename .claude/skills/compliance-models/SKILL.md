@@ -225,30 +225,60 @@ time series.
   re-price without rebuilding.
 ### What the unit tests hold
 
-Four of them, in `dbt/models/marts/_unit_tests.yml`. This model's 20 data tests
-are `not_null` and generous `accepted_range`s bar one, and they cannot be much
+Five of them, in `dbt/models/marts/_unit_tests.yml`. This model's 21 data tests
+are `not_null` and generous `accepted_range`s bar two, and they cannot be much
 else:
 the numbers are transcribed from a legal instrument, so there is no independent
 quantity to check them against. What is testable is the *rules*, and mutation
-against a warehouse copy says how much they were worth:
+against a warehouse copy says how much they were worth. Every row below was
+measured against the current suite — the four older ones re-run rather than
+carried forward, since two of the tests did not exist when they were first
+recorded — and both exceptions to "`not_null` and a range" were added *by* a
+mutation in this table:
 
-| mutation | data tests at the time (19) | effect |
+| mutation | data tests | effect |
 |---|---|---|
 | fallback resolved per column, not per row | **all pass** | **nothing moves at all** |
+| fallback let back into the `excess` window | **all pass** | **nothing moves at all** |
 | mark-up hardcoded at 10/20/30% | **all pass** | fertiliser avg EUR 105.76 -> 115.18 /t |
-| `excess_over_cleanest_source` partitioned by product group | **all pass** | 18,989 t -> 30,599 t |
+| `excess_over_cleanest_source` partitioned by product group | **all pass** | 18,153 t -> 29,469 t |
+| the fallback row keeps an `excess` of its own | **1 fails** | 260 nulls become numbers, +836 t |
 | `count(*)` for `count(<total>)` in `priced_goods` | 7 fail | +875 unpriced heading rows |
 
-- **The one the data tests catch is the one with no near-miss, and that is what
-  the table is really measuring.** `having count(*) > 0` is a tautology over a
+- **The ones the data tests catch have no near-miss, and that is what the table
+  is really measuring.** `having count(*) > 0` is a tautology over a
   `group by` — 283 goods out where the real clause gives 260 — so the mutation
   deletes the filter rather than weakening it. `priced_goods` is a binary rule:
   a good has a total somewhere or it has not, and there is no subtly-wrong
-  version to write. The other three rules all have a plausible wrong answer, and
-  all three are invisible to every one of them. Keep the unit test anyway: the seven
+  version to write. The four rules that do have a plausible wrong answer are
+  invisible to every data test. Keep the unit test anyway: the seven
   `not_null`s report 875 nulls across three columns, the unit test reports the
   two heading rows by `good_key`, and a failing unit test stops the model
   materialising instead of finding it afterwards.
+  - **The fifth row is caught for a different reason and it is worth separating:
+    not because the rule is binary but because the *policy* chose to null.** A
+    fallback row carrying a figure is a well-formed non-negative double that no
+    range or null test on the column can object to — unless the column is
+    declared absent on exactly those rows, which is what makes it checkable. The
+    test is one `expression_is_true` reading `is null = is_fallback_table`, both
+    directions in one expression because either alone passes for the wrong
+    reason.
+
+- **The excess window is the second rule here that data cannot reach, and the
+  cleanest example in the repo.** `excess_over_cleanest_source` measures against
+  the cheapest *listed* source, and letting the annex's fallback row into that
+  window moves **not one cell**. The fallback has never been below the cheapest
+  listed source of a good, and for **48 of the 260 goods it cannot be**: the
+  resolution rule copies the fallback onto every listed country the annex prints
+  "-" for, so those goods carry a guaranteed tie. The other 212 are safe by the
+  annex's shape alone — the fallback is dearer than **87.5%** of listed sources
+  at the median good, narrowest margin **72%** — which is the mark-up's design
+  intent rather than a property of the model. The fixture prices the fallback
+  *below* both listed countries, the shape the regulation does not publish.
+  - **The measurement in the issue that filed it counted 260 rows as the
+    exposure and that was the wrong denominator.** The exposure is 212 goods,
+    not 260 rows: on 48 the defect is unreachable by construction, and on the
+    260 fallback rows themselves nothing was ever numerically wrong.
 
 - **The fallback rule is now unreachable by data, which is the argument for
   testing it.** Zero of the 12,540 seed rows have a null total beside a non-null
