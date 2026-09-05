@@ -33,15 +33,46 @@ start duplicating each other. A change to how a layer works usually needs an edi
 in `docs/` **and** here.
 
 [`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) (2026-09-02) is the one
-file in `docs/` that describes **something the repo has not built** — an
-always-on deployment, why it is a `just serve` recipe rather than a container,
-and publish-and-swap around the single-writer lock. It says so in its first
-paragraph, which is the only thing stopping a reader typing a recipe that does
-not exist: `tests/test_course.py` checks backticked paths and `just` recipes in
-the *course* and the *skills*, never in `docs/`, so a doc proposing unbuilt
-tooling fails no guard.
+file in `docs/` that mostly describes **something the repo has not built** — an
+always-on deployment and publish-and-swap around the single-writer lock. Its §2
+stopped being one of those on 2026-09-05, when `just serve` became a recipe; the
+unit file and §4's swap asset have not. Its first paragraph is what says which is
+which, and it is the only thing stopping a reader typing a recipe that does not
+exist: `tests/test_course.py` checks backticked paths and `just` recipes in the
+*course* and the *skills*, never in `docs/`, so a doc proposing unbuilt tooling
+fails no guard.
 
-**Writing it corrected a skill, which is the part worth carrying.**
+**Building §2's recipe found two defects in it, and both were the failure the
+document is about** — a service that looks fine and is not. `trap 'kill 0' EXIT`
+takes the recipe's own shell down with the children, so it dies *by SIGTERM*,
+which `man systemd.service` (259) lists as successful termination alongside exit
+0: the `Restart=on-failure` four paragraphs below it would never have fired. A
+bare `wait` returns only once *every* child has exited, so a dead webserver
+leaves the recipe running and the unit healthy. Neither is visible by reading,
+and both needed twelve processes and five ways of killing them to see. **A design
+block nobody has executed is prose** — the measure-it standard does not apply
+itself to a code block just because it is written in the right language.
+
+**Then a review found a third, which the implementation had introduced rather
+than inherited, and it is a repo-wide fact rather than a `serve` one.** **`uv
+run` is a mutating command wearing an executing command's clothes**: it *syncs*
+the venv before it runs anything, and `[tool.uv] default-groups` is deliberately
+unset here, so a bare `uv run` resolves to `dev` alone and uninstalls 46
+packages — `dagster`, `dagster-webserver`, `grpcio`. Sequentially that is
+invisible, because the next `--group orchestration` recipe re-syncs; `just serve`
+is the first recipe to run three `uv run`s *at once*, and the file server was
+missing the group, so which sync landed last was a race. The running webserver
+and daemon survive on imports they already hold and everything they fork later
+dies — ports up, nothing materialising, `Restart=on-failure` never firing. **The
+lesson generalises past this recipe**: any recipe without the group (`just
+report`, `just test`, `just sql`) strips the venv under a running service, which
+is why `docs/RUNNING_AS_A_SERVICE.md` §10 says to stop it first. Setting
+`default-groups = ["dev", "orchestration"]` would close it globally and is
+deliberately *not* done — the narrow default is what caught pyarrow being
+undeclared, and the note on that key says so.
+
+**Writing the document corrected a skill, which is the other part worth
+carrying.**
 `querying-the-warehouse` said `just sql` "can sit alongside a build" because it
 opens read-only. Measured on the pinned DuckDB 1.5.5, across processes and in
 both directions, that is false: the rule is **one writer XOR many readers**, so a
@@ -187,6 +218,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — the partitioned `raw/wb_wdi` asset |
 | `just backfill-weather 2012 2026` | deepen the capital-city weather archive one year at a time — paced against Open-Meteo's budget, so a decade is about an hour and fifteen years is the most one run can hold |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
+| `just serve` | run the graph and the dashboard as one always-on service — webserver, daemon and a static file server, no container (`docs/RUNNING_AS_A_SERVICE.md`) |
 | `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
 | `just restore-history prev/warehouse.duckdb` | copy the unreproducible tables (`history`, `raw.om_weather_daily`) out of a published release so the build appends to them — refuses if dlt has local state |
 | `just test` | `pytest` — mocked-payload unit tests, no network |

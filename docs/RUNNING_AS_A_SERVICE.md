@@ -1,11 +1,13 @@
 # Running this warehouse as a service
 
-> **Nothing in this document is built.** There is no `just serve` recipe, no unit
-> file and no container in this repo. The pipeline runs from `just` recipes on a
-> laptop and from four GitHub workflows on cron, and that is the whole of what
-> works today. This is a design: what an always-on deployment would take, which
-> parts the existing code already decides, and the three things measured while
-> writing it that changed the answer. Read it as a plan, not as instructions.
+> **§2's `just serve` is built; everything else here is still a design.** The
+> recipe is in the justfile and was run rather than sketched — three processes,
+> twelve once Dagster's code servers are counted, and a measured answer for what
+> happens to all of them when one dies. What does not exist is everything around
+> it: no unit file, no container, no swap asset (§4), and no host anybody has
+> stood this up on. The pipeline still runs from `just` recipes on a laptop and
+> from four GitHub workflows on cron, and that is the whole of what runs
+> unattended today. Read §2 as instructions and the rest as a plan.
 
 Today the pipeline has two homes and neither is a service. Locally it is
 `just run` or `just materialize`, invoked by a person. In CI it is four
@@ -68,24 +70,44 @@ Four reasons, all specific to this repo rather than to taste:
    `data/warehouse.duckdb`.** Serving it is a static file server, and there is
    nothing there to containerise.
 
-### The recipe this implies
+### The recipe
 
-Not in the justfile. Shown so the design is concrete:
+Built. It lives in the [`justfile`](../justfile), which carries the reasoning
+below in its comments. What follows is the **shape, abridged** — not a second
+copy to drift against, and **not runnable as it stands**:
 
 ```just
-# NOT BUILT — see docs/RUNNING_AS_A_SERVICE.md
-serve: where dbt-parse
+serve dagster_port="3000" site_port="8081": where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p "$DAGSTER_HOME"
-    trap 'kill 0' EXIT           # or Ctrl-C orphans both children
-    uv run --group orchestration dagster-webserver -h 127.0.0.1 -p 3000 &
+    # … refuse to start if $SITE_ROOT holds no site …
+    # … traps, so a signal exits 0 and a dead child exits 1 …
+    uv run --group orchestration dagster-webserver -h 127.0.0.1 -p {{ dagster_port }} &
     uv run --group orchestration dagster-daemon run &
-    python -m http.server 8081 --directory "$SITE_ROOT" &   # the `current` symlink of §4
-    wait
+    uv run --group orchestration python -m http.server {{ site_port }} --directory "$SITE_ROOT" &
+    # … record each PID, then `wait -n` …
 ```
 
-Three things in that block are load-bearing:
+**The shebang is not decoration, and pasting the block without its elided half
+gives you the failure this section is about.** `just` runs a recipe that has no
+shebang **one line per shell**, so each `&` backgrounds a process into a shell
+that exits immediately and a trailing `wait` waits on nothing. Measured on a
+reduced copy: such a recipe returns **exit 0 in under a second**, having
+orphaned every child — a `just serve` that appears to have worked. The runnable
+text is the justfile's, and it is the only copy.
+
+`SITE_ROOT` defaults to `reports/build`, the fixed path
+`publish/build_report.py` writes to, because §4's `current` symlink is not
+built. That is the one place the recipe is smaller than the design, and it costs
+what §4 says it costs: the site is *down* for the length of a rebuild, because
+that module clears its output directory on every run, `--clean` or not. The
+recipe refuses to start if the directory is not there at all, naming
+`just report`, rather than serving 404s that look like a broken build.
+
+Cold start on a warm venv is **17 s** from `just serve` to both ports answering,
+`dbt deps` and `dbt parse` included — the dependency below is most of it.
+
+Four things in that block are load-bearing:
 
 - **`dagster-webserver` and `dagster-daemon`, not `dagster dev`.** Checked
   upstream rather than assumed, and in two places. The help text shipped with
@@ -124,9 +146,66 @@ Three things in that block are load-bearing:
   deployment fine. `dbt/target/` is gitignored, so it bites on every fresh
   deploy; the justfile already records the prerequisite at every headless recipe,
   and §10 makes it a step.
+- **`--group orchestration` on all three, including the file server.** It does
+  not import Dagster; what it needs is to not *change* the venv underneath the
+  other two. `uv run` **syncs before it executes**, and `default-groups` is
+  deliberately unset in `pyproject.toml`, so a bare `uv run` resolves to `dev`
+  alone — `uv sync --dry-run` on this tree would uninstall 46 packages,
+  `dagster`, `dagster-webserver` and `grpcio` among them. The three start
+  milliseconds apart and uv serialises on the venv lock, so which sync lands
+  last is a race. When the strip wins the already-running webserver and daemon
+  survive on imports they hold in memory, and everything they *fork later*
+  dies — the grpc code servers, and the run worker forked per schedule tick. The
+  ports answer, `wait -n` never returns, and nothing materialises: §2's own
+  failure mode, arriving through the dependency resolver rather than through dbt.
+  **It is reachable from outside the recipe**, which §8 records: any recipe
+  without the group strips the venv under a running service.
 - **The port collision.** `just dagster` uses 3000 and so does `evidence dev`.
   The site here is static, so it is served by anything; give it its own port and
   do not reach for `evidence dev`, which is a hot-reloading dev server.
+
+### Stopping it — measured
+
+`trap 'kill 0' EXIT` and a bare `wait` are what this section proposed, and
+building it corrected both. The tree is also bigger than the recipe starts:
+**twelve processes, not three**, because the webserver and the daemon each spawn
+a `dagster api grpc` code server, which spawns a multiprocessing resource tracker
+of its own. Whether the cleanup reaches all of that is a question rather than a
+formality, so it was run — five ways of stopping it, against the real graph:
+
+| stopped by | processes | left behind | `just` exits |
+|---|---|---|---|
+| Ctrl-C (SIGINT to the process group) | 12 | **0** | 130 |
+| `systemctl stop` (SIGTERM to the group) | 12 | **0** | 143 |
+| SIGTERM to `just` alone | 12 | **0** | 143 |
+| SIGTERM to the recipe's shell alone | 12 | **0** | 0 |
+| **one child killed** (`kill -9` on the site server) | 12 | **0** | **1** |
+
+Three corrections came out of that, and the first one matters most:
+
+- **`kill` the recorded PIDs, not `kill 0`.** Measured separately: `uv run`
+  forwards SIGTERM to the process it spawned, and the cascade carries on down to
+  the grpc servers, so three PIDs are enough to stop twelve processes. `kill 0`
+  signals the whole group *including the recipe's own shell*, which would then
+  die **by SIGTERM** — and `man systemd.service`, read on the systemd this was
+  measured against (259), lists SIGHUP, SIGINT, SIGTERM and SIGPIPE as
+  *successful* termination alongside exit 0. So the proposed line would have quietly disabled the
+  `Restart=on-failure` written four paragraphs below it: the unit would exit
+  looking clean and never come back.
+- **`wait -n`, not `wait`.** Plain `wait` returns only once *every* child has
+  exited, so a dead webserver leaves the recipe running, systemd seeing a healthy
+  unit, and nothing materialising. That is this section's own "the port answers
+  and the code location is dead", one level out. The last row is the fix
+  working: killing one child takes the other eleven processes with it and exits
+  non-zero, which is the only thing that makes `Restart=on-failure` mean
+  anything.
+- **A signal and a dead child must not look alike.** The bottom two rows are the
+  same shutdown with different causes, and a supervisor reads the difference, so
+  the recipe traps INT and TERM to exit 0 and lets a child's own exit fall
+  through to 1. Where the signal reaches `just` too — Ctrl-C, and systemd's
+  default `KillMode=control-group` — `just` dies by the signal instead and
+  systemd reaches the same verdict by the other route, which is why those rows
+  are 130 and 143 rather than 0.
 
 ### The supervisor
 
@@ -311,11 +390,21 @@ running and is not:
   of §3, and a wipe silently returns the service to ingesting nothing. Flipping
   `default_status` instead is a code change that changes what `dagster dev` does
   for everyone who clones the repo.
-- **It targets `full_refresh` only**, which excludes `load_retail`. That is
+- **It targets `full_refresh` only, which excludes two things, and the second
+  one only started mattering when §2 became real.** It excludes `load_retail`:
   correct forever on an established lakehouse (retail is a closed archive whose
-  partitions are replayed by hand), and it fails on a fresh one, inside
+  partitions are replayed by hand), and a failure on a fresh one, inside
   `stg_retail_lines`, with `Catalog Error: Table with name retail_invoice_lines
-  does not exist!`.
+  does not exist!`. **It also excludes `reports/evidence_site`.** That cost
+  nothing while the site was a Pages deploy on its own workflow; with `just
+  serve` in front of it, only `publish_site` builds the site and *nothing
+  schedules `publish_site`*, so a scheduled service keeps the warehouse current
+  and leaves the dashboard exactly where the last `just report` left it — no
+  error, no log line, a page that simply stops moving. The exclusion is
+  deliberate and stays (three workflows run `full_refresh` on a bare uv checkout
+  with no Node), so the answer is not to move the asset into the job but to
+  refresh the site alongside the graph: step 6 of §10 by hand, and §4's swap
+  properly.
 
 So **the service's first run is a different command from its steady state** —
 §10 is the runbook that says so, rather than leaving it to be discovered on a
@@ -328,10 +417,13 @@ adopting §4 changes is one environment variable (`WAREHOUSE_PATH` points at the
 build file rather than the served one) and one asset on the end of the graph.
 
 **Without §4 the schedule still works**, materialising into the served warehouse
-in place. That is the smaller starting point and it costs exactly two things: a
-reader lockout for the length of a build (§8), and a half-written file where the
-good one was if the build goes red. Both are survivable on an internal
-deployment and neither is silent.
+in place. That is the smaller starting point and it costs three things. Two were
+here from the start and neither is silent: a reader lockout for the length of a
+build (§8), and a half-written file where the good one was if the build goes
+red. **The third arrived with `just serve` and is silent** — the site is served
+from a fixed `reports/build/` that only a manual `just report` rewrites, so the
+dashboard ages while the warehouse behind it does not. All three are survivable
+on an internal deployment; only the third needs somebody to remember.
 
 ## 6. Exposure
 
@@ -388,6 +480,18 @@ keeps, extended with the ones only an always-on deployment meets:
   fails to load, or loads against a stale manifest (§2).
 - **A `STOPPED` schedule survives a `.dagster/` wipe as stopped.** The service
   runs, serves an increasingly old site, and ingests nothing (§5).
+- **`uv run` without `--group orchestration` uninstalls Dagster.** It syncs
+  before it executes and `default-groups` is unset, so `just report`, `just test`
+  or a bare `uv run python …` typed against a *running* service strips 46
+  packages out of the venv under it. The running processes hold their imports
+  and keep answering; the grpc code servers and run workers they fork afterwards
+  do not exist any more. Stop the service before running anything else against
+  the same venv, or give it its own checkout (§2).
+- **The schedule refreshes the warehouse and never the site.** `daily_refresh`
+  targets `full_refresh`, which excludes `reports/evidence_site`; only
+  `publish_site` builds it and nothing schedules that. So a host that follows §10
+  serves a dashboard frozen at bootstrap over a warehouse that updates daily,
+  indefinitely, with no error anywhere (§5).
 - **`LAKEHOUSE_DIR` must keep one absolute spelling for the deployment's whole
   life.** DuckLake compares `data_path` as a *string*, so moving the volume's
   mount point refuses every attach, and the error surfaces inside `dbt build`,
@@ -417,13 +521,17 @@ building the design first:
 ## 10. Standing it up
 
 The ordered version of everything above. Written as a runbook because §5's two
-facts are only dangerous out of order. And, again, none of it runs today: it
-assumes the `just serve` recipe of §2 and the swap asset of §4 have been built.
+facts are only dangerous out of order. `just serve` is real now, so steps 1, 3,
+5 and 6 are things you can type; step 2's environment file and step 4's unit are
+still to be written, and the whole of it assumes §4's swap asset has not been
+built — which is the smaller starting point §5 describes, not a blocker.
 
 **1. The host, once.** Clone, then `just setup`, which syncs the venv and
-fetches the DuckLake extension, the one dependency no lockfile can name. Node is
-needed only if the deployment serves the Evidence site; `full_refresh` does not
-touch it. Install `just` itself (`uv tool install rust-just`).
+fetches the DuckLake extension, the one dependency no lockfile can name. Install
+`just` itself (`uv tool install rust-just`). **Node is required**, because
+`just serve` serves the Evidence site and refuses to start without a built one —
+the graph itself still does not touch it, so this is a cost of serving rather
+than of running.
 
 **2. The paths, once.** Write `/srv/mds/service.env` with the §3 set, all
 absolute, and nothing secret in it:
@@ -448,14 +556,19 @@ differs from steady state, and it differs because `daily_refresh` targets
 
 ```sh
 just materialize     # load_retail, then full_refresh — in that order
+just report          # the site `just serve` will serve; needs Node
 ```
 
-Skip it and the first scheduled run dies inside `stg_retail_lines` with
+Skip the first and the first scheduled run dies inside `stg_retail_lines` with
 `Catalog Error: Table with name retail_invoice_lines does not exist!`. Doing it
 by hand also means the first failure is watched rather than discovered in a log.
+Skip the second and `just serve` refuses to start, naming the recipe — which is
+the one failure in this runbook that cannot be quiet.
 
-**4. The service.** Install the §2 unit, then `systemctl enable --now mds`.
-Then confirm the code location actually loaded, and do not skip this on the
+**4. The service.** `just serve` in the foreground is the whole thing already,
+minus restart, boot and logging; the §2 unit is what supplies those and is the
+part still to be written. Install it, then `systemctl enable --now mds`. Either
+way, confirm the code location actually loaded, and do not skip this on the
 grounds that the port answers:
 
 ```sh
@@ -481,7 +594,27 @@ The UI toggle is the same action against the same instance; use either. What is
 *not* equivalent is editing `default_status` in `definitions.py`, which changes
 what `dagster dev` does for everyone who clones the repo.
 
-**6. Verify, and prefer the checks that fail loudly.** `dagster schedule list`
+**6. Refresh the site, and know that the schedule will not.** `daily_refresh`
+targets `full_refresh`, which excludes `reports/evidence_site` (§5) — so the
+warehouse moves daily and the served dashboard does not. Until §4's swap asset
+exists, the site is rebuilt by hand:
+
+```sh
+systemctl stop mds     # or Ctrl-C the foreground `just serve`
+just report
+systemctl start mds
+```
+
+**Stopping first is not caution, it is required, for two independent reasons.**
+`just report` is `uv run` *without* `--group orchestration`, so run against the
+same venv it uninstalls Dagster from under the running daemon (§8) — the ports
+keep answering and every process forked afterwards fails. And `evidence sources`
+opens the warehouse to extract its Parquet, which is a reader against a file a
+scheduled build may be writing: one writer XOR many readers, across processes.
+A separate checkout for the build side avoids the first; only §4 avoids the
+second.
+
+**7. Verify, and prefer the checks that fail loudly.** `dagster schedule list`
 shows it RUNNING. After the first scheduled run, the useful assertions are the
 ones the repo already computes rather than a glance at the dashboard:
 `analytics.pipeline_sources` for per-source load times and row counts,
@@ -489,8 +622,11 @@ ones the repo already computes rather than a glance at the dashboard:
 the UI, which are the reason §1 calls the daemon the thing that makes the SLA
 real.
 
-**What can go wrong quietly, in the order it bites:** a wiped `DAGSTER_HOME`
-leaves the schedule stopped and the service serving an ageing site; a `$HOME`
-change moves dlt's watermark and re-fetches everything; a moved mount point
-breaks every DuckLake attach because `data_path` is compared as a string. All
-three are §8, and none of them raises where you are looking.
+**What can go wrong quietly, in the order it bites:** step 6 is forgotten and
+the dashboard ages against a warehouse that does not, with nothing red anywhere;
+a wiped `DAGSTER_HOME` leaves the schedule stopped and the service serving an
+ageing site for the other reason; a stray `uv run` without the orchestration
+group strips Dagster out of the venv while it is running; a `$HOME` change moves
+dlt's watermark and re-fetches everything; a moved mount point breaks every
+DuckLake attach because `data_path` is compared as a string. All five are §8,
+and none of them raises where you are looking.
