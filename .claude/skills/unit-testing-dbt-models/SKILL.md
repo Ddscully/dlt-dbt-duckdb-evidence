@@ -274,7 +274,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     policies and the retail `<> 'adjustment'` clause are the same category, and
     that is now three of the five models.
 - **`fct_retail_returns` is the sixth, and unit-testing it turned up that the
-  model is not deterministic.** Six mutations, all ten data tests green on
+  model is not deterministic.** Six mutations, all eleven data tests green on
   every one: checking "no prior purchase" before "no customer id" relabels the
   352 unmatchable rows; `>=` for "quantity exceeds purchase" takes matched from
   16,031 to 10,398; `<` for `quantity_is_consistent` takes consistent to 10,404;

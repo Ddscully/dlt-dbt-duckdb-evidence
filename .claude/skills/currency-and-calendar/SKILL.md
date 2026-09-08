@@ -78,7 +78,7 @@ follows from that rather than from the numbers.
     `fct_fx_rates_published` and `fct_fx_rates_periods`: a silent per-currency
     hole, not a build failure, and the shape that makes it hard to spot is that
     only *one* of the three tables is wrong. A `relationships` test on
-    `stg_fx_rates.quote_currency` closes it. The reverse — a seed row the series
+    `stg_fx_rates.currency_code` closes it. The reverse — a seed row the series
     never quoted — could not be caught by the `retired_on` test either: its
     subquery returns NULL for a code with no rates, and `retired_on > NULL` is
     null rather than false, so the row passed by being *unknown*. Hence the
@@ -189,6 +189,33 @@ follows from that rather than from the numbers.
     the fiscal year *ends* in, which is what makes it collapse onto `year` when
     the var is 1.
 ### The one incremental model
+
+- **The currency key is `currency_code` everywhere from `staging` outward, and
+  it was not until 2026-09-08.** `fct_fx_rates_published` and
+  `fct_fx_rates_periods` published `quote_currency` while `dim_currency`
+  published `currency_code` and `fct_fx_rates_daily` — the sibling between
+  them — spelled it the conformed way, so the daily model carried a
+  cross-spelling join (`s.currency_code = p.quote_currency`) and the bus matrix
+  rendered `fct_fx_rates_periods` as conforming to **nothing**. The rename is a
+  single alias in `stg_fx_rates`; everything downstream inherits it.
+  - **`raw.ecb_fx_rates` deliberately keeps `quote_currency`.** Renaming a
+    landing column means a dlt schema drop and a re-fetch, and "the quote side
+    of a pair" is the right name beside `base_currency` anyway. Staging is where
+    a source's words become the warehouse's — the same division `stg_co2` makes
+    with `iso_code`.
+  - **It is the first change to make `on_schema_change='fail'` fire**, and it
+    fired exactly as that config's comment said it would: `dbt build` stopped on
+    `fct_fx_rates_published` rather than quietly writing a table whose shape no
+    longer matched its contract. The fix is a deliberate
+    `dbt build --select fct_fx_rates_published --full-refresh`, which is the
+    decision the config exists to force. Every workflow builds from an empty
+    warehouse, so this only ever bites a local tree.
+  - **The rename put the same identifier in two scopes, and the `currencies`
+    seed's `retired_on` test was correlated on it.** Both sides are qualified
+    now; unqualified, DuckDB binds the inner one and the test compares every
+    retirement date against the whole panel's last fixing. It lands the safe way
+    up — all twelve retired rows go red rather than quietly green — but that is
+    luck, not design.
 
 - **`fct_fx_rates_published` is the only `materialized='incremental'` model in
   the project, and it is the right one rather than the biggest one.** Every other

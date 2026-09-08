@@ -428,9 +428,9 @@ unit_tests:
           - {currency_code: "BBB", is_quoted: true, first_published_date: "2024-01-02", last_published_date: "2024-01-04"}
       - input: ref('fct_fx_rates_published')
         rows:
-          - {rate_date: "2024-01-01", quote_currency: "AAA", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
-          - {rate_date: "2024-01-02", quote_currency: "BBB", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
-          - {rate_date: "2024-01-04", quote_currency: "BBB", base_currency: "EUR", units_per_eur: 40.0, eur_per_unit: 0.025}
+          - {rate_date: "2024-01-01", currency_code: "AAA", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
+          - {rate_date: "2024-01-02", currency_code: "BBB", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
+          - {rate_date: "2024-01-04", currency_code: "BBB", base_currency: "EUR", units_per_eur: 40.0, eur_per_unit: 0.025}
     expect:
       rows:
         # AAA carries its own 10.0 for three days. Unpartitioned it would read
@@ -481,9 +481,9 @@ unit_tests:
           - {currency_code: "TST", is_quoted: true, first_published_date: "2024-01-02", last_published_date: "2024-01-16"}
       - input: ref('fct_fx_rates_published')
         rows:
-          - {rate_date: "2024-01-02", quote_currency: "TST", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
+          - {rate_date: "2024-01-02", currency_code: "TST", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
           # The gap runs 01-03 to 01-10, then a fresh fixing lands.
-          - {rate_date: "2024-01-11", quote_currency: "TST", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
+          - {rate_date: "2024-01-11", currency_code: "TST", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
     expect:
       rows:
         # The fixing itself, then the first carried day. Pattern for the rest.
@@ -554,9 +554,9 @@ unit_tests:
     given:
       - input: ref('fct_fx_rates_published')
         rows:
-          - {rate_date: "2024-03-01", quote_currency: "TST", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
-          - {rate_date: "2024-03-15", quote_currency: "TST", base_currency: "EUR", units_per_eur: 30.0, eur_per_unit: 0.0333333}
-          - {rate_date: "2024-03-29", quote_currency: "TST", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
+          - {rate_date: "2024-03-01", currency_code: "TST", base_currency: "EUR", units_per_eur: 20.0, eur_per_unit: 0.05}
+          - {rate_date: "2024-03-15", currency_code: "TST", base_currency: "EUR", units_per_eur: 30.0, eur_per_unit: 0.0333333}
+          - {rate_date: "2024-03-29", currency_code: "TST", base_currency: "EUR", units_per_eur: 10.0, eur_per_unit: 0.1}
       - input: ref('dim_date')
         rows:
           - {date_day: "2024-03-01", year: 2024, quarter: 1, half: 1, month_start_date: "2024-03-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
@@ -592,8 +592,8 @@ unit_tests:
     given:
       - input: ref('fct_fx_rates_published')
         rows:
-          - {rate_date: "2024-05-10", quote_currency: "TST", base_currency: "EUR", units_per_eur: 2.0, eur_per_unit: 0.5}
-          - {rate_date: "2024-05-20", quote_currency: "TST", base_currency: "EUR", units_per_eur: 8.0, eur_per_unit: 0.125}
+          - {rate_date: "2024-05-10", currency_code: "TST", base_currency: "EUR", units_per_eur: 2.0, eur_per_unit: 0.5}
+          - {rate_date: "2024-05-20", currency_code: "TST", base_currency: "EUR", units_per_eur: 8.0, eur_per_unit: 0.125}
       - input: ref('dim_date')
         rows:
           - {date_day: "2024-05-10", year: 2024, quarter: 2, half: 1, month_start_date: "2024-05-01", quarter_start_date: "2024-04-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
@@ -620,8 +620,8 @@ unit_tests:
     given:
       - input: ref('fct_fx_rates_published')
         rows:
-          - {rate_date: "2024-01-02", quote_currency: "TST", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
-          - {rate_date: "2024-01-31", quote_currency: "TST", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-01-02", currency_code: "TST", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-01-31", currency_code: "TST", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
       - input: ref('dim_date')
         rows:
           - {date_day: "2024-01-02", year: 2024, quarter: 1, half: 1, month_start_date: "2024-01-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
@@ -673,9 +673,9 @@ unit_tests:
         rows:
           # CAP leaves the panel on 24 January; LIV publishes on to 31 March and
           # so sets the series end for both.
-          - {rate_date: "2024-01-24", quote_currency: "CAP", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
-          - {rate_date: "2024-01-31", quote_currency: "LIV", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
-          - {rate_date: "2024-03-31", quote_currency: "LIV", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-01-24", currency_code: "CAP", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-01-31", currency_code: "LIV", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-03-31", currency_code: "LIV", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
       - input: ref('dim_date')
         rows:
           - {date_day: "2024-01-24", year: 2024, quarter: 1, half: 1, month_start_date: "2024-01-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
@@ -685,26 +685,26 @@ unit_tests:
       rows:
         # CAP's month ends 7 days after its last fixing — on the cap, not past
         # it. `>=` would flip this row and nothing else here.
-        - {quote_currency: "CAP", period_type: "month",   period_label: "2024-01",  period_is_complete: true,  period_end_stale_days: 7,  period_end_is_stale: false}
+        - {currency_code: "CAP", period_type: "month",   period_label: "2024-01",  period_is_complete: true,  period_end_stale_days: 7,  period_end_is_stale: false}
         # 24 Jan to 31 Mar is 7 + 29 + 31 = 67 days. The quarter has finished;
         # the half and the year have not, and are stale all the same because the
         # currency stopped rather than the calendar.
-        - {quote_currency: "CAP", period_type: "quarter", period_label: "2024-q1", period_is_complete: true,  period_end_stale_days: 67, period_end_is_stale: true}
-        - {quote_currency: "CAP", period_type: "half",    period_label: "2024-1",  period_is_complete: false, period_end_stale_days: 67, period_end_is_stale: true}
-        - {quote_currency: "CAP", period_type: "year",    period_label: "2024",    period_is_complete: false, period_end_stale_days: 67, period_end_is_stale: true}
+        - {currency_code: "CAP", period_type: "quarter", period_label: "2024-q1", period_is_complete: true,  period_end_stale_days: 67, period_end_is_stale: true}
+        - {currency_code: "CAP", period_type: "half",    period_label: "2024-1",  period_is_complete: false, period_end_stale_days: 67, period_end_is_stale: true}
+        - {currency_code: "CAP", period_type: "year",    period_label: "2024",    period_is_complete: false, period_end_stale_days: 67, period_end_is_stale: true}
         # LIV is current in every period. Its half and year are incomplete and
         # fresh — the two rows that fail if the clock runs to `period_end_date`
         # instead of stopping at the series end.
-        - {quote_currency: "LIV", period_type: "month",   period_label: "2024-01",  period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
-        - {quote_currency: "LIV", period_type: "month",   period_label: "2024-03",  period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
-        - {quote_currency: "LIV", period_type: "quarter", period_label: "2024-q1", period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
-        - {quote_currency: "LIV", period_type: "half",    period_label: "2024-1",  period_is_complete: false, period_end_stale_days: 0,  period_end_is_stale: false}
-        - {quote_currency: "LIV", period_type: "year",    period_label: "2024",    period_is_complete: false, period_end_stale_days: 0,  period_end_is_stale: false}
+        - {currency_code: "LIV", period_type: "month",   period_label: "2024-01",  period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
+        - {currency_code: "LIV", period_type: "month",   period_label: "2024-03",  period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
+        - {currency_code: "LIV", period_type: "quarter", period_label: "2024-q1", period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
+        - {currency_code: "LIV", period_type: "half",    period_label: "2024-1",  period_is_complete: false, period_end_stale_days: 0,  period_end_is_stale: false}
+        - {currency_code: "LIV", period_type: "year",    period_label: "2024",    period_is_complete: false, period_end_stale_days: 0,  period_end_is_stale: false}
 
   # ---------------------------------------------------------------------------
   # fct_retail_returns — the inferred join.
   #
-  # Six mutations against a warehouse copy, all ten data tests green on every
+  # Six mutations against a warehouse copy, all eleven data tests green on every
   # one:
   #
   # | mutation                                      | effect                                          |
@@ -755,6 +755,16 @@ unit_tests:
       it used to be reached through eight raw invoice lines and an inferred
       join.
     given:
+      # Three rows, and only because the model joins the calendar for
+      # `date_key` — the same conformed key `fct_retail_order_line` carries at
+      # the identical grain. Nothing here is under test; it exists so the inner
+      # join keeps all four posed returns, which is itself the assertion that
+      # the join cannot silently drop one.
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-01-10", date_key: 20240110}
+          - {date_day: "2024-01-11", date_key: 20240111}
+          - {date_day: "2024-01-12", date_key: 20240112}
       - input: ref('int_retail_return_matches')
         rows:
           # Within the purchase: a clean match.

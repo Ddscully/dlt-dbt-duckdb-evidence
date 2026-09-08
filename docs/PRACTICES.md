@@ -50,11 +50,13 @@ it), exposures (who reads it) and contracts (what shape it is) do not state. It
 is generated from `manifest.json`, never written, so the grain comes from each
 model's own uniqueness tests and the columns from its enforced contract. It earns
 its place because the entry above was *already written down* and still broken one
-schema away: `fct_fx_rates_periods` and `fct_fx_rates_published` carry
+schema away: `fct_fx_rates_periods` and `fct_fx_rates_published` carried
 `quote_currency` where `dim_currency` publishes `currency_code`, while their own
-sibling `fct_fx_rates_daily` spells it the conformed way. No test here could see
+sibling `fct_fx_rates_daily` spelled it the conformed way. No test here could see
 that, because every guard is scoped to one relation, so a key spelled two ways is
-three green models. Two rules keep the output honest. A uniqueness test carrying
+three green models. Both were renamed on 2026-09-08, along with the `date_key`
+`fct_retail_returns` was missing beside a sibling at the identical grain — so the
+practice above is now enforced by something rather than only asserted. Two rules keep the output honest. A uniqueness test carrying
 a `where` is not a grain (`dim_grid_emission_factors` asserts one row per country
 *where `is_latest_available`*, which read as a grain turns a country-year
 reference table into a conformed dimension every fact appears to join). And
@@ -124,7 +126,7 @@ so the boundary is the one dbt itself can check rather than a filing convention
 
 **Say what a measure means under `sum()`.** A contract states a column's type
 and a test states that it is correct; neither says whether adding it up is
-meaningful. 118 of the 227 numeric mart columns are non-additive: ratios, rates,
+meaningful. 118 of the 228 numeric mart columns are non-additive: ratios, rates,
 prices, averages or extrema, where a sum is nonsense that comes back as a number.
 Every one carries `meta: {additivity: …}` from a closed four-value vocabulary,
 the 16 `semi_additive` ones have to say in prose *which* direction fails

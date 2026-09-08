@@ -36,7 +36,7 @@ usd as (
         period_end_units_per_eur,
         period_is_complete
     from {{ ref('fct_fx_rates_periods') }}
-    where period_type = 'half' and quote_currency = 'USD'
+    where period_type = 'half' and currency_code = 'USD'
 ),
 
 -- Half-over-half change. `lag` returns the previous row this country *has*, which

@@ -1,5 +1,5 @@
 -- ECB daily euro foreign-exchange reference rates, from Frankfurter.
--- Grain: one row per (rate_date, quote_currency).
+-- Grain: one row per (rate_date, currency_code).
 --
 -- The landing table is already long — the resource unpivots the API's wide
 -- `{date: {currency: rate}}` payload so the merge key is a real key — so this
@@ -22,7 +22,16 @@ with source as (
 select
     cast(rate_date as date) as rate_date,
     base_currency,
-    quote_currency,
+    -- `currency_code`, not `quote_currency`, and this alias is the whole of the
+    -- rename. `dim_currency` publishes `currency_code`; two of the three FX
+    -- facts used to spell the same dimension a second way, so nothing joined
+    -- them and the bus matrix showed `fct_fx_rates_periods` conforming to
+    -- nothing at all. The landing table keeps `quote_currency` deliberately —
+    -- `raw` is what we were handed and renaming it means a dlt schema drop and
+    -- a re-fetch, and "the quote side of a pair" is the right name for a column
+    -- sitting next to `base_currency` anyway. Staging is where a source's words
+    -- become the warehouse's.
+    quote_currency as currency_code,
     -- Units of the quote currency per 1 EUR — the ECB's own convention.
     rate as units_per_eur,
     -- EUR per 1 unit of the quote currency.

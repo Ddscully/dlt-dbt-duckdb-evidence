@@ -89,7 +89,7 @@ series as (
 
 dated as (
     select
-        p.quote_currency,
+        p.currency_code,
         p.base_currency,
         p.rate_date,
         p.units_per_eur,
@@ -124,7 +124,7 @@ keyed as (
             when 'half' then d.year || '-' || d.half
             else cast(d.year as varchar)
         end as period_label,
-        d.quote_currency,
+        d.currency_code,
         d.base_currency,
         d.rate_date,
         d.units_per_eur,
@@ -138,7 +138,7 @@ aggregated as (
         period_type,
         period_start_date,
         period_label,
-        quote_currency,
+        currency_code,
         min(base_currency) as base_currency,
         count(*) as n_published_days,
         min(rate_date) as first_rate_date,
@@ -151,7 +151,7 @@ aggregated as (
         min(units_per_eur) as min_units_per_eur,
         max(units_per_eur) as max_units_per_eur
     from keyed
-    group by period_type, period_start_date, period_label, quote_currency
+    group by period_type, period_start_date, period_label, currency_code
 ),
 
 -- The period end, and the last date any value in this row could be speaking
@@ -180,7 +180,7 @@ select
     a.period_label,
     a.period_end_date,
     cast(date_part('year', a.period_start_date) as integer) as year,
-    a.quote_currency,
+    a.currency_code,
     a.base_currency,
 
     -- For flows: revenue, spend, a price over the period.

@@ -1,7 +1,7 @@
 {{
     config(
         materialized='incremental',
-        unique_key=['rate_date', 'quote_currency'],
+        unique_key=['rate_date', 'currency_code'],
         incremental_strategy='delete+insert',
         on_schema_change='fail',
     )
@@ -16,7 +16,7 @@
 -- rows to fix: stop, and let a person decide to run `--full-refresh`.
 --
 -- Every euro reference rate the ECB has actually published, as published.
--- Grain: one row per (rate_date, quote_currency). Sparse by design — no row on a
+-- Grain: one row per (rate_date, currency_code). Sparse by design — no row on a
 -- weekend, a TARGET holiday, or for a currency outside its quoted lifetime.
 --
 -- **This is the project's first incremental model**, and it is the right one
@@ -56,7 +56,7 @@ with rates as (
 
 select
     rate_date,
-    quote_currency,
+    currency_code,
     base_currency,
     units_per_eur,
     eur_per_unit,

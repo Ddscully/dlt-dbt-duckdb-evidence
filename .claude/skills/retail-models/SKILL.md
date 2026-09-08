@@ -83,7 +83,7 @@ one; the page is `retail.md`.
     is lexicographic, and nothing claims the chosen line is the better match. It
     is documented in `_retail.yml` as well as in the model, because
     `original_line_number` ships as Parquet to consumers who never see either.
-- **`fct_retail_returns` has ten data tests; six mutations, none caught** (`dbt/models/marts/_unit_tests.yml`
+- **`fct_retail_returns` has eleven data tests; six mutations, none caught** (`dbt/models/marts/_unit_tests.yml`
   holds the three that do). The `accepted_values` on `match_status` is the same
   trap as `item_type`: reordering the `case` so "no prior purchase" is tested
   before "no customer id" relabels 352 rows and stays green. `>=` for "quantity

@@ -326,7 +326,7 @@ def additivity(manifest_path: str = MANIFEST_PATH) -> dict[str, dict[str, str]] 
 
     A consumer of a Parquet file has the column names and the types and nothing
     that says `renewables_share_pct` must not be summed while `co2_mt` may be —
-    and 118 of the 227 numeric mart columns are non-additive. The labels
+    and 118 of the 228 numeric mart columns are non-additive. The labels
     are declared once, as `meta: {additivity: …}` on the column in the same ymls
     that carry the contract, and this is what carries them out of the repo.
 
@@ -920,6 +920,21 @@ select count(*) from lakehouse.raw.om_weather_daily;
   (OWID's 2011 international-$ PPP vs. constant 2015 US$ derived here) and their
   levels are not comparable. Divide by `gdp_constant_usd`, never `gdp_usd`, for
   anything measured over time.
+- **Two FX columns were renamed, and here the old shape does *not* ship.**
+  `quote_currency` is `currency_code` from this release on, in
+  `marts.fct_fx_rates_published` and `marts.fct_fx_rates_periods` (and in the
+  `staging.stg_fx_rates` Parquet). Same values, and it is the name
+  `marts.dim_currency` has always published and that `marts.fct_fx_rates_daily`
+  has always used — the two renamed tables were the only ones spelling the
+  currency key a second way, so nothing joined them to the dimension without an
+  alias. There is no compatibility view for this one, unlike the emissions
+  rename below: `sed -i 's/quote_currency/currency_code/g'` over your queries is
+  the whole migration, and carrying a v1 of two tables to say so would cost more
+  than it tells you.
+- **`marts.fct_retail_returns` gained a column.** `date_key`, the same
+  `yyyymmdd` surrogate `marts.fct_retail_order_line` carries at the identical
+  grain, so returns can now be joined to `marts.dim_date` the same way. Purely
+  additive; nothing was removed or reordered ahead of it.
 - **One column was renamed, and the old shape still ships.**
   `marts.fct_emissions_energy.co2_per_gdp` is `co2_kg_per_gdp_ppp_2011` from this
   release on — same numbers, a name that states the unit and the basis, because

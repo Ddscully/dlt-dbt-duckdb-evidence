@@ -12,9 +12,10 @@ and holds `TABLE_TO_DBT_MODEL` for the same reason this holds `KNOWN_UNCONFORMED
 
 **The declared holes are not an allowlist of things that are fine.** A hole is a
 fact that joins to no conformed dimension, and the reason attached to it says
-whether that is a boundary or a defect. Two are declared today and only one of
-them is a decision — writing the other down is what stops it being rediscovered
-by a survey a third time.
+whether that is a boundary or a defect. Two were declared when this was written
+and only one of them was a decision; the other — `fct_fx_rates_periods` spelling
+`dim_currency` a second way — was fixed on 2026-09-08, which is what the
+declaration was for. One is left, and it is a boundary.
 """
 
 from __future__ import annotations
@@ -40,13 +41,6 @@ KNOWN_UNCONFORMED: dict[str, str] = {
         "the customer is aggregated away by construction, and `cohort_month` is a "
         "cohort label rather than a calendar day, so there is no grain at which "
         "`dim_date` or `dim_retail_customer` could be joined."
-    ),
-    "fct_fx_rates_periods": (
-        "**Open finding, not a boundary.** It carries `quote_currency` where "
-        "`dim_currency` publishes `currency_code` — the same dimension under a "
-        "second name, which its own sibling `fct_fx_rates_daily` spells the "
-        "conformed way — and its four date columns are period bounds rather than "
-        "`date_day` or `date_key`. Nothing about this model requires either."
     ),
 }
 

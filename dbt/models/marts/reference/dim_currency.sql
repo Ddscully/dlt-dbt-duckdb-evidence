@@ -48,12 +48,12 @@ series as (
 
 spans as (
     select
-        quote_currency,
+        currency_code,
         min(rate_date) as first_published_date,
         max(rate_date) as last_published_date,
         count(*) as n_published_days
     from published
-    group by quote_currency
+    group by currency_code
 ),
 
 -- The longest run of calendar days between two consecutive fixings. A weekend
@@ -61,20 +61,20 @@ spans as (
 -- publisher having stopped rather than a holiday — Iceland's krona is 3,341.
 gaps as (
     select
-        quote_currency,
+        currency_code,
         max(date_diff('day', previous_rate_date, rate_date)) as longest_gap_days
     from (
         select
-            quote_currency,
+            currency_code,
             rate_date,
             lag(rate_date) over (
-                partition by quote_currency
+                partition by currency_code
                 order by rate_date
             ) as previous_rate_date
         from published
     ) as consecutive
     where previous_rate_date is not null
-    group by quote_currency
+    group by currency_code
 )
 
 select
@@ -87,7 +87,7 @@ select
     p.first_published_date,
     p.last_published_date,
     p.n_published_days,
-    p.quote_currency is not null as is_quoted,
+    p.currency_code is not null as is_quoted,
     -- Tolerant of a currency missing the single newest day: the threshold is the
     -- same one the carry-forward uses, so "current" here and "carried forward to
     -- today" there cannot disagree.
@@ -105,6 +105,6 @@ select
     s.replaced_by_currency,
     s.retired_on is not null as retirement_is_explained
 from seed as s
-left join spans as p on s.currency_code = p.quote_currency
-left join gaps as g on s.currency_code = g.quote_currency
+left join spans as p on s.currency_code = p.currency_code
+left join gaps as g on s.currency_code = g.currency_code
 cross join series

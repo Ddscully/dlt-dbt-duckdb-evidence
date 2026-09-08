@@ -116,9 +116,15 @@ Two rules decide what a mark means. A uniqueness test carrying a `where` is not
 a grain — `dim_grid_emission_factors` asserts one row per country *where
 `is_latest_available`*, and reading that as a grain would make a country-year
 reference table look like a conformed country dimension. And conformance is
-**exact column-name matching**, deliberately: an alias list would render the FX
-models' two spellings of the currency key as a tidy row of marks, which is the
-one defect this table exists to show.
+**exact column-name matching**, deliberately: an alias list would have rendered
+the FX models' two spellings of the currency key as a tidy row of marks, and
+those marks were the defect. On its first render `fct_fx_rates_periods`
+conformed to **nothing** and `fct_fx_rates_published` only to `dim_date`, both
+because they said `quote_currency` where `dim_currency` publishes
+`currency_code`; `fct_retail_returns` was missing `date_key` while
+`fct_retail_order_line`, at the identical grain, carried it. All three were
+closed on 2026-09-08 — the table is what found them, and an alias list would
+have hidden two of them permanently.
 
 Regenerate with `just bus-matrix`.
 
@@ -136,11 +142,11 @@ Regenerate with `just bus-matrix`.
 | `fct_eu_electricity_prices_semiannual` | `country_iso3, year, half` | ✅ | · | · | · | · |
 | `fct_example_scope2_emissions` | `site_id` | ✅ | · | · | · | · |
 | `fct_fx_rates_daily` | `date_day, currency_code` | · | ✅ | ✅ | · | · |
-| `fct_fx_rates_periods` | `period_type, period_start_date, quote_currency` | · | · | · | · | · |
-| `fct_fx_rates_published` | `rate_date, quote_currency` | · | · | ✅ | · | · |
+| `fct_fx_rates_periods` | `period_type, period_start_date, currency_code` | · | ✅ | · | · | · |
+| `fct_fx_rates_published` | `rate_date, currency_code` | · | ✅ | ✅ | · | · |
 | `fct_retail_customer_cohorts` | `cohort_month, months_since_first_order` | · | · | · | · | · |
 | `fct_retail_order_line` | `invoice, line_number` | ✅ | · | ✅ | ✅ | ✅ |
-| `fct_retail_returns` | `invoice, line_number` | ✅ | · | · | ✅ | ✅ |
+| `fct_retail_returns` | `invoice, line_number` | ✅ | · | ✅ | ✅ | ✅ |
 
 Notes:
 
@@ -151,7 +157,6 @@ Notes:
 
 Facts conforming to no dimension:
 
-- `fct_fx_rates_periods` — **Open finding, not a boundary.** It carries `quote_currency` where `dim_currency` publishes `currency_code` — the same dimension under a second name, which its own sibling `fct_fx_rates_daily` spells the conformed way — and its four date columns are period bounds rather than `date_day` or `date_key`. Nothing about this model requires either.
 - `fct_retail_customer_cohorts` — Deliberate. An aggregate at `(cohort_month, months_since_first_order)`: the customer is aggregated away by construction, and `cohort_month` is a cohort label rather than a calendar day, so there is no grain at which `dim_date` or `dim_retail_customer` could be joined.
 
 <!-- bus-matrix:end -->

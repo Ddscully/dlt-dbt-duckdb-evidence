@@ -108,7 +108,7 @@ observed as (
     from spine as s
     left join published as p
         on
-            s.currency_code = p.quote_currency
+            s.currency_code = p.currency_code
             and s.date_day = p.rate_date
 ),
 

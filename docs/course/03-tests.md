@@ -97,7 +97,7 @@ the credibility of the other 424 with it.
 ## 3. Three ways a row escapes a test
 
 This is the part that is not in the dbt documentation, and it is the whole reason
-464 tests is not the reassuring number it looks like.
+465 tests is not the reassuring number it looks like.
 
 **(a) The value is null.** `dbt_utils.accepted_range` compiles to:
 
@@ -171,7 +171,7 @@ Two consequences that are not obvious:
   failure against a build that finished `ERROR=0`, which is how the pipeline
   health page came to contradict the build it was reporting on.
   `src/modern_data_stack/observability.py` reads `fail_calc` out of the manifest
-  and applies it; 462 of the 464 tests here use the default.
+  and applies it; 462 of the 465 tests here use the default.
 - **dbt writes that schema every build and never cleans it.** An audit table
   whose test has been renamed or deleted stays, is empty, and therefore scores as
   passing. A real warehouse here held **391 audit tables, 22 of them orphans**
@@ -302,8 +302,8 @@ written for exactly this:
       expression: >
         retired_on is null
         or retired_on > (
-            select max(rate_date) from {{ ref('stg_fx_rates') }} as r
-            where r.quote_currency = currency_code
+            select max(r.rate_date) from {{ ref('stg_fx_rates') }} as r
+            where r.currency_code = currencies.currency_code
         )
 ```
 
@@ -355,9 +355,9 @@ between `stg_fx_rates` and `currencies`.
 ```sql
 select currency_code, retired_on,
        (select max(rate_date) from staging.stg_fx_rates r
-          where r.quote_currency = cur.currency_code) as last_quote,
+          where r.currency_code = cur.currency_code) as last_quote,
        retired_on > (select max(rate_date) from staging.stg_fx_rates r
-          where r.quote_currency = cur.currency_code) as test_expression
+          where r.currency_code = cur.currency_code) as test_expression
 from main.currencies cur where currency_code in ('XYZ', 'GRD', 'USD');
 ```
 
@@ -400,7 +400,7 @@ sed -i '/^PLN,/d' dbt/seeds/currencies.csv && just course-rebuild
 ```
 
 ```
-Failure in test relationships_stg_fx_rates_quote_currency__currency_code__ref_currencies_
+Failure in test relationships_stg_fx_rates_currency_code__currency_code__ref_currencies_
   Got 7066 results, configured to fail if != 0
 ```
 
@@ -436,7 +436,7 @@ each get a self-consistent answer, and the two only meet in a meeting.
 
 ---
 
-## 🔍 Investigate 1 — how much of the warehouse do 464 tests actually look at?
+## 🔍 Investigate 1 — how much of the warehouse do 465 tests actually look at?
 
 > Real warehouse (`data/warehouse.duckdb`), not the sandbox.
 
@@ -510,7 +510,7 @@ column is the one place a cents/euros mix-up could enter — is being asked abou
 for knowing the number before you quote "43,138 rows, fully range-checked" to
 anybody.
 
-**3. 391 audit tables against 464 tests: 22 orphans.** dbt writes the audit
+**3. 391 audit tables against 465 tests: 22 orphans.** dbt writes the audit
 schema on every build and never removes a table whose test has gone, and the
 alias hash is computed over the test's arguments, so renaming a model orphans
 every audit table attached to it. Being empty, an orphan scores as *passing*, so
@@ -527,7 +527,7 @@ coverage are the sparse ones, which is backwards: sparse columns are where a
 join went wrong.
 
 *Correctly built:* tests are not free, and their cost is not runtime: it is that
-every test which can fail on reality trains people to ignore failures. 464 tests
+every test which can fail on reality trains people to ignore failures. 465 tests
 that have never had a false positive are worth more than 900 with a standing
 amber. The uncovered columns are largely OWID pass-throughs whose values this
 project does not compute; a bound on them tests the publisher, not the pipeline.
