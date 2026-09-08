@@ -61,6 +61,31 @@ caught by a data test.
 - **World Bank region names are padded** — `'Sub-Saharan Africa '` and
   `'Latin America & Caribbean '` come back with a trailing space. `stg_country`
   trims them, so join and group on the trimmed values.
+- **WDI is not only observations, and `stg_wdi` cuts it back to them.** On
+  2026-09-07 the World Bank began serving `SP.POP.TOTL` out to **2050** — 155
+  countries, 2026-2050, every other indicator null on those rows — and it broke
+  the nightly, the dashboard deploy and (had it run) the monthly release, because
+  `stg_wdi.year` carried a literal `max_value: 2030`. Three things worth keeping:
+  - **A ceiling in a test cannot keep a projection out of the warehouse**; it can
+    only redden the build. The rule is a `where` clause in `stg_wdi.sql` now
+    (`year <= extract(year from current_date)`), and the test's ceiling is gone
+    rather than restated, which would make it a test that cannot fail.
+  - **The literal was blind below itself.** The artifact evidences the 2031-2050
+    block and only that — 3,100 country-years, which is what the test could see.
+    Replaying a 2026-2050 projection against a throwaway lakehouse reproduces
+    that number exactly *and* passes a further **775** rows, 2026 through 2030,
+    into the spine, the latest-year queries and every per-capita join that reads
+    `population`, indistinguishable from an observation. Whether the World Bank
+    served that lower block is unknowable now; that the ceiling would not have
+    stopped it is measured.
+  - **The drop is visible without a test.** `pipeline_sources` takes its year
+    span from `raw` and `pipeline_tables` takes `stg_wdi`'s from `staging`, so a
+    publisher who does it again shows up on the Pipeline page as the two
+    disagreeing — which is why no `severity: warn` guard was added for it.
+  The API served the projections for at most ~28 hours and was back to
+  1960-2025 by 2026-09-08 14:00 UTC; the recorded fixtures never held them, so
+  nothing needed re-recording.
+
 - **"Latest year" is per column, not per table.** `max(year)` on the mart is
   whichever source runs furthest ahead (Eurostat prices, a year beyond the rest),
   and coverage thins out unevenly before that: `co2_mt` holds 214 countries into
