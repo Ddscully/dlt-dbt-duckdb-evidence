@@ -225,30 +225,60 @@ time series.
   re-price without rebuilding.
 ### What the unit tests hold
 
-Four of them, in `dbt/models/marts/_unit_tests.yml`. This model's 20 data tests
-are `not_null` and generous `accepted_range`s bar one, and they cannot be much
+Five of them, in `dbt/models/marts/_unit_tests.yml`. This model's 21 data tests
+are `not_null` and generous `accepted_range`s bar two, and they cannot be much
 else:
 the numbers are transcribed from a legal instrument, so there is no independent
 quantity to check them against. What is testable is the *rules*, and mutation
-against a warehouse copy says how much they were worth:
+against a warehouse copy says how much they were worth. Every row below was
+measured against the current suite — the four older ones re-run rather than
+carried forward, since two of the tests did not exist when they were first
+recorded — and both exceptions to "`not_null` and a range" were added *by* a
+mutation in this table:
 
-| mutation | data tests at the time (19) | effect |
+| mutation | data tests | effect |
 |---|---|---|
 | fallback resolved per column, not per row | **all pass** | **nothing moves at all** |
+| fallback let back into the `excess` window | **all pass** | **nothing moves at all** |
 | mark-up hardcoded at 10/20/30% | **all pass** | fertiliser avg EUR 105.76 -> 115.18 /t |
-| `excess_over_cleanest_source` partitioned by product group | **all pass** | 18,989 t -> 30,599 t |
+| `excess_over_cleanest_source` partitioned by product group | **all pass** | 18,153 t -> 29,469 t |
+| the fallback row keeps an `excess` of its own | **1 fails** | 260 nulls become numbers, +836 t |
 | `count(*)` for `count(<total>)` in `priced_goods` | 7 fail | +875 unpriced heading rows |
 
-- **The one the data tests catch is the one with no near-miss, and that is what
-  the table is really measuring.** `having count(*) > 0` is a tautology over a
+- **The ones the data tests catch have no near-miss, and that is what the table
+  is really measuring.** `having count(*) > 0` is a tautology over a
   `group by` — 283 goods out where the real clause gives 260 — so the mutation
   deletes the filter rather than weakening it. `priced_goods` is a binary rule:
   a good has a total somewhere or it has not, and there is no subtly-wrong
-  version to write. The other three rules all have a plausible wrong answer, and
-  all three are invisible to every one of them. Keep the unit test anyway: the seven
+  version to write. The four rules that do have a plausible wrong answer are
+  invisible to every data test. Keep the unit test anyway: the seven
   `not_null`s report 875 nulls across three columns, the unit test reports the
   two heading rows by `good_key`, and a failing unit test stops the model
   materialising instead of finding it afterwards.
+  - **The fifth row is caught for a different reason and it is worth separating:
+    not because the rule is binary but because the *policy* chose to null.** A
+    fallback row carrying a figure is a well-formed non-negative double that no
+    range or null test on the column can object to — unless the column is
+    declared absent on exactly those rows, which is what makes it checkable. The
+    test is one `expression_is_true` reading `is null = is_fallback_table`, both
+    directions in one expression because either alone passes for the wrong
+    reason.
+
+- **The excess window is the second rule here that data cannot reach, and the
+  cleanest example in the repo.** `excess_over_cleanest_source` measures against
+  the cheapest *listed* source, and letting the annex's fallback row into that
+  window moves **not one cell**. The fallback has never been below the cheapest
+  listed source of a good, and for **48 of the 260 goods it cannot be**: the
+  resolution rule copies the fallback onto every listed country the annex prints
+  "-" for, so those goods carry a guaranteed tie. The other 212 are safe by the
+  annex's shape alone — the fallback is dearer than **87.5%** of listed sources
+  at the median good, narrowest margin **72%** — which is the mark-up's design
+  intent rather than a property of the model. The fixture prices the fallback
+  *below* both listed countries, the shape the regulation does not publish.
+  - **The measurement in the issue that filed it counted 260 rows as the
+    exposure and that was the wrong denominator.** The exposure is 212 goods,
+    not 260 rows: on 48 the defect is unreachable by construction, and on the
+    260 fallback rows themselves nothing was ever numerically wrong.
 
 - **The fallback rule is now unreachable by data, which is the argument for
   testing it.** Zero of the 12,540 seed rows have a null total beside a non-null
@@ -295,6 +325,27 @@ against a warehouse copy says how much they were worth:
   the flag keys on "this row has a total of its own" and the fallback does.
   `is_fallback_table` is the column that identifies it. Reads oddly, so it is
   pinned rather than left to be rediscovered.
+- **A fallen-back row is indistinguishable from a country's own value unless the
+  page says so, and 2026-09-05 is when it started saying so.**
+  `reports/pages/cbam.md` selected `is_country_specific` and rendered every other
+  column but that one, so 221 of the 10,785 rows the dropdown can reach — over 40
+  of its 252 goods — showed a tonnage, a cost and (on 36 of them) a production
+  route that belong to the catch-all. Grey hydraulic cements is the clearest
+  case: 24 of that good's 100 sourcing countries share one identical tonnage
+  where the other 76 carry 39 distinct values. The `Value basis` column is the
+  fix, and it is the same fallback-is-not-a-source distinction the mart already
+  enforces on `excess_over_cleanest_source_t_co2e_per_t` — one policy in three
+  places now (model, page filter, page column) rather than one place and two
+  omissions.
+- **The join to `dim_grid_emission_factors` filters `is_latest_available`, which
+  is per country and not a year.** 2025 for 60 countries, 2024 for 59 and 2022
+  for one, so a `where year = <literal>` written for the same job strips the
+  factor off 2,584 rows and passes every data test. It is also a **left** join in
+  earnest: the fallback row has no `country_iso3` and Curaçao has no factor, so
+  an inner join silently deletes 261 rows — the fallback's 260 among them, which
+  the page's headline ratio reads. Both are held by
+  `cbam_exposure_takes_each_country_latest_grid_factor_and_keeps_the_rest`; until
+  it existed, every CBAM unit test mocked that input as `rows: []`.
 
 ### Licence and scope limits
 

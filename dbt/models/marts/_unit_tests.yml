@@ -102,8 +102,29 @@ unit_tests:
 # **Two of those four rules moved out with the model that decides them.** The
 # row-level fallback and the heading filter belong to `int_cbam_default_factors`
 # and are tested there, against the seed alone; what stays here is the mark-up
-# and the window partition, which are what this model adds. Both tests below
-# used to declare five inputs to reach a rule that touched two of them.
+# and the excess window — what it partitions by, and which rows are allowed
+# inside it — which is what this model adds. The two tests that stayed used to
+# declare five inputs to reach a rule that touched two of them.
+#
+# **Four mutations of that window against a warehouse copy, and the split
+# between them is the argument for the policy the third test pins:**
+#
+# | mutation                                    | 21 data tests | effect on the warehouse       |
+# |---------------------------------------------|---------------|-------------------------------|
+# | window loses `filter (where not p.is_fallback_table)` | all pass | **not one cell moves**   |
+# | the `case` goes, so the fallback keeps a figure       | 1 fails  | 260 nulls become numbers |
+# | both — the expression exactly as it shipped          | 1 fails  | the same 260, +836 t     |
+# | partition by product group instead of good           | all pass | 18,153 t -> 29,469 t     |
+#
+# The first row is the defect that was filed, and it changes nothing, because
+# the fallback has never been below the cheapest listed source of a good: for 48
+# of the 260 goods it cannot be, and across the other 212 it is dearer than
+# 87.5% of listed sources at the median. So no data test could ever see it and
+# the fixture is the entire guard. The second row is the half that *is*
+# observable, and only because the policy nulls the fallback's figure rather
+# than keeping it — one of the 21 data tests fires, the both-directions
+# `expression_is_true` on the column, and it is the only one that can. Choosing
+# to null is what gave half of this rule a data test at all.
 #
 # The tests that moved pose rows the source does not contain, deliberately:
 # `is_country_specific` and the fallback are reachable only through shapes the
@@ -223,6 +244,139 @@ unit_tests:
         # a group-wide minimum of 11.0 would make it 33.0.
         - {country_or_territory: "Norway", good_key: "2523290000-portland-cement", certificates_2026_t_co2e_per_t: 44.0, excess_over_cleanest_source_t_co2e_per_t: 0.0}
         - {country_or_territory: "Chile",  good_key: "2523290000-portland-cement", certificates_2026_t_co2e_per_t: 88.0, excess_over_cleanest_source_t_co2e_per_t: 44.0}
+
+  - name: cbam_exposure_keeps_the_fallback_table_out_of_the_cheapest_source
+    model: fct_cbam_exposure
+    description: >
+      The annex's "other countries and territories" row is a rule covering every
+      country the regulation does not name, not a place goods are made, so it is
+      excluded from `excess_over_cleanest_source_t_co2e_per_t` in **both**
+      directions: it cannot set the baseline the listed countries measure
+      against, and it does not receive a figure of its own.
+
+      **Only a fixture can pose this.** The window ran unfiltered for a year and
+      no number in the warehouse was ever wrong for it, because the fallback has
+      never been below the cheapest listed source of a good. For 48 of the 260
+      goods it cannot be — the resolution rule copies the fallback row onto every
+      listed country the annex prints "-" for, so a tie is guaranteed and strict
+      undercutting is unreachable — and across the other 212 the fallback is
+      dearer than 87.5% of listed sources at the median good, the narrowest
+      margin being 72%. That is a fact about this month's regulation, and the
+      mark-up's design intent besides: being unlisted is meant to cost you. So
+      the fixture prices the fallback *below* both listed countries, which is the
+      only shape that separates the two windows, and it moves all three rows —
+      unfiltered, Norway's excess is 5.5 rather than 0, Chile's 16.5 rather than
+      11, and the fallback's own is 0 rather than absent.
+    given:
+      - input: ref('int_cbam_default_factors')
+        rows:
+          - {country_or_territory: "Other countries and territories", country_iso3: null, good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 4.5, indirect_t_co2e_per_t: 0.5, total_t_co2e_per_t: 5.0, production_route_code: "F", is_fallback_table: true, is_country_specific: true}
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 9.0,  indirect_t_co2e_per_t: 1.0, total_t_co2e_per_t: 10.0, production_route_code: "A", is_fallback_table: false, is_country_specific: true}
+          - {country_or_territory: "Chile",  country_iso3: "CHL", good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 18.0, indirect_t_co2e_per_t: 2.0, total_t_co2e_per_t: 20.0, production_route_code: "A", is_fallback_table: false, is_country_specific: true}
+      - input: ref('cbam_goods')
+        rows:
+          - {good_key: "2523100090-other-clinker", product_group: "Cement", cn_code: "2523 10 00 90", goods_description: "Other clinker, including grey clinker"}
+      - input: ref('cbam_markup_schedule')
+        rows:
+          - {product_group: "Cement", year: 2026, markup_pct: 10}
+          - {product_group: "Cement", year: 2027, markup_pct: 20}
+          - {product_group: "Cement", year: 2028, markup_pct: 30}
+      - input: ref('dim_country')
+        rows:
+          - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
+          - {country_iso3: "CHL", country_name: "Chile",  region: "Latin America & Caribbean", income_group: "High income"}
+      - input: ref('dim_grid_emission_factors')
+        rows: []
+    expect:
+      rows:
+        # The cheapest row in the table by construction, and it still carries no
+        # excess: the column presupposes a sourcing country and this row is not
+        # one. `accepted_range min_value 0` would have passed a 0.0 here.
+        - {country_or_territory: "Other countries and territories", country_iso3: null, certificates_2026_t_co2e_per_t: 5.5, excess_over_cleanest_source_t_co2e_per_t: null}
+        # The cheapest *listed* source, so zero — which is the assertion that
+        # fails when the fallback is allowed into the window.
+        - {country_or_territory: "Norway", country_iso3: "NOR", certificates_2026_t_co2e_per_t: 11.0, excess_over_cleanest_source_t_co2e_per_t: 0.0}
+        - {country_or_territory: "Chile",  country_iso3: "CHL", certificates_2026_t_co2e_per_t: 22.0, excess_over_cleanest_source_t_co2e_per_t: 11.0}
+
+  - name: cbam_exposure_takes_each_country_latest_grid_factor_and_keeps_the_rest
+    model: fct_cbam_exposure
+    description: >
+      The grid join was mocked `rows: []` by all three CBAM tests above, so
+      `grid_factor_year`, `grid_factor_t_co2_per_mwh` and the
+      `where is_latest_available` filter were never once exercised — three
+      columns of the shipped mart reaching the release untested.
+
+      Two of its three rules are invisible to every data test on this model.
+
+      **"Latest" is per country, not a year.** The mart's factors carry three
+      different years — 2025 on 60 countries, 2024 on 59 and 2022 on one — so a
+      `where year = 2025` written for the same job looks right and strips the
+      factor off **2,584 rows that had one** (the null count goes 261 to 2,845).
+      Measured against a warehouse copy: **PASS=22, ERROR=0**. Norway and Chile
+      here carry different latest years for that reason, and Norway carries a
+      second, dearer row marked `is_latest_available: false`, so taking the
+      whole series or the wrong end of it is a different answer rather than the
+      same one by luck.
+
+      **The join is left, in both of the ways it can stop being.** The fallback
+      table has no `country_iso3` at all and Curaçao is a listed country the
+      factor dimension does not cover; an inner join drops both — 11,665 rows to
+      11,404, and **all 260 of the "other countries and territories" rows** that
+      `reports/pages/cbam.md` reads for its fallback-penalty figure. Also
+      **PASS=22, ERROR=0**: uniqueness holds on what is left, no `not_null`
+      fires on rows that are gone, and this model has no row-count test.
+
+      The three tests above go red on that same mutation and **not one of them
+      is a guard against it** — their grid input is `rows: []`, so an inner join
+      against an empty table deletes their whole fixture. Give any of them a
+      single factor row and they stop noticing, which is the same trap
+      `..._keeps_a_line_whose_country_the_map_has_never_seen` records for the
+      country map. This one fails on the rows that matter.
+
+      The third rule, the filter's *presence*, is the one a data test does
+      catch: dropping it fans 11,665 rows out to 306,276 and
+      `unique_combination_of_columns` on (country_or_territory, good_key) fails
+      immediately. Recorded because knowing which half is already guarded is
+      worth as much as the fixture, not because it is why this test exists.
+    given:
+      - input: ref('int_cbam_default_factors')
+        rows:
+          - {country_or_territory: "Other countries and territories", country_iso3: null, good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 4.5, indirect_t_co2e_per_t: 0.5, total_t_co2e_per_t: 5.0, production_route_code: "F", is_fallback_table: true, is_country_specific: true}
+          - {country_or_territory: "Norway", country_iso3: "NOR", good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 9.0,  indirect_t_co2e_per_t: 1.0, total_t_co2e_per_t: 10.0, production_route_code: "A", is_fallback_table: false, is_country_specific: true}
+          - {country_or_territory: "Chile",  country_iso3: "CHL", good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 18.0, indirect_t_co2e_per_t: 2.0, total_t_co2e_per_t: 20.0, production_route_code: "A", is_fallback_table: false, is_country_specific: true}
+          - {country_or_territory: "Curaçao", country_iso3: "CUW", good_key: "2523100090-other-clinker", direct_t_co2e_per_t: 27.0, indirect_t_co2e_per_t: 3.0, total_t_co2e_per_t: 30.0, production_route_code: "A", is_fallback_table: false, is_country_specific: true}
+      - input: ref('cbam_goods')
+        rows:
+          - {good_key: "2523100090-other-clinker", product_group: "Cement", cn_code: "2523 10 00 90", goods_description: "Other clinker, including grey clinker"}
+      - input: ref('cbam_markup_schedule')
+        rows:
+          - {product_group: "Cement", year: 2026, markup_pct: 10}
+          - {product_group: "Cement", year: 2027, markup_pct: 20}
+          - {product_group: "Cement", year: 2028, markup_pct: 30}
+      - input: ref('dim_country')
+        rows:
+          - {country_iso3: "NOR", country_name: "Norway", region: "Europe & Central Asia", income_group: "High income"}
+          - {country_iso3: "CHL", country_name: "Chile",  region: "Latin America & Caribbean", income_group: "High income"}
+          - {country_iso3: "CUW", country_name: "Curaçao", region: "Latin America & Caribbean", income_group: "High income"}
+      - input: ref('dim_grid_emission_factors')
+        rows:
+          # Norway's superseded year. Dearer than the latest, so a join that
+          # takes the whole series or the earliest row gives a different number
+          # rather than the same one by luck.
+          - {country_iso3: "NOR", year: 2024, emission_factor_t_co2_per_mwh: 0.300, is_latest_available: false}
+          - {country_iso3: "NOR", year: 2025, emission_factor_t_co2_per_mwh: 0.020, is_latest_available: true}
+          # Chile's latest is an older year than Norway's, which is the whole
+          # point: "latest available" is a per-country fact.
+          - {country_iso3: "CHL", year: 2022, emission_factor_t_co2_per_mwh: 0.400, is_latest_available: true}
+          # No row for CUW, and none for the fallback's null key.
+    expect:
+      rows:
+        # Both uncovered rows survive, with a null factor and a null year — the
+        # assertion an inner join fails by deleting them.
+        - {country_or_territory: "Other countries and territories", country_iso3: null,  grid_factor_year: null, grid_factor_t_co2_per_mwh: null}
+        - {country_or_territory: "Norway",  country_iso3: "NOR", grid_factor_year: 2025, grid_factor_t_co2_per_mwh: 0.020}
+        - {country_or_territory: "Chile",   country_iso3: "CHL", grid_factor_year: 2022, grid_factor_t_co2_per_mwh: 0.400}
+        - {country_or_territory: "Curaçao", country_iso3: "CUW", grid_factor_year: null, grid_factor_t_co2_per_mwh: null}
 
   # ---------------------------------------------------------------------------
   # fct_fx_rates_daily — the carry-forward.
@@ -358,15 +512,17 @@ unit_tests:
   # ---------------------------------------------------------------------------
   # fct_fx_rates_periods — the aggregation.
   #
-  # Five mutations against a warehouse copy. The model has 20 data tests and
+  # Seven mutations against a warehouse copy. The model has 23 data tests and
   # only one of them notices anything:
   #
-  # | mutation                                    | 20 data tests | effect                                        |
+  # | mutation                                    | 23 data tests | effect                                        |
   # |---------------------------------------------|---------------|-----------------------------------------------|
   # | `avg_eur_per_unit` = 1 / `avg_units_per_eur`| all pass      | USD 2008 0.683499 -> 0.679923; ISK 2008 off 11.9% |
   # | `max()` for `arg_max(.., rate_date)`        | all pass      | USD 2014 period end 1.2141 -> 1.3953, `period_end_vs_avg_pct` **flips** -8.61% -> +5.03% |
   # | `min()` for `arg_min(.., rate_date)`        | all pass      | `period_start_units_per_eur` wrong on 16,975 rows (85.9%) |
   # | `period_is_complete` `<` instead of `<=`    | all pass      | **nothing at all** — no period ends on the series end |
+  # | `period_end_is_stale` `>=` instead of `>`   | all pass      | **nothing at all** — no period-end sits on the cap |
+  # | staleness clock to `period_end_date`        | all pass      | 87 of the 116 open periods become stale, every one a false alarm |
   # | average over dense `fct_fx_rates_daily`     | **1 fails**   | caught by `fx_periods_annual_buckets_cover_every_fixing` |
   #
   # The one that fails is the reason to keep that model-level test: summing
@@ -374,6 +530,14 @@ unit_tests:
   # row count is what makes averaging the gap-filled table impossible to miss.
   # Everything else here is a number that is positive, non-null and inside every
   # range, which is all the column tests can ask.
+  #
+  # **The staleness distribution is bimodal and the cap sits in the gap**, which
+  # is why its boundary joins `period_is_complete`'s in the unreachable column:
+  # 19,743 period-ends are 0-3 days old, then nothing at all until 22, and the
+  # remaining 22 run 22 / 30 / 62 / 121 / 184 / 305. Any cap from 4 to 21 selects
+  # the same 22 rows, so `fx_max_carry_forward_days` is not finely tuned here —
+  # it is a threshold in an 18-day-wide empty band, which is a better defence of
+  # the number than precision would have been.
 
   - name: fx_periods_takes_the_last_fixing_of_a_period_not_the_highest
     model: fct_fx_rates_periods
@@ -414,7 +578,7 @@ unit_tests:
     description: >
       The mean of the reciprocals is not the reciprocal of the mean, and
       `avg_eur_per_unit` is the former. Writing it as `1 / avg_units_per_eur` is
-      the natural-looking simplification and it passes all 20 data tests: the
+      the natural-looking simplification and it passes all 23 data tests: the
       number stays positive and non-null, and it is only 0.07% out in a calm
       year. The gap grows with how far the rate moved inside the period — 0.52%
       for EUR/USD in 2008 and **11.9% for the Icelandic krona that same year** —
@@ -471,6 +635,72 @@ unit_tests:
         - {period_type: "half",    period_end_date: "2024-06-30", period_is_complete: false}
         - {period_type: "year",    period_end_date: "2024-12-31", period_is_complete: false}
 
+  - name: fx_periods_ages_the_closing_fixing_against_the_last_date_it_speaks_for
+    model: fct_fx_rates_periods
+    description: >
+      `period_end_is_stale` is this model's half of the staleness policy
+      `fct_fx_rates_daily` has always had, and both of its plausible
+      implementations are wrong in a way no data test can see — the column stays
+      a non-null boolean either way.
+
+      **Reading `is_rate_stale` off the sibling instead of computing it here**
+      catches 5 of the warehouse's 22 stale period-ends. The daily model stops
+      emitting rows once a currency leaves the ECB's panel, so the 17 rows that
+      most need the flag have nothing to join to and a left join calls them
+      clean. That mutation is unreachable from a unit test — it is a missing
+      join, not a wrong value — which is why the model comment carries the
+      argument and this fixture pins what is left.
+
+      **Ageing the fixing against `period_end_date` alone** is the reachable one,
+      and it flags 87 of the warehouse's 116 open periods: a period that has not
+      finished has a period end in the future, so every current month, quarter,
+      half and year is stale by construction. `least(period_end_date,
+      series_end_date)` asks how old the fixing is relative to the last date the
+      value could be speaking for. LIV's half and year below are the pin — both
+      incomplete, both quoting a fixing that *is* the series end, both fresh.
+
+      The third mutation is the cap boundary, and **no row in the warehouse sits
+      on it** — the staleness distribution stops at 3 days and resumes at 22, so
+      `>=` for `>` moves nothing at all and only a fixture can pose the
+      question. CAP therefore publishes its last fixing seven days before its
+      month ends: at the cap and so **not** stale, the same `<=` the daily model
+      uses. CAP's longer periods run past the cap and are stale while
+      incomplete, which is the case the flag exists to catch early — a currency
+      that stops publishing mid-period, before it has aged into a finished
+      one.
+    given:
+      - input: ref('fct_fx_rates_published')
+        rows:
+          # CAP leaves the panel on 24 January; LIV publishes on to 31 March and
+          # so sets the series end for both.
+          - {rate_date: "2024-01-24", quote_currency: "CAP", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-01-31", quote_currency: "LIV", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+          - {rate_date: "2024-03-31", quote_currency: "LIV", base_currency: "EUR", units_per_eur: 4.0, eur_per_unit: 0.25}
+      - input: ref('dim_date')
+        rows:
+          - {date_day: "2024-01-24", year: 2024, quarter: 1, half: 1, month_start_date: "2024-01-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-01-31", year: 2024, quarter: 1, half: 1, month_start_date: "2024-01-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+          - {date_day: "2024-03-31", year: 2024, quarter: 1, half: 1, month_start_date: "2024-03-01", quarter_start_date: "2024-01-01", half_start_date: "2024-01-01", year_start_date: "2024-01-01"}
+    expect:
+      rows:
+        # CAP's month ends 7 days after its last fixing — on the cap, not past
+        # it. `>=` would flip this row and nothing else here.
+        - {quote_currency: "CAP", period_type: "month",   period_label: "2024-01",  period_is_complete: true,  period_end_stale_days: 7,  period_end_is_stale: false}
+        # 24 Jan to 31 Mar is 7 + 29 + 31 = 67 days. The quarter has finished;
+        # the half and the year have not, and are stale all the same because the
+        # currency stopped rather than the calendar.
+        - {quote_currency: "CAP", period_type: "quarter", period_label: "2024-q1", period_is_complete: true,  period_end_stale_days: 67, period_end_is_stale: true}
+        - {quote_currency: "CAP", period_type: "half",    period_label: "2024-1",  period_is_complete: false, period_end_stale_days: 67, period_end_is_stale: true}
+        - {quote_currency: "CAP", period_type: "year",    period_label: "2024",    period_is_complete: false, period_end_stale_days: 67, period_end_is_stale: true}
+        # LIV is current in every period. Its half and year are incomplete and
+        # fresh — the two rows that fail if the clock runs to `period_end_date`
+        # instead of stopping at the series end.
+        - {quote_currency: "LIV", period_type: "month",   period_label: "2024-01",  period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
+        - {quote_currency: "LIV", period_type: "month",   period_label: "2024-03",  period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
+        - {quote_currency: "LIV", period_type: "quarter", period_label: "2024-q1", period_is_complete: true,  period_end_stale_days: 0,  period_end_is_stale: false}
+        - {quote_currency: "LIV", period_type: "half",    period_label: "2024-1",  period_is_complete: false, period_end_stale_days: 0,  period_end_is_stale: false}
+        - {quote_currency: "LIV", period_type: "year",    period_label: "2024",    period_is_complete: false, period_end_stale_days: 0,  period_end_is_stale: false}
+
   # ---------------------------------------------------------------------------
   # fct_retail_returns — the inferred join.
   #
@@ -501,8 +731,10 @@ unit_tests:
   #
   # Four of those six mutations are on the matching rule rather than on the
   # classification, and they are pinned in `int_retail_return_matches` now — the
-  # `item_type` filter, the asof boundary, the tie-break and the dead
-  # `quantity > 0`. The table is kept whole here because it was measured whole:
+  # `item_type` filter, the asof boundary, the tie-break and, since 2026-09-05,
+  # the dead `quantity > 0` (`..._never_point_at_a_stock_write_off`, which is
+  # the only one of the four that needed a row the source has never sent).
+  # The table is kept whole here because it was measured whole:
   # splitting it would leave each half quoting numbers the other half's model
   # produced. What is left below is the `case`, mocked on matched rows.
 
@@ -574,9 +806,15 @@ unit_tests:
   # `revenue_per_active_customer_gbp` and not its numerator.
   #
   # `quantity > 0` is dead here for the reason it is dead in
-  # `fct_retail_returns`' `purchases`: every stock write-off is anonymous, so
-  # `customer_id is not null` has already excluded them. It stays because it
-  # states the intent.
+  # `int_retail_return_matches`' `purchases`: every stock write-off is
+  # anonymous, so `customer_id is not null` has already excluded them. It stays
+  # because it states the intent. Only the other one is posed by a fixture —
+  # `..._never_point_at_a_stock_write_off` — and that is a judgement about
+  # consequence rather than an oversight: a write-off admitted to the *matching*
+  # rule makes a return point at a sale that never happened and writes five
+  # `original_*` columns off it, which is a wrong answer rather than a missing
+  # one. What it would do to this model has not been measured, so nothing here
+  # claims it is harmless.
   #
   # **One fixture, four tests, each asserting a different column set**, so a
   # failure names which edge moved. Its shape is doing three jobs at once: the

@@ -5,7 +5,7 @@ description: The twelve dbt models that carry unit tests and what mutating each 
 
 # Unit testing the models (`dbt/models/**/_unit_tests.yml`)
 
-Thirty-one unit tests over twelve models. They exist because a data test cannot
+Thirty-six unit tests over twelve models. They exist because a data test cannot
 see a wrong answer that is a legal one, and every one of them was written after
 mutating the model and watching its data tests stay green. This file is the
 record of those mutations — what moved, what did not, and which fixture shapes
@@ -17,7 +17,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
 
 ## The method
 
-- **The way a test here earns its place is mutation, and the method has two
+- **The way a test here earns its place is mutation, and the method has three
   traps.** Break the model in a plausible way against a *copy* of the warehouse
   (`WAREHOUSE_PATH` at an absolute path — `just dbt-build` targets the real
   one), run its full data-test suite, and record the number that moves. "Nothing
@@ -33,10 +33,20 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   - **Restore from a copy, never `git checkout <file>`.** During this work the
     tree is dirty by definition; `git checkout` is a revert to HEAD, not an
     undo, and it destroyed a round of uncommitted edits to three files.
+  - **`dbt build --select <model>` cannot tell you which tests caught a
+    mutation.** A failing unit test skips everything downstream of it, the
+    model included — so the run stops after the first red one and reports
+    `SKIP=25`. Reading that as "one test caught it" is wrong twice over: it
+    names an arbitrary member of the red set, and it hides how many others
+    fired. Measured here on the CBAM grid join, where the single name reported
+    was a *different* test on two consecutive runs. Run the two phases
+    separately — `dbt test --select <model>,test_type:unit`, which has no model
+    build to skip and so runs every one, then `dbt build --select <model>
+    --exclude test_type:unit` for the data tests against the mutated model.
 
 ## The twelve models, and what mutating each one proved
 
-- **There are thirty-one unit tests, over twelve models, and they exist because a data
+- **There are thirty-six unit tests, over twelve models, and they exist because a data
   test cannot see a wrong answer that is a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
@@ -77,26 +87,88 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     `invoice_type <> 'adjustment'` has never once been the deciding term and
     nothing in the data can reach it. The unit test poses the row the source has
     not sent.
+  - **Two more of that shape were closed on 2026-09-05, and one of them was a
+    real inconsistency rather than a dormant clause.** `country` was
+    `trim(country)` while its two neighbours in the same select list were
+    `nullif(trim(...), '')`, so a blank country would have survived as `''` and
+    joined the seed as a 44th label — a country in its own right, and one the
+    `relationships` test could not name, because a *null* code is what that test
+    skips. Unreachable today (0 null and 0 blank countries in 1,067,371 rows),
+    so putting the `nullif` back moves nothing and taking it away again is
+    **PASS=83, ERROR=0**; two fixture rows are the whole guard.
+  - **`invoice_date` had no test of any kind, and the interesting part is how
+    hard it is to make its hazard visible.** The string `invoice_ts` appeared
+    nowhere in `staging/_unit_tests.yml`, so `cast(invoice_ts as date)` was
+    unchecked while feeding `invoice_month`, every cohort grain and the RFM
+    recency window. The hazard `RETAIL_COLUMNS` warns about is dlt typing the
+    column `TIMESTAMP WITH TIME ZONE`, which renders a naive 07:45 as
+    08:45+01:00 on a CET machine — and **at that offset not one of the
+    1,067,371 rows changes date**, because the tills run 06:10 to 21:52 and
+    nothing is within two hours of midnight. Push the drift to six hours and
+    **28,286 order lines move to a different date, 521 of them onto a month that
+    contradicts the `invoice_month` the ingest layer computed from the same
+    column — and the build is still PASS=83, ERROR=0.** Two derivations of one
+    fact, in two layers, with nothing comparing them; the fixture states the
+    relation at 23:45, 23:59 on New Year's Eve and midnight exactly.
 - **`fct_cbam_exposure` is the third, and the hardest of the three to test any
   other way.** It is a table of euro costs with a statutory deadline whose every
   figure is plausible, transcribed from a legal instrument — so there is no
-  independent quantity to check the numbers against and its 20 data tests are
+  independent quantity to check the numbers against and its 21 data tests are
   `not_null` and `accepted_range` with bounds that have to be generous, bar the
-  one added with the route fix below. What is
+  two added with the route fix and the excess-window fix below. What is
   left to test is the *rules*. Mutated against a warehouse copy: resolving the
   fallback **per column instead of per row** changes not one number in the
-  warehouse and all 19 pass; **hardcoding the mark-up at 10/20/30** moves the
-  fertiliser average from EUR 105.76 to EUR 115.18 a tonne and all 19 pass;
+  warehouse and every data test passes; **letting the annex's fallback row into
+  the `excess_over_cleanest_source` window** also changes not one number, and
+  every data test passes; **hardcoding the mark-up at 10/20/30** moves the
+  fertiliser average from EUR 105.76 to EUR 115.18 a tonne, all passing;
   partitioning `excess_over_cleanest_source` **by product group instead of by
-  good** takes the total from 18,989 t to 30,599 t and all 19 pass. Only
-  `count(*)` in place of `count(<total>)` in `priced_goods` goes red, on seven
-  `not_null`s, because the 875 heading rows it lets through have no price at all.
+  good** takes the total from 18,153 t to 29,469 t, all passing. Two go red.
+  `count(*)` in place of `count(<total>)` in `priced_goods` fails seven
+  `not_null`s, because the 875 heading rows it lets through have no price at all;
+  and **giving the fallback row an excess of its own** fails exactly one test,
+  the both-directions `expression_is_true` written for it.
   It is caught because it is the only one of the four with **no near-miss**:
   `having count(*) > 0` is a tautology over a `group by` (283 goods out, not
   260), so it deletes the filter rather than weakening it. A rule that is binary
-  has no plausible wrong answer; the other three do, which is the whole table.
+  has no plausible wrong answer; the other four do, which is the whole table.
   The unit test is still worth having, because the seven `not_null`s name the
   symptom — 875 nulls in three columns — and it names the heading rows.
+  - **The excess window is the strongest unreachable-branch case here, because
+    the mutation moves nothing *and* the reason it moves nothing is structural.**
+    For 48 of the 260 goods the fallback cannot be strictly cheapest at all — the
+    resolution rule copies it onto every listed country the annex prints "-" for,
+    so a tie is guaranteed — and across the other 212 it is dearer than 87.5% of
+    listed sources at the median good, narrowest margin 72%. The fixture has to
+    price the fallback *below* both listed countries, which is a shape the
+    regulation does not publish and, given what the mark-up is for, never should.
+  - **The grid join was mocked away by every test on the model, and three
+    shipped columns went untested for it.** `grid_factor_year`,
+    `grid_factor_t_co2_per_mwh` and the `where is_latest_available` filter sat
+    behind `- input: ref('dim_grid_emission_factors')` / `rows: []` in all three
+    fixtures. Two of its rules are invisible to the data tests: making the join
+    inner deletes 261 rows — 11,665 to 11,404, **including all 260 of the
+    fallback rows the CBAM page reads for its headline ratio** — and replacing
+    `is_latest_available` with a year literal strips the factor off 2,584 rows,
+    because "latest" is per country here (2025 on 60 countries, 2024 on 59,
+    2022 on one). **PASS=22, ERROR=0** for both: uniqueness holds on what is
+    left, `not_null` cannot fire on rows that are gone, and this model has no
+    row-count test. The third rule, the filter's presence, *is* caught — dropping
+    it fans the mart out to 306,276 rows and the grain contract fails.
+    - **The three older tests go red on the inner-join mutation and not one of
+      them is a guard.** Their grid input is `rows: []`, so an inner join
+      against an empty table deletes their whole fixture; give any of them a
+      single factor row and they stop noticing. Same trap as
+      `..._keeps_a_line_whose_country_the_map_has_never_seen` records for the
+      country map, and the reason an empty mock is worth a second look: it can
+      make a test look like a guard for a mutation it only detects by accident.
+  - **Nulling is what made half of that rule data-testable, and the choice was
+    the deliverable.** The open question the defect was filed with was whether
+    the fallback should keep its own excess or lose it. Keeping it leaves the
+    whole rule invisible to every data test forever; nulling it puts 260 cells
+    in the warehouse that a test can read, and one `expression_is_true`
+    (`is null = is_fallback_table`) then holds it. **Where a fix is otherwise
+    unobservable, look for the half of it that can be made to show.**
   - **`markup_2026_pct` cannot be unit tested and that is the finding.** It is a
     ratio of two doubles, and the warehouse holds three distinct values of it
     that all print as `10.0` — 9.99999999999998578915, 10.00000000000000888178
@@ -166,16 +238,21 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     converts at a rate 132% and 98% from the next real quote. That is the
     argument for the cap being 7 rather than generous.
 - **`fct_fx_rates_periods` is the fifth, and the only model so far where an
-  existing test caught one of the mutations.** 20 data tests; five mutations,
-  four of them green on every one. `avg_eur_per_unit` written as
+  existing test caught one of the mutations.** 23 data tests; seven mutations,
+  six of them green on every one. `avg_eur_per_unit` written as
   `1 / avg_units_per_eur` moves USD 2008 from 0.683499 to 0.679923; `max()` in
   place of `arg_max(.., rate_date)` takes USD 2014's period end from 1.2141 to
   1.3953 and **flips the sign of `period_end_vs_avg_pct`, -8.61% to +5.03%**;
   `min()` for `arg_min` puts the wrong `period_start_units_per_eur` on 16,975
   rows (85.9%); and `period_is_complete` on `<` instead of `<=` changes nothing
-  at all. Averaging the dense `fct_fx_rates_daily` instead of the published
-  fixings is the one that fails, on
-  `fx_periods_annual_buckets_cover_every_fixing`.
+  at all. The two staleness mutations added with `period_end_is_stale` are the
+  same shape: `>=` for `>` on the cap changes nothing (the distribution stops at
+  3 days and resumes at 22, so no row sits on it), and ageing the closing fixing
+  against `period_end_date` instead of `least(period_end_date,
+  series_end_date)` turns 87 of the 116 open periods stale — a period that has
+  not finished has a period end in the future. Averaging the dense
+  `fct_fx_rates_daily` instead of the published fixings is the one that fails,
+  on `fx_periods_annual_buckets_cover_every_fixing`.
   - **That test is the model to copy.** It sums `n_published_days` over the year
     buckets and compares it with the row count of `fct_fx_rates_published`, so
     the *shape* of the input is pinned rather than any value. It was written to
@@ -204,35 +281,47 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   dropping `item_type = 'product'` from `returns` adds **1,207 rows** of
   cancelled postage and fees; the asof `>` costs 2 rows; and dropping
   `quantity > 0` from `purchases` does **nothing at all**, because every stock
-  write-off is anonymous and `customer_id is not null` already excludes them.
+  write-off is anonymous and `customer_id is not null` already excludes them
+  (**PASS=16 ERROR=0** with the clause deleted, re-measured 2026-09-05). That
+  put it in the same class as `stg_retail_lines`' `<> 'adjustment'` and
+  `period_is_complete`'s boundary — an argument for a fixture rather than for
+  deleting the clause, which is what
+  `return_matches_never_point_at_a_stock_write_off` now is: a write-off carrying
+  a customer id, a shape the source has never sent, which an unfiltered
+  `purchases` turns into the matched purchase with a **negative**
+  `original_quantity` and a `match_status` that is still a legal value.
   - **`accepted_values` on `match_status` is the trap, and it is the same one
     `stg_retail_lines` has.** All four strings stay legal while tens of
     thousands of rows move between them, and no total changes.
   - **`quantity_is_consistent`'s `<=` is worth 5,613 rows — 34% of all
     matches** — because a complete return is the ordinary case, not an edge one.
   - **The model was not reproducible between builds, and it is a different
-    mechanism from the float one.** Three consecutive `dbt run` against
-    byte-identical sources gave `matched` = 16,031 / 16,032 / 16,030 and
-    `sum(original_quantity)` = 637,411 / 636,410 / 636,208. The cause is ties in
-    the `asof join`, which picks arbitrarily among rows tied on its inequality
-    key: **33,518 groups share a (customer, product, instant)**, covering 70,174
-    of 802,716 purchase lines (8.7%), and 604 returns (3.68%) land on one, up to
-    20 deep. `dim_retail_customer` had already met this and settled it by
-    ranking on `min(invoice_ts)` then `invoice`; `purchases` now does the same
-    with a `qualify row_number()` on `(invoice, line_number)`. Three builds now
-    agree to the penny. It mattered more here than there — the table ships as
-    Parquet in the release and feeds `reports/pages/retail.md`, so figures moved
-    between releases with no upstream change.
+    mechanism from the float one.** The cause is ties in the `asof join`, which
+    picks arbitrarily among rows tied on its inequality key, and enough of this
+    purchase universe is tied that `matched` and `sum(original_quantity)` both
+    moved across consecutive runs on byte-identical sources.
+    `dim_retail_customer` had already met this and settled it by ranking on
+    `min(invoice_ts)` then `invoice`; `int_retail_return_matches` now does the
+    same in a `match_candidates` CTE, a `qualify row_number()` on
+    `(invoice, line_number)`. Three builds now agree to the penny. It mattered
+    more here than there — the table ships as Parquet in the release and feeds
+    `reports/pages/retail.md`, so figures moved between releases with no
+    upstream change.
+    - **The figures live in the model, in the comment above
+      `match_candidates`, and nowhere else on purpose.** How many groups are
+      tied, how deep, how many returns land on one, and what choosing a line
+      instead of summing costs were written out in four places — this file
+      among them — so one re-measurement took four edits, and the copy that got
+      missed would have looked exactly as authoritative as the three that did
+      not. Read them there.
     - **The tie-break picks one line and deliberately does not sum them, and
-      the cost of that is measured.** Of the 604 tied matches, 63 are flagged
-      'matched, quantity exceeds purchase' and **56 would be plain matches if
-      the tied lines were added up** — the customer did buy that many, across
-      two lines of one order. That is 15% of the 366 rows in the bucket the
-      model calls its most interesting number, so **that bucket is an upper
-      bound on "the rule found the wrong sale", not a count of it.** Summing is
-      a re-specification of the matching rule (`original_line_number` would have
-      nothing to point at) and belongs in its own decision, not inside a
-      determinism fix.
+      the consequence outlives the digits**: most of the tied rows flagged
+      'matched, quantity exceeds purchase' would be plain matches if the tied
+      lines were added up — the customer did buy that many, across two lines of
+      one order — so **that bucket is an upper bound on "the rule found the
+      wrong sale", not a count of it.** Summing is a re-specification of the
+      matching rule (`original_line_number` would have nothing to point at) and
+      belongs in its own decision, not inside a determinism fix.
     - **A tie-break fixture has to separate the ordering from its permutations.**
       The first version put the winning row on both the lowest invoice *and* the
       lowest line number, so `order by line_number, invoice` passed it too. It

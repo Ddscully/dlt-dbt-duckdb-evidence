@@ -3,10 +3,12 @@
 # `DuplicateYAMLKeysDeprecation` — nothing red, nothing missing, and gone in
 # Fusion.
 #
-# Five tests, and all five moved here from `marts/_unit_tests.yml` rather than
-# being written fresh. That is the layer paying for itself: each was already
-# testing a rule that now has a model of its own, and each had to reach that
-# rule through a mart's inputs and output columns to do it.
+# Six tests. Five moved here from `marts/_unit_tests.yml` rather than being
+# written fresh — that is the layer paying for itself: each was already testing a
+# rule that now has a model of its own, and each had to reach that rule through a
+# mart's inputs and output columns to do it. The sixth
+# (`..._never_point_at_a_stock_write_off`) is new, and covers a filter that no
+# data can reach.
 unit_tests:
   # --- int_cbam_default_factors ---------------------------------------------
   #
@@ -117,13 +119,18 @@ unit_tests:
     model: int_retail_return_matches
     description: >
       An `asof join` with several rows tied on its inequality key picks one
-      arbitrarily, and 33,518 groups in the purchase universe are tied — 70,174
-      of 802,716 lines, 8.7%. 604 return lines land on one. Until 2026-08-24 the
-      model was therefore not reproducible: three runs against byte-identical
-      sources gave 16,031 / 16,032 / 16,030 clean matches. `purchases` now keeps
-      the lowest invoice then the lowest line number at each (customer, product,
+      arbitrarily, and enough of this purchase universe is tied that the model
+      was not reproducible between builds until 2026-08-24. **How much, and what
+      choosing one tied line instead of summing them costs, is measured once —
+      in the comment above `match_candidates` in the model** — and deliberately
+      not restated here: that set of figures was written out in four places, so
+      one re-measurement took four edits to land. `match_candidates` keeps the
+      lowest invoice then the lowest line number at each (customer, product,
       instant), so the choice is stated instead of emergent. Nothing here claims
       the chosen line is the *better* match — only that it is always the same one.
+
+      Everything below is this test's own, and is about the fixture rather than
+      about the warehouse.
 
       **Four tie groups, because one group cannot catch the mutation this test
       exists for.** Delete the `qualify` and the model still returns *a* member
@@ -190,9 +197,9 @@ unit_tests:
       rows:
         # Group 1's winner has quantity 2 against a return of 4, so this row is
         # also the 'matched, quantity exceeds purchase' artefact the model
-        # comment quantifies: 56 of the warehouse's 366 rows in that bucket
-        # would be plain matches if tied lines were summed instead of chosen
-        # between. That is a separate decision and this test pins today's.
+        # comment quantifies — most of that bucket's tied rows would be plain
+        # matches if the tied lines were summed instead of chosen between. That
+        # is a separate decision and this test pins today's.
         - {invoice: "C700", original_invoice: "700", original_line_number: 3, original_quantity: 2, quantity_returned: 4}
         - {invoice: "C800", original_invoice: "800", original_line_number: 4, original_quantity: 3, quantity_returned: 1}
         - {invoice: "C900", original_invoice: "900", original_line_number: 2, original_quantity: 5, quantity_returned: 2}
@@ -228,3 +235,43 @@ unit_tests:
       rows:
         - {invoice: "C601", quantity_returned: 3, original_invoice: "500", original_quantity: 5}
         - {invoice: "C606", quantity_returned: 2, original_invoice: "503", original_quantity: 4}
+
+  - name: return_matches_never_point_at_a_stock_write_off
+    model: int_retail_return_matches
+    description: >
+      `purchases` requires `quantity > 0`, and that clause has never once been
+      the deciding one: a negative quantity on a *sale* invoice is inventory
+      shrinkage, all 3,457 of them are anonymous, and `customer_id is not null`
+      excludes every one before this filter is reached. Delete it and no number
+      in the warehouse moves — which is why it was recorded as a "nothing moves"
+      mutation and left untested, and why it is the same category as
+      `stg_retail_lines`' `invoice_type <> 'adjustment'` and `dim_date`'s eleven
+      unbuilt fiscal policies: logic no data can reach, so a fixture is the only
+      thing that can reach it. Confirmed against a warehouse copy — the clause
+      deleted, `int_retail_return_matches` and everything downstream rebuilt,
+      **PASS=16 ERROR=0** and not a row moved.
+
+      The row that reaches it is a write-off *with a customer on it* — invoice
+      501 here, a shape the source has never sent. It sits between the genuine
+      purchase and the return, so an unfiltered `purchases` makes it the most
+      recent prior "purchase" and the asof join takes it: `original_quantity`
+      goes from 5 to **-2**, `original_invoice` names an order that sold
+      nothing, and every downstream column follows. `quantity_returned >
+      original_quantity` is then true, so `fct_retail_returns` files the row
+      under 'matched, quantity exceeds purchase' — a legal value of a tested
+      column, which is exactly what no data test can see. The zero price is
+      deliberate too: it is what makes `original_amount_gbp` zero rather than
+      absurd, so nothing downstream looks wrong either.
+    given:
+      - input: ref('stg_retail_lines')
+        rows:
+          # The genuine purchase, and the answer.
+          - {invoice: "500", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 5, unit_price: 2.0, line_amount_gbp: 10.0, invoice_ts: "2024-01-01 09:00:00", invoice_date: "2024-01-01"}
+          # A write-off carrying a customer id. Negative quantity, zero price, a
+          # plain (non-`C`) invoice — `stg_retail_lines` calls this
+          # `is_stock_write_off` and it is not a sale to anybody.
+          - {invoice: "501", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: -2, unit_price: 0.0, line_amount_gbp: 0.0, invoice_ts: "2024-01-05 09:00:00", invoice_date: "2024-01-05"}
+          - {invoice: "C601", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -3, unit_price: 2.0, line_amount_gbp: -6.0, invoice_ts: "2024-01-10 09:00:00", invoice_date: "2024-01-10"}
+    expect:
+      rows:
+        - {invoice: "C601", quantity_returned: 3, original_invoice: "500", original_line_number: 1, original_quantity: 5, original_amount_gbp: 10.0}

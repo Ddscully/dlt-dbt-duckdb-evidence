@@ -242,7 +242,7 @@ is in the `unit-testing-dbt-models` skill.
     A list extended by hand every time a total crosses a decade is a guard with
     a scheduled expiry.
   - **An additivity figure is bound to its own label, not to a global set.**
-    There are two honest bases — 190 literal `additivity:` entries in the ymls
+    There are two honest bases — 191 literal `additivity:` entries in the ymls
     against 226 labelled columns in the manifest, the gap being
     `fct_emissions_energy_v1`'s inherited labels — so a set holding both makes
     either legal anywhere. A bare "N labels" is deliberately not scanned at
@@ -275,9 +275,21 @@ is in the `unit-testing-dbt-models` skill.
     words. Both are handled; words only from ten up, because below that they are
     always local ("Two unit tests catch all five") and admitting them produced
     nine false positives against zero finds. Anything longer than that filler is
-    deliberately out — "422 of the 460 tests" has to capture 424, not 422. What
+    deliberately out — "462 of the 464 tests" has to capture 464, not 462. What
     still escapes is a number with no test-noun after it at all ("pass all 14:"),
     so phrase a count with its noun.
+    - **The uncaptured partner then goes stale, and it did — in two files, by 23
+      and by 39.** A sentence of the form "N of the M tests use the default
+      `fail_calc`" is one guarded number beside one unguarded one, so every
+      ripple bumped the total and left the partner behind: `CLAUDE.md` read "438 of the 463" and
+      `docs/course/03-tests.md` "422 of the 463" when the true figure at 463 was
+      461. Both were right when written — 438 at a total of 440, 422 at 424 —
+      which is the tell, because the partner is always total-minus-two here, the
+      two `dbt_utils.equal_rowcount` tests being the only ones that override
+      `fail_calc` at all. The example sentence in this very bullet had drifted
+      the same way, quoting a total that had moved four times against a partner
+      that had not. Prefer a phrasing the guard can hold — "all but two of the
+      464 tests" — over an arithmetic pair it can only half-see.
   - `seen > 35` is the vacuity guard. A scanner whose patterns stop matching
     passes by not looking — the same failure `_ROUTES` reachability exists for.
 

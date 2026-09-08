@@ -171,6 +171,13 @@ unit_tests:
       the workbook read returns NULL for an empty cell, so the source currently
       holds no blank string at all. It is one cast away from holding one, which
       is why the shape is pinned here rather than left to the reader.
+
+      **All three text columns the model trims are here, and they did not always
+      agree.** `country` was `trim(country)` with no `nullif` until 2026-09-05,
+      so a blank country would have become a 44th label rather than an absence —
+      unreachable in today's 1,067,371 rows, which is precisely the condition
+      under which this project writes the fixture instead of arguing about the
+      clause.
     given:
       - input: source('raw', 'retail_invoice_lines')
         rows:
@@ -181,6 +188,14 @@ unit_tests:
           - {invoice: "536365", line_number: 5, customer_id: " 17850 ", description: "  WHITE HANGING HEART  ", country: "  United Kingdom  "}
           - {invoice: "536365", line_number: 6, customer_id: "17850",   description: "",                        country: "United Kingdom"}
           - {invoice: "536365", line_number: 7, customer_id: "17850",   description: "   ",                     country: "United Kingdom"}
+          # The third column, added 2026-09-05. `country` was `trim(country)`
+          # alone while its two neighbours were `nullif(trim(...), '')` — so a
+          # blank country survived as `''` and joined to the seed as a country
+          # in its own right, while a blank customer and a blank description
+          # were both absences. Rows 8 and 9 are the shapes that separate the
+          # two treatments; the source has sent neither.
+          - {invoice: "536365", line_number: 8, customer_id: "17850",   description: "WHITE HANGING HEART",     country: ""}
+          - {invoice: "536365", line_number: 9, customer_id: "17850",   description: "WHITE HANGING HEART",     country: "   "}
       # Every row here is the same country, so one mapping row is the whole
       # map. It is not decoration: line 5's label arrives padded, and the join
       # is on the *trimmed* value, so a resolution moved above the trim would
@@ -197,6 +212,12 @@ unit_tests:
         - {line_number: 5, customer_id: "17850", description: "WHITE HANGING HEART", country: "United Kingdom", country_iso3: "GBR"}
         - {line_number: 6, customer_id: "17850", description: null,                  country: "United Kingdom", country_iso3: "GBR"}
         - {line_number: 7, customer_id: "17850", description: null,                  country: "United Kingdom", country_iso3: "GBR"}
+        # Null, not `''`. Under the old expression both of these carried a
+        # distinct 44th "country" that resolved to no code — and a null code is
+        # what the `relationships` test in `_staging.yml` ignores, so nothing
+        # would have named them.
+        - {line_number: 8, customer_id: "17850", description: "WHITE HANGING HEART", country: null,             country_iso3: null}
+        - {line_number: 9, customer_id: "17850", description: "WHITE HANGING HEART", country: null,             country_iso3: null}
 
   - name: stg_retail_lines_keeps_a_line_whose_country_the_map_has_never_seen
     model: stg_retail_lines
@@ -249,6 +270,61 @@ unit_tests:
         - {invoice: "536365", country: "Germany",     country_iso3: "DEU"}
         - {invoice: "536367", country: "Unspecified", country_iso3: null}
         - {invoice: "536368", country: "Poland",      country_iso3: null}
+
+  - name: stg_retail_lines_dates_a_line_by_the_till_time_it_carries
+    model: stg_retail_lines
+    description: >
+      `invoice_date` is `cast(invoice_ts as date)` and was untested: the string
+      `invoice_ts` appeared nowhere in this file. Its `not_null` cannot see a
+      wrong date, only a missing one, and the column feeds `invoice_month` in
+      every downstream grain — `fct_retail_customer_cohorts`, the RFM recency
+      window, `days_to_return`.
+
+      **The two are derived in different layers from the same timestamp, and
+      nothing compares them.** `invoice_month` is computed at ingest, in the
+      DuckDB query that reads the workbook (`strftime(invoice_ts, '%Y-%m')` in
+      `ingest/sources/retail.py`); `invoice_date` is computed here. They agree on
+      all 1,067,371 rows today, and no test says they must — so this fixture
+      states the relation once, on the rows where it is least obvious.
+
+      Those rows are the last minutes of a day and of a year, and the source has
+      sent neither: the tills open at 06:10 and the latest stamp in the workbook
+      is **21:52**, so nothing in the real data is within two hours of a date
+      boundary. That is worth knowing before trusting the hazard
+      `RETAIL_COLUMNS` describes to be visible — dlt's default `timestamp` maps
+      to TIMESTAMP WITH TIME ZONE and renders a naive 07:45 as 08:45+01:00 on a
+      CET machine, and at that offset **not one of the 1,067,371 rows changes
+      date**. Push the same drift to six hours, the offset of a machine east of
+      here, and it is not subtle any more and still not visible: **28,286 order
+      lines move to a different `invoice_date`, 521 of them onto a date whose
+      month contradicts the `invoice_month` the ingest layer computed, and the
+      build finishes PASS=83 ERROR=0** across `stg_retail_lines` and everything
+      downstream of it. Measured against a warehouse copy. Rows 1 and 2 here are
+      red at either offset.
+    given:
+      - input: source('raw', 'retail_invoice_lines')
+        rows:
+          # Fifteen minutes before midnight, on the last day of a month. A cast
+          # that rounds up, or an hour of drift, puts this in February and makes
+          # it disagree with the `invoice_month` the ingest layer computed.
+          - {invoice: "536365", line_number: 1, stock_code: "85123A", quantity: 1, unit_price: 2.55, country: "United Kingdom", invoice_ts: "2024-01-31 23:45:00", invoice_month: "2024-01"}
+          # One minute before midnight on New Year's Eve: the same trap across a
+          # year boundary, where a wrong date is also a wrong year.
+          - {invoice: "536366", line_number: 1, stock_code: "85123A", quantity: 1, unit_price: 2.55, country: "United Kingdom", invoice_ts: "2023-12-31 23:59:00", invoice_month: "2023-12"}
+          # Midnight exactly — the boundary itself, which belongs to the new day.
+          - {invoice: "536367", line_number: 1, stock_code: "85123A", quantity: 1, unit_price: 2.55, country: "United Kingdom", invoice_ts: "2024-02-01 00:00:00", invoice_month: "2024-02"}
+          # An ordinary trading hour, so the fixture cannot pass by treating
+          # every row as an edge case.
+          - {invoice: "536368", line_number: 1, stock_code: "85123A", quantity: 1, unit_price: 2.55, country: "United Kingdom", invoice_ts: "2024-01-15 12:30:00", invoice_month: "2024-01"}
+      - input: ref('retail_country_map')
+        rows:
+          - {retail_country: "United Kingdom", country_iso3: "GBR", mapping_basis: "name_match"}
+    expect:
+      rows:
+        - {invoice: "536365", invoice_date: "2024-01-31", invoice_month: "2024-01"}
+        - {invoice: "536366", invoice_date: "2023-12-31", invoice_month: "2023-12"}
+        - {invoice: "536367", invoice_date: "2024-02-01", invoice_month: "2024-02"}
+        - {invoice: "536368", invoice_date: "2024-01-15", invoice_month: "2024-01"}
 
   - name: stg_weather_daily_nulls_a_degree_day_it_cannot_compute
     model: stg_weather_daily

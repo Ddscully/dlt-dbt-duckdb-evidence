@@ -28,6 +28,13 @@ down and applied consistently.
   `from` table is the wrong one.
 - **[convention]** Use `--` for comments that should survive into compiled SQL
   and `{# #}` for notes meant only for the reader of the model file.
+- **[lint]** A `filter` on a windowed aggregate dedents to the function's own
+  indent and the `over` that follows it indents one level further —
+  `min(x)` / `filter (…)` / `    over (…)`. It looks wrong and it is what
+  `layout.indent` wants; `sqlfluff fix --rules layout.indent` settles the
+  argument in one pass. That command has to run with an absolute `LAKEHOUSE_DIR`
+  like everything else that reaches the dbt templater, so prefer `just lint` to
+  find the line and `sqlfluff fix` only to see the layout it has in mind.
 
 ### Deliberate deviations from dbt's guide
 

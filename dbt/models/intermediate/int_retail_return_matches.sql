@@ -52,6 +52,39 @@ returns as (
         and quantity < 0
 ),
 
+-- The purchase universe: every line a return could be pointing back at. A sale
+-- of a product, positively signed, by a customer we can name — 802,716 lines.
+--
+-- `quantity > 0` cannot change that number today and is kept anyway. A negative
+-- quantity on a *sale* invoice is a stock write-off rather than a purchase
+-- (`stg_retail_lines` names 3,457 of them), and **every single one is
+-- anonymous**, so `customer_id is not null` has already excluded all 3,457
+-- before this clause is reached. Delete it and no row in the warehouse moves.
+-- That is an argument for a fixture, not against the clause — the day a
+-- write-off arrives with a customer on it, the most recent "purchase" of that
+-- product becomes a shrinkage line with a negative quantity, and every return
+-- matched to it reports an original order that was never sold. Posed in
+-- `return_matches_never_point_at_a_stock_write_off`, which is the only thing
+-- that can reach it.
+purchases as (
+    select
+        invoice,
+        line_number,
+        customer_id,
+        stock_code,
+        invoice_ts,
+        invoice_date,
+        quantity,
+        unit_price,
+        line_amount_gbp
+    from lines
+    where
+        invoice_type = 'sale'
+        and item_type = 'product'
+        and quantity > 0
+        and customer_id is not null
+),
+
 -- One candidate per (customer, product, instant), because an `asof join` that
 -- has several rows tied on its inequality key picks one of them arbitrarily —
 -- and 33,518 groups here are tied, covering 70,174 of the 802,716 purchase
@@ -61,6 +94,15 @@ returns as (
 -- 16,030 clean matches and `sum(original_quantity)` of 637,411 / 636,410 /
 -- 636,208. `dim_retail_customer` had already met this and settled it the same
 -- way, ranking on `min(invoice_ts)` then `invoice`.
+--
+-- **A separate CTE because it is a separate population, and the name is the
+-- whole reason.** This keeps 766,060 of the 802,716 purchase lines: one per tie
+-- group, so the 70,174 tied lines collapse to 33,518 and **36,656 lines (4.6%)
+-- are not here**. Only the asof join reads it, where dropping them is the
+-- entire point — but a `purchases` CTE that silently means "some of the
+-- purchases" is a trap for the first aggregate anyone adds, a line count or a
+-- `sum(quantity)` denominator for a match rate, which would be short by tens of
+-- thousands with nothing to flag it.
 --
 -- The tie-break is the lowest invoice then the lowest line number. `invoice` is
 -- a string, so that ordering is lexicographic rather than numeric — which is
@@ -80,29 +122,18 @@ returns as (
 -- Left as a separate decision on purpose; a determinism fix should not quietly
 -- move 56 rows between buckets.
 --
--- These five figures are measured against the warehouse this model *now*
--- builds. The first version of this comment quoted 70 / 63 / 367, taken while
--- diagnosing the instability — i.e. from the model that gave a different answer
--- every build. A determinism fix invalidates the evidence gathered for it, so
--- everything here was re-measured afterwards. This comment is the one copy that
--- carries the numbers; CLAUDE.md and the retail skill cite it.
-purchases as (
-    select
-        invoice,
-        line_number,
-        customer_id,
-        stock_code,
-        invoice_ts,
-        invoice_date,
-        quantity,
-        unit_price,
-        line_amount_gbp
-    from lines
-    where
-        invoice_type = 'sale'
-        and item_type = 'product'
-        and quantity > 0
-        and customer_id is not null
+-- These figures are measured against the warehouse this model *now* builds. The
+-- first version of this comment quoted 70 / 63 / 367, taken while diagnosing the
+-- instability — i.e. from the model that gave a different answer every build. A
+-- determinism fix invalidates the evidence gathered for it, so everything here
+-- was re-measured afterwards. **This comment is the one copy that carries these
+-- numbers**; the unit test, `marts/retail/_retail.yml`'s description of
+-- `original_line_number`, `.claude/skills/retail-models/SKILL.md` and
+-- `.claude/skills/unit-testing-dbt-models/SKILL.md` all cite it rather than
+-- restating it, because a set of figures written out four times took four edits
+-- to correct once and will again.
+match_candidates as (
+    select * from purchases
     qualify row_number() over (
         partition by customer_id, stock_code, invoice_ts
         order by invoice, line_number
@@ -118,7 +149,7 @@ select
     p.unit_price as original_unit_price,
     p.line_amount_gbp as original_amount_gbp
 from returns as r
-asof left join purchases as p
+asof left join match_candidates as p
     on
         r.customer_id = p.customer_id
         and r.stock_code = p.stock_code

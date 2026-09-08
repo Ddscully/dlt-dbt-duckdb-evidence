@@ -91,7 +91,18 @@ select
     country_display_name,
     region,
     production_route_code,
-    is_country_specific,
+    -- Rendered, not just selected. Where the annex prints "-" for a listed
+    -- country the resolution rule copies the fallback row onto it *whole* —
+    -- tonnage, certificates, cost and the production route with them — so
+    -- 221 of the 10,785 rows this dropdown can reach, across 40 of its 252
+    -- goods, are the catch-all value wearing a country's name. 36 of them show
+    -- a route letter the country never earned. Nothing in the numbers
+    -- distinguishes those rows from a country-specific one, which is the whole
+    -- reason this column is on the table below rather than only in the query.
+    case
+        when is_country_specific then 'Country-specific'
+        else 'Annex fallback'
+    end                                                     as value_basis,
     total_t_co2e_per_t,
     certificates_2026_t_co2e_per_t,
     cbam_cost_2026_eur_per_t,
@@ -104,7 +115,10 @@ order by cbam_cost_2026_eur_per_t
 ```sql ranked_span
 -- The fallback table stays on the chart below, where it is a useful reference
 -- line, but it is not a sourcing country and must not be counted as one or
--- become the "cheapest source" of anything.
+-- become the "cheapest source" of anything. The mart enforces the same rule on
+-- `excess_over_cleanest_source_t_co2e_per_t` now — kept out of the window and
+-- null on its own row — so this filter and that one are one policy stated in
+-- two places, rather than a page working around a model that disagrees.
 select
     count(*)                                                    as n,
     min(cbam_cost_2026_eur_per_t)                               as cheapest,
@@ -131,6 +145,7 @@ Across <Value data={ranked_span} column=n/> sourcing countries the 2026 cost run
 <DataTable data={ranked} rows=12 search=true>
     <Column id=country_display_name title="Sourcing country"/>
     <Column id=production_route_code title="Route"/>
+    <Column id=value_basis title="Value basis" align=left/>
     <Column id=total_t_co2e_per_t title="tCO₂e/t, before mark-up" fmt='0.000'/>
     <Column id=certificates_2026_t_co2e_per_t title="Certificates 2026" fmt='0.000'/>
     <Column id=cbam_cost_2026_eur_per_t title="€/t 2026" fmt='€#,##0.00'/>
@@ -147,6 +162,18 @@ the clean end are not the ones with clean grids. This is the opposite of the
 [Scope 2](/scope2) story, where the grid was the whole answer, and it is why a
 procurement team screening suppliers on country-level carbon data alone will pick
 the wrong lanes.
+
+**Read the `Value basis` column before the route.** Where the annex prints "-"
+for a listed country, the regulation sends that whole line to the "other
+countries and territories" table — tonnage, certificates, cost *and* the
+production route together. Those rows say `Annex fallback`, and the route letter
+on them belongs to the catch-all, not to the country: 221 of the 10,785 rows
+this dropdown can reach fall back, and 36 of them display a route the country
+never earned. Pick *Cement · 2523 90 00 90 — Other hydraulic cements* to see the
+shape of it: 24 of that good's 100 sourcing countries carry one identical
+tonnage between them, against 39 distinct values across the other 76. They are
+still what an importer owes; they are not evidence about how that country makes
+the good.
 
 </Alert>
 
