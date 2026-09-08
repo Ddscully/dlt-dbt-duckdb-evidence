@@ -37,47 +37,65 @@
 -- a flat spread over the two-year window instead of that shape.
 with matched as (
     select * from {{ ref('int_retail_return_matches') }}
+),
+
+-- Joined for `date_key` alone, exactly as `fct_retail_order_line` does at the
+-- identical grain. Re-deriving it here with `strftime` would work and is what
+-- `fct_fx_rates_published` does — but that model buys its independence for a
+-- stated reason (it is incremental and has to be rebuildable on its own), and
+-- this one has none. Inner, like the sibling: `dim_date` spans every invoice
+-- date in the archive, so it drops nothing, and that is measured rather than
+-- assumed (18,286 rows before and after).
+calendar as (
+    select * from {{ ref('dim_date') }}
 )
 
 select
-    invoice,
-    line_number,
-    customer_id,
-    stock_code,
-    description,
-    country,
-    country_iso3,
-    invoice_ts,
-    invoice_date,
-    invoice_month,
-    quantity_returned,
-    unit_price,
-    return_amount_gbp,
-    original_invoice,
-    original_line_number,
-    original_invoice_date,
-    original_quantity,
-    original_unit_price,
-    original_amount_gbp,
+    r.invoice,
+    r.line_number,
+    r.customer_id,
+    r.stock_code,
+    r.description,
+    r.country,
+    r.country_iso3,
+    r.invoice_ts,
+    r.invoice_date,
+    r.invoice_month,
+    -- The return's own date, conformed to `dim_date`. Deliberately one key and
+    -- not two: `original_invoice_date` is a second date *role* on the same
+    -- dimension, and a role-playing key would have to be called something other
+    -- than `date_key` — which the bus matrix, matching on exact column names,
+    -- would not read as conformance anyway.
+    d.date_key,
+    r.quantity_returned,
+    r.unit_price,
+    r.return_amount_gbp,
+    r.original_invoice,
+    r.original_line_number,
+    r.original_invoice_date,
+    r.original_quantity,
+    r.original_unit_price,
+    r.original_amount_gbp,
     -- Days on the shelf before it came back. Null when unmatched, which is the
     -- one place a null here means "unknown" rather than "not applicable".
-    date_diff('day', original_invoice_date, invoice_date) as days_to_return,
-    original_invoice is not null as is_matched,
+    date_diff('day', r.original_invoice_date, r.invoice_date) as days_to_return,
+    r.original_invoice is not null as is_matched,
     case
-        when customer_id is null then 'no customer id'
-        when original_invoice is null then 'no prior purchase in window'
-        when quantity_returned > original_quantity then 'matched, quantity exceeds purchase'
+        when r.customer_id is null then 'no customer id'
+        when r.original_invoice is null then 'no prior purchase in window'
+        when r.quantity_returned > r.original_quantity then 'matched, quantity exceeds purchase'
         else 'matched'
     end as match_status,
     -- Null rather than false when unmatched: there is no quantity to be
     -- consistent *with*, and a false here would read as a failed check.
     case
-        when original_invoice is not null then quantity_returned <= original_quantity
+        when r.original_invoice is not null then r.quantity_returned <= r.original_quantity
     end as quantity_is_consistent,
     -- A price that moved between the sale and the return is worth seeing: it
     -- either means the rule matched the wrong sale, or the item was refunded at
     -- a different price than it was bought at. Both are worth a question.
     case
-        when original_unit_price > 0 then unit_price <> original_unit_price
+        when r.original_unit_price > 0 then r.unit_price <> r.original_unit_price
     end as price_differs_from_original
-from matched
+from matched as r
+inner join calendar as d on r.invoice_date = d.date_day

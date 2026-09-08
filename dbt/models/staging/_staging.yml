@@ -517,17 +517,17 @@ models:
     config:
       group: reference
     description: >
-      ECB daily euro reference rates, one row per (rate_date, quote_currency).
+      ECB daily euro reference rates, one row per (rate_date, currency_code).
       The only staging model that is not country-year keyed, and the only one
       with a sub-annual grain — the grain contract below is the same kind of
       assertion, just over different columns.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: [rate_date, quote_currency]
+            combination_of_columns: [rate_date, currency_code]
       - dbt_utils.expression_is_true:
           arguments:
-            expression: "length(quote_currency) = 3"
+            expression: "length(currency_code) = 3"
       # A rate quoted against anything but the euro would mean the request lost
       # its `base` parameter, and every converted figure downstream would be
       # wrong by whatever the new base happened to be.
@@ -541,7 +541,7 @@ models:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: "'1999-01-04'", max_value: "current_date"}
-      - name: quote_currency
+      - name: currency_code
         description: >
           Every code here must have a `currencies` seed row, because that seed is
           hand-maintained and `marts.dim_currency` is built `from seed left join`

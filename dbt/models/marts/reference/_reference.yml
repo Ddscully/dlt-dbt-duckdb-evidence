@@ -399,7 +399,7 @@ models:
         enforced: true
     description: >
       Every ECB euro reference rate as published, one row per (rate_date,
-      quote_currency). 265,035 rows over 7,066 publication days and 46
+      currency_code). 265,035 rows over 7,066 publication days and 46
       currencies. Sparse on purpose: no row on a weekend, a TARGET holiday, or
       for a currency outside its quoted lifetime.
 
@@ -413,7 +413,7 @@ models:
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: [rate_date, quote_currency]
+            combination_of_columns: [rate_date, currency_code]
       # An incremental model can drift from its source in a way a table model
       # cannot — a missed window, or a `unique_key` that stopped matching the
       # grain — and nothing else would notice. This is the cheap guard, and it is
@@ -427,7 +427,7 @@ models:
       - name: rate_date
         data_type: DATE
         data_tests: [not_null]
-      - name: quote_currency
+      - name: currency_code
         data_type: VARCHAR
         data_tests: [not_null]
       - name: base_currency
@@ -583,7 +583,7 @@ models:
         enforced: true
     description: >
       Rates aggregated to month, quarter, half and year. Grain: one row per
-      (period_type, period_start_date, quote_currency).
+      (period_type, period_start_date, currency_code).
 
       **It exists for one decision: spot or average.** A stock — a balance, a
       position at an instant — converts at the closing rate; a flow — revenue,
@@ -605,7 +605,7 @@ models:
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: [period_type, period_start_date, quote_currency]
+            combination_of_columns: [period_type, period_start_date, currency_code]
       # The annual average must be reconstructible from the fixings it covers.
       # Guards the join to `dim_date` — a period key that drifted by a day would
       # silently move fixings between buckets.
@@ -640,7 +640,7 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
-      - name: quote_currency
+      - name: currency_code
         data_type: VARCHAR
         data_tests: [not_null]
       - name: base_currency

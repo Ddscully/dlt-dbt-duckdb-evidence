@@ -68,9 +68,27 @@ That contract drives most of the naming below.
 - **[convention]** Model prefixes: `stg_` for staging views, `fct_` for facts,
   `dim_` for dimensions, `snap_` for snapshots. Underscores only, never dots.
 - **[convention]** Join keys keep the same name in every model that has them:
-  `country_iso3` and `year`. Not `iso3`, not `iso_code`, not `country_code`.
-  Renaming to the contract is the staging layer's job — `stg_co2` maps OWID's
-  `iso_code` to `country_iso3` on the way through.
+  `country_iso3` and `year`, and equally `currency_code` and `date_key` — the
+  key a conformed dimension publishes is the key every fact spells. Not `iso3`,
+  not `iso_code`, not `country_code`. Renaming to the contract is the staging
+  layer's job — `stg_co2` maps OWID's `iso_code` to `country_iso3` on the way
+  through, and `stg_fx_rates` maps the landing table's `quote_currency` to
+  `currency_code`. **This rule was written before anything checked it, and two
+  marts broke it for months**: `fct_fx_rates_published` and
+  `fct_fx_rates_periods` said `quote_currency` while `dim_currency` published
+  `currency_code` and their own sibling `fct_fx_rates_daily` spelled it the
+  conformed way. Every guard here is scoped to one relation, so a key spelled
+  two ways is three green models; the bus matrix in `docs/WAREHOUSE.md` is what
+  finally saw it, because it is the only thing that reads across relations.
+- **[convention]** Qualify **both** sides of a correlated subquery, always —
+  `where r.currency_code = currencies.currency_code`, never
+  `where r.currency_code = currency_code`. An unqualified name binds to the
+  innermost scope, so the moment the inner and outer tables share a column name
+  the correlation silently becomes `r.x = r.x`. The rule above makes that
+  collision *more* likely, not less: conforming a key is exactly what puts the
+  same identifier in two scopes. Measured on the `currencies` seed's
+  `retired_on` test, where the rename would have turned a per-currency
+  comparison into a panel-wide one.
 - **[convention]** Spell things out. `country_iso3`, not `cty`. Readability beats
   brevity; the one exception is join aliases in wide marts (above).
 - **[convention]** Units live in the column name: `co2_mt`, `primary_energy_twh`,

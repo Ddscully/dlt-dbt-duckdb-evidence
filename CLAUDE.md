@@ -202,7 +202,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 7 seeds + 464 data tests + 36 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 7 seeds + 465 data tests + 36 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -590,7 +590,7 @@ done in the skills; scanning this file would need that ambiguity resolved first.
   `weather-models` skill has the measurement that a carried raw table works at
   all
 - `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain —
-  except `stg_fx_rates`, which is `(rate_date, quote_currency)`,
+  except `stg_fx_rates`, which is `(rate_date, currency_code)`,
   `stg_retail_lines`, which is `(invoice, line_number)`, and
   `stg_weather_daily`, which is `(country_iso3, weather_date)`
 - `intermediate` — dbt views, `int_*`, and the layer with the fewest models on
@@ -1067,11 +1067,11 @@ the point of the layer is that none of it is a comment.
 - **Every numeric mart column declares `meta: {additivity: …}`**, from a closed
   four-value vocabulary — `additive`, `semi_additive`, `non_additive`,
   `not_a_measure` — because a contract states a type and a test states
-  correctness, and neither says whether `sum()` means anything. 118 of the 227
+  correctness, and neither says whether `sum()` means anything. 118 of the 228
   are non-additive. **Counted as dbt resolves them, which is the basis every
   figure in this section uses** — `fct_emissions_energy_v1` inherits 36 labels
-  through `include: all` and declares one, so the ymls carry 191 literal
-  `additivity:` entries where the manifest carries 227 labelled columns (190 +
+  through `include: all` and declares one, so the ymls carry 192 literal
+  `additivity:` entries where the manifest carries 228 labelled columns (191 +
   v1's 37). Quoting the yml count while naming the manifest one is how a stale
   pair survived into a release — described in words rather than digits here,
   because the guard cannot tell a quotation from an assertion and should not
@@ -1094,7 +1094,7 @@ the point of the layer is that none of it is a comment.
   - **`gdp_usd` is `semi_additive` and `gdp_constant_usd` is `additive`**, which
     is the current-vs-constant-dollar gotcha under *Conventions & gotchas*
     expressed as metadata rather than as prose somebody has to have read.
-  - **The labels ship**, in `manifest.json`'s `additivity` map — 283 columns
+  - **The labels ship**, in `manifest.json`'s `additivity` map — 284 columns
     across 25 relations — for the reason `direct_identifier` is real: a label
     with no consequence is decoration, and a Parquet consumer has the types and
     nothing else. The five `analytics` tables are invisible to dbt, so their 56
@@ -1168,12 +1168,16 @@ the point of the layer is that none of it is a comment.
     `is_latest_available`*. Read as a grain it becomes a conformed country
     dimension and every country fact appears to conform to it — a column of
     marks that mean nothing. `declared_grains` skips filtered tests.
-  - **Conformance is exact column-name matching, deliberately.** An alias list
-    would hide the defect the matrix exists to expose: `fct_fx_rates_periods`
-    and `fct_fx_rates_published` carry `quote_currency` where `dim_currency`
-    publishes `currency_code`, and `fct_fx_rates_daily` spells it the conformed
-    way. Rendering that as a tidy row would be the matrix arguing against
-    itself. A hole is a question, not a bug in the derivation.
+  - **Conformance is exact column-name matching, deliberately, and it has now
+    been paid off once.** An alias list would have hidden the defect the matrix
+    exists to expose: `fct_fx_rates_periods` and `fct_fx_rates_published`
+    carried `quote_currency` where `dim_currency` publishes `currency_code`,
+    while `fct_fx_rates_daily` spelled it the conformed way — and
+    `fct_retail_returns` had no `date_key` beside a sibling at the identical
+    grain that did. All three closed on 2026-09-08; `stg_fx_rates` adopts the
+    conformed name and `raw` keeps the publisher's. A hole is still a question,
+    not a bug in the derivation — but a question that gets an answer, which is
+    the argument for not aliasing it away.
   - **The rendered block is guarded, not just generated.**
     `tests/test_bus_matrix.py` regenerates and compares, so a mart added without
     `just bus-matrix` fails rather than leaving a confidently wrong table. Its
@@ -1212,7 +1216,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 462 of the 464 tests use the default. `severity` comes across
+  is what dbt does; 463 of the 465 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the

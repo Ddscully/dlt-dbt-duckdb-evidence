@@ -345,13 +345,26 @@ seeds:
       # land on the business day before, which is why the dates can be trusted at
       # all. Lives here rather than on the mart because it is the *seed* being
       # checked; the mart is only where the evidence lives.
+      #
+      # **Both sides are qualified, and that stopped being cosmetic on
+      # 2026-09-08.** While staging spelled the column `quote_currency` the
+      # inner and outer names differed, so a bare `currency_code` could only
+      # mean the seed's. Renaming staging to the conformed name puts the same
+      # identifier in both scopes, and DuckDB binds an unqualified one to the
+      # *inner* table — turning the correlation into `r.currency_code =
+      # r.currency_code` and comparing every retirement date against the last
+      # fixing of the whole panel. Measured rather than assumed, and it lands
+      # the safe way up: GRD's own last fixing is 2000-12-29 but the panel's is
+      # today, so all twelve retired rows would go red rather than quietly
+      # green. A collision that fails loudly is still a collision — the next one
+      # in this repo may not point that way.
       - dbt_utils.expression_is_true:
           arguments:
             expression: >
               retired_on is null
               or retired_on > (
-                  select max(rate_date) from {{ ref('stg_fx_rates') }} as r
-                  where r.quote_currency = currency_code
+                  select max(r.rate_date) from {{ ref('stg_fx_rates') }} as r
+                  where r.currency_code = currencies.currency_code
               )
       - dbt_utils.expression_is_true:
           arguments:

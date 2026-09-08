@@ -103,7 +103,7 @@ calls, so the recipe and the graph can't drift into running different builds.
     `period_label` gave 27 category ticks rendered as `2...` and sorted as
     strings; `x=period_start_date` with `xFmt='yyyy'` is what makes it readable.
     Same for the half-yearly price chart (`xFmt='yyyy-mmm'`).
-  - It is the second page driven by a *string* input (`quote_currency`), so the
+  - It is the second page driven by a *string* input (`currency_code`), so the
     hand-written quotes in `'${inputs.ccy.value}'` are the cbam.md pattern again,
     and the selection is named in prose as `{inputs.ccy.label}` — a `<Value>`
     would show the first row of a query rather than what the reader picked.

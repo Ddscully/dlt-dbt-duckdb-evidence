@@ -496,6 +496,17 @@ models:
         data_type: DATE
       - name: invoice_month
         data_type: VARCHAR
+      - name: date_key
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+        description: >
+          The return date as `dim_date`'s integer surrogate — the conformed key
+          `fct_retail_order_line` has always carried and this model, at the
+          identical `(invoice, line_number)` grain, did not. It is the return's
+          own date; `original_invoice_date` is a second role on the same
+          dimension and deliberately carries no key.
+        data_tests: [not_null]
       - name: quantity_returned
         data_type: BIGINT
         meta:

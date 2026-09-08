@@ -164,7 +164,7 @@ select
     period_end_vs_avg_pct,
     intra_period_range_pct
 from warehouse.fx_periods
-where period_type = 'year' and quote_currency = '${inputs.ccy.value}' and period_is_complete
+where period_type = 'year' and currency_code = '${inputs.ccy.value}' and period_is_complete
 order by period_start_date
 ```
 
@@ -181,7 +181,7 @@ select
     period_end_units_per_eur
 from warehouse.fx_periods
 where period_type = 'year'
-  and quote_currency = '${inputs.ccy.value}'
+  and currency_code = '${inputs.ccy.value}'
   and period_is_complete
   and period_end_is_stale
 order by period_start_date
@@ -189,11 +189,11 @@ order by period_start_date
 
 ```sql ccy_list
 select
-    quote_currency as value,
-    quote_currency as label
+    currency_code as value,
+    currency_code as label
 from warehouse.fx_periods
 where period_type = 'year'
-group by quote_currency
+group by currency_code
 having count(*) >= 20
 order by label
 ```
@@ -205,7 +205,7 @@ select
     period_label,
     period_end_vs_avg_pct
 from warehouse.fx_periods
-where period_type = 'year' and quote_currency = '${inputs.ccy.value}' and period_is_complete
+where period_type = 'year' and currency_code = '${inputs.ccy.value}' and period_is_complete
 order by abs(period_end_vs_avg_pct) desc
 limit 1
 ```
