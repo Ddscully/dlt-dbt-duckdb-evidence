@@ -1413,7 +1413,11 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   - **"Latest year" is per column, not per table.** `max(year)` on the mart is
     whichever source runs furthest ahead, and coverage thins unevenly before it —
     `co2_mt` holds 214 countries where `primary_energy_twh` collapses to **79**.
-    Read `reports/sources/warehouse/latest_years.sql`, never a literal.
+    Read `reports/sources/warehouse/latest_years.sql`, never a literal. It is
+    the latest *observed* year because `stg_wdi` cuts WDI at `current_date` —
+    the World Bank served population projections to 2050 on 2026-09-07, and a
+    literal ceiling in a test was both too late and blind below itself
+    (`country-stats-models`).
   - **Eurostat prices are semi-annual.** Chart prices over time off
     `marts.fct_eu_electricity_prices_semiannual`; the annual column exists to
     join prices to emissions or GDP and is a price nobody paid.

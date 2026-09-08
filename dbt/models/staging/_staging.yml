@@ -208,10 +208,20 @@ models:
       - name: year
         # WDI starts in 1960; anything earlier means the pivot has picked up a
         # dimension that isn't the year.
+        #
+        # **No ceiling, deliberately.** This carried `max_value: 2030` until
+        # the World Bank served population projections out to 2050 on
+        # 2026-09-07 and it fired -- correctly, and far too late to help. A
+        # maximum here can only ever redden a build; it cannot keep a projected
+        # year out of the spine, and everything the publisher projected below
+        # 2031 would have passed it unremarked. The rule is a `where` clause in
+        # `stg_wdi.sql` now, cut at `current_date`, so a ceiling restated here
+        # would be a test that cannot fail and a fresh time bomb for
+        # 2031-01-01.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
-              arguments: {min_value: 1960, max_value: 2030}
+              arguments: {min_value: 1960}
       - name: gdp_constant_usd
         description: >
           GDP in constant 2015 US$ (NY.GDP.MKTP.KD). The real-terms denominator
