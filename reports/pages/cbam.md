@@ -94,12 +94,26 @@ select
     -- Rendered, not just selected. Where the annex prints "-" for a listed
     -- country the resolution rule copies the fallback row onto it *whole* —
     -- tonnage, certificates, cost and the production route with them — so
-    -- 221 of the 10,785 rows this dropdown can reach, across 40 of its 252
+    -- 221 of the 11,037 rows this dropdown can reach, across 40 of its 252
     -- goods, are the catch-all value wearing a country's name. 36 of them show
     -- a route letter the country never earned. Nothing in the numbers
     -- distinguishes those rows from a country-specific one, which is the whole
     -- reason this column is on the table below rather than only in the query.
+    --
+    -- **`is_fallback_table` is tested first, and the order is the whole
+    -- correctness of the column.** `is_country_specific` means "the annex
+    -- printed a value in *this* row", not "this row is a country" — and the
+    -- annex does print one for "Other countries and territories", so all 260
+    -- fallback rows satisfy it. Asking `is_country_specific` first therefore
+    -- labelled the one row that is definitionally not a country
+    -- `Country-specific`, in the column that exists to say otherwise. The two
+    -- other uses of the flag on this page conjoin `not is_fallback_table` and
+    -- were always right; this one stood alone and was wrong from the day it
+    -- shipped. The row count above moved with the fix for the same reason: the
+    -- table displays the 252 fallback rows (one per good) and 10,785 was the
+    -- count with them taken out.
     case
+        when is_fallback_table then 'Annex fallback (catch-all row)'
         when is_country_specific then 'Country-specific'
         else 'Annex fallback'
     end                                                     as value_basis,
@@ -167,9 +181,11 @@ the wrong lanes.
 for a listed country, the regulation sends that whole line to the "other
 countries and territories" table — tonnage, certificates, cost *and* the
 production route together. Those rows say `Annex fallback`, and the route letter
-on them belongs to the catch-all, not to the country: 221 of the 10,785 rows
+on them belongs to the catch-all, not to the country: 221 of the 11,037 rows
 this dropdown can reach fall back, and 36 of them display a route the country
-never earned. Pick *Cement · 2523 90 00 90 — Other hydraulic cements* to see the
+never earned. The catch-all row itself is in the table too, one per good, and
+says `Annex fallback (catch-all row)` — it is the rule those 221 are copies of,
+not a 253rd place goods are made. Pick *Cement · 2523 90 00 90 — Other hydraulic cements* to see the
 shape of it: 24 of that good's 100 sourcing countries carry one identical
 tonnage between them, against 39 distinct values across the other 76. They are
 still what an importer owes; they are not evidence about how that country makes
