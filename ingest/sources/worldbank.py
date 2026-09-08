@@ -252,11 +252,31 @@ def wb_wdi(years: tuple[int, int] | None = None):
                 # the load succeeds — a half-failed run can't move the watermark
                 # past years that never landed.
                 #
+                # **Clamped to the current year, because the publisher can send
+                # one that is not.** The World Bank served `SP.POP.TOTL`
+                # projected to 2050 on 2026-09-07 (see `stg_wdi.sql`, which cuts
+                # them out one layer down). Landing those would set this to 2050,
+                # and `wdi_start_year` would then ask for `&date=2046:2026` on
+                # every subsequent run — for a year nobody can have observed,
+                # forever, since `max()` alone can only ever raise it.
+                #
+                # What that costs is not what it looks like. A reversed range is
+                # *ignored* by the API rather than refused: measured against the
+                # live endpoint, `date=2046:2026` returns the whole 17,490-row
+                # series, exactly as an out-of-range one does. So the indicator
+                # keeps updating and silently stops being incremental — a
+                # permanent ~190k-row fetch where the window buys ~15k — rather
+                # than going stale. The clamp also heals a watermark already
+                # poisoned, which is why it is `min()` here and not a refusal on
+                # the way in.
+                #
                 # A backfill deliberately doesn't touch it. The watermark means
                 # "everything up to here is loaded", and a partition run only
                 # claims its own window: backfilling 2020-2025 into an empty
                 # warehouse would otherwise leave a 2025 watermark, and the next
                 # incremental run would look back five years over sixty years of
                 # history that was never fetched.
-                watermarks[code] = max(loaded + [watermarks.get(code, 0)])
+                watermarks[code] = min(
+                    max(loaded + [watermarks.get(code, 0)]), datetime.now(UTC).year
+                )
             yield rows

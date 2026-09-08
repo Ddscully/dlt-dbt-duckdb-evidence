@@ -263,6 +263,35 @@ def test_wb_wdi_incremental_load_asks_only_for_the_lookback_window(monkeypatch):
     assert state[worldbank.WDI_WATERMARK_KEY] == {"SP.POP.TOTL": 2025}
 
 
+def test_wb_wdi_watermark_never_runs_ahead_of_the_calendar(monkeypatch):
+    """A year the publisher cannot have observed must not become the watermark.
+
+    The World Bank served `SP.POP.TOTL` projected to 2050 on 2026-09-07.
+    `stg_wdi` cuts those rows out, but the watermark is set from what *landed*,
+    one layer above that filter, and `max()` can only ever raise it — so an
+    unclamped run would leave 2050 in dlt's state and ask for `&date=2046:<now>`
+    on every subsequent run, forever.
+
+    The failure is quiet rather than loud, which is why only a test can hold it:
+    a reversed range is ignored by the API rather than refused, so the indicator
+    keeps returning its whole series and merely stops being incremental.
+    """
+    state = _state(monkeypatch, {})
+    this_year = datetime.now(UTC).year
+    _serve_wdi(
+        monkeypatch,
+        {
+            "SP.POP.TOTL": [
+                _wdi_row("USA", str(this_year - 1), 1.0),
+                _wdi_row("USA", "2050", 2.0),
+            ]
+        },
+    )
+
+    list(worldbank.wb_wdi())
+    assert state[worldbank.WDI_WATERMARK_KEY] == {"SP.POP.TOTL": this_year}
+
+
 def test_wb_wdi_watermarks_are_per_indicator(monkeypatch):
     """A newly added indicator has no watermark, so it gets its whole series
     while the established ones stay on the window.
