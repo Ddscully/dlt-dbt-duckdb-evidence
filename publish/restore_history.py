@@ -66,40 +66,35 @@ RAW_SCHEMA = "raw"
 # and cold-start the weather archive with nothing going red.
 LAKEHOUSE_ASSET = "lakehouse.tar.gz"
 
-# Landing tables a rebuild cannot afford to refetch. One entry today, and it is
-# a hand-written copy of a dlt resource name — `tests/test_restore_history.py`
-# holds it to `ingest.pipeline`, because a renamed resource would otherwise stop
-# being carried in silence and only cost a day of API budget a month later.
-
 # What this warehouse cannot rebuild, and what proves each relation is the thing
 # it claims to be. The package knows nothing about either — see `Carry`.
 #
-# The snapshot schema is carried whole: every table in `history` is there
-# *because* it is unreproducible, so naming them would be a list to forget to
-# update. `release-data.yml` learned that lesson once already, having asserted
-# "history didn't shrink" against `snap_co2_estimates` by name until
-# `snap_grid_emission_factors` arrived and was carried but never verified.
-# **The `raw` rule is gone, and its job is not done — it moved out of reach.**
-# `raw.om_weather_daily` was carried here because it is unreproducible within
-# Open-Meteo's daily budget. It is still unreproducible; it is simply no longer
-# in this file. dlt lands `raw` in the DuckLake catalog under `data/lakehouse/`,
-# which the release does not publish, so there is nothing in a published
-# `warehouse.duckdb` for this rule to find.
+# **The `raw` rule is gone because its job moved, not because it stopped
+# mattering.** `raw.om_weather_daily` was carried here while `raw` lived in the
+# DuckDB file; dlt lands it in the DuckLake catalog under `data/lakehouse/` now,
+# so there is nothing in a published `warehouse.duckdb` for a schema-aware rule
+# to find. It is still unreproducible within Open-Meteo's daily budget, and it is
+# still carried — by `_restore_lakehouse` below, out of the `LAKEHOUSE_ASSET`
+# that `publish/export_warehouse.py` writes and `release-data.yml` downloads,
+# counts and holds against the previous release's row count. A DuckLake is a
+# directory, so that restore is a copy rather than a `create or replace`, which
+# is why it is the *simpler* half of this module rather than the harder one.
 #
-# The consequence is quiet and expensive, which is why it is written here rather
-# than left to be discovered: `weather_watermark()` reads the destination table,
-# a fresh runner's catalog is empty, and every release therefore cold-starts the
-# archive at `WEATHER_COLD_START_YEARS`. Nothing errors — a cold start is a valid
-# state — and the published series silently stops deepening.
+# What that leaves `CARRIED` is the schema whose unreproducibility is a property
+# of the relation rather than of where it happens to live: `history` is carried
+# whole, because every table in it is there *because* no rebuild can invent a
+# revision, so naming them would be a list to forget to update.
+# `release-data.yml` learned that once already, having asserted "history didn't
+# shrink" against `snap_co2_estimates` by name until `snap_grid_emission_factors`
+# arrived and was carried but never verified.
 #
-# Carrying it forward again means publishing the lakehouse as a second release
-# asset and restoring it before the graph runs. That is *simpler* than what this
-# module does, not harder: a DuckLake is a directory, so the restore is a copy
-# rather than a schema-aware `create or replace`. What it needs first is the
-# decision to publish it, and one measured detail — the catalog stores its
-# `data_path` as given, so a published one has to be created with a relative
-# path (verified: relative survives a move with a bare ATTACH; absolute needs
-# `OVERRIDE_DATA_PATH`).
+# **This comment described the carry-forward as unbuilt for as long as it was
+# built**, which is the failure the module is about wearing the other face: a
+# reader would have concluded every release cold-starts the weather archive at
+# `WEATHER_COLD_START_YEARS`, and nothing here would have contradicted them.
+# Corrected 2026-09-08 against the tree — `export_warehouse.LAKEHOUSE_ASSET`,
+# `_restore_lakehouse` and `release-data.yml`'s "published lakehouse holds N
+# rows" check are the three places that say otherwise.
 CARRIED: tuple[Carry, ...] = (
     Carry(schema=HISTORY_SCHEMA, kind="dbt snapshot", required_columns=SCD2_COLUMNS),
 )

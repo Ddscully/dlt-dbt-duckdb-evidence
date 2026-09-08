@@ -11,7 +11,7 @@ warehouse. They cover the parts of the pipeline that have actually broken:
 |---|---|
 | `test_ingest.py` | `_get_json` retry-then-raise, WDI pagination and the 200-with-an-error-body guard, the WDI incremental window (per-indicator watermarks, the full-reload escape hatch) and the replace/merge load split, the Eurostat JSON-stat stride arithmetic |
 | `test_transform.py` | the Polars intensity metric — Mt→kg conversion, the constant-USD denominator, dropped rows, dense per-cohort ranking |
-| `test_lake.py` | the Parquet archive: hive layout, read-back parity with the warehouse, and the stale-partition case DuckDB's `overwrite` doesn't cover |
+| `test_lakehouse.py` | the DuckLake landing zone: that two snapshots diff to the revisions dlt's merge hides, that `revisions()` refuses to answer rather than compare nothing, and that three hand-maintained lists still match dlt — the provenance columns, the weather table's name and the ATTACH alias dbt declares |
 | `test_fixtures.py` | that every URL the pipeline can build resolves to a fixture that exists |
 | `test_exposures.py` | that the exposures in `dbt/models/_exposures.yml` still describe what the Evidence pages read, and that the release exposure names every mart — a stale exposure is invisible, since `dbt build` stays green and `dbt ls --select +exposure:*` keeps answering |
 
