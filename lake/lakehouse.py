@@ -38,12 +38,23 @@ the scans parallelise and the change log does not.
 
 A DuckLake catalog stores its `data_path` as given: pass a relative one and the
 catalog is relocatable with a bare `ATTACH`, pass an absolute one and a consumer
-needs `OVERRIDE_DATA_PATH`. Relative would therefore be right for a *published*
-lakehouse — and this one is not published, because the release ships the curated
-DuckDB file alone. It is read by dlt from the repo root and by dbt from `dbt/`,
-two different working directories, which a relative path cannot serve. So these
-are absolute on purpose, and `PUBLISHING.md`'s note is where the other choice
-belongs if that ever changes.
+needs `OVERRIDE_DATA_PATH`. So the two catalogs make opposite choices, and both
+are right for where they live. The *working* one is absolute because it is read
+by dlt from the repo root and by dbt from `dbt/` — two working directories a
+relative path cannot serve, and getting that wrong is the `DATA_PATH` mismatch
+`just`'s exported `LAKEHOUSE_DIR` exists to prevent. The *published* one is
+relative, written that way by `publish/export_warehouse.py` into
+`lakehouse.tar.gz`, so a consumer unpacks it anywhere and opens it with a bare
+`ATTACH`.
+
+This paragraph said the landing zone "is not published, because the release
+ships the curated DuckDB file alone" until 2026-09-08, and pointed the reader at
+a `PUBLISHING.md` that has never existed in this repo. Both halves were stale in
+the same direction as the comment above `CARRIED` in
+`publish/restore_history.py`: the release does publish it, which is what keeps
+the weather archive deepening instead of cold-starting every month. The
+measurements behind the relative/absolute split are in the `the-lakehouse`
+skill.
 """
 
 from __future__ import annotations

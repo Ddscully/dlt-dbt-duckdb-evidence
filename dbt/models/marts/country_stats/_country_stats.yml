@@ -139,10 +139,13 @@ models:
     #
     # `ref('fct_emissions_energy')` resolves to the latest version, so every
     # consumer that doesn't ask for a version gets v2. v2 is aliased back to the
-    # bare relation name for the same reason: the Evidence source query, the
-    # lake's `ARCHIVED_TABLES`, `TABLE_TO_DBT_MODEL` and the release notes all
-    # name `marts.fct_emissions_energy`, and a migration that renames the table
-    # out from under them is not a migration.
+    # bare relation name for the same reason: the Evidence source query,
+    # `TABLE_TO_DBT_MODEL` and the release notes all name
+    # `marts.fct_emissions_energy`, and a migration that renames the table out
+    # from under them is not a migration. This list named a fourth consumer,
+    # the lake's `ARCHIVED_TABLES`, until 2026-09-08 — that constant went with
+    # the hive archive, so a live decision was carrying a reason that no longer
+    # existed.
     latest_version: 2
     versions:
       - v: 2
