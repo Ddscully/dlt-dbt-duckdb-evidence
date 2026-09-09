@@ -72,6 +72,23 @@ models:
         data_type: VARCHAR
       - name: region
         data_type: VARCHAR
+        description: >
+          Left-joined from the country dimension, and **the only place in the
+          warehouse a row that names a country carries no region** — 35 rows,
+          all Antarctica. This model hangs off `snap_co2_estimates`, which
+          follows `stg_co2`, and OWID reports Antarctica where the World Bank
+          does not carry it. Every other country model is built on
+          `dim_country_year`, whose inner join to the dimension drops the code
+          instead. Not a defect in either direction: the snapshot's job is to
+          record what OWID published, and dropping a row from a *history* to
+          tidy a join key would lose the history.
+
+          `fct_cbam_exposure` has 260 further null regions and they are a
+          different thing — every one is the annex's fallback row, which carries
+          no `country_iso3` either, so no row there names a country and lacks a
+          region. Measured both ways rather than assumed: the first draft of
+          this description said "the only place in the warehouse", which the
+          CBAM rows falsify.
       - name: year
         data_type: INTEGER
         meta:
@@ -525,7 +542,8 @@ models:
       # mix-up. It does not. Rebuilding the model against a warehouse copy with
       # the two vars swapped raised heating totals 89% and cooling totals 336%,
       # and `max(cdd_total - hdd_total)` went 637.5 to 975.2 — still five times
-      # under the bound, with **all 55 data tests on the two models passing**. A
+      # under the bound, with **`stg_weather_daily`'s 27 data tests and
+      # `fct_country_weather_year`'s 28 data tests all passing**. A
       # swap moves both totals the same way, so a ceiling on their difference is
       # structurally the wrong instrument, and the annual grain has already
       # summed away the thing that breaks. The base ordering is now asserted at

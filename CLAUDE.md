@@ -1134,6 +1134,20 @@ the point of the layer is that none of it is a comment.
     old one appended) so the two agree on the order dbt enforces.
   - **`deprecation_date: 2026-11-01`** is carried in the release notes as well as
     the yml, because the consumers who need it never see a dbt log.
+  - **The date is enforced now, and until 2026-09-09 it was a promise five
+    documents made and nothing kept.** dbt's own behaviour on the day it passes
+    is a `[WARNING]` and **exit 0** — measured, by setting the date to 2020 and
+    running `dbt parse` — so `release-data.yml`'s monthly run would have
+    published a compatibility view past its own advertised removal date with the
+    reason in a log nobody reads. `dbt_project.yml`'s `flags.warn_error_options`
+    promotes `DeprecatedModel` (the deadline, fired at *parse*, on the producer)
+    and `DeprecatedReference` (a `ref` to a model whose date has gone) to
+    errors; the same mutation then exits 2 out of `dbt parse`, which is
+    `ci.yml`'s cheapest step. `UpcomingReferenceDeprecation` is deliberately
+    left a warning — it fires on a ref to a model whose date is still in the
+    future, which is exactly what a migration window is *for*. Not `error: all`,
+    for the reason dbt's own docs give: a warning added in a later dbt version
+    would fail the monthly release for a reason nobody chose.
   - **Versioning a model changes its Dagster asset key, silently.**
     `default_asset_key_fn` keys an ordinary model on `[configured_schema, name]`
     (`marts/fct_emissions_energy`) but a versioned one on `[alias]` alone — so
@@ -1662,6 +1676,49 @@ Gotchas:
   the review's own source never claimed. Nothing was stale and nothing was
   fabricated; the number changed meaning when it changed sentence, and a scanner
   that checks totals against the manifest cannot see that at all.
+- **A yml `description:` is prose, and until 2026-09-09 the counts guard did not
+  read any of it.** `tests/test_documented_counts.py`'s `SCANNED` was `*.md`
+  plus two hand-named `_unit_tests.yml` paths, so the four marts group ymls,
+  `_staging.yml`, `_intermediate.yml` and `_sources.yml` — **202 column
+  descriptions** — went unchecked, and so did
+  `dbt/models/intermediate/_unit_tests.yml`, which arrived with the intermediate
+  layer in `b006e1e` and joined a list of two that nobody remembered to extend.
+  The pathspec is `dbt/models/**/_*.yml` now, which is 61 files against 53 and
+  63 claims against 59.
+  - **It found one false claim, and the interesting half is that the claim had
+    *moved* rather than expired.** `stg_country.region` said "the mart has one
+    null region (Antarctica), which arrives from OWID and has no dimension row".
+    Measured: `fct_emissions_energy`, `dim_country_year` and `dim_country` hold
+    **zero** null regions and no `ATA` row at all, because the spine's inner
+    join drops a code the dimension does not carry. But
+    `fct_co2_estimate_versions` still carries all **35** of them — it is built
+    off `snap_co2_estimates` rather than off the spine, and a *history* cannot
+    drop a row to tidy a join key. Three of the four Antarctica claims in the
+    tree were corrected when `dim_country` shipped; this one was missed, and the
+    correct sentence names the model rather than "the mart".
+  - **Writing the replacement reproduced the same defect one draft later.** It
+    said `fct_co2_estimate_versions` was "the only place in the warehouse where
+    region is null", which `fct_cbam_exposure`'s **260** falsify — every one the
+    annex's fallback row, which carries no `country_iso3` either, so the true
+    claim is the only place a row that *names a country* has no region. Both
+    versions read equally confidently.
+  - **What it does not buy is larger than what it does.** The scanners read a
+    *test* or *mart* noun; the other **154** numeric claims in those
+    descriptions (row counts, shares, distinct values) stay unguarded. Nine were
+    spot-checked against the warehouse and all nine held — 11,665 CBAM rows over
+    260 goods and 121 countries, 871 unresolved retail labels, 5,881 customers,
+    265,441 fixings — so this is one stale sentence, not rot. Guarding them
+    needs a warehouse holding the full data, which CI has not got.
+  - **Extending the scan cost a rewrite, and refusing the cheaper fix is the
+    point.** `_staging.yml` and `_country_stats.yml` both recorded the
+    degree-day mutation against one combined figure for the two weather
+    models — 27 + 28 = 55, correct, and a number no single model has. Teaching
+    the scanner to sum over a pair would make every such sum legal, which is
+    exactly the widening `model_counts`' docstring already argues against;
+    naming each model beside its own number costs one clause and leaves both
+    halves checkable. (Quoting the old phrasing here failed the guard on the
+    spot — the same trap the mart-count note above records: it cannot tell a
+    quotation from an assertion and should not try.)
 - **Every hand-maintained list here is asserted against the authority it
   copies** — `SOURCE_TABLES`, `RAW_DESCRIPTIONS`, `WB_WDI_INDICATORS`,
   `ATTRIBUTION`, `pages.yml`'s path allowlist, the seven `@dg.asset_check`

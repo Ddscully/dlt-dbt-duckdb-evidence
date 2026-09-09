@@ -4,6 +4,43 @@ config-version: 2
 
 profile: "modern_data_stack"
 
+# A deprecation date is a promise, and until this block existed nothing kept it.
+#
+# `fct_emissions_energy_v1` carries `deprecation_date: 2026-11-01`, restated in
+# `docs/DATA_QUALITY.md`, `docs/PRACTICES.md`, `CLAUDE.md` and the release notes
+# `publish/export_warehouse.py` writes. On the day it passes, dbt logs
+#
+#     [WARNING]: Model fct_emissions_energy.v1 has passed its deprecation date
+#
+# and exits 0 — measured, by setting the date to 2020 and running `dbt parse`.
+# `release-data.yml` runs monthly and would have published a compatibility view
+# past its own advertised removal date, with the reason in a log nobody reads.
+# Promoted, the same line fails `dbt parse`, which is `ci.yml`'s cheapest step
+# and runs before anything is built. Same shape as the storage-format ceiling in
+# `publish/export_warehouse.py`: a date the project has committed to should stop
+# the build rather than annotate it.
+#
+# * `DeprecatedModel` is the deadline itself — it fires at *parse*, on the
+#   producer, from the day the date passes.
+# * `DeprecatedReference` is a `ref` to a model whose date has already gone.
+#   Nothing here refs v1 today, so it cannot fire yet; it is the half that
+#   catches the migration being started and not finished.
+# * `UpcomingReferenceDeprecation` is deliberately left a warning. It fires on a
+#   ref to a model whose date is still in the *future*, which is exactly what a
+#   migration window is for — erroring on it would forbid the thing the window
+#   exists to permit.
+#
+# Not `error: all`. dbt's own docs warn against it in production for the reason
+# that applies here: a warning added in a future dbt version would fail the
+# monthly release for a reason nobody chose. `dagster<3.15` is the only hard
+# upper bound in this tree and this is not a second one — it is a list of two
+# warnings this project has decided are errors.
+flags:
+  warn_error_options:
+    error:
+      - DeprecatedModel
+      - DeprecatedReference
+
 model-paths: ["models"]
 seed-paths: ["seeds"]
 target-path: "target"
