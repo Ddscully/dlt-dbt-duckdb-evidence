@@ -1004,8 +1004,8 @@ the point of the layer is that none of it is a comment.
 - **Marts are `public` because the release makes them so.** Every mart ships as a
   standalone Parquet file to people who cannot be paged; `access` is a statement
   about that, not about the repo.
-- **Contracts are enforced on every mart model — 20 relations (19 models, one of
-  them versioned) and 397 columns, each with a `data_type`.** The ymls documented 179 of those columns before, so the list was
+- **Contracts are enforced on every mart model — 21 relations (20 models, one of
+  them versioned) and 407 columns, each with a `data_type`.** The ymls documented 179 of those columns before, so the list was
   *generated* from the built warehouse's `information_schema` and inserted
   line-wise, reordering the existing entries into SQL order and keeping every
   description untouched. A PyYAML round-trip would have reflowed 1,246 lines of
@@ -1854,6 +1854,34 @@ Gotchas:
     halves checkable. (Quoting the old phrasing here failed the guard on the
     spot — the same trap the mart-count note above records: it cannot tell a
     quotation from an assertion and should not try.)
+- **Scoring the warehouse against somebody else's rubric found three stale
+  counts that no guard could see, which is most of the argument for doing it.**
+  `docs/FOR_REVIEWERS.md` §6 reads the repo against the GDAM rubric from
+  arXiv 2606.08266 — five dimensions, four levels, and the paper explicitly
+  refuses an aggregate score because one "would manufacture a precision the
+  instrument does not have". Counting what each dimension asks for meant
+  counting things nothing counted before: the contract covered **407** columns
+  where two files said 397 (stale since `4a457fb`), and **21 relations over 20
+  models** where CLAUDE.md said 20 and 19. `CLAIM` reads a test-noun and
+  `MART_CLAIM` a mart-noun; neither is a column or a relation, so both figures
+  were green the whole time. `tests/test_documented_counts.py` covers them now,
+  anchored on the phrase rather than the bare noun — "columns" is the most
+  common counted thing in this prose and a loose pattern would collide with the
+  additivity checks that already own it.
+  - **The verdicts are the numbers, so the numbers are guarded.** Metadata
+    completeness is *Partial* rather than *Established* because 171 of those 407
+    columns carry a description — 42%. A test recomputes all three parts, since
+    a stale numerator beside a fresh denominator still rounds to something
+    plausible; mutation-proven with 171 → 180, which leaves the percentage
+    reading 42% and fails anyway.
+  - **The most useful line in the table is the worst one.** Access governance is
+    **Absent** and cannot be otherwise: `create role`, `grant`, `create user`
+    and `create policy` are each a *parser error* on the pinned DuckDB 1.5.5,
+    re-verified rather than inherited. dbt's `access` is enforced at parse time
+    over `ref`, which governs who may build on a model and not who may read one.
+    The pseudonymisation boundary is a real control and is a *different* one;
+    scoring the dimension Partial because a mitigation exists would be the
+    flattery the rubric exists to prevent.
 - **Every hand-maintained list here is asserted against the authority it
   copies** — `SOURCE_TABLES`, `RAW_DESCRIPTIONS`, `WB_WDI_INDICATORS`,
   `ATTRIBUTION`, `pages.yml`'s path allowlist, the eight `@dg.asset_check`

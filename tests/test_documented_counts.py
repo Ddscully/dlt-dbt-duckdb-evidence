@@ -503,3 +503,94 @@ def test_every_documented_additivity_count_is_one_the_labels_actually_carry():
         f"scanner matched only {seen} additivity claims; the patterns or the file list have drifted"
     )
     assert not stale, "additivity counts in prose disagree with the labels:\n" + "\n".join(stale)
+
+
+# The contract figures, which the scanners above cannot see. `CLAIM` reads a
+# *test*-noun and `MART_CLAIM` a mart-noun; "407 columns, each with a
+# `data_type`" and "21 relations (20 models…)" are neither, so both went stale
+# and stayed green — the column count since `4a457fb`, across two files.
+#
+# Deliberately anchored on the surrounding phrase rather than on the bare noun,
+# for `MART_CLAIM`'s reason one noun over: "columns" is the most common counted
+# thing in this prose (labelled columns, published columns, retail columns) and
+# a loose pattern would collide with the additivity checks above, which own
+# those. These four phrasings are the ones that mean *the contract*.
+CONTRACT_CLAIMS = (
+    (re.compile(r"(\d+)\s+columns,\s+each\s+with\s+a\s+`data_type`"), "contracted columns"),
+    (re.compile(r"(\d+)\s+columns\s+with\s+a\s+declared\s+type"), "contracted columns"),
+    (re.compile(r"(\d+)\s+relations\s+\((\d+)\s+models"), "contracted relations and models"),
+)
+
+
+def contract_counts(man: dict) -> dict[str, set[int]]:
+    """What dbt actually enforces: relations, distinct models, typed columns."""
+    contracted = [
+        v
+        for v in man["nodes"].values()
+        if v.get("resource_type") == "model" and (v["config"].get("contract") or {}).get("enforced")
+    ]
+    return {
+        "contracted relations": {len(contracted)},
+        "contracted models": {len({v["name"] for v in contracted})},
+        "contracted columns": {sum(len(v.get("columns", {})) for v in contracted)},
+    }
+
+
+def test_every_documented_contract_count_is_one_dbt_actually_enforces():
+    """The schema contract's own figures, held to the manifest.
+
+    Found by scoring the warehouse against an external rubric rather than by a
+    test: counting what the contract covers is not something any existing guard
+    did, so "397 columns" survived two models being added to the layer.
+    """
+    counts = contract_counts(manifest())
+    stale: list[str] = []
+    for path in tracked_prose():
+        text = path.read_text()
+        for pattern, label in CONTRACT_CLAIMS:
+            for match in pattern.finditer(text):
+                line = text.count("\n", 0, match.start()) + 1
+                rel = path.relative_to(REPO_ROOT)
+                claim = " ".join(match.group(0).split())
+                if label == "contracted relations and models":
+                    ok = (
+                        int(match.group(1)) in counts["contracted relations"]
+                        and int(match.group(2)) in counts["contracted models"]
+                    )
+                    truth = f"{sorted(counts['contracted relations'])} relations over {sorted(counts['contracted models'])} models"
+                else:
+                    ok = int(match.group(1)) in counts[label]
+                    truth = f"{label} is {sorted(counts[label])}"
+                if not ok:
+                    stale.append(f"  {rel}:{line}: {claim!r} — {truth}")
+    assert not stale, "contract counts in prose disagree with the manifest:\n" + "\n".join(stale)
+
+
+def test_the_documented_description_coverage_is_what_the_ymls_carry():
+    """The one figure in `FOR_REVIEWERS.md` §6 that a rubric score rests on.
+
+    Scoring metadata completeness *Partial* rather than Established turns on
+    "171 of those 407 columns (42%)". A number carrying a verdict is the last
+    one that should be allowed to drift, and the percentage is recomputed rather
+    than trusted — a stale numerator with a fresh denominator would still round
+    to something plausible.
+    """
+    contracted = [
+        v
+        for v in manifest()["nodes"].values()
+        if v.get("resource_type") == "model" and (v["config"].get("contract") or {}).get("enforced")
+    ]
+    cols = [c for v in contracted for c in v.get("columns", {}).values()]
+    described = sum(1 for c in cols if c.get("description"))
+    pattern = re.compile(r"(\d+)\s+of\s+those\s+(\d+)\s+columns\s+\((\d+)%\)")
+    seen = 0
+    for path in tracked_prose():
+        text = path.read_text()
+        for match in pattern.finditer(text):
+            seen += 1
+            got = tuple(int(g) for g in match.groups())
+            expected = (described, len(cols), round(described / len(cols) * 100))
+            assert got == expected, (
+                f"{path.relative_to(REPO_ROOT)} claims {got}, the ymls carry {expected}"
+            )
+    assert seen == 1, f"expected the coverage claim in exactly one place, found {seen}"
