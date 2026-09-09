@@ -98,8 +98,8 @@ holds 214 countries into the latest year where `primary_energy_twh` collapses to
 **First, a word this repo uses precisely.** In the BI sense a *mart* is the
 subject area a reader works with, and there are **four**: `country_stats`,
 `reference`, `retail` and `compliance`. `marts/` is dbt's name for the
-presentation *layer*, one folder per mart, and the 20 relations inside it are
-**mart models**. Getting that backwards is easy and this repo did it: it counted
+presentation *layer*, one folder per mart, and the 21 relations (20 models, one
+of them versioned) inside it are **mart models**. Getting that backwards is easy and this repo did it: it counted
 models and called them marts, so a stale figure sat in five files through two
 additions to the layer.
 

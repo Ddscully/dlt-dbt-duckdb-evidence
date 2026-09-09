@@ -27,7 +27,8 @@ stray Python REPL, a `just sql write` session, a Dagster run — makes the next
 `just run` fail with
 a lock error. `read_only=True` costs nothing and avoids the whole class of
 problem. This is also why the Dagster graph uses `in_process_executor` and puts
-all five dlt resources in one op: parallel steps would just fight over the lock.
+the four `replace` dlt resources in one op: parallel steps would just fight
+over the lock.
 
 For interactive poking, `just sql` opens the DuckDB CLI read-only, which is the
 right default — but **it does not let you sit alongside a build, and this skill
@@ -53,6 +54,51 @@ session before building, and use
 [`lake.lakehouse.read_only_connection()`](../../../lake/lakehouse.py) to query
 `raw` mid-build — that opens the catalog, never the warehouse, which is why it
 is the one read that genuinely does work alongside one.
+
+**The second half of that rule is not "one writer *plus* many readers", and
+DuckDB refuses to mix the two modes even inside a single process.** Measured
+2026-09-10 on the same DuckDB 1.5.5. An instance is cached per file and
+`read_only` is part of its *configuration*, so a second `connect()` in one
+process asking for the other mode fails in both orders:
+
+```
+Connection Error: Can't open a connection to same database file
+with a different configuration than existing connections
+```
+
+A second read-only connection with the *same* configuration opens fine, sharing
+the cached instance. And a cursor inherits its parent's mode: `con.cursor()` on
+a read-write connection can `insert`, while one on a read-only connection
+raises `Cannot execute statement of type "INSERT"`. So **read-only is a
+property of the instance, not a privilege on a connection** — there is no way
+to hand a caller a restricted handle onto a writable warehouse, which is why
+every reader here opens its own read-only connection rather than being passed
+one.
+
+What a single process *does* get is one instance in one mode with many
+connections on it. MVCC gives a reader a consistent snapshot while a write is
+in flight, and the reader/writer split there is per-*transaction* rather than
+per-connection: measured on a scratch file, a reader mid-transaction still sees
+the pre-insert count, and 200 interleaved inserts and reads on one instance
+complete without contention. That is the arrangement people picture when they
+ask for a writer alongside readers, and it is a *server* — one long-lived
+read-write instance behind a connection pool. Across processes no configuration
+produces it.
+
+**`read_only_connection()` works because of *which file* is locked, not because
+DuckLake is more permissive.** The catalog is an ordinary DuckDB file under the
+identical rule; a `dbt build` simply is not writing it, because dlt has already
+finished. Measured 2026-09-10 with a read-write stand-in holding
+`data/lakehouse/catalog.duckdb` and no DML — the file was byte-identical
+afterwards — the call is refused, so it fails during `just ingest` exactly as a
+warehouse read fails during a build. Worth recognising because it does not read
+as a lock error until the second line:
+
+```
+IO Error: Failed to attach DuckLake MetaData "__ducklake_metadata_lakehouse"
+at path + "duckdb:…/catalog.duckdb"Could not set lock on file
+".../catalog.duckdb": Conflicting lock is held in ... (PID 618977) by user dman.
+```
 
 The way out is not a connection flag: it is to stop writing to the file anyone
 reads. [`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md)

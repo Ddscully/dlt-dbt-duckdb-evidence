@@ -202,7 +202,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 7 seeds + 482 data tests + 36 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (33 models, 2 snapshots, 8 seeds + 482 data tests + 36 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -651,7 +651,7 @@ done in the skills; scanning this file would need that ambiguity resolved first.
 ways until 2026-09-01.** In the BI sense a mart is the view a department works
 with — so there are **four** here, and they are `dbt/models/_groups.yml`:
 `country_stats`, `reference`, `retail`, `compliance`. `marts/` is dbt's name for
-the *layer*, and the 20 relations inside it (19 models, one of them versioned)
+the *layer*, and the 21 relations (20 models, one of them versioned) inside it
 are **mart models**. The docs counted models and called them marts, which is how
 a stale count of 17 survived two additions to the layer;
 `tests/test_documented_counts.py` guards the number now and the folders make the
@@ -1014,11 +1014,13 @@ the point of the layer is that none of it is a comment.
 - **The marts declarations are one yml per dbt group, not one per layer.**
   `_country_stats.yml` (5 models, 680 lines), `_reference.yml` (5, 536),
   `_retail.yml` (5, 526) and `_compliance.yml` (3, 450) replaced a single
-  2,183-line `_marts.yml` on 2026-09-01. dbt does not care which file declares a
-  model, so the boundary had to come from somewhere — and `_groups.yml` already
-  declares exactly four domains with enforced `access` between them, which makes
-  the split the one dbt itself can check. A layer-shaped split would have put
-  every mart model in one file and changed nothing.
+  2,183-line `_marts.yml` on 2026-09-01 — *sizes as at that split*, like the
+  file they replaced, rather than figures to restate every time a model lands.
+  dbt does not care which file declares a model, so the boundary had to come
+  from somewhere — and `_groups.yml` already declares exactly four domains
+  with enforced `access` between them, which makes the split the one dbt
+  itself can check. A layer-shaped split would have put every mart model in
+  one file and changed nothing.
   - **The move was line-slicing, and the guard was a manifest diff.** Blocks
     were relocated as bytes and asserted byte-identical afterwards; then a
     fingerprint of every marts node in `manifest.json` — group, access, alias,
