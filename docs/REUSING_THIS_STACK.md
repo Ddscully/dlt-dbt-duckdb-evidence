@@ -291,10 +291,10 @@ dollar figure for running it is zero — it is a file on a laptop — so the use
 question is not what it costs but which layer gives first, and the answer is not
 the one people reach for.
 
-**What it holds now.** 3.7M rows across the modelled layers in a 298 MB DuckDB
+**What it holds now.** 3.7M rows across the modelled layers in a 289 MB DuckDB
 file, plus a 72 MB DuckLake landing zone. The largest relation is
-`fct_retail_order_line` at 1,067,371 rows. A full `dbt build` — 552 nodes, 32
-models, 465 data tests, 36 unit tests — takes **24.9 s** on four threads.
+`fct_retail_order_line` at 1,067,371 rows. A full `dbt build` — 571 nodes, 33
+models, 482 data tests, 36 unit tests — takes **24.1 s** on four threads.
 `analytics.pipeline_runs` records that per build, so the trend is a query rather
 than a memory.
 
@@ -325,7 +325,7 @@ restore is a file copy. If the answer to "who else writes to this" ever stops
 being "nobody", that is the migration signal — before any row count is.
 
 **The publication boundary has a ceiling nobody has hit.** A release ships the
-whole DuckDB file plus a Parquet per table, 222 MB today, as GitHub release
+whole DuckDB file plus a Parquet per table, 225 MB today, as GitHub release
 assets. That is comfortable and would stop being so an order of magnitude up;
 `publish/export_warehouse.py` already guards the storage *format* from both the
 artifact and the toolchain side, and would need a size gate too.
