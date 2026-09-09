@@ -121,6 +121,26 @@ def dbt_dir() -> Path:
     return project_root() / "dbt"
 
 
+def dbt_target_path() -> str:
+    """The directory dbt writes its artifacts into.
+
+    `DBT_TARGET_PATH` is dbt's own environment variable for this, so setting it
+    moves the manifest and the run results together — which is what
+    `just test-pipeline` relies on to keep a fixture build's artifacts out of
+    the real tree.
+
+    It exists as a *directory* helper, rather than each artifact resolving its
+    own file, because one caller needs to name the directory and not a file in
+    it: `orchestration.assets.dbt_models` hands it to `dbt.cli(...)`.
+    dagster-dbt otherwise picks a unique per-invocation subdirectory of it, and
+    then nothing that reads `run_results.json` by path can find the artifact the
+    orchestrated build just wrote — measured, and the reason
+    `analytics.pipeline_runs` was empty in every workflow while being correct
+    on a laptop.
+    """
+    return os.environ.get("DBT_TARGET_PATH") or str(dbt_dir() / "target")
+
+
 def dbt_manifest_path() -> str:
     """dbt's manifest, which is only present after a `dbt build` or `dbt parse`.
 
