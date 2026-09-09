@@ -5,7 +5,10 @@ gated `MERGE` copied two weather tables into a DuckLake catalog beside it, so
 the format could demonstrate a row-level change feed. It is now the landing zone
 itself: dlt writes straight into DuckLake, dbt reads `raw` from here, and the
 DuckDB file holds only what dbt builds. The hive archive that used to sit under
-`data/lake/` is gone with it.
+`data/lake/` is gone from the *tree* with it — but the directory it wrote is
+gitignored, so it survives on any machine that predates the move, 60 MB of it,
+read by nothing. `just clean` takes it now; this sentence claimed it was gone
+for a fortnight while it was not.
 
 Run:  uv run python -m lake.lakehouse       (report the catalog's snapshots)
 

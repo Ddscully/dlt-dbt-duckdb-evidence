@@ -699,6 +699,18 @@ clean scope="safe" force="":
     #   reports/build     `just report`
     #   reports/.evidence `just report-clean`
     #
+    # data/lake is the odd one out: it is not regenerable, it is *dead*. The
+    # hand-rolled hive archive DuckLake replaced on 2026-08-27 wrote it, the
+    # recipe that built it (`just lake`) no longer exists, and nothing reads it
+    # — `lake/lakehouse.py`'s docstring has said "`data/lake/` is gone with it"
+    # while 60 MB of it sat on every machine that predates the move. Listed
+    # here so the claim becomes true rather than aspirational.
+    #
+    # **`data/lake` and `data/lakehouse` differ by four characters and the rule
+    # for them is opposite.** `drop` takes exact paths and never globs, which is
+    # what keeps that safe; a `data/lake*` here would destroy the weather
+    # archive and say "removed" while doing it.
+    #
     # data/lakehouse is deliberately absent, and the reason got stronger when it
     # stopped being a mirror: it is now the *only* copy of every landing table.
     # Deleting it costs the snapshot lineage (which no rebuild invents, the same
@@ -706,7 +718,7 @@ clean scope="safe" force="":
     # (which no rebuild can afford — days of Open-Meteo's budget). Silently, in
     # both cases: nothing in the output would say so.
     drop dbt/target dbt/dbt_packages dbt/logs \
-         data/export data/course data/cache \
+         data/export data/course data/cache data/lake \
          reports/build reports/.evidence
 
     # Dagster run/event storage. `.dagster/dagster.yaml` is checked in and stays.
