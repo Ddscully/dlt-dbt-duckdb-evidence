@@ -224,6 +224,8 @@ exposures:
       migration path — which is what `contract: {enforced: true}` on the marts is
       for, and why the versioned model exists.
     depends_on:
+      - ref('dim_country')
+      - ref('dim_country_income_history')
       - ref('dim_country_year')
       - ref('dim_currency')
       - ref('dim_date')
@@ -242,7 +244,6 @@ exposures:
       - ref('fct_retail_customer_cohorts')
       - ref('fct_retail_order_line')
       - ref('fct_retail_returns')
-      - ref('dim_country')
     owner:
       name: Daniel Scully
       email: danieldscully@gmail.com

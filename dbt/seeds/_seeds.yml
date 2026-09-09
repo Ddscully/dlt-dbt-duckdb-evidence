@@ -26,6 +26,48 @@ seeds:
       - name: region
         data_tests: [not_null]
 
+  - name: wb_income_classification
+    config:
+      group: reference
+    description: >
+      The World Bank's income classification for every economy in every year it
+      published one — fiscal 1989 (data year 1987) to fiscal 2027 (2025), 7,901
+      rows over 218 economies. Transcribed from `OGHIST.xlsx` by
+      `scripts/build_income_classification_seed.py`, which carries what the file
+      costs to read.
+
+      A seed rather than a dlt resource for the CBAM seeds' reason: it is an
+      annual file drop with a fiscal-year vintage, versioned by publication and
+      not served by the `/country` endpoint the other World Bank resources read.
+
+      It exists because `dim_country.income_group` is the *current*
+      classification applied to every year the warehouse holds, and 45% of
+      economies moved group between the two ends of this table.
+      `marts.dim_country_income_history` publishes the comparison.
+    columns:
+      - name: country_iso3
+        data_tests: [not_null]
+      - name: data_year
+        description: >
+          The GNI year the classification was computed from. Two behind
+          `fiscal_year` and the one that joins to anything here.
+        data_tests: [not_null]
+      - name: fiscal_year
+        description: The World Bank fiscal year the classification governed, `FY89`-style.
+        data_tests: [not_null]
+      - name: income_group_code
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["L", "LM", "UM", "H"]
+      - name: income_group
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Low income", "Lower middle income", "Upper middle income", "High income"]
+
   - name: example_scope2_sites
     config:
       group: compliance

@@ -242,7 +242,7 @@ is in the `unit-testing-dbt-models` skill.
     A list extended by hand every time a total crosses a decade is a guard with
     a scheduled expiry.
   - **An additivity figure is bound to its own label, not to a global set.**
-    There are two honest bases — 192 literal `additivity:` entries in the ymls
+    There are two honest bases — 193 literal `additivity:` entries in the ymls
     against 226 labelled columns in the manifest, the gap being
     `fct_emissions_energy_v1`'s inherited labels — so a set holding both makes
     either legal anywhere. A bare "N labels" is deliberately not scanned at
@@ -275,7 +275,7 @@ is in the `unit-testing-dbt-models` skill.
     words. Both are handled; words only from ten up, because below that they are
     always local ("Two unit tests catch all five") and admitting them produced
     nine false positives against zero finds. Anything longer than that filler is
-    deliberately out — "463 of the 465 tests" has to capture 464, not 462. What
+    deliberately out — "463 of the 482 tests" has to capture 464, not 462. What
     still escapes is a number with no test-noun after it at all ("pass all 14:"),
     so phrase a count with its noun.
     - **The uncaptured partner then goes stale, and it did — in two files, by 23
@@ -289,7 +289,7 @@ is in the `unit-testing-dbt-models` skill.
       `fail_calc` at all. The example sentence in this very bullet had drifted
       the same way, quoting a total that had moved four times against a partner
       that had not. Prefer a phrasing the guard can hold — "all but two of the
-      465 tests" — over an arithmetic pair it can only half-see.
+      482 tests" — over an arithmetic pair it can only half-see.
   - `seen > 35` is the vacuity guard. A scanner whose patterns stop matching
     passes by not looking — the same failure `_ROUTES` reachability exists for.
 

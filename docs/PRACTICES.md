@@ -115,7 +115,7 @@ fails — the point of the layer is that none of it is a comment.
 the start.
 → [`dbt/models/marts/country_stats/_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
 
-**Enforce a schema contract on everything that leaves.** All 19 mart models are
+**Enforce a schema contract on everything that leaves.** All 20 mart models are
 contract-enforced, across 397 declared columns each carrying a `data_type`.
 The grain test and the schema contract catch different things: the contract is
 what sees a column change type under a consumer. Verified by declaring `year` as
@@ -126,7 +126,7 @@ so the boundary is the one dbt itself can check rather than a filing convention
 
 **Say what a measure means under `sum()`.** A contract states a column's type
 and a test states that it is correct; neither says whether adding it up is
-meaningful. 118 of the 228 numeric mart columns are non-additive: ratios, rates,
+meaningful. 118 of the 229 numeric mart columns are non-additive: ratios, rates,
 prices, averages or extrema, where a sum is nonsense that comes back as a number.
 Every one carries `meta: {additivity: …}` from a closed four-value vocabulary,
 the 16 `semi_additive` ones have to say in prose *which* direction fails

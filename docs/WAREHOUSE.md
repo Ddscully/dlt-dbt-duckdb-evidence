@@ -152,6 +152,7 @@ Notes:
 
 - `dim_country` publishes 2 keys: `country_iso2`, `country_iso3`
 - `dim_date` publishes 2 keys: `date_day`, `date_key`
+- `dim_country_income_history` is not a conformed dimension: it declares no single-column grain
 - `dim_country_year` is not a conformed dimension: it declares no single-column grain
 - `dim_grid_emission_factors` is not a conformed dimension: it declares no single-column grain
 
