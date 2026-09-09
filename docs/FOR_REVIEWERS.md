@@ -103,7 +103,7 @@ that OWID was down.
 
 **What blocks.** 482 dbt tests run inside `dbt build`, every one with
 `store_failures`, so a red test hands you `select * from
-dbt_test__audit.<test_name>` rather than a count. Six Dagster asset checks sit
+dbt_test__audit.<test_name>` rather than a count. Eight Dagster asset checks sit
 alongside them, and `site_pages_all_rendered` is blocking and checks page
 *size*: `evidence build` exits 0 for a site missing a page, so a route that
 emitted only the SvelteKit shell would otherwise deploy green.

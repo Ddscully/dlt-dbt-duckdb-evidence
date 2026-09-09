@@ -145,7 +145,7 @@ is in the `unit-testing-dbt-models` skill.
     scan that stops matching passes by not looking, so the vacuity guard is a
     real test and the scan returns empty rather than raising, to make its
     message the one a reader sees.
-- **The seven `@dg.asset_check` bodies are unit tested in
+- **The eight `@dg.asset_check` bodies are unit tested in
   `tests/test_asset_checks.py`, and were not before 2026-08-25.**
   `tests/test_definitions.py` proved each check was *registered* — that it would
   run at all. Nothing proved any of them would *notice*: the bodies were only

@@ -203,3 +203,61 @@ def test_every_retail_month_has_a_partition_to_land_in():
     assert keys[-1] == RETAIL_LAST_MONTH
     # 2009-12 through 2011-12 inclusive, i.e. no gaps in between either.
     assert len(keys) == 25
+
+
+# --------------------------------------------------------------------------- #
+# dbt_models — where the build leaves its artifacts
+# --------------------------------------------------------------------------- #
+
+
+def test_the_dbt_build_writes_its_run_results_where_the_reader_looks():
+    """`dbt_models` pins the target path, and `pipeline_runs` depends on it.
+
+    Left to itself dagster-dbt gives every invocation a unique target directory
+    (`target/<op>-<run id>-<uuid>/`) so concurrent invocations cannot overwrite
+    each other's artifacts. Nothing here is ever concurrent, and
+    `observability.build_runs` reads `run_results.json` *by path* — so the
+    unique directory meant the orchestrated graph wrote `analytics.pipeline_runs`
+    with zero rows on every workflow while `just run`, which shells out to plain
+    dbt, filled it correctly. Evidence then refused to write the empty table to
+    Parquet and `pages.yml` failed three minutes into an npm build.
+
+    This asserts the *call site* rather than the artifact, which is the half a
+    behavioural test misses: pointing a real invocation at an explicit path
+    proves dagster-dbt honours the argument and stays green when the argument is
+    dropped again.
+    """
+    from pathlib import Path
+    from typing import Any
+
+    from modern_data_stack.paths import dbt_run_results_path, dbt_target_path
+    from orchestration import assets
+
+    called_with: list[str] = []
+    kwargs_seen: dict[str, Any] = {}
+
+    class _Invocation:
+        def stream(self):
+            return iter(())
+
+    class _Dbt:
+        def cli(self, args, **kwargs):
+            called_with.extend(args)
+            kwargs_seen.update(kwargs)
+            return _Invocation()
+
+    # `decorated_fn` is the undecorated generator, so this exercises the call
+    # site with no execution harness: nothing is materialized and no output is
+    # yielded, which is exactly the part being asserted. Dagster types
+    # `compute_fn` as a union that does not narrow to the decorated half, so the
+    # annotation states the gap rather than suppressing it — the tree carries
+    # two `ty: ignore`s and both sit next to a reason a checker cannot have.
+    compute: Any = assets.dbt_models.op.compute_fn
+    list(compute.decorated_fn(context=None, dbt=_Dbt()))
+
+    assert called_with == ["build"]
+    target = kwargs_seen["target_path"]
+    assert Path(target) == Path(dbt_target_path())
+    # The property that actually matters, stated as the two paths agreeing: the
+    # artifact the build writes is the one `transform.pipeline_status` reads.
+    assert Path(target) / "run_results.json" == Path(dbt_run_results_path())

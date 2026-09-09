@@ -110,6 +110,7 @@ defs = dg.Definitions(
         assets.fx_rates_reach_the_present,
         assets.co2_intensity_rank_is_dense,
         assets.rfm_scores_do_not_split_ties,
+        assets.run_history_records_this_build,
         assets.weather_revisions_are_derivable,
         assets.site_pages_all_rendered,
     ],

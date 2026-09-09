@@ -1299,6 +1299,31 @@ leave the other free to land after the inventory meant to count it.
     manifest fixture carries the versioned model now so one assertion runs
     through `pipeline_status.build_runs` — the same lesson as the asset checks
     that read the wrong database for a week.
+  - **And the wiring broke anyway, one layer further out, on the first push.**
+    `build_runs` reads `run_results.json` *by path*; dagster-dbt gives every
+    invocation a unique target directory (`target/<op>-<run id>-<uuid>/`) so
+    concurrent invocations cannot overwrite each other's artifacts. Nothing here
+    is ever concurrent, so the uniqueness bought nothing and cost the table:
+    `just run` shells out to plain dbt and filled it, while **every**
+    orchestrated path — `just materialize`, CI, the nightly, the release, the
+    site — wrote `pipeline_runs` with zero rows. `dbt.cli(…)` takes an explicit
+    `target_path` and now gets `paths.dbt_target_path()`, which is also what
+    keeps a fixture run's artifacts isolated.
+    - **The only consumer that objected was the one with the least at stake.**
+      Nothing reads the table back, so an empty one is not an error anywhere;
+      Evidence cannot write a zero-row source to Parquet, so `pages.yml` failed
+      three minutes into an npm build with a message about a file being too
+      small — the same trap `co2_estimate_versions` already carries. The three
+      workflows that matter more were green and wrong, and the release would
+      have published an empty history and then carried the emptiness forward
+      every month.
+    - **The guard is `run_history_records_this_build`, and its assertion is the
+      whole of it.** `count(*) > 0` passes on the exact broken state, because a
+      developer's warehouse still holds the shell-ordered runs — measured, by
+      mutating the check to that form and watching the fixture go green. It
+      asserts that the invocation `run_results.json` *names* is in the table,
+      and it is `blocking=True` on an asset the site depends on, so the failure
+      lands before npm starts rather than after.
 
 ## The lakehouse (`lake/lakehouse.py`)
 
@@ -1831,7 +1856,7 @@ Gotchas:
     quotation from an assertion and should not try.)
 - **Every hand-maintained list here is asserted against the authority it
   copies** — `SOURCE_TABLES`, `RAW_DESCRIPTIONS`, `WB_WDI_INDICATORS`,
-  `ATTRIBUTION`, `pages.yml`'s path allowlist, the seven `@dg.asset_check`
+  `ATTRIBUTION`, `pages.yml`'s path allowlist, the eight `@dg.asset_check`
   bodies, and every count cited in prose. Not one of those failures is loud: an
   unlisted source yields no row and the page under-reports while looking
   complete, a stale count reads as authoritative, an unregistered check simply

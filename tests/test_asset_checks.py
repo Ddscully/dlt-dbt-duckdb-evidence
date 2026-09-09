@@ -1,4 +1,4 @@
-"""The seven `@dg.asset_check` bodies, run without materializing anything.
+"""The eight `@dg.asset_check` bodies, run without materializing anything.
 
 `tests/test_definitions.py` proves each check is *registered* — that it will run
 at all. Nothing proved that any of them would *notice*: the seven function
@@ -28,6 +28,7 @@ configured indicator and the verdict alone still looks right.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -428,6 +429,90 @@ def test_rfm_check_fails_an_unsegmented_customer(tmp_path, monkeypatch, assets):
 
     assert not result.passed
     assert _meta(result, "unsegmented") == 1
+
+
+# --------------------------------------------------------------------------- #
+# analytics/pipeline_status — run_history_records_this_build
+# --------------------------------------------------------------------------- #
+
+
+def _run_results(tmp_path: Path, invocation_id: str) -> Path:
+    """A minimal `run_results.json` announcing one invocation id.
+
+    The check reads nothing else out of the artifact, so nothing else is posed:
+    a fixture carrying `results` would suggest the check counts them, and it
+    deliberately does not — `build_runs` owns that, and `pipeline_runs` is what
+    this asks about.
+    """
+    path = tmp_path / "run_results.json"
+    path.write_text(json.dumps({"metadata": {"invocation_id": invocation_id}}))
+    return path
+
+
+def _history(tmp_path: Path, *invocation_ids: str) -> str:
+    return _warehouse(
+        tmp_path,
+        "create schema analytics",
+        "create table analytics.pipeline_runs (invocation_id varchar)",
+        *(f"insert into analytics.pipeline_runs values ('{i}')" for i in invocation_ids),
+    )
+
+
+def test_run_history_check_passes_when_this_build_left_rows(tmp_path, monkeypatch, assets):
+    warehouse = _history(tmp_path, "abc-123", "abc-123", "older-run")
+    monkeypatch.setattr(assets, "DUCKDB_PATH", warehouse)
+    monkeypatch.setattr(
+        assets, "dbt_run_results_path", lambda: str(_run_results(tmp_path, "abc-123"))
+    )
+
+    result = assets.run_history_records_this_build()
+
+    assert result.passed
+    assert _meta(result, "nodes_recorded") == 2
+    assert _meta(result, "invocations_in_history") == 2
+
+
+def test_run_history_check_fails_when_the_build_appended_nowhere(tmp_path, monkeypatch, assets):
+    """The defect this exists for, posed exactly as it happened.
+
+    dagster-dbt wrote `run_results.json` into a unique subdirectory of
+    `dbt/target/`; `build_runs` read the top-level path, found nothing, and
+    appended nothing. The table is *not* empty in that state on a developer's
+    machine — earlier shell-ordered runs are still in it — so a check asserting
+    `count(*) > 0` would have passed on the very tree that shipped the bug.
+    Asserting on the count as well as the verdict is what separates the two:
+    the history has rows, and none of them are this build's.
+    """
+    warehouse = _history(tmp_path, "an-earlier-run", "an-earlier-run")
+    monkeypatch.setattr(assets, "DUCKDB_PATH", warehouse)
+    monkeypatch.setattr(
+        assets,
+        "dbt_run_results_path",
+        lambda: str(_run_results(tmp_path, "the-build-that-just-ran")),
+    )
+
+    result = assets.run_history_records_this_build()
+
+    assert not result.passed
+    assert _meta(result, "nodes_recorded") == 0
+    assert _meta(result, "invocations_in_history") == 1
+
+
+def test_run_history_check_fails_when_dbt_left_no_artifact_at_all(tmp_path, monkeypatch, assets):
+    """A missing artifact is a failure, not a pass by absence.
+
+    `build_runs` tolerates it — a fresh clone is a real state and the other
+    three tables do not need it — so the tolerance has to end somewhere, and it
+    ends here: by the time `pipeline_status` materializes in the graph, a dbt
+    build has run upstream of it and an absent artifact means the path moved.
+    """
+    monkeypatch.setattr(assets, "DUCKDB_PATH", _history(tmp_path, "whatever"))
+    monkeypatch.setattr(assets, "dbt_run_results_path", lambda: str(tmp_path / "nowhere.json"))
+
+    result = assets.run_history_records_this_build()
+
+    assert not result.passed
+    assert "run_results" in _meta(result, "reason")
 
 
 # --------------------------------------------------------------------------- #

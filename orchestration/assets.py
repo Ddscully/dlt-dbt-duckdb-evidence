@@ -22,8 +22,10 @@ there is no shell script to keep in sync.
 # NB: no `from __future__ import annotations` here — Dagster inspects the
 # `context` parameter's annotation object, and a stringified one fails its check.
 
-from collections.abc import Mapping
+import json
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import dagster as dg
@@ -59,6 +61,7 @@ from lake.lakehouse import (
     versions as table_versions_for,
 )
 from modern_data_stack.db import row, scalar
+from modern_data_stack.paths import dbt_run_results_path, dbt_target_path
 from orchestration.resources import dbt_project
 from publish.build_report import (
     BUILD_DIR,
@@ -465,7 +468,19 @@ class FolderGroupDbtTranslator(DagsterDbtTranslator):
 def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource):
     # `build` = run + test, so dbt's schema tests surface as Dagster asset checks
     # on the model they belong to.
-    yield from dbt.cli(["build"], context=context).stream()
+    #
+    # **`target_path` is not a tidiness argument and removing it empties a
+    # table.** Left to itself dagster-dbt writes every invocation's artifacts to
+    # a *unique* subdirectory — `target/<op>-<run id>-<uuid>/` — so that two
+    # concurrent invocations cannot overwrite each other's `run_results.json`.
+    # Nothing here is ever concurrent (`in_process_executor`, and DuckDB takes
+    # one writer), while `analytics.pipeline_runs` reads that artifact *by path*
+    # after the build. The unique directory therefore bought no safety and cost
+    # the whole table: `just run` populated it and every orchestrated path —
+    # CI, the nightly, the release, the site — wrote it with zero rows, which
+    # Evidence then refused to turn into a Parquet file.
+    # `run_history_records_this_build` is the guard; this is the fix.
+    yield from dbt.cli(["build"], context=context, target_path=Path(dbt_target_path())).stream()
 
 
 FCT_EMISSIONS_ENERGY = get_asset_key_for_model([dbt_models], "fct_emissions_energy")
@@ -629,11 +644,11 @@ def evidence_site(context: AssetExecutionContext) -> dg.MaterializeResult:
 FX_STALE_AFTER_DAYS = 8
 
 
-def _scalar(query: str):
+def _scalar(query: str, params: Sequence[Any] | None = None):
     """`db.scalar` against a fresh read-only connection to the warehouse."""
     con = duckdb.connect(DUCKDB_PATH, read_only=True)
     try:
-        return scalar(con, query)
+        return scalar(con, query, params)
     finally:
         con.close()
 
@@ -807,6 +822,59 @@ def rfm_scores_do_not_split_ties() -> dg.AssetCheckResult:
             "customers_scored_against_a_peer": bad,
             "unsegmented": unsegmented,
             "scores_null_where_they_should_not_be": unscored,
+        },
+    )
+
+
+@dg.asset_check(asset=pipeline_status, blocking=True)
+def run_history_records_this_build() -> dg.AssetCheckResult:
+    """The dbt build that just ran left rows in `analytics.pipeline_runs`.
+
+    The other six checks here read the warehouse and ask whether the *data* is
+    right. This one asks whether a wire is still connected, because that wire
+    has already come loose once and nothing noticed: `build_runs` reads
+    `run_results.json` by path, dagster-dbt writes it to a unique subdirectory
+    unless told otherwise, and the two disagreed for every orchestrated run of
+    the graph. `pipeline_runs` was written with zero rows in CI, the nightly and
+    the release while a laptop's `just run` — which invokes plain dbt — filled
+    it correctly.
+
+    **What made that expensive is where it surfaced.** Nothing reads the table
+    back, so an empty one is not an error anywhere; the only consumer that
+    objects is Evidence, which cannot write a zero-row source to Parquet and
+    fails the site build three minutes later with a message about a file being
+    too small. That is one workflow of four, and the one that matters least —
+    the release would have published an empty history and then carried the
+    emptiness forward every month, green.
+
+    So this asserts the specific link rather than "the table has rows": the
+    invocation `run_results.json` describes must be *in* the table. A stale
+    artifact left by an earlier build passes (its rows were appended then, and
+    materializing `analytics/pipeline_status` alone is a legitimate thing to
+    do); an artifact the appender never saw does not.
+    """
+    path = Path(dbt_run_results_path())
+    if not path.exists():
+        return dg.AssetCheckResult(
+            passed=False,
+            metadata={
+                "run_results_path": str(path),
+                "reason": "no dbt run_results.json here — nothing could have been appended",
+            },
+        )
+    invocation = (json.loads(path.read_text()).get("metadata") or {}).get("invocation_id")
+    recorded = _scalar(
+        "select count(*) from analytics.pipeline_runs where invocation_id = ?",
+        [invocation],
+    )
+    return dg.AssetCheckResult(
+        passed=recorded > 0,
+        metadata={
+            "invocation_id": invocation or "",
+            "nodes_recorded": recorded,
+            "invocations_in_history": _scalar(
+                "select count(distinct invocation_id) from analytics.pipeline_runs"
+            ),
         },
     )
 
