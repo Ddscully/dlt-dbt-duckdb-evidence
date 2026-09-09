@@ -325,7 +325,7 @@ below, and the profile is the point.
 | Dimension | Level | Why, with the number that decides it |
 |---|---|---|
 | Metadata completeness | **Partial** | Every model carries a description and an owner (33/33 each) and 21 relations enforce a contract over 407 typed columns — but only **171 of those 407 columns (42%) carry a description**. |
-| Quality observability | **Established** | 482 data tests and 36 unit tests with failing rows stored per test, 7 asset checks, freshness thresholds on 7 of 8 sources, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
+| Quality observability | **Established** | 482 data tests and 36 unit tests with failing rows stored per test, 8 asset checks, freshness thresholds on 7 of 8 sources, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
 | Access governance | **Absent** | Structurally, not by neglect — see below. |
 | Lineage traceability | **Established** | One graph from dlt through dbt and Polars to the site; 10 exposures answer "what breaks if I change this" per page; the bus matrix is derived from the manifest rather than drawn. |
 | Organizational ownership | **Ad hoc** | Ownership is declared and enforced for all 33 models. There is one owner, who is also the only contributor. |
