@@ -1537,11 +1537,41 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 Two tiers, and the split is the point — see [`tests/README.md`](tests/README.md).
 
 - `just test` — mocked-payload unit tests over the ingest/transform logic. No
-  network, no warehouse, ~14s for the whole suite. **It said ~1s from the
-  initial commit to 2026-08-26**, which was true of a much smaller suite and
+  network, no warehouse, **~42s** for the whole suite (measured 2026-09-09,
+  three runs within 0.1s of each other; it is wall clock on one machine, so
+  treat it as an order of magnitude rather than a constant). **It said ~1s from
+  the initial commit to 2026-08-26**, which was true of a much smaller suite and
   drifted by a factor of fourteen with nothing to notice:
   `tests/test_documented_counts.py` guards counts in front of test-nouns, and a
   *timing* claim has no such guard. Re-measure before quoting one.
+  - **That instruction was written on 2026-08-26 and the number it fixed was
+    stale again fourteen days later** — 14s against a measured 42s, a second
+    factor of three, in the bullet that exists to warn about the first. The
+    lesson is not "re-measure harder": a wall-clock figure in prose has no
+    authority to check it against, and unlike a count there is nothing a test
+    could compare it to that would not be flaky on a different machine. What is
+    worth keeping is the *vintage* — a number with a date beside it is one a
+    reader can discount, and one without a date reads as current forever.
+  - **And the 2026-08-26 correction had already lost a site.** The claim lives
+    in four files; that fix updated `README.md`, `CLAUDE.md` and
+    `tests/README.md` and left `.github/CONTRIBUTING.md` on **~1s** — a figure
+    forty-two times out, on the page a first-time contributor reads. Same shape
+    as the four Antarctica claims in the ymls, three corrected and one missed,
+    and as `docs/STYLE_GUIDE.md`'s "staging takes no alias at all". A claim
+    restated in N places loses one every time it is corrected by hand.
+  - `just test-pipeline` drifted the same way and less far: **~42s** against a
+    documented ~30s, across `README.md`, `.github/CONTRIBUTING.md` **and**
+    `tests/README.md` — and correcting it caught the first two and missed the
+    third until a `grep` for the old figure was run afterwards. That grep is the
+    only reliable step here: fix the sites you know about, then search for the
+    *old* number and expect a hit.
+  - **The one timing claim that held is the one measuring dbt rather than
+    pytest.** `just dbt-unit-test` is documented at 4.8s of dbt's own time and
+    ~10.5s wall, and measured 4.95s / 10.85s — because it times a fixed 36 unit
+    tests through dbt's own reporting, not a suite that grows. The coverage
+    *percentages* held for the same reason (67.1% branch / 78.5% statement
+    against a documented 67/78): they move with the code proportionally. It is
+    specifically the pytest wall clock that is a liability.
   - **Writing that bullet tripped the counts guard, which is worth recording.**
     The first draft said "over 242 &lt;test-noun&gt;" — a *pytest* figure, in a
     document where that noun almost always means a dbt test, so the scanner read
@@ -1550,8 +1580,10 @@ Two tiers, and the split is the point — see [`tests/README.md`](tests/README.m
     phrase was genuinely ambiguous to a human reader too. Phrase a pytest count
     as "the whole suite" or "pytest cases", never as a bare number in front of
     that noun.
-- `just coverage` — line and branch coverage of that tier, ~18s, at 67% branch /
-  78% statement today. Reports and gates nothing (no `fail_under`, not in CI,
+- `just coverage` — line and branch coverage of that tier, **~53s** (2026-09-09;
+  documented as ~18s until then, drifting with `just test` above), at 67% branch
+  / 78% statement today — 67.1% and 78.5% measured, so those two held while the
+  seconds beside them tripled. Reports and gates nothing (no `fail_under`, not in CI,
   no plugin loaded into `addopts`) for ty's reason. Read it with the two caveats
   in `[tool.coverage.report]`: it measures the mocked tier only, so the
   transform and lake layers read low while `just test-pipeline` exercises them

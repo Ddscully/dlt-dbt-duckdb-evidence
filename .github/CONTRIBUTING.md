@@ -32,8 +32,8 @@ pre-commit hook is a `local` hook whose entry is `just lint`, so a shell without
 ## Before you open a PR
 
 ```bash
-just test           # ~1s, mocked payloads, no network, no warehouse
-just test-pipeline  # ~30s, the real modules against checked-in fixtures
+just test           # ~42s, mocked payloads, no network, no warehouse
+just test-pipeline  # ~42s, the real modules against checked-in fixtures
 just lint           # sqlfluff over dbt/models and dbt/snapshots
 ```
 
