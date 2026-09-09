@@ -18,10 +18,12 @@ Landing tables and layer names come from the project; see
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import duckdb
 import polars as pl
+from polars.datatypes import DataTypeClass
 
 from .db import qualify, row, scalar
 
@@ -183,20 +185,39 @@ def build_tables(
     return pl.DataFrame(rows)
 
 
-def tested_model_name(attached: str, nodes: dict[str, dict]) -> str | None:
-    """Readable name for the node a test is attached to.
+def node_display_name(unique_id: str, nodes: dict[str, dict]) -> str | None:
+    """Readable name for a node id.
 
-    `attached_node` is a unique id, and the last segment is only the model name
-    while the model has no versions: a versioned one is
-    `model.<project>.fct_emissions_energy.v1`, so splitting on the final dot
-    labels the test **`v1`**. Prefer the node's own `alias`, which is the
-    relation the test actually ran against (`fct_emissions_energy_v1`,
-    `fct_emissions_energy`) and so matches what every other table on the
-    pipeline page calls it. The split stays as the fallback, because a test can
-    attach to a source, which does not live in `nodes`.
+    A unique id's last segment is only the node name while the model has no
+    versions: a versioned one is `model.<project>.fct_emissions_energy.v1`, so
+    splitting on the final dot labels it **`v1`**. Prefer the node's own
+    `alias`, which is the relation that actually ran
+    (`fct_emissions_energy_v1`, `fct_emissions_energy`) and so matches what
+    every other table on the pipeline page calls it. The split stays as the
+    fallback, because a test can attach to a source, which does not live in
+    `nodes`.
+
+    Named for the *test* it was written for until `build_runs` needed the same
+    answer about models, snapshots and seeds. The trap is a property of unique
+    ids, not of tests: both versioned nodes appear in `run_results.json` too,
+    so a second caller splitting the id by hand would have relabelled them.
     """
-    node = nodes.get(attached) or {}
-    return node.get("alias") or attached.rsplit(".", 1)[-1] or None
+    node = nodes.get(unique_id) or {}
+    return node.get("alias") or unique_id.rsplit(".", 1)[-1] or None
+
+
+def manifest_nodes(manifest_path: str) -> dict[str, dict]:
+    """The manifest's node map, or `{}` when there is no manifest.
+
+    Split out of `manifest_tests` when `build_runs` needed the same map for a
+    different question. Absence is tolerated here rather than raised for the
+    reason stated on `manifest_tests`: `dbt/target/` is gitignored, so every
+    reader of it has to work on a fresh clone.
+    """
+    path = Path(manifest_path)
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text()).get("nodes", {})
 
 
 def manifest_tests(manifest_path: str) -> dict[str, dict]:
@@ -212,12 +233,7 @@ def manifest_tests(manifest_path: str) -> dict[str, dict]:
     `fail_calc` and `severity` come from the same node and are what make a
     *passing* test read as passing — see `build_tests`.
     """
-    path = Path(manifest_path)
-    if not path.exists():
-        return {}
-
-    manifest = json.loads(path.read_text())
-    nodes = manifest.get("nodes", {})
+    nodes = manifest_nodes(manifest_path)
     out: dict[str, dict] = {}
     for node in nodes.values():
         if node.get("resource_type") != "test":
@@ -228,7 +244,7 @@ def manifest_tests(manifest_path: str) -> dict[str, dict]:
         out[node["alias"]] = {
             "test_name": node["name"],
             "test_type": metadata.get("name") or "singular",
-            "tested_model": tested_model_name(attached, nodes),
+            "tested_model": node_display_name(attached, nodes),
             "tested_column": (metadata.get("kwargs") or {}).get("column_name"),
             "fail_calc": config.get("fail_calc") or DEFAULT_FAIL_CALC,
             # dbt writes this as "ERROR"/"WARN", but a yml can spell it lowercase.
@@ -311,3 +327,126 @@ def build_tests(
             }
         )
     return pl.DataFrame(rows)
+
+
+# The shape `build_runs` returns when there is nothing to read. Stated rather
+# than inferred, because an empty `pl.DataFrame([])` has *no columns*, and the
+# first append of one would create a table with no columns that every later
+# append then fails against. A schema-only frame creates the right table.
+#
+# `DataTypeClass | pl.DataType` and not the obvious `dict[str, pl.DataType]`:
+# `pl.String` is a *class*, `pl.Datetime("us")` an instance, and this mapping
+# holds both. Polars spells the union `PolarsDataType` in `polars._typing`,
+# which is private — so the two public names are written out. `just typecheck`
+# found it; the annotation was wrong in a way nothing else would have caught.
+RUN_COLUMNS: dict[str, DataTypeClass | pl.DataType] = {
+    "invocation_id": pl.String,
+    "invocation_started_at": pl.Datetime("us"),
+    "dbt_command": pl.String,
+    "dbt_version": pl.String,
+    "unique_id": pl.String,
+    "resource_type": pl.String,
+    "node_name": pl.String,
+    "status": pl.String,
+    "execution_time_s": pl.Float64,
+    "compile_time_s": pl.Float64,
+    "execute_time_s": pl.Float64,
+}
+
+
+def _phase_seconds(timing: list[dict], phase: str) -> float | None:
+    """Seconds spent in one of dbt's two timing phases, or None if absent.
+
+    dbt reports `compile` and `execute` separately and `execution_time` as the
+    total. Both are kept because the split is the interesting part: on this
+    project compile is ~10% of node time, which is the number somebody asking
+    "why is dbt slow" is usually looking for, and it is invisible in the total.
+    """
+    for entry in timing or []:
+        if entry.get("name") != phase:
+            continue
+        started, completed = entry.get("started_at"), entry.get("completed_at")
+        if not started or not completed:
+            return None
+        return (_parse_ts(completed) - _parse_ts(started)).total_seconds()
+    return None
+
+
+def _parse_ts(value: str) -> datetime:
+    """dbt writes RFC 3339 with a trailing `Z`, which `fromisoformat` reads.
+
+    It did not always: parsing `Z` needs 3.11, and the `.replace("Z", "+00:00")`
+    every example on the internet still carries is for older interpreters.
+    `.python-version` pins 3.13, so ruff's FURB162 is right to call it dead.
+    """
+    return datetime.fromisoformat(value)
+
+
+def build_runs(run_results_path: str, nodes: dict[str, dict] | None = None) -> pl.DataFrame:
+    """One row per node in the dbt invocation `run_results.json` describes.
+
+    This is the *pipeline* measuring itself, where the three tables above
+    measure the data. It is the same "no new instrumentation" argument: dbt has
+    written this artifact on every invocation since long before anything read
+    it.
+
+    **What it deliberately does not carry is row counts**, which idea 27 asked
+    for in the same breath as runtime. `adapter_response.rows_affected` is
+    present on **7 of 552** results here and every one is a seed — dbt-duckdb
+    returns a bare `{"_message": "OK"}` for a model, so the artifact simply does
+    not know. Row counts per table already live in `pipeline_tables`, measured
+    from the warehouse where they are actually true.
+
+    `nodes` is the manifest's node map and is optional for the same reason
+    `manifest_tests` tolerates an absent manifest: `dbt/target/` is gitignored.
+    Without it the node name falls back to the id's last segment, which
+    mislabels the two versioned nodes — see `node_display_name`.
+
+    An absent artifact returns the empty frame rather than raising. A warehouse
+    that has never had a dbt build run against it is a real state (a fresh
+    clone, a fixture run), and the caller writes three other tables that do not
+    need it.
+    """
+    path = Path(run_results_path)
+    if not path.exists():
+        return pl.DataFrame(schema=RUN_COLUMNS)
+
+    payload = json.loads(path.read_text())
+    metadata = payload.get("metadata") or {}
+    # `invocation_started_at` rather than `generated_at`: the artifact is written
+    # when the run *ends*, so ordering runs by `generated_at` orders them by
+    # finish time, which reshuffles two runs that overlapped. It also makes the
+    # duration of a run derivable from its own rows.
+    started = metadata.get("invocation_started_at") or metadata.get("generated_at")
+    common = {
+        "invocation_id": metadata.get("invocation_id"),
+        "invocation_started_at": _parse_ts(started).replace(tzinfo=None) if started else None,
+        # Which dbt command wrote this. `dbt test` overwrites the artifact a
+        # `dbt build` left, so a row set is only meaningful next to the command
+        # that produced it — without this column a 36-row `dbt test --select
+        # test_type:unit` invocation is indistinguishable from a build that
+        # somehow ran 36 nodes.
+        "dbt_command": (payload.get("args") or {}).get("which"),
+        "dbt_version": metadata.get("dbt_version"),
+    }
+
+    nodes = nodes or {}
+    rows = []
+    for result in payload.get("results") or []:
+        unique_id = result.get("unique_id") or ""
+        timing = result.get("timing") or []
+        rows.append(
+            {
+                **common,
+                "unique_id": unique_id,
+                # dbt encodes the type as the id's first segment, which is the
+                # only place it appears — a result carries no `resource_type`.
+                "resource_type": unique_id.split(".")[0] or None,
+                "node_name": node_display_name(unique_id, nodes),
+                "status": result.get("status"),
+                "execution_time_s": result.get("execution_time"),
+                "compile_time_s": _phase_seconds(timing, "compile"),
+                "execute_time_s": _phase_seconds(timing, "execute"),
+            }
+        )
+    return pl.DataFrame(rows, schema=RUN_COLUMNS)

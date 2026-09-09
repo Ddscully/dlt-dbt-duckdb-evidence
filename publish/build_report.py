@@ -114,6 +114,7 @@ TABLE_TO_ASSET_KEY = {
     "analytics.pipeline_sources": ("analytics", "pipeline_status"),
     "analytics.pipeline_tables": ("analytics", "pipeline_status"),
     "analytics.pipeline_tests": ("analytics", "pipeline_status"),
+    "analytics.pipeline_runs": ("analytics", "pipeline_status"),
     "analytics.retail_rfm": ("analytics", "retail_rfm"),
 }
 

@@ -168,6 +168,18 @@ where year = ${inputs.year.value}
   (`In total <Value .../> lines, …`). Only paragraph-initial components matter:
   a component beginning a wrapped line *inside* a paragraph is fine, and
   `findings.md` relies on that.
+- **`agg=` on `<Value>` renders the right number and logs two failed queries
+  per use.** `<Value data={q} column=n agg=sum/>` prints the correct total — it
+  falls back to aggregating the rows it already has — while the build log gains
+  `Error in Query! Parser Error: SELECT clause without selection list` twice,
+  and `evidence build` still exits 0. Bisected: the same page with the same SQL
+  blocks, the same `<DataTable contentType=bar>` and the same `<BarChart>` and
+  no `agg=` builds silently. It is another prop the hosted docs describe and
+  this OSS version does not implement — see [[evidence-mcp-serves-studio-docs]]
+  for why the docs disagree with the build. **Aggregate in the query instead**,
+  which also prerenders the number server-side. The reason to care about a
+  working component is the log: two permanent errors in every build are what a
+  real one then hides in.
 - **`<Value>` emits a trailing space, so never put punctuation straight after
   one.** `<Value .../>.` renders as "Turkmenistan ." and `<Value .../>'s` as
   "Norway 's". End the clause on words instead: `... at <Value .../> g/kWh.`

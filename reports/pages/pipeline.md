@@ -169,6 +169,85 @@ table holding the offending rows.
 
 {/if}
 
+## What the build costs
+
+The three sections above describe the warehouse. This one describes the *build* —
+one row per node per `dbt build`, appended rather than replaced, so it is the one
+table on this page that accumulates.
+
+```sql latest_run
+select * from warehouse.pipeline_runs
+where invocation_id = (
+    select invocation_id from warehouse.pipeline_runs
+    order by invocation_started_at desc limit 1
+)
+order by total_s desc
+```
+
+```sql run_totals
+select
+    count(distinct invocation_id)                        as invocations,
+    sum(node_count) filter (where invocation_id = (
+        select invocation_id from warehouse.pipeline_runs
+        order by invocation_started_at desc limit 1
+    ))                                                   as latest_nodes
+from warehouse.pipeline_runs
+```
+
+The most recent build ran <Value data={run_totals} column=latest_nodes fmt="#,##0"/> nodes.
+
+<DataTable data={latest_run}>
+    <Column id=resource_type title="Node type"/>
+    <Column id=node_count title="Nodes" fmt="#,##0"/>
+    <Column id=total_s title="Seconds" fmt="#,##0.00" contentType=bar/>
+    <Column id=compile_s title="of which compile" fmt="#,##0.00"/>
+    <Column id=slowest_node_s title="Slowest node" fmt="#,##0.00"/>
+</DataTable>
+
+<Alert status=info>
+
+**So what.** The data-quality layer *is* the build. Tests and unit tests together
+cost several times what building every model costs — the price of
+`store_failures` being on project-wide and of running unit tests inside
+`dbt build` rather than excluding them from production runs. Both are deliberate
+and both are argued in the docs; neither had ever been measured.
+
+The seconds do not sum to the per-node total. dbt reports `compile` and
+`execute` as named phases and counts work outside both in the figure it calls
+execution time, so both are stored rather than one derived from the other.
+
+</Alert>
+
+```sql cost_trend
+select
+    invocation_started_at,
+    resource_type,
+    total_s
+from warehouse.pipeline_runs
+order by invocation_started_at
+```
+
+{#if run_totals[0].invocations > 1}
+
+<BarChart
+    data={cost_trend}
+    x=invocation_started_at
+    y=total_s
+    series=resource_type
+    title="Build cost over time, seconds by node type"
+    yFmt="#,##0.00"
+/>
+
+{:else}
+
+There is only one build recorded so far, so there is no trend to draw yet. That
+is the expected state on a fresh warehouse and in CI, both of which start from an
+empty DuckDB file. The history accumulates a row set per `just pipeline-status`
+and is carried between published releases by `publish/restore_history.py` — the
+same machinery that keeps the snapshot revisions and the weather archive.
+
+{/if}
+
 ## Where these numbers come from
 
 None of this is instrumentation added for the purpose. dlt stamps `_dlt_load_id`
@@ -178,9 +257,17 @@ table, and `information_schema` knows the shape of every layer.
 `pipeline_tables` and `pipeline_tests`, because two of them need dynamic SQL over
 a variable table list and one needs a file that lives outside the database.
 
+The build cost is that argument once more. dbt has written per-node timings to
+`dbt/target/run_results.json` on every invocation since long before anything read
+them, and `analytics.pipeline_runs` is that artifact appended to a table. What it
+deliberately does not carry is a row count per model: dbt-duckdb returns a bare
+`OK` rather than a count for anything but a seed, and the row counts that matter
+are two sections up, measured from the warehouse where they are true.
+
 ---
 
 <small>Written by <code>transform/pipeline_status.py</code> (<code>just
 pipeline-status</code>, part of <code>just run</code> and the Dagster asset
-<code>analytics/pipeline_status</code>). A snapshot taken at build time rather
-than a history: nothing here accumulates across runs.</small>
+<code>analytics/pipeline_status</code>). The first three sections are a snapshot
+taken at build time; <em>What the build costs</em> is a history, and the only
+thing on this page a rebuild cannot reproduce.</small>

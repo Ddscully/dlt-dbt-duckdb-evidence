@@ -482,3 +482,77 @@ def test_the_state_check_looks_for_the_pipeline_dlt_would_actually_use(tmp_path,
 
     monkeypatch.delenv("INGEST_FIXTURES")
     assert _real_state_lookup() is None, "found the fixture pipeline's state for a real run"
+
+
+RUNS = """
+create schema analytics;
+create table analytics.pipeline_runs as
+select * from (values
+    ('inv-1', 'model.demo.stg_co2', 0.5),
+    ('inv-1', 'test.demo.nn', 0.25)
+) t(invocation_id, unique_id, execution_time_s);
+-- The reproducible neighbours. Every one of these is rebuilt from the warehouse
+-- on each run, which is why the rule names its tables instead of the schema.
+create table analytics.co2_intensity as select 'DEU' as country_iso3;
+create table analytics.pipeline_tables as select 'marts.dim_date' as table_name;
+"""
+
+
+def test_the_run_history_is_carried_and_its_reproducible_neighbours_are_not(tmp_path: Path):
+    """The first `Carry` rule that has to name tables, and the reason it does.
+
+    `history` is carried whole because everything in it is unreproducible by
+    definition. `analytics` is the opposite: five of its six relations are
+    rebuilt from the warehouse on every run, so carrying the schema would
+    restore a *previous release's* `co2_intensity` over a fresh one and — worse
+    — restore the three `pipeline_*` snapshots that describe the previous
+    release's warehouse, next to a `pipeline_runs` that is genuinely history.
+    """
+    previous = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT + RUNS)
+    current = tmp_path / "wh" / "warehouse.duckdb"
+
+    restore_history.run(previous, current)
+
+    con = duckdb.connect(str(current), read_only=True)
+    try:
+        assert scalar(con, "select count(*) from analytics.pipeline_runs") == 2
+        listed = {
+            name
+            for (name,) in con.sql(
+                "select table_name from information_schema.tables where table_schema = 'analytics'"
+            ).fetchall()
+        }
+        assert listed == {"pipeline_runs"}
+    finally:
+        con.close()
+
+
+def test_a_run_history_without_its_timing_column_is_refused(tmp_path: Path):
+    """`invocation_id` alone would match anything keyed on a run.
+
+    The rule requires `execution_time_s` too, so a table that merely records
+    *that* a run happened cannot be restored as a timing history — the same
+    check that stops a landing table being carried as a snapshot.
+    """
+    previous = _db(
+        tmp_path / "prev" / "warehouse.duckdb",
+        SNAPSHOT
+        + """
+        create schema analytics;
+        create table analytics.pipeline_runs as select 'inv-1' as invocation_id;
+        """,
+    )
+    with pytest.raises(ValueError, match="dbt run history"):
+        restore_history.run(previous, tmp_path / "wh" / "warehouse.duckdb")
+
+
+def test_irreplaceable_rows_counts_the_run_history_too(tmp_path: Path):
+    """A rule added to `CARRIED` has to reach all three callers at once.
+
+    `irreplaceable_rows` is what `just clean warehouse` asks before deleting the
+    file and what `release-data.yml` verifies did not shrink. Two snapshot rows
+    plus two run rows: if this returns 2, the gate would let a build history be
+    deleted without saying so.
+    """
+    warehouse = _db(tmp_path / "wh" / "warehouse.duckdb", SNAPSHOT + RUNS)
+    assert irreplaceable_rows(warehouse) == 4
