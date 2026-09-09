@@ -202,7 +202,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 7 seeds + 465 data tests + 36 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 7 seeds + 482 data tests + 36 unit tests) |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -612,10 +612,13 @@ done in the skills; scanning this file would need that ambiguity resolved first.
   `int_retail_return_matches` (the returns-to-purchase inference). `private` and
   uncontracted, like staging; they do not ship as Parquet
 - `marts` — dbt tables, **one folder per mart**: `country_stats/` (6),
-  `reference/` (6), `retail/` (5), `compliance/` (3). The models are:
+  `reference/` (7), `retail/` (5), `compliance/` (3). The models are:
   `dim_country` (**the conformed country dimension** — one row per
   `country_iso3`, 228 of them, and what every other model's country key joins
-  to), `dim_country_year` (the country-year spine, that crossed with the years),
+  to), `dim_country_income_history` (**the income classification as it stood in
+  each year**, 1987 onward — published because every other `income_group` in the
+  warehouse is the *current* one stamped on every year, and 51% of the economies
+  classified in 1990 are in a different group today), `dim_country_year` (the country-year spine, that crossed with the years),
   `fct_emissions_energy` (the wide join, built on the spine, and **the one
   versioned model** — `fct_emissions_energy_v1` is a compatibility view live
   until 2026-11-01),
@@ -1080,11 +1083,11 @@ the point of the layer is that none of it is a comment.
 - **Every numeric mart column declares `meta: {additivity: …}`**, from a closed
   four-value vocabulary — `additive`, `semi_additive`, `non_additive`,
   `not_a_measure` — because a contract states a type and a test states
-  correctness, and neither says whether `sum()` means anything. 118 of the 228
+  correctness, and neither says whether `sum()` means anything. 118 of the 229
   are non-additive. **Counted as dbt resolves them, which is the basis every
   figure in this section uses** — `fct_emissions_energy_v1` inherits 36 labels
-  through `include: all` and declares one, so the ymls carry 192 literal
-  `additivity:` entries where the manifest carries 228 labelled columns (191 +
+  through `include: all` and declares one, so the ymls carry 193 literal
+  `additivity:` entries where the manifest carries 229 labelled columns (192 +
   v1's 37). Quoting the yml count while naming the manifest one is how a stale
   pair survived into a release — described in words rather than digits here,
   because the guard cannot tell a quotation from an assertion and should not
@@ -1107,8 +1110,8 @@ the point of the layer is that none of it is a comment.
   - **`gdp_usd` is `semi_additive` and `gdp_constant_usd` is `additive`**, which
     is the current-vs-constant-dollar gotcha under *Conventions & gotchas*
     expressed as metadata rather than as prose somebody has to have read.
-  - **The labels ship**, in `manifest.json`'s `additivity` map — 284 columns
-    across 25 relations — for the reason `direct_identifier` is real: a label
+  - **The labels ship**, in `manifest.json`'s `additivity` map — 285 columns
+    across 26 relations — for the reason `direct_identifier` is real: a label
     with no consequence is decoration, and a Parquet consumer has the types and
     nothing else. The five `analytics` tables are invisible to dbt, so their 56
     are `EXTRA_ADDITIVITY`, beside `EXTRA_CLASSIFICATIONS` and for its reason.
@@ -1244,7 +1247,7 @@ leave the other free to land after the inventory meant to count it.
   `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
   against a build that finished ERROR=0 — the health page contradicting the
   build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 463 of the 465 tests use the default. `severity` comes across
+  is what dbt does; 463 of the 482 tests use the default. `severity` comes across
   the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
 - **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
   that schema every build but never *removes* a table whose test is gone, and the
@@ -1476,7 +1479,30 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   World Bank's padded region names and missing ISO3s, Eurostat's JSON-stat grid
   and its two ISO2 exceptions, and the WDI incremental window. Four of them
   cannot wait for a skill to load, because they change what a query *means*:
-  - **Divide by `gdp_constant_usd`, never `gdp_usd`.** `gdp_usd` is *current* US$,
+  - **`income_group` and `region` are today's answer applied to every year, and
+  `marts.dim_country_income_history` is the measurement of what that costs.**
+  The World Bank `/country` endpoint publishes only the current classification,
+  so `dim_country` stamps the 2026 answer onto 1990 and every rollup by income
+  group inherits it. Measured against the publisher's own history
+  (`OGHIST.xlsx`, fiscal 1989 onward, transcribed by
+  `scripts/build_income_classification_seed.py` into a seed):
+
+  | Year | Economies classified | In a different group today |
+  |------|---------------------|----------------------------|
+  | 1990 | 174 | **89 (51%)** |
+  | 2000 | 203 | 102 (50%) |
+  | 2010 | 211 | 59 (28%) |
+  | 2020 | 212 | 22 (10%) |
+  | 2025 | 213 | 0 |
+
+  The 0 in the current year is not luck and is worth keeping as an invariant: it
+  is the same classification reached two ways, so a singular test warns when the
+  two stop agreeing, which is what a July reclassification looks like before
+  anybody re-runs the script. **Nothing is repointed at the history yet** — that
+  is a contract change on the eight relations carrying `income_group` plus a v3
+  of the versioned model, and is deliberately a separate decision from
+  publishing the fact.
+- **Divide by `gdp_constant_usd`, never `gdp_usd`.** `gdp_usd` is *current* US$,
     so it moves with inflation and the exchange rate. Of the 193 countries with
     both series in 2010 and 2024, **30 flip the sign of their decarbonisation
     trend** on that choice alone.

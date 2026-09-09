@@ -299,6 +299,91 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 12}
 
+  - name: dim_country_income_history
+    config:
+      contract:
+        enforced: true
+    description: >
+      The World Bank income classification as it stood in each year, beside the
+      one `dim_country` carries today. Grain: one row per (country_iso3, year)
+      the World Bank classified, fiscal 1989 (data year 1987) onward.
+
+      **Published because every other `income_group` in this warehouse is a
+      Type-1 attribute.** The `/country` endpoint serves only the current
+      classification, so the 2026 answer is stamped on 1990 wherever a model
+      groups by it — and 45% of the economies classified at both ends of this
+      table changed group in between. That makes "emissions by income group in
+      1990" a 2026 grouping of 1990 emissions.
+
+      Nothing is repointed at this yet. It is the fact published beside the
+      existing column so the distortion is one query rather than an argument;
+      whether `dim_country_year.income_group` becomes as-of-year is a contract
+      change on eight relations and is deliberately a separate decision.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [country_iso3, year]
+    columns:
+      - name: country_iso3
+        data_type: VARCHAR
+        description: >
+          ISO3 as the World Bank spells it, from `OGHIST.xlsx`. **Not tested
+          against `dim_country`**, and that is the point of the model: an economy
+          the dimension has since dropped still had an income group in the years
+          it existed, and the 2026 file lists 218 economies where the 2024 one
+          listed 223.
+        data_tests: [not_null]
+      - name: year
+        data_type: INTEGER
+        meta:
+          additivity: not_a_measure
+        description: >
+          The GNI data year the classification was computed from — the seed's
+          `data_year`, renamed to the conformed key so this joins to the rest of
+          the warehouse like every other country-year relation.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1987, max_value: 2030}
+      - name: fiscal_year
+        data_type: VARCHAR
+        description: >
+          The World Bank fiscal year the classification governed, `FY89`-style
+          and two ahead of `year`. Kept because the World Bank's own published
+          lists are indexed by it, so it is what makes this table checkable
+          against the source.
+        data_tests: [not_null]
+      - name: income_group
+        data_type: VARCHAR
+        description: The classification in force that year. Never null — an unclassified year has no row.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Low income", "Lower middle income", "Upper middle income", "High income"]
+      - name: income_group_code
+        data_type: VARCHAR
+        description: >
+          The publisher's own code — `L`, `LM`, `UM`, `H`. `LM*` appears on Yemen
+          in 1987-88 and is a footnote rather than a fifth group; the
+          transcription maps it to `LM` and stops on any other starred code.
+        data_tests: [not_null]
+      - name: current_income_group
+        data_type: VARCHAR
+        description: >
+          What `dim_country` says today, carried on every row so the comparison
+          needs no join. **Nullable on purpose**: the `country_overrides`
+          territories have no World Bank classification, and neither does an
+          economy the dimension no longer lists.
+      - name: differs_from_current
+        data_type: BOOLEAN
+        description: >
+          Whether that year's classification differs from today's. False rather
+          than null where `current_income_group` is unknown — a row whose current
+          group nobody knows is not a row that agrees, and a null here would drop
+          out of `where differs_from_current` without saying so.
+        data_tests: [not_null]
+
   - name: dim_currency
     config:
       contract:

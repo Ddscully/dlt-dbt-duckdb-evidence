@@ -2,7 +2,7 @@
 
 A Parquet file carries column names and types and nothing else. Nothing in it
 says that `co2_mt` may be summed while `renewables_share_pct` may not, or that
-`population` adds across countries and not across years — and 118 of the 228
+`population` adds across countries and not across years — and 118 of the 229
 numeric mart columns are non-additive, with 16 more semi_additive. So
 the warehouse states it: `meta: {additivity: …}` on the column, in the same ymls
 that carry the contract, and `publish/export_warehouse.py` carries the labels
@@ -10,7 +10,7 @@ into the release manifest so a consumer who cannot be paged has them too.
 
 **Every count in this docstring is a manifest count, which is the basis
 `numeric()` below returns and the only one anything here can check.** The ymls
-carry 192 literal `additivity:` lines; the manifest carries 228 labelled
+carry 193 literal `additivity:` lines; the manifest carries 229 labelled
 columns, because `fct_emissions_energy_v1` inherits 36 through `include: all`
 and declares one. Quoting the first while naming the second is how these figures
 went stale once already, so
