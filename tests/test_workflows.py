@@ -584,3 +584,59 @@ def test_both_ways_of_announcing_are_actually_in_use():
         (by_dependency if "where" in deps.split() else by_own_export).append(name)
     assert by_dependency, "no recipe depends on `where`"
     assert by_own_export, "no recipe exports its own WAREHOUSE_PATH any more"
+
+
+def _recipe(name: str) -> str:
+    """The body of one `just` recipe, from its header to the next blank-line gap.
+
+    Read as text rather than by running `just --evaluate`: the assertions here
+    are about what the recipe *says*, and a recipe that has stopped exporting
+    something evaluates perfectly well.
+    """
+    lines = (REPO_ROOT / "justfile").read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(f"{name}:"))
+    body: list[str] = []
+    for line in lines[start + 1 :]:
+        if line and not line.startswith((" ", "\t", "#")):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+def test_the_fixture_pipeline_isolates_every_piece_of_state_it_touches():
+    """`just test-pipeline` must not leave anything behind for the next real run.
+
+    Four overrides, and each one was added after the leak it prevents was
+    observed rather than predicted:
+
+    * `WAREHOUSE_PATH` — without it a fixture run overwrites the real warehouse
+      with the 17-country slice.
+    * `LAKEHOUSE_DIR` — dlt *lands* in the lakehouse, so without it the slice
+      merges into a landing zone holding a weather archive no rebuild affords.
+    * `DBT_RUN_RESULTS_PATH` (with `--target-path`) — dbt writes its artifacts
+      to `dbt/target/` wherever the build pointed, and `analytics.pipeline_runs`
+      records whatever that file last held. A fixture run therefore left its
+      timings there and the next `just pipeline-status` filed them in the real
+      warehouse's build history, as a build nothing could tell from a production
+      one.
+    * `DBT_MANIFEST_PATH` — the same directory, so the test inventory reads the
+      fixture build's manifest rather than a real one alongside it.
+
+    Asserted as a set rather than by reading the recipe's behaviour, because
+    each is invisible when missing: the fixture run still passes, and what
+    breaks is the *next* command against real data.
+    """
+    recipe = _recipe("test-pipeline")
+    for variable in (
+        "WAREHOUSE_PATH",
+        "LAKEHOUSE_DIR",
+        "DBT_RUN_RESULTS_PATH",
+        "DBT_MANIFEST_PATH",
+    ):
+        assert f"export {variable}=" in recipe, (
+            f"`just test-pipeline` no longer overrides {variable}, so a fixture run "
+            f"leaks that state into the next command that reads it"
+        )
+    # The env var alone is not enough: dbt has to be told to *write* there too,
+    # or the override points at a file the build never creates.
+    assert '--target-path "$DBT_TARGET_PATH"' in recipe

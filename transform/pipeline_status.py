@@ -1,15 +1,20 @@
 """Pipeline observability: turn the warehouse's own metadata into queryable tables.
 
-Writes three flat tables into `analytics`:
+Writes four flat tables into `analytics`:
 
 * `pipeline_sources` — one row per dlt landing table: rows, span, when it loaded.
 * `pipeline_tables`  — one row per table in every modelled layer: rows, year span.
 * `pipeline_tests`   — one row per dbt test: what it guards and how many rows
   are currently failing it.
+* `pipeline_runs`    — one row per node per dbt invocation: what ran, and how
+  long it took. The only one that accumulates.
 
-`reports/pages/pipeline.md` renders the three. They are a *snapshot* written at
-run time, not a history — nothing here accumulates across runs the way
-`history.snap_co2_estimates` does.
+`reports/pages/pipeline.md` renders them. The first three are a *snapshot*
+written at run time; `pipeline_runs` is the exception and is a history, because
+the invocation it describes is over and its artifact is overwritten by the next
+one. That makes it the third thing in this warehouse no rebuild can reproduce,
+alongside the dbt snapshots and the weather archive, and it is carried between
+releases by the same machinery — `publish/restore_history.CARRIED`.
 
 The queries live in `modern_data_stack.observability`; what's here is this
 project's landing tables and layer names. It must run **after** `dbt build`: it
@@ -27,7 +32,7 @@ import polars as pl
 from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, catalog_path, data_path
 from modern_data_stack import db, observability
 from modern_data_stack.ducklake import attach
-from modern_data_stack.paths import dbt_manifest_path, warehouse_path
+from modern_data_stack.paths import dbt_manifest_path, dbt_run_results_path, warehouse_path
 
 DUCKDB_PATH = warehouse_path()
 
@@ -35,6 +40,17 @@ DUCKDB_PATH = warehouse_path()
 # present after a `dbt build`/`dbt parse`. Absent, the test inventory falls back
 # to whatever audit tables exist — see `observability.manifest_tests`.
 MANIFEST_PATH = dbt_manifest_path()
+
+# dbt's per-node timings for the last invocation that executed anything. Same
+# gitignored directory as the manifest and the same tolerance for absence, but
+# it is read for a different purpose: the three tables below describe the
+# warehouse *now*, and this one accumulates what each build cost.
+RUN_RESULTS_PATH = dbt_run_results_path()
+
+# The one table here that is appended rather than replaced, and so the one this
+# project cannot rebuild. `publish/restore_history.CARRIED` carries it between
+# releases for that reason — see the rule there.
+RUNS_TABLE = "pipeline_runs"
 
 # The schemas that make up the modelled warehouse, in pipeline order. `raw` is
 # covered separately by `build_sources` (it has freshness, these don't) and
@@ -86,12 +102,29 @@ def build_tests(con: duckdb.DuckDBPyConnection, manifest_path: str = MANIFEST_PA
     return observability.build_tests(con, manifest_path)
 
 
+def build_runs(
+    manifest_path: str = MANIFEST_PATH, run_results_path: str = RUN_RESULTS_PATH
+) -> pl.DataFrame:
+    """One row per node in the last dbt invocation, with its timings.
+
+    Reads no database at all — both inputs are files dbt wrote — which is why it
+    takes no connection where the other three builders do.
+    """
+    return observability.build_runs(run_results_path, observability.manifest_nodes(manifest_path))
+
+
 def run(
     duckdb_path: str = DUCKDB_PATH,
     manifest_path: str = MANIFEST_PATH,
     lakehouse_dir: str = LAKEHOUSE_DIR,
+    run_results_path: str = RUN_RESULTS_PATH,
 ) -> dict[str, int]:
-    """Write the three `analytics.pipeline_*` tables. Returns rows written each."""
+    """Write the four `analytics.pipeline_*` tables. Returns rows written each.
+
+    Three are replaced and `pipeline_runs` is appended; the returned count for it
+    is rows *added*, which is 0 when the artifact has already been recorded and
+    is the honest answer rather than the table's height.
+    """
     con = duckdb.connect(duckdb_path)
     try:
         # `raw` is in the lakehouse, so the inventory cannot be built without
@@ -109,7 +142,15 @@ def run(
             "pipeline_tables": build_tables(con),
             "pipeline_tests": build_tests(con, manifest_path),
         }
-        return db.write_frames(con, frames, "analytics")
+        written = db.write_frames(con, frames, "analytics")
+        written[RUNS_TABLE] = db.append_frame(
+            con,
+            build_runs(manifest_path, run_results_path),
+            "analytics",
+            RUNS_TABLE,
+            key="invocation_id",
+        )
+        return written
     finally:
         con.close()
 

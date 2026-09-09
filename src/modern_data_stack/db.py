@@ -120,3 +120,56 @@ def write_frames(
         # silently rebound the same name.
         con.unregister("frame_df")
     return {name: frame.height for name, frame in frames.items()}
+
+
+def append_frame(
+    con: duckdb.DuckDBPyConnection,
+    frame: pl.DataFrame,
+    schema: str,
+    table: str,
+    key: str,
+) -> int:
+    """Append `frame` to `<schema>.<table>`, skipping keys already there.
+
+    The counterpart to `write_frames`, and the difference is the whole reason it
+    exists: everything else this project writes to `analytics` is a *snapshot*
+    that `create or replace` is right for, because it can be rebuilt from the
+    warehouse at any time. A run history cannot — the invocation it describes is
+    over, its artifact will be overwritten by the next one, and a replace would
+    silently reduce the table to whatever the last build did.
+
+    **Idempotent on `key`, not on the whole row**, because the operation being
+    protected is "the same artifact read twice". `just pipeline-status` can be
+    run repeatedly against one `run_results.json` — it is its own recipe, and
+    `just run` calls it after a build that a person may then re-run it against —
+    and every one of those reads yields identical rows. Deduplicating on the
+    full row would also work today and would silently start appending the moment
+    any column became non-deterministic; keying on the invocation says what is
+    actually meant.
+
+    `key` has no default for `write_frames`' reason: the caller knows what
+    identifies a batch and this module cannot.
+    """
+    con.sql(f"create schema if not exists {schema}")
+    qualified = qualify(None, schema, table)
+    con.register("append_df", frame)
+    try:
+        # `if not exists` rather than `or replace`: this is the branch that runs
+        # on a fresh warehouse, and on every later build the table is already
+        # there holding rows a replace would delete. `limit 0` so the create
+        # only fixes the shape — the insert below is what puts rows in, and
+        # having one path do both is how a first run double-counts.
+        con.sql(f"create table if not exists {qualified} as select * from append_df limit 0")
+        before = scalar(con, f"select count(*) from {qualified}")
+        # `by name` rather than positionally: the two column orders agree today,
+        # and a table restored from a *previous release* was written by an older
+        # version of this code. A positional insert against a reordered table
+        # succeeds and puts values in the wrong columns.
+        con.sql(f"""
+            insert into {qualified} by name
+            select * from append_df
+            where {key} not in (select {key} from {qualified})
+        """)
+        return scalar(con, f"select count(*) from {qualified}") - before
+    finally:
+        con.unregister("append_df")

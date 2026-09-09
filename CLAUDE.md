@@ -638,8 +638,11 @@ done in the skills; scanning this file would need that ambiguity resolved first.
   numbers) and `snap_grid_emission_factors` (the same for the Scope 2 factors,
   2015+). **The two tables here that no rebuild can reproduce** — see below
 - `analytics` — Polars output: `co2_intensity` and `retail_rfm`, plus
-  `pipeline_sources` / `pipeline_tables` / `pipeline_tests` (see *Pipeline
-  observability* below)
+  `pipeline_sources` / `pipeline_tables` / `pipeline_tests` / `pipeline_runs`
+  (see *Pipeline observability* below). **`pipeline_runs` is the third table a
+  rebuild cannot reproduce** and the only one of the four that accumulates —
+  it is appended per dbt invocation, and the artifact it reads holds only the
+  most recent one
 
 **"Mart" means the subject area, not the file, and this repo used the word both
 ways until 2026-09-01.** In the BI sense a mart is the view a department works
@@ -1212,10 +1215,11 @@ the point of the layer is that none of it is a comment.
 
 ## Pipeline observability (`transform/pipeline_status.py`)
 
-`just pipeline-status` writes three flat tables into `analytics` —
+`just pipeline-status` writes four flat tables into `analytics` —
 `pipeline_sources` (dlt load time, rows and year span per landing table),
-`pipeline_tables` (rows and year span per modelled table) and `pipeline_tests`
-(every dbt test, what it guards, and how many rows are currently failing it).
+`pipeline_tables` (rows and year span per modelled table), `pipeline_tests`
+(every dbt test, what it guards, and how many rows are currently failing it) and
+`pipeline_runs` (one row per node per dbt invocation, with its timings).
 `reports/pages/pipeline.md` renders them; the asset is
 `analytics/pipeline_status`, downstream of **both** Polars assets
 (`co2_intensity` and `retail_rfm`). It has to name both: it inventories
@@ -1256,6 +1260,42 @@ leave the other free to land after the inventory meant to count it.
   (36 tables today, not 39).
 - **It must run after `dbt build`** — it reads `dbt_test__audit` and the
   manifest, neither of which exists before one.
+- **`pipeline_runs` is the one table here that is a history, and the split is
+  `db.append_frame` against `db.write_frames`.** The other three are snapshots
+  that `create or replace` is right for, because they can be rebuilt from the
+  warehouse whenever. A run cannot: the invocation is over and
+  `dbt/target/run_results.json` holds only the most recent one. It is appended,
+  idempotent on `invocation_id` — `just pipeline-status` is its own recipe and
+  can be run twice against one build — and carried between releases by a
+  `Carry` rule in `publish/restore_history.CARRIED`.
+  - **It is the first `Carry` rule that has to name its tables**, which is the
+    case `Carry.tables`' docstring predicted. `history` is carried whole because
+    everything in it is unreproducible by definition; `analytics` holds five
+    relations that are rebuilt every run, so carrying the schema would restore a
+    previous release's `co2_intensity` over a fresh one *and* restore the three
+    `pipeline_*` snapshots describing the previous release's warehouse.
+  - **It carries no row counts, and that half of the idea was not buildable.**
+    `adapter_response.rows_affected` is present on **7 of 552** results and every
+    one is a seed — dbt-duckdb returns a bare `OK` for a model. Row counts per
+    table are already in `pipeline_tables`, measured from the warehouse rather
+    than from an artifact that does not know them.
+  - **`compile_time_s + execute_time_s` is not `execution_time_s`** — 57.86s
+    against 65.14s on the build this was written against, with neither phase
+    null on any node. dbt counts work outside the two phases it names, so both
+    are stored rather than one derived from the other.
+  - **The versioned-node trap bit a second time and was caught by reuse.** Both
+    `fct_emissions_energy` nodes appear in `run_results.json` as ids ending
+    `.v1`/`.v2`, and every *test* id ends in a hash — so splitting the id by hand
+    labels the model `v1` and the tests `d3e9382890`. `observability.
+    node_display_name` (renamed from `tested_model_name`, because the trap is a
+    property of unique ids rather than of tests) resolves both through the
+    manifest's `alias`.
+  - **Testing the resolver did not test the wiring, and the mutation proved
+    it.** Deleting `manifest_nodes(...)` from the call site left every
+    pytest case in that file green, because the direct test hands `build_runs` a `nodes` dict. The
+    manifest fixture carries the versioned model now so one assertion runs
+    through `pipeline_status.build_runs` — the same lesson as the asset checks
+    that read the wrong database for a week.
 
 ## The lakehouse (`lake/lakehouse.py`)
 
@@ -1350,8 +1390,10 @@ lot to a dated `data-YYYY-MM-DD` GitHub release.
   - **Each release carries the previous one's unreproducible tables forward**
     (`publish/restore_history.py`, `just restore-history`), which is what makes
     the published snapshot accumulate a real revision log instead of holding one
-    version per row forever, and what keeps the weather archive deepening instead
-    of resetting to a three-year cold start every month. `CARRIED` is a tuple of
+    version per row forever, keeps the weather archive deepening instead of
+    resetting to a three-year cold start every month, and — since
+    `analytics.pipeline_runs` joined them — makes the published build history
+    span releases rather than describing one run. `CARRIED` is a tuple of
     `Carry` rules and `irreplaceable_rows()` is the one count all three callers
     use — `just clean warehouse`'s gate, the restore step and the "did not
     shrink" verify — so a rule added there reaches all three at once. **Only "no
@@ -1769,6 +1811,22 @@ Gotchas:
   complete, a stale count reads as authoritative, an unregistered check simply
   never runs. What each guard found, and the mutation that proved each one
   actually looks, are the `repo-guards` skill.
+- **A fixture run leaks through any state it does not override, and
+  `dbt/target/` was the third one.** `just test-pipeline` isolates
+  `WAREHOUSE_PATH` and `LAKEHOUSE_DIR`, and dlt's pipeline name gets `_fixtures`
+  — but dbt writes `run_results.json` into `dbt/target/` wherever the build
+  pointed, so once `analytics.pipeline_runs` started reading it a fixture run
+  left the 17-country slice's timings sitting there and the next
+  `just pipeline-status` filed them in the **real** warehouse's build history.
+  Observed rather than predicted: a 63.4s build over 552 nodes landed beside a
+  real one and nothing distinguished them, because `relation_name` says
+  `"warehouse".…` either way — both files are called `warehouse.duckdb`. The
+  recipe exports `DBT_TARGET_PATH`, `DBT_MANIFEST_PATH` and
+  `DBT_RUN_RESULTS_PATH` and passes `--target-path`; the env var alone would
+  point at a file the build never writes.
+  `tests/test_workflows.py` holds all four, because each is invisible when
+  missing — the fixture run still passes and it is the *next* command against
+  real data that is wrong.
 - **`WAREHOUSE_PATH` overrides the DuckDB file** for `ingest`, `transform`, `lake`
   *and* dbt's profile. It must be **absolute**: dbt resolves its path from `dbt/`,
   the Python layers from the repo root. `just test-pipeline` sets it to a temp file

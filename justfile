@@ -203,9 +203,22 @@ test-pipeline:
     # 17-country slice into the real landing zone — whose snapshot lineage and
     # weather archive no rebuild reproduces.
     export LAKEHOUSE_DIR="$(dirname "$WAREHOUSE_PATH")/lakehouse"
+    # ...and dbt's artifacts, for the third instance of the same lesson. dbt
+    # writes `run_results.json` into `dbt/target/` wherever the build pointed,
+    # and `analytics.pipeline_runs` records whatever that file last held — so a
+    # fixture run left the 17-country slice's timings sitting there and the next
+    # `just pipeline-status` filed them in the *real* warehouse's build history,
+    # as a build indistinguishable from a production one (`relation_name` says
+    # `"warehouse".…` either way, because both files are named warehouse.duckdb).
+    # Measured, not feared: it happened once here before this line existed.
+    # Same shape as dlt's state being keyed on the pipeline name rather than the
+    # destination, which is why `build_pipeline()` appends `_fixtures`.
+    export DBT_TARGET_PATH="$(dirname "$WAREHOUSE_PATH")/dbt-target"
+    export DBT_MANIFEST_PATH="$DBT_TARGET_PATH/manifest.json"
+    export DBT_RUN_RESULTS_PATH="$DBT_TARGET_PATH/run_results.json"
     echo "fixture warehouse: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
-    cd dbt && uv run dbt deps && uv run dbt build && cd ..
+    cd dbt && uv run dbt deps && uv run dbt build --target-path "$DBT_TARGET_PATH" && cd ..
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status

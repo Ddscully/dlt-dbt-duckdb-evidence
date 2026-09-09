@@ -59,6 +59,13 @@ DUCKDB_PATH = warehouse_path()
 
 HISTORY_SCHEMA = "history"
 RAW_SCHEMA = "raw"
+ANALYTICS_SCHEMA = "analytics"
+
+# The run-history table and the two columns that prove a relation is one. Both
+# are needed: `invocation_id` alone would match anything keyed on a run, and
+# `execution_time_s` is what makes it a *timing* record rather than a log.
+RUNS_TABLE = "pipeline_runs"
+RUN_COLUMNS = ("invocation_id", "execution_time_s")
 
 # The published landing zone, as it is named in the release.
 # `publish/export_warehouse.LAKEHOUSE_ASSET` is the other half; a test holds them
@@ -97,14 +104,37 @@ LAKEHOUSE_ASSET = "lakehouse.tar.gz"
 # rows" check are the three places that say otherwise.
 CARRIED: tuple[Carry, ...] = (
     Carry(schema=HISTORY_SCHEMA, kind="dbt snapshot", required_columns=SCD2_COLUMNS),
+    # The run history, and the first rule here that has to *name* its tables.
+    # `analytics` holds five other relations and every one of them is rebuilt
+    # from the warehouse on each run — carrying the schema whole would restore a
+    # stale `co2_intensity` over a fresh one and, worse, would restore the three
+    # `pipeline_*` snapshots that describe the *previous* release's warehouse.
+    # That is the distinction `Carry.tables` exists for, and this is the case its
+    # docstring predicted: a schema that holds anything besides unreproducible
+    # state has to be an allowlist.
+    #
+    # Unreproducible for a different reason from the other two. A snapshot cannot
+    # be rebuilt because the revision it recorded is gone, and the weather
+    # archive because Open-Meteo will not serve it again within a day's budget.
+    # A run cannot be rebuilt because it is an *event*: the invocation is over,
+    # and `dbt/target/run_results.json` holds only the most recent one.
+    Carry(
+        schema=ANALYTICS_SCHEMA,
+        kind="dbt run history",
+        required_columns=RUN_COLUMNS,
+        tables=(RUNS_TABLE,),
+    ),
 )
 
 __all__ = [
+    "ANALYTICS_SCHEMA",
     "CARRIED",
     "DUCKDB_PATH",
     "HISTORY_SCHEMA",
     "LAKEHOUSE_ASSET",
     "RAW_SCHEMA",
+    "RUNS_TABLE",
+    "RUN_COLUMNS",
     "irreplaceable_rows",
     "main",
     "run",

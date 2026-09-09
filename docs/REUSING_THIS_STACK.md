@@ -284,7 +284,59 @@ compares two snapshots instead.
 The stack itself is less separable: Dagster is additive (`just run` still works
 without it), but dlt, DuckDB, dbt and Evidence each assume the previous one.
 
-## 8. What doesn't transfer
+## 8. Where this shape stops being the right one
+
+Every number below is measured on this warehouse today, not estimated. The
+dollar figure for running it is zero — it is a file on a laptop — so the useful
+question is not what it costs but which layer gives first, and the answer is not
+the one people reach for.
+
+**What it holds now.** 3.7M rows across the modelled layers in a 298 MB DuckDB
+file, plus a 72 MB DuckLake landing zone. The largest relation is
+`fct_retail_order_line` at 1,067,371 rows. A full `dbt build` — 552 nodes, 32
+models, 465 data tests, 36 unit tests — takes **24.9 s** on four threads.
+`analytics.pipeline_runs` records that per build, so the trend is a query rather
+than a memory.
+
+**The single-writer lock is not a scale limit and it binds already.** DuckDB
+takes one writer *xor* many readers, so a build and a read cannot overlap in
+either direction — measured across processes on the pinned 1.5.5, and written up
+in the `querying-the-warehouse` skill. That is a concurrency ceiling at any
+volume: it is why `just serve` has to stop the graph before a rebuild, and it is
+what a second concurrent consumer runs into on day one with 43k rows. **It is
+the first thing to hurt and no amount of data makes it worse.** Reaching for a
+server-based warehouse for *this* reason is legitimate at any size.
+
+**The Polars step is the first true volume limit, and it is bounded by the mart
+rather than by the source.** Both transforms materialise a whole relation:
+`transform/co2_intensity.py` does `select * from marts.fct_emissions_energy` into
+a frame, `transform/retail_rfm.py` the same on `dim_retail_customer`. Those are
+43,138 and 5,881 rows today and the step peaks at ~250-290 MB resident, nearly
+all of it interpreter and library rather than data. The thing that breaks it is a
+*mart* outgrowing memory, not a landing table — dbt has already aggregated by
+then, which is why 1.07M invoice lines never reach Polars. The fix when it comes
+is streaming (`pl.scan_*` / `LazyFrame`) or pushing the step back into SQL, and
+it is a rewrite of two files rather than of the architecture.
+
+**DuckDB on one file is not the thing that breaks.** It handles far more than
+this on a single machine, and the honest limit is not row count but the fact that
+one file is one machine: no horizontal scale, no concurrent writers, and a
+restore is a file copy. If the answer to "who else writes to this" ever stops
+being "nobody", that is the migration signal — before any row count is.
+
+**The publication boundary has a ceiling nobody has hit.** A release ships the
+whole DuckDB file plus a Parquet per table, 222 MB today, as GitHub release
+assets. That is comfortable and would stop being so an order of magnitude up;
+`publish/export_warehouse.py` already guards the storage *format* from both the
+artifact and the toolchain side, and would need a size gate too.
+
+**What to do about it, in order.** Nothing, until a second writer exists — then
+a real warehouse, and `dbt/profiles.yml` grows the targets §3 says it should.
+The layer that changes is the profile and the two Polars files; the models, the
+tests, the contracts, the exposures and the release all port unchanged, which is
+the argument for the shape rather than for the file.
+
+## 9. What doesn't transfer
 
 - **The gotchas that are about the sources**, and there are a lot of them here:
   padded region names, ISO2 exceptions, per-metric coverage curves, which GDP

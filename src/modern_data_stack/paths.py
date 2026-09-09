@@ -128,3 +128,16 @@ def dbt_manifest_path() -> str:
     assume a build has happened.
     """
     return os.environ.get("DBT_MANIFEST_PATH") or str(dbt_dir() / "target" / "manifest.json")
+
+
+def dbt_run_results_path() -> str:
+    """dbt's run results, written by every invocation that executes nodes.
+
+    Gitignored like the manifest, and staler in a way the manifest is not: a
+    `dbt test` overwrites what a `dbt build` left, and a bare `dbt parse` leaves
+    it alone entirely (measured — the file's md5 is unchanged across one). So an
+    absent file means no build has ever run here, and a *present* one only
+    describes whichever command last executed nodes. `observability.build_runs`
+    carries `dbt_command` on every row for that reason.
+    """
+    return os.environ.get("DBT_RUN_RESULTS_PATH") or str(dbt_dir() / "target" / "run_results.json")
