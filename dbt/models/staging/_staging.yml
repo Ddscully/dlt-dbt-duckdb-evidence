@@ -409,7 +409,8 @@ models:
       # warehouse copy with the two vars swapped: heating totals rose 89% and
       # cooling totals 336% — a comprehensively wrong warehouse — and
       # `max(cdd_total - hdd_total)` moved from 637.5 to 975.2, still five times
-      # under the 5,000 bound. **All 55 data tests on the two models passed.** A
+      # under the 5,000 bound. **`stg_weather_daily`'s 27 data tests and
+      # `fct_country_weather_year`'s 28 data tests all passed.** A
       # ceiling on the difference cannot see it because a swap moves *both*
       # totals the same way; the annual grain has already summed away the thing
       # that breaks. This expression fails on 52,253 days of the same mutation.
@@ -610,8 +611,13 @@ models:
         data_tests: [not_null]
       - name: region
         description: >
-          Trimmed World Bank region. Never null here; the mart has one null
-          region (Antarctica), which arrives from OWID and has no dimension row.
+          Trimmed World Bank region. Never null here, and downstream the model
+          has to be named rather than "the mart": `fct_co2_estimate_versions`
+          carries 35 null-region rows, all Antarctica, because it is built off
+          the snapshot and not off the spine. `fct_emissions_energy` had them
+          too until `dim_country` shipped — the spine's inner join drops a code
+          the dimension does not carry, so there the count is 0, and this
+          sentence went on naming it for the eight days after.
         data_tests: [not_null]
       - name: income_group
         description: >

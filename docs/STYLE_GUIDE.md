@@ -41,7 +41,7 @@ down and applied consistently.
 | dbt Labs says | We do | Why |
 |---|---|---|
 | Lines wrap at 80 chars | 120 (`max_line_length` in `.sqlfluff`) | The wide mart's column list and the ISO3/year join predicates read worse when folded at 80. |
-| Avoid table aliases in join conditions | Short aliases allowed in marts | `fct_emissions_energy` joins five CTEs on the same two keys; `c.year = e.year` is more scannable than the full CTE name repeated ten times. Staging models select from a single source and take no alias at all. |
+| Avoid table aliases in join conditions | Short aliases allowed in marts, and in the four staging models that join or union | `fct_emissions_energy` joins five CTEs on the same two keys; `c.year = e.year` is more scannable than the full CTE name repeated ten times. This row used to end "staging models select from a single source and take no alias at all", which was true when it was written and is not now: `stg_country`, `stg_retail_lines`, `stg_weather_daily` and `stg_eu_electricity_prices_semiannual` all take one — see the structure deviations below. |
 | `group by 1, 2` (positional) | **[lint]** Name the columns: `group by country_iso3, year` | Both staging models that aggregate already spell them out, and the grain is the whole contract here — writing it in the `group by` makes a regression visible in the diff. |
 | Sort/dist keys in-model | N/A | DuckDB has neither. Materialization lives in `dbt_project.yml` per directory. |
 
@@ -58,6 +58,30 @@ down and applied consistently.
 - **[convention]** A CTE duplicated across two models becomes its own model.
 - **[convention]** Open the file with a `--` comment stating what the model is
   and its grain. Both existing marts do this; keep it up.
+
+### Deliberate deviations from dbt's structure guide
+
+The table above records only *formatting* departures, which left the structural
+ones reading as oversights. dbt Labs'
+[Staging: preparing our atomic building blocks](https://docs.getdbt.com/best-practices/how-we-structure/2-staging)
+sets five rules for the staging layer, and this project breaks all five on
+purpose. Counts are of the nine staging models, measured rather than recalled.
+
+| dbt Labs says | We do | Why |
+|---|---|---|
+| ❌ Joins in staging | **3 of 9** join — `stg_retail_lines`, `stg_weather_daily`, `stg_eu_electricity_prices_semiannual` | The same page's DRY rule says to push an always-wanted transformation as far upstream as possible, and here the two rules conflict. Each of these resolves a key every consumer would otherwise redo: the `retail_country_map` seed gives four downstream models a conformed `country_iso3`, and the other two read capital coordinates and the ISO2→ISO3 map out of `stg_country`. Those two are also the *only* reason `stg_country` is `protected` rather than `private`, so the departure is already visible in the access rules. |
+| ❌ Aggregations in staging | **2 of 9** aggregate — `stg_wdi`, `stg_eu_electricity_prices` | `stg_wdi` pivots 192,390 long rows over 11 indicators into 17,160 country-years; without it the model's grain is `(indicator, country, year)` and every consumer repeats the pivot. `stg_eu_electricity_prices` averages 1,373 semi-annual rows into 701 annual. dbt's stated cost — losing access to source data you will want later — does not apply: the long form is still `lakehouse.raw.wb_wdi`, and the semi-annual grain ships as its own model *and* its own mart. |
+| One staging model per source table | **8 of 9** call `source()` exactly once; the ninth reads a staging peer | The rule holds wherever a source is involved. `stg_eu_electricity_prices` is the exception and is a derived convenience — the annual average exists to join prices to the country-year grain, and it carries `n_half_years` so a reader can tell a year from half a year. |
+| One source per source system | **One `raw` source, 8 tables**, six publishers | `raw` is one dlt landing schema in one DuckLake catalog, not six systems' schemas. Splitting the declaration would describe a topology the warehouse does not have. |
+| `stg_[source]__[entity]s`, plural | `stg_<entity>`, plurality following the noun | The double underscore exists to disambiguate publisher from entity; no two of the six publishers here supply the same entity, so it would add a word without removing an ambiguity. Plurality follows the noun instead of the rule — `stg_retail_lines` and `stg_fx_rates` are plural, `stg_co2` and `stg_energy` are mass nouns. |
+
+Not on that list, because it is a live judgement rather than a settled decision:
+**`staging/` is flat**, where the guide wants a subdirectory per source system.
+`marts/` was split into four folders because `_groups.yml` already declared four
+domains with enforced `access` between them, so the folders matched a boundary
+dbt itself checks. Staging has no equivalent axis — a publisher is not a group
+here — and nine models in one directory has not yet cost anything. A seventh
+publisher is the point to re-ask.
 
 ## Naming
 

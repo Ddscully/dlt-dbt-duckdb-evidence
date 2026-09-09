@@ -239,6 +239,16 @@ must run from the `dbt/` directory (that's where `profiles.yml` lives).
 SQL and model conventions live in [`docs/STYLE_GUIDE.md`](docs/STYLE_GUIDE.md) —
 naming, grain, import CTEs, column ordering, and where this project deliberately
 departs from [dbt Labs' style guide](https://docs.getdbt.com/best-practices/how-we-style/0-how-we-style-our-dbt-projects).
+It carries **two** deviation tables now: the formatting one, and a structural one
+against [how dbt Labs structure a staging layer](https://docs.getdbt.com/best-practices/how-we-structure/2-staging),
+whose five rules this project breaks on all five counts — joins, aggregations,
+one model per source table, one source per system, and the
+`stg_[source]__[entity]s` name. Each departure was already reasoned about
+somewhere in the tree (the `protected` overrides on `stg_country` are the same
+decision seen from the access side) and none of them was written down as a
+departure, which is what makes a deliberate choice read as an oversight. Writing
+the table also found the formatting one had gone stale: it asserted staging
+models "take no alias at all", and four of the nine do.
 The formatting half of it is enforced by [`.sqlfluff`](.sqlfluff); run
 `just lint` (pre-commit runs the same check — literally: the hook is a `local`
 one whose entry is `just lint`).
@@ -1134,6 +1144,20 @@ the point of the layer is that none of it is a comment.
     old one appended) so the two agree on the order dbt enforces.
   - **`deprecation_date: 2026-11-01`** is carried in the release notes as well as
     the yml, because the consumers who need it never see a dbt log.
+  - **The date is enforced now, and until 2026-09-09 it was a promise five
+    documents made and nothing kept.** dbt's own behaviour on the day it passes
+    is a `[WARNING]` and **exit 0** — measured, by setting the date to 2020 and
+    running `dbt parse` — so `release-data.yml`'s monthly run would have
+    published a compatibility view past its own advertised removal date with the
+    reason in a log nobody reads. `dbt_project.yml`'s `flags.warn_error_options`
+    promotes `DeprecatedModel` (the deadline, fired at *parse*, on the producer)
+    and `DeprecatedReference` (a `ref` to a model whose date has gone) to
+    errors; the same mutation then exits 2 out of `dbt parse`, which is
+    `ci.yml`'s cheapest step. `UpcomingReferenceDeprecation` is deliberately
+    left a warning — it fires on a ref to a model whose date is still in the
+    future, which is exactly what a migration window is *for*. Not `error: all`,
+    for the reason dbt's own docs give: a warning added in a later dbt version
+    would fail the monthly release for a reason nobody chose.
   - **Versioning a model changes its Dagster asset key, silently.**
     `default_asset_key_fn` keys an ordinary model on `[configured_schema, name]`
     (`marts/fct_emissions_energy`) but a versioned one on `[alias]` alone — so
@@ -1513,11 +1537,41 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 Two tiers, and the split is the point — see [`tests/README.md`](tests/README.md).
 
 - `just test` — mocked-payload unit tests over the ingest/transform logic. No
-  network, no warehouse, ~14s for the whole suite. **It said ~1s from the
-  initial commit to 2026-08-26**, which was true of a much smaller suite and
+  network, no warehouse, **~42s** for the whole suite (measured 2026-09-09,
+  three runs within 0.1s of each other; it is wall clock on one machine, so
+  treat it as an order of magnitude rather than a constant). **It said ~1s from
+  the initial commit to 2026-08-26**, which was true of a much smaller suite and
   drifted by a factor of fourteen with nothing to notice:
   `tests/test_documented_counts.py` guards counts in front of test-nouns, and a
   *timing* claim has no such guard. Re-measure before quoting one.
+  - **That instruction was written on 2026-08-26 and the number it fixed was
+    stale again fourteen days later** — 14s against a measured 42s, a second
+    factor of three, in the bullet that exists to warn about the first. The
+    lesson is not "re-measure harder": a wall-clock figure in prose has no
+    authority to check it against, and unlike a count there is nothing a test
+    could compare it to that would not be flaky on a different machine. What is
+    worth keeping is the *vintage* — a number with a date beside it is one a
+    reader can discount, and one without a date reads as current forever.
+  - **And the 2026-08-26 correction had already lost a site.** The claim lives
+    in four files; that fix updated `README.md`, `CLAUDE.md` and
+    `tests/README.md` and left `.github/CONTRIBUTING.md` on **~1s** — a figure
+    forty-two times out, on the page a first-time contributor reads. Same shape
+    as the four Antarctica claims in the ymls, three corrected and one missed,
+    and as `docs/STYLE_GUIDE.md`'s "staging takes no alias at all". A claim
+    restated in N places loses one every time it is corrected by hand.
+  - `just test-pipeline` drifted the same way and less far: **~42s** against a
+    documented ~30s, across `README.md`, `.github/CONTRIBUTING.md` **and**
+    `tests/README.md` — and correcting it caught the first two and missed the
+    third until a `grep` for the old figure was run afterwards. That grep is the
+    only reliable step here: fix the sites you know about, then search for the
+    *old* number and expect a hit.
+  - **The one timing claim that held is the one measuring dbt rather than
+    pytest.** `just dbt-unit-test` is documented at 4.8s of dbt's own time and
+    ~10.5s wall, and measured 4.95s / 10.85s — because it times a fixed 36 unit
+    tests through dbt's own reporting, not a suite that grows. The coverage
+    *percentages* held for the same reason (67.1% branch / 78.5% statement
+    against a documented 67/78): they move with the code proportionally. It is
+    specifically the pytest wall clock that is a liability.
   - **Writing that bullet tripped the counts guard, which is worth recording.**
     The first draft said "over 242 &lt;test-noun&gt;" — a *pytest* figure, in a
     document where that noun almost always means a dbt test, so the scanner read
@@ -1526,8 +1580,10 @@ Two tiers, and the split is the point — see [`tests/README.md`](tests/README.m
     phrase was genuinely ambiguous to a human reader too. Phrase a pytest count
     as "the whole suite" or "pytest cases", never as a bare number in front of
     that noun.
-- `just coverage` — line and branch coverage of that tier, ~18s, at 67% branch /
-  78% statement today. Reports and gates nothing (no `fail_under`, not in CI,
+- `just coverage` — line and branch coverage of that tier, **~53s** (2026-09-09;
+  documented as ~18s until then, drifting with `just test` above), at 67% branch
+  / 78% statement today — 67.1% and 78.5% measured, so those two held while the
+  seconds beside them tripled. Reports and gates nothing (no `fail_under`, not in CI,
   no plugin loaded into `addopts`) for ty's reason. Read it with the two caveats
   in `[tool.coverage.report]`: it measures the mocked tier only, so the
   transform and lake layers read low while `just test-pipeline` exercises them
@@ -1662,6 +1718,49 @@ Gotchas:
   the review's own source never claimed. Nothing was stale and nothing was
   fabricated; the number changed meaning when it changed sentence, and a scanner
   that checks totals against the manifest cannot see that at all.
+- **A yml `description:` is prose, and until 2026-09-09 the counts guard did not
+  read any of it.** `tests/test_documented_counts.py`'s `SCANNED` was `*.md`
+  plus two hand-named `_unit_tests.yml` paths, so the four marts group ymls,
+  `_staging.yml`, `_intermediate.yml` and `_sources.yml` — **202 column
+  descriptions** — went unchecked, and so did
+  `dbt/models/intermediate/_unit_tests.yml`, which arrived with the intermediate
+  layer in `b006e1e` and joined a list of two that nobody remembered to extend.
+  The pathspec is `dbt/models/**/_*.yml` now, which is 61 files against 53 and
+  63 claims against 59.
+  - **It found one false claim, and the interesting half is that the claim had
+    *moved* rather than expired.** `stg_country.region` said "the mart has one
+    null region (Antarctica), which arrives from OWID and has no dimension row".
+    Measured: `fct_emissions_energy`, `dim_country_year` and `dim_country` hold
+    **zero** null regions and no `ATA` row at all, because the spine's inner
+    join drops a code the dimension does not carry. But
+    `fct_co2_estimate_versions` still carries all **35** of them — it is built
+    off `snap_co2_estimates` rather than off the spine, and a *history* cannot
+    drop a row to tidy a join key. Three of the four Antarctica claims in the
+    tree were corrected when `dim_country` shipped; this one was missed, and the
+    correct sentence names the model rather than "the mart".
+  - **Writing the replacement reproduced the same defect one draft later.** It
+    said `fct_co2_estimate_versions` was "the only place in the warehouse where
+    region is null", which `fct_cbam_exposure`'s **260** falsify — every one the
+    annex's fallback row, which carries no `country_iso3` either, so the true
+    claim is the only place a row that *names a country* has no region. Both
+    versions read equally confidently.
+  - **What it does not buy is larger than what it does.** The scanners read a
+    *test* or *mart* noun; the other **154** numeric claims in those
+    descriptions (row counts, shares, distinct values) stay unguarded. Nine were
+    spot-checked against the warehouse and all nine held — 11,665 CBAM rows over
+    260 goods and 121 countries, 871 unresolved retail labels, 5,881 customers,
+    265,441 fixings — so this is one stale sentence, not rot. Guarding them
+    needs a warehouse holding the full data, which CI has not got.
+  - **Extending the scan cost a rewrite, and refusing the cheaper fix is the
+    point.** `_staging.yml` and `_country_stats.yml` both recorded the
+    degree-day mutation against one combined figure for the two weather
+    models — 27 + 28 = 55, correct, and a number no single model has. Teaching
+    the scanner to sum over a pair would make every such sum legal, which is
+    exactly the widening `model_counts`' docstring already argues against;
+    naming each model beside its own number costs one clause and leaves both
+    halves checkable. (Quoting the old phrasing here failed the guard on the
+    spot — the same trap the mart-count note above records: it cannot tell a
+    quotation from an assertion and should not try.)
 - **Every hand-maintained list here is asserted against the authority it
   copies** — `SOURCE_TABLES`, `RAW_DESCRIPTIONS`, `WB_WDI_INDICATORS`,
   `ATTRIBUTION`, `pages.yml`'s path allowlist, the seven `@dg.asset_check`

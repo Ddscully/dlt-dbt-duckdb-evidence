@@ -2,7 +2,7 @@
 
 Two tiers, deliberately separated.
 
-## `just test` — unit tests, mocked, ~14s
+## `just test` — unit tests, mocked, ~42s
 
 `tests/test_*.py`. Every HTTP call is mocked; nothing touches the network or the
 warehouse. They cover the parts of the pipeline that have actually broken:
@@ -15,7 +15,7 @@ warehouse. They cover the parts of the pipeline that have actually broken:
 | `test_fixtures.py` | that every URL the pipeline can build resolves to a fixture that exists |
 | `test_exposures.py` | that the exposures in `dbt/models/_exposures.yml` still describe what the Evidence pages read, and that the release exposure names every mart — a stale exposure is invisible, since `dbt build` stays green and `dbt ls --select +exposure:*` keeps answering |
 
-## `just test-pipeline` — integration against fixtures, ~30s
+## `just test-pipeline` — integration against fixtures, ~42s
 
 Runs the real `ingest → dbt build → transform` into a throwaway DuckDB file with
 `INGEST_FIXTURES=1`, so dlt's schema inference, both of its load calls (replace

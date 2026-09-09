@@ -104,16 +104,42 @@ def as_int(token: str) -> int:
 # figure planted in a brand-new `docs/` page went uncaught until the file was
 # staged. Nothing here can fix that (a glob would drag the transcripts back in);
 # stage the file, then trust the run.
+#
+# **The yml pathspec is a wildcard because the hand-written version had already
+# gone quiet** (still `git ls-files`, per the paragraph above — what changed is
+# the pattern handed to it, not the listing). It named `_unit_tests.yml` under
+# staging and under marts;
+# `dbt/models/intermediate/_unit_tests.yml` arrived with the intermediate layer
+# in `b006e1e` and joined neither, so a count written there would have been
+# checked by nothing — the same defect this file exists to catch, in this file's
+# own configuration.
+#
+# The model ymls are the larger gap and had never been scanned at all. They hold
+# 202 column descriptions, and `stg_country.region`'s said "the mart has one
+# null region (Antarctica)" for the eight days after `dim_country` closed that
+# at the spine's inner join: measurably false (0 null regions in
+# `fct_emissions_energy`), green everywhere, and three of the four Antarctica
+# claims in the tree had been corrected while this one was missed. The claim had
+# also *moved* rather than expired — `fct_co2_estimate_versions` is built off
+# the snapshot rather than the spine and still carries all 35 of them.
+#
+# **What this does and does not buy**, because the gap it leaves is bigger than
+# the one it closes. The scanners here read a *test* or *mart* noun, so pointing
+# them at these files catches a count of either written beside a model. The
+# other 154 numeric claims in those descriptions — row counts, shares, distinct
+# values — stay unguarded: nine were spot-checked against the warehouse when
+# this was written and all nine held, but checking them needs a built warehouse
+# holding the full data, which CI does not have.
 SCANNED = (
     "*.md",
-    "dbt/models/staging/_unit_tests.yml",
-    "dbt/models/marts/_unit_tests.yml",
+    "dbt/models/**/_*.yml",
 )
 
 
 # The additivity figures are also written into two source modules, and both were
-# stale. `SCANNED` is markdown plus two ymls because that is where *test* counts
-# are written; a docstring is prose too, and the scanner has to be pointed at it.
+# stale. `SCANNED` is markdown plus the model ymls because that is where *test*
+# counts are written; a docstring is prose too, and the scanner has to be
+# pointed at it.
 ADDITIVITY_PROSE = (
     "*.md",
     "tests/test_additivity.py",
@@ -163,6 +189,16 @@ CITED_MODELS = (
     "fct_retail_customer_cohorts",
     "dim_retail_customer",
     "stg_wdi",
+    # The two weather models arrived with the yml scan, and the prose that
+    # brought them had to be rewritten to get here. Both `_staging.yml` and
+    # `_country_stats.yml` recorded the degree-day mutation as "all 55 data
+    # tests on the two models" — 27 + 28, correct today, and a total no single
+    # model has. Teaching the scanner to sum over a pair would have made every
+    # such sum legal, which is the widening `model_counts` below argues against;
+    # naming each model beside its own number costs one clause and leaves both
+    # halves checkable.
+    "stg_weather_daily",
+    "fct_country_weather_year",
 )
 
 

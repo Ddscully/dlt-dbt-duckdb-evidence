@@ -184,3 +184,11 @@ compatibility view until **2026-11-01**, because the people reading the publishe
 Parquet files can't be paged. Nothing in the repo refs that model and the release
 ships it, which is what makes it the right one to version: a rename is free
 in-repo and breaking outside it.
+
+That date is enforced rather than announced. dbt's own behaviour when a
+deprecation date passes is a warning and a zero exit, so the monthly release
+would have gone on publishing v1 with the reason in a log nobody reads;
+`dbt_project.yml` promotes `DeprecatedModel` and `DeprecatedReference` to errors
+through `flags.warn_error_options`, which from 2026-11-01 fails `dbt parse` —
+run in CI's Dagster-definitions step, before anything is built or published.
+Removing v1 is then a change somebody makes on purpose.

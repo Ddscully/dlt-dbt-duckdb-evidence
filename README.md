@@ -191,9 +191,9 @@ No `just`? The recipes map to plain commands; see the [`justfile`](./justfile).
 ## Tests
 
 ```bash
-just test           # pytest: mocked payloads, no network, ~14s
+just test           # pytest: mocked payloads, no network, ~42s
 just coverage       # the same, with line + branch coverage; gates nothing
-just test-pipeline  # the whole pipeline against recorded fixtures, ~30s
+just test-pipeline  # the whole pipeline against recorded fixtures, ~42s
 ```
 
 CI on a pull request runs both, plus the Dagster asset graph and the asset
