@@ -291,44 +291,38 @@ dollar figure for running it is zero — it is a file on a laptop — so the use
 question is not what it costs but which layer gives first, and the answer is not
 the one people reach for.
 
-**What it holds now.** 3.7M rows across the modelled layers in a 289 MB DuckDB
-file, plus a 72 MB DuckLake landing zone. The largest relation is
+**What it holds now**, measured 2026-09-09 alongside the figures in
+`FOR_REVIEWERS.md` §3, which this agrees with by construction. 3.7M rows across
+the modelled layers in a 282 MB DuckDB file, plus a 111 MiB DuckLake landing
+zone — that one grows about 39 MiB per full ingest and nothing expires the
+snapshots, which is its own answer to what a run costs. The largest relation is
 `fct_retail_order_line` at 1,067,371 rows. A full `dbt build` — 571 nodes, 33
-models, 482 data tests, 36 unit tests — takes **24.1 s** on four threads.
+models, 482 data tests, 36 unit tests — takes **24.5 s** of dbt's own time on
+four threads.
 `analytics.pipeline_runs` records that per build, so the trend is a query rather
 than a memory.
 
-**The single-writer lock is not a scale limit and it binds already.** DuckDB
-takes one writer *xor* many readers, so a build and a read cannot overlap in
-either direction — measured across processes on the pinned 1.5.5, and written up
-in the `querying-the-warehouse` skill. That is a concurrency ceiling at any
-volume: it is why `just serve` has to stop the graph before a rebuild, and it is
-what a second concurrent consumer runs into on day one with 43k rows. **It is
-the first thing to hurt and no amount of data makes it worse.** Reaching for a
-server-based warehouse for *this* reason is legitimate at any size.
+**Which layer gives first is answered in full by
+[`docs/FOR_REVIEWERS.md` §4](FOR_REVIEWERS.md#4-what-breaks-at-1000), and this
+section deliberately does not restate it.** That one is written for someone
+assessing this repo and carries the ordered failure list, the `quack` extension
+measurement and the per-model materialisation argument. What belongs *here* is
+the porting decision the ordering implies, which is shorter than the mechanism:
 
-**The Polars step is the first true volume limit, and it is bounded by the mart
-rather than by the source.** Both transforms materialise a whole relation:
-`transform/co2_intensity.py` does `select * from marts.fct_emissions_energy` into
-a frame, `transform/retail_rfm.py` the same on `dim_retail_customer`. Those are
-43,138 and 5,881 rows today and the step peaks at ~250-290 MB resident, nearly
-all of it interpreter and library rather than data. The thing that breaks it is a
-*mart* outgrowing memory, not a landing table — dbt has already aggregated by
-then, which is why 1.07M invoice lines never reach Polars. The fix when it comes
-is streaming (`pl.scan_*` / `LazyFrame`) or pushing the step back into SQL, and
-it is a rewrite of two files rather than of the architecture.
-
-**DuckDB on one file is not the thing that breaks.** It handles far more than
-this on a single machine, and the honest limit is not row count but the fact that
-one file is one machine: no horizontal scale, no concurrent writers, and a
-restore is a file copy. If the answer to "who else writes to this" ever stops
-being "nobody", that is the migration signal — before any row count is.
-
-**The publication boundary has a ceiling nobody has hit.** A release ships the
-whole DuckDB file plus a Parquet per table, 225 MB today, as GitHub release
-assets. That is comfortable and would stop being so an order of magnitude up;
-`publish/export_warehouse.py` already guards the storage *format* from both the
-artifact and the toolchain side, and would need a size gate too.
+- **The single-writer lock is the one to plan around, and it is not a scale
+  limit.** One writer xor many readers binds at 43k rows exactly as hard as at
+  43M. If your project has a second writer — a second pipeline, a second team, a
+  reverse-ETL job — you need a server-based warehouse on day one, and no row
+  count will tell you that.
+- **The first volume limit is whatever materialises a whole relation in
+  memory**, which here is the two Polars transforms. Note *which* relation: they
+  read a mart, not a landing table, so they are bounded by what dbt already
+  aggregated — 43,138 and 5,881 rows against a 1.07M-row source. Porting this
+  shape, the equivalent question is what your heavy-transform layer reads, not
+  how much you ingest.
+- **The file itself is not the constraint.** DuckDB handles far more than this
+  on one machine; what one file cannot do is have two writers, scale
+  horizontally, or be restored by anything but a copy.
 
 **What to do about it, in order.** Nothing, until a second writer exists — then
 a real warehouse, and `dbt/profiles.yml` grows the targets §3 says it should.

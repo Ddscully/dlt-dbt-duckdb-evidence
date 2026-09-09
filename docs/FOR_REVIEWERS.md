@@ -116,54 +116,91 @@ then checks, which is why it's a `just` recipe rather than a workflow step.
 
 ## 3. What does a run cost, and how long does it take?
 
-Measured on this machine against the live APIs, per stage:
+Measured on this machine against the live APIs, per stage, on 2026-09-09:
 
 | Stage | Time | Notes |
 |-------|------|-------|
-| `just ingest` | **61.0 s** | seven sources; 55.2 s of it with the retail workbook already cached |
-| `just dbt-build` | **23.5 s** | 542 built nodes: 32 models, 2 snapshots, 7 seeds, 482 data tests and 36 unit tests (dbt's own total of 552 adds the 10 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
-| `just transform` | **2.1 s** | two Polars models |
-| `just pipeline-status` | **1.4 s** | observability tables |
-| `just lake` | **3.2 s** | 793 Parquet files, ~60 MB |
-| **total** | **≈ 94 s** | ingest is 65% of it, and most of *that* is still network |
+| `just ingest` | **29.6 s** | seven sources, with the 45 MB retail workbook already cached — its download and parse add ~12 s to a cold run |
+| `just dbt-build` | **31.4 s** wall, **24.5 s** of dbt's own | 561 built nodes: 33 models, 2 snapshots, 8 seeds, 482 data tests and 36 unit tests (dbt's own total of 571 adds the 10 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
+| `just transform` | **1.8 s** | two Polars models |
+| `just pipeline-status` | **2.5 s** | observability tables |
+| **total** (`just run`) | **≈ 65 s** | ingest is 45% of it, and most of *that* is still network |
 
-Artifacts: a 288 MB DuckDB file, a 60 MB Parquet archive, a 94 MB Evidence site.
+Artifacts: a 282 MB DuckDB file, a 111 MiB DuckLake landing zone and a 165 MiB
+Evidence site.
 
-Ingest stopped being purely network-bound when the retail source landed, and the
-split is worth measuring: of the 61 s, the 45 MB workbook costs ~5.8 s to
-download and ~5.8 s to parse into 1.07M rows. It is the first source here whose
-cost is CPU rather than latency, which is also why its download is cached: 25
-Dagster partitions over one static file must not mean 25 fetches.
-Warehouse contents: 344,242 staging rows, 808,787 mart rows (43,138 of them the
-wide fact and 646k the three FX tables), 9,821 snapshot rows across the two
-`history` tables.
+**Every figure in that table was stale, and one row described a stage that no
+longer exists.** It read `just lake` at 3.2 s producing "793 Parquet files, ~60
+MB" — the hand-rolled hive archive DuckLake replaced on 2026-08-27. The recipe
+has not existed since; `just lakehouse` *reports* the landing zone rather than
+building one, and it is not part of `just run` at all. `data/lake/` is still
+60 MB on any machine that predates the move, which is why `just clean` now takes
+it: `lake/lakehouse.py`'s docstring has said "`data/lake/` is gone with it" for
+a fortnight while it sat there.
+
+Two of the timings moved in opposite directions and both are informative.
+Ingest halved, 61.0 s → 29.6 s, because the earlier figure was taken with a cold
+workbook cache. `dbt-build` went 23.5 s → 24.5 s of dbt's own time while the
+wall clock reached 31.4 s — the gap is `dbt deps` and startup, which is why both
+are quoted now rather than one number that silently means either.
+
+**A run also costs disk, and nothing reclaims it.** The DuckLake landing zone
+went 72 → 111 MiB across the single ingest above, because DuckLake retains a
+snapshot per write and the catalog now holds **51** of them. Nothing in this
+repo calls `ducklake_expire_snapshots` or `ducklake_cleanup_old_files`, so the
+landing zone grows monotonically — about 39 MiB per full ingest at today's
+volumes. That is the honest answer to "what does a run cost" on a stack with no
+invoice: not money, but a directory that only goes one way until somebody
+decides on a retention policy. It is not urgent at 111 MiB and it is the kind of
+thing that is embarrassing at 111 GiB.
+
+Warehouse contents: 1,647,099 staging rows and 1,959,307 mart rows — of which
+1,067,371 are the retail order lines, 667,809 the three FX tables and 43,138 the
+wide country-year fact — plus 9,821 snapshot rows across the two `history`
+tables.
 
 CI, from the repo's own run history, as the median of the successful runs in the
-last 40, re-measured 2026-09-01:
+last 40, re-measured 2026-09-09:
 
 | Workflow | Median | Range | n | What it does |
 |----------|--------|-------|---|--------------|
-| `ci` | **153 s** | 136–187 | 37 | pytest + the whole asset graph against fixtures, offline |
-| `nightly` | **173 s** | 89–985 | 32 | the same graph against live sources |
-| `pages` | **273 s** | 174–712 | 36 | live build + the Evidence site + deploy |
-| `release-data` | **154 s** | 109–247 | 5 | live build + export + a dated GitHub release |
+| `ci` | **191 s** | 170–290 | 40 | pytest + the whole asset graph against fixtures, offline |
+| `nightly` | **175 s** | 89–999 | 39 | the same graph against live sources |
+| `pages` | **271 s** | 164–712 | 40 | live build + the Evidence site + deploy |
+| `release-data` | **171 s** | 109–247 | 6 | live build + export + a dated GitHub release |
 
-**Every one of those was stale, and `ci` was stale by 66%** — it read 92 s,
-measured before the retail source, the weather source and the DuckLake move.
-Nothing could have said so: `tests/test_documented_counts.py` guards counts by
-scanning integers in front of a *test*-noun, and a **timing** has no such
-anchor. The range and `n` ship beside the median for that reason: a single
-number invites exactly the quiet decay that produced the 92 s, and the two live
-workflows' spread (`nightly` reaching 985 s, `pages` 712 s) is a property of the
-public APIs rather than noise to be averaged away.
+**`ci` has now gone stale twice in this table, which is the point of keeping
+it.** It read 92 s until 2026-09-01 — measured before the retail source, the
+weather source and the DuckLake move, so 66% low. Corrected to 153 s, it is
+191 s eight days later: in that window the offline graph gained a mart, a seed
+and the tests that came with them. The two live workflows barely moved, because their cost is the
+public APIs rather than the build.
+
+Nothing could have said so either time. `tests/test_documented_counts.py` guards
+counts by scanning integers in front of a *test*-noun, and a **timing** has no
+such anchor — the same gap that let `just test` drift from ~1 s to ~42 s across
+two corrections. The range and `n` ship beside the median for that reason: a
+single number invites exactly the quiet decay that produced the 92 s, and the
+live workflows' spread (`nightly` reaching 999 s, `pages` 712 s) is a property of
+the public APIs rather than noise to be averaged away.
 
 **The dollar cost is zero**, and I'd rather say that plainly than dress it up:
 GitHub Actions' free tier, no cloud warehouse, no credentials, no bill. That is a
 property of the scale, not a virtue of the design. The part that transfers is
 that the numbers are *measured and tracked*: `analytics.pipeline_*` records load
-times, per-layer inventory and per-test failure counts on every run, and
-[`reports/pages/pipeline.md`](../reports/pages/pipeline.md) renders them. On a
+times, per-layer inventory, per-test failure counts and — since
+`analytics.pipeline_runs` landed — the per-node cost of every `dbt build`, all
+rendered by [`reports/pages/pipeline.md`](../reports/pages/pipeline.md). On a
 warehouse that bills by the second, that table is where the invoice comes from.
+
+`pipeline_runs` is also why half of the `dbt-build` row above need not be
+hand-measured again: it records the node count and per-node seconds of every
+invocation, so the figure a reader is asked to trust is one the warehouse can
+be asked for. The first thing it showed is that **the data-quality layer is the
+build** — tests and unit tests cost several times what building every model
+does, which is the price of `store_failures` being on project-wide and of
+running unit tests inside `dbt build`. Both are deliberate; neither had been a
+number before.
 
 ## 4. What breaks at 1000×?
 
@@ -174,7 +211,12 @@ warehouse that bills by the second, that table is where the invoice comes from.
    the fix is either the lazy/streaming API or pushing it into dbt SQL where it
    arguably belonged. The layer exists to demonstrate heavy Python transforms,
    and this particular transform isn't heavy enough to need one.
-2. **The single-writer lock.** Dagster runs `in_process_executor` deliberately,
+2. **The single-writer lock — and it is second here only because this list is
+   ordered by *volume*.** It is not a scale limit at all: one writer xor many
+   readers binds at 43k rows exactly as hard as at 43M, which is why `just
+   serve` has to stop the graph before a rebuild and why a second concurrent
+   consumer meets it on day one. Everything else here arrives with growth; this
+   one is already present. Dagster runs `in_process_executor` deliberately,
    because DuckDB takes one writer and a multiprocess executor would just lose
    races for the file lock. Wanting parallel model builds is exactly the point
    where the warehouse stops being one file. That's the migration the shape is
@@ -199,15 +241,17 @@ warehouse that bills by the second, that table is where the invoice comes from.
    is a few thousand a second and a few terabytes, there's no distributed query
    processing, and it's beta until 2.0 this autumn. And I haven't put dbt's
    build graph through it. That's the run that would settle it.
-3. **Full-refresh materialisation, for 31 of the 32 models.** Every mart is
-   `+materialized: table` and rebuilt whole. That is deliberate rather than
+3. **Full-refresh materialisation, for 32 of the 33 models.** Every mart is
+   `+materialized: table` and rebuilt whole (19 tables, 13 views, one
+   incremental). That is deliberate rather than
    pending: each one re-derives a source that gets fully re-fetched, so
    rebuilding is *how* an upstream restatement is picked up, and the whole
-   graph, 1.07M-row retail fact included, rebuilds in 20 s. The exception is the
+   graph, 1.07M-row retail fact included, rebuilds in 24.5 s. The exception is the
    one model where the argument reverses:
    `fct_fx_rates_published` is `incremental`, because a published ECB fixing
    never changes and the table grows ~30 rows a day forever. At 43M rows the
-   question is which of the other 24 join it, and the cost of each is the tension
+   question is which of the other 18 table models join it, and the cost of each
+   is the tension
    WDI's lookback window already documents: a restated year needs a full refresh,
    so "incremental" and "picks up restatements" are in conflict and you have to
    choose per model. Today's numbers are honest and unimpressive: 0.16 s
