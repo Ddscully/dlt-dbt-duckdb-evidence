@@ -239,6 +239,16 @@ must run from the `dbt/` directory (that's where `profiles.yml` lives).
 SQL and model conventions live in [`docs/STYLE_GUIDE.md`](docs/STYLE_GUIDE.md) —
 naming, grain, import CTEs, column ordering, and where this project deliberately
 departs from [dbt Labs' style guide](https://docs.getdbt.com/best-practices/how-we-style/0-how-we-style-our-dbt-projects).
+It carries **two** deviation tables now: the formatting one, and a structural one
+against [how dbt Labs structure a staging layer](https://docs.getdbt.com/best-practices/how-we-structure/2-staging),
+whose five rules this project breaks on all five counts — joins, aggregations,
+one model per source table, one source per system, and the
+`stg_[source]__[entity]s` name. Each departure was already reasoned about
+somewhere in the tree (the `protected` overrides on `stg_country` are the same
+decision seen from the access side) and none of them was written down as a
+departure, which is what makes a deliberate choice read as an oversight. Writing
+the table also found the formatting one had gone stale: it asserted staging
+models "take no alias at all", and four of the nine do.
 The formatting half of it is enforced by [`.sqlfluff`](.sqlfluff); run
 `just lint` (pre-commit runs the same check — literally: the hook is a `local`
 one whose entry is `just lint`).
