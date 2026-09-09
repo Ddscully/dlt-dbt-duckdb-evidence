@@ -52,7 +52,9 @@ push, so it is never more than a week behind what the publishers release.
 <sub>Nothing to install to look at the numbers; follow the link above. The rest
 of this README is for running or reading the pipeline;
 [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) answers the SLA, run-cost and
-what-breaks-at-1000× questions.</sub>
+what-breaks-at-1000× questions, and
+[scores the warehouse against a published governance rubric](./docs/FOR_REVIEWERS.md#6-scored-against-somebody-elses-rubric)
+it did not write — including the dimension it fails.</sub>
 
 ---
 

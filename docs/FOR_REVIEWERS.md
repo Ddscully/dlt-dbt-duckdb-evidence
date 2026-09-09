@@ -308,6 +308,99 @@ The genuine ones, not the diplomatic ones.
   daily FX table on the day it landed, and 13% of its rows depend on a
   carry-forward rule written months earlier for a series with no weekends in it.
 
+## 6. Scored against somebody else's rubric
+
+Sections 4 and 5 self-critique against my own judgement, which is the weaker
+kind of criticism: I chose the questions. This scores the same warehouse against
+a rubric I did not write — the **Governance Debt Assessment Model** from Gahi,
+*What Went Wrong with Data Lakes? A 15-Year Reality Check from the Field*
+(arXiv 2606.08266, 2026).
+
+Its five dimensions read at one of four levels — Absent, Ad hoc, Partial,
+Established. The paper is explicit that there is no aggregate score: *"We
+deliberately avoid a 0 to 20 scale and fixed percentage thresholds, which would
+manufacture a precision the instrument does not have."* So there is no total
+below, and the profile is the point.
+
+| Dimension | Level | Why, with the number that decides it |
+|---|---|---|
+| Metadata completeness | **Partial** | Every model carries a description and an owner (33/33 each) and 21 relations enforce a contract over 407 typed columns — but only **171 of those 407 columns (42%) carry a description**. |
+| Quality observability | **Established** | 482 data tests and 36 unit tests with failing rows stored per test, 8 asset checks, freshness thresholds on 7 of 8 sources, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
+| Access governance | **Absent** | Structurally, not by neglect — see below. |
+| Lineage traceability | **Established** | One graph from dlt through dbt and Polars to the site; 10 exposures answer "what breaks if I change this" per page; the bus matrix is derived from the manifest rather than drawn. |
+| Organizational ownership | **Ad hoc** | Ownership is declared and enforced for all 33 models. There is one owner, who is also the only contributor. |
+
+**Access governance is Absent and cannot be otherwise here, which is the most
+useful line in the table.** DuckDB has no access control at all: on the pinned
+1.5.5, `create role`, `grant`, `create user` and `create policy` are each a
+*parser error* rather than an unsupported feature — re-verified while writing
+this. There is no principal to attach a policy to, so a "restricted" schema
+would be theatre. dbt's `access` (private / protected / public) is enforced, but
+at parse time and over `ref`, which governs who may *build on* a model, not who
+may read one.
+
+What stands in its place is a different control: the personal-data column is
+classified in metadata, pseudonymised at the publication boundary, and the
+rewrite is *verified* against `^[0-9a-f]{16}$` rather than assumed. That is data
+minimisation at the only moment the data crosses a machine — the right answer
+for this architecture, and still not what the dimension asks for. Scoring it
+Partial because a mitigation exists would be exactly the flattery the rubric is
+supposed to prevent.
+
+**Metadata completeness is the one that is Partial by choice and could move.**
+The paper's Established is *"documentation is the default condition of
+ingestion"*; here the default condition is *typing* — a column cannot enter a
+mart without a `data_type` and a contract, but it can enter without a sentence.
+42% is not a bad number for prose coverage and it is not Established, and the
+gap is worth naming because the repo reads as more documented than that: the
+columns that carry an explanation are the ones where an explanation was needed,
+which is a defensible policy and not the same claim.
+
+**Quality observability is Established with one caveat I would not want passed
+over.** The reach is real, and the alerting is a `nightly-failure` issue opened
+by a workflow on a repository one person watches. That is alerting in form. On a
+team it would be a page, and the dimension would read the same — which is worth
+knowing about the rubric as well as about the warehouse.
+
+**Organizational ownership is where the rubric stops applying cleanly.** Its
+levels describe stewardship across an organization; a single-owner demo cannot
+be Established in the sense meant, and claiming it would manufacture the
+precision the paper's own preamble refuses. Ad hoc is the honest read: the
+structure is there (four groups, an owner on each, enforced boundaries) and the
+process is not, because there is nobody to have a process with.
+
+**The profile, read the way the paper asks** — weakest dimensions first — points
+at access governance and metadata completeness. The first is a property of
+running on an embedded database and moves only by moving off one (§4 covers what
+that migration costs). The second is a fortnight of writing sentences, and is
+the only item here that effort alone would fix.
+
+### The Seven Deadly Sins, honestly
+
+The paper's other instrument is a taxonomy of failures. Four do not apply to a
+demo of this size — democratization and the skills mirage need users and a team;
+purposeless ingestion needs an ingest budget nobody is watching, where this has
+eight tables each feeding a named model. Of the rest:
+
+- **Schema avoidance (Sloth)** — no. Contracts on 21 relations, dlt column types
+  declared rather than inferred where inference was found to be unsafe.
+- **Cost delusion (Wrath)** — no, and §3 is the answer: the dollar figure is
+  zero, said plainly, with the note that this is a property of the scale rather
+  than a virtue of the design. The disk cost that *is* real — a landing zone
+  growing ~39 MiB per ingest with nothing expiring snapshots — is named there
+  rather than left flattering.
+- **Governance as afterthought (Pride)** — **partly, and the record shows it.**
+  The personal-data classification arrived as idea 30, well after the data it
+  classifies; the release published `raw_staging.retail_invoice_lines` with
+  824,364 clear customer ids before anyone looked. It was found and closed, but
+  it was found late, which is the sin's exact shape.
+- **Technology worship (Idolatry)** — the one to keep watching, and the defence
+  is on the record rather than asserted: `dg` costed and refused, two vendor
+  plugin sets removed after measuring zero invocations across 211 transcripts,
+  `pytest-cov` added and dropped the same day for buying nothing, and a semantic
+  layer still unbuilt because eleven pages written by one person do not have the
+  coordination problem it solves.
+
 ---
 
 <sub>Ideas and their post-mortems accumulate in `CLAUDE.md`; it is the file to
