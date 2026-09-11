@@ -1,14 +1,13 @@
 {#
   SCD2 history of OWID's CO2 estimates. OWID revises published years as
-  countries restate their inventories, and every other model in this project
-  overwrites the old number without noticing. This keeps the versions.
+  countries restate their inventories, and every other model overwrites the old
+  number. This keeps the versions.
 
   Grain: one row per (country_iso3, year, version). `dbt_valid_to is null` is
   the number the warehouse is using now; anything else is a superseded estimate.
 
-  Narrow on purpose — two columns from 1990 on, not the whole 60-column fact.
-  A snapshot is the one table dbt can't rebuild, so it should hold only what is
-  worth keeping forever.
+  Narrow on purpose — two columns from 1990 on, not the whole fact. dbt cannot
+  rebuild a snapshot, so it holds only what is worth keeping forever.
 #}
 {% snapshot snap_co2_estimates %}
 

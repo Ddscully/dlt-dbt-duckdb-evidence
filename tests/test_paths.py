@@ -3,9 +3,8 @@
 What's worth pinning here isn't the happy path — this repo is an editable `src/`
 install, so the in-tree branch always wins and nothing else ever runs. It's the
 branches that only fire somewhere else: a consumer setting `PROJECT_ROOT`, and a
-non-editable install started outside any project tree, where the old cwd
-fallback would have handed back a plausible-looking path to a warehouse that
-doesn't exist.
+non-editable install started outside any project tree, where a cwd fallback
+would hand back a plausible-looking path to a warehouse that doesn't exist.
 """
 
 from __future__ import annotations
@@ -28,13 +27,10 @@ def test_an_explicit_root_wins(monkeypatch, tmp_path):
     this package from outside the tree, so it outranks the in-tree guess even
     when the in-tree guess would have worked.
 
-    The two overrides have to be cleared first, and not clearing them is how this
-    test passed locally and failed on the first CI run after `paths.py` landed:
-    `ci.yml` exports `WAREHOUSE_PATH`, which correctly beats the root-derived
-    default (`test_the_overrides_do_not_need_a_root_at_all` pins that), so the
-    assertion below was reading the runner's path instead of `tmp_path`. What is
-    under test here is the *derived* location, so the thing that overrides it
-    has to be out of the way.
+    The two overrides are cleared first: CI exports `WAREHOUSE_PATH`, which
+    correctly beats the root-derived default
+    (`test_the_overrides_do_not_need_a_root_at_all` pins that), and what is
+    under test here is the *derived* location.
     """
     monkeypatch.delenv(paths.WAREHOUSE_ENV_VAR, raising=False)
     monkeypatch.delenv(paths.LAKEHOUSE_ENV_VAR, raising=False)
@@ -78,14 +74,7 @@ def test_exhausting_the_search_raises_rather_than_using_the_cwd(monkeypatch, tmp
 def test_the_overrides_do_not_need_a_root_at_all(monkeypatch, tmp_path):
     """`WAREHOUSE_PATH`/`LAKEHOUSE_DIR` are absolute by contract, so they answer
     without consulting the root — which is what keeps `just test-pipeline`
-    working from anywhere.
-
-    The second override used to be `LAKE_DIR`, for the hive-partitioned Parquet
-    archive that DuckLake replaced. `lake_dir()` outlived every reader of it by
-    a whole PR and this test is why it stayed green — an env var nothing sets
-    and a function nothing calls still answer perfectly when a test asks them
-    directly. The live override goes here instead, which is also the only place
-    `lakehouse_dir` is covered at all.
+    working from anywhere. This is also the only test covering `lakehouse_dir`.
     """
     monkeypatch.delenv(paths.ROOT_ENV_VAR, raising=False)
     monkeypatch.setattr(paths, "_looks_like_root", lambda path: False)

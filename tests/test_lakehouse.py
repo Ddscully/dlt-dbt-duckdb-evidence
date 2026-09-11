@@ -1,10 +1,7 @@
 """The lakehouse: dlt's landing zone, and the revision log derived from it.
 
-These tests replace a suite written against a *mirror* — when `raw` lived in the
-DuckDB file and a gated `MERGE` copied two weather tables into DuckLake beside
-it. dlt writes the catalog directly now, so the merge, the prune and their
-parity check are gone, and what is left to guard is narrower and sharper: the
-substitute for the change feed.
+dlt writes the catalog directly, so what is left to guard is the substitute for
+DuckLake's change feed.
 
 **Why there is a substitute at all** is the finding these tests exist to hold.
 `ducklake_table_changes()` is the obvious answer and it does not work behind
@@ -109,7 +106,7 @@ def test_forgetting_the_provenance_columns_reports_the_whole_table(tmp_path):
     This is the bug the design exists to avoid, run deliberately: compare
     without ignoring anything and an identical reload reports both rows. It
     raises nothing and returns nothing malformed — a wrong answer of the right
-    shape, which is the only kind this repo has ever had trouble seeing.
+    shape.
     """
     _write(tmp_path, [DAY, DAY])
     con = _connect(tmp_path)

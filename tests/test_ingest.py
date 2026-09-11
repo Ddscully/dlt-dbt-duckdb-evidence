@@ -94,8 +94,8 @@ def test_get_json_retries_then_succeeds(monkeypatch):
 def test_get_json_raises_on_persistent_http_error(monkeypatch):
     """A 500 must not be handed on as data.
 
-    This is the regression the `raise_for_status()` was added for: without it an
-    HTML error page parses to *something* and flows into the warehouse.
+    Without `raise_for_status()` an HTML error page parses to *something* and
+    flows into the warehouse.
     """
     seen = _mock_get(monkeypatch, [FakeResponse(status=500)] * 3)
     with pytest.raises(RuntimeError, match="failed to fetch JSON"):
@@ -130,8 +130,8 @@ def _wdi_row(iso3: str, date: str, value: float | None) -> dict:
 def test_wb_wdi_follows_pagination(monkeypatch):
     """Every page is fetched, and the loop stops at the last one.
 
-    The single-page version of this silently truncated the oldest indicators
-    once the series outgrew one page, which is the failure this guards.
+    A single-page fetch silently truncates the oldest indicators once the series
+    outgrows one page.
     """
     pages = {
         1: _wdi_page(1, 2, [_wdi_row("USA", "2023", 1.0)]),
@@ -253,7 +253,7 @@ def test_wb_wdi_first_load_fetches_everything_and_records_a_watermark(monkeypatc
 
 def test_wb_wdi_incremental_load_asks_only_for_the_lookback_window(monkeypatch):
     """The point of the exercise: a run with a watermark re-fetches five years,
-    not sixty-five."""
+    not the whole series back to 1960."""
     state = _state(monkeypatch, {worldbank.WDI_WATERMARK_KEY: {"SP.POP.TOTL": 2025}})
     calls = _serve_wdi(monkeypatch, {"SP.POP.TOTL": [_wdi_row("USA", "2025", 1.0)]})
 
@@ -266,15 +266,14 @@ def test_wb_wdi_incremental_load_asks_only_for_the_lookback_window(monkeypatch):
 def test_wb_wdi_watermark_never_runs_ahead_of_the_calendar(monkeypatch):
     """A year the publisher cannot have observed must not become the watermark.
 
-    The World Bank served `SP.POP.TOTL` projected to 2050 on 2026-09-07.
-    `stg_wdi` cuts those rows out, but the watermark is set from what *landed*,
-    one layer above that filter, and `max()` can only ever raise it — so an
-    unclamped run would leave 2050 in dlt's state and ask for `&date=2046:<now>`
-    on every subsequent run, forever.
+    The World Bank serves population projections to 2050. `stg_wdi` cuts those
+    rows out, but the watermark is set from what *landed*, one layer above that
+    filter, and `max()` only ever raises it — so an unclamped run would leave
+    2050 in dlt's state and ask for `&date=2046:<now>` on every run after.
 
-    The failure is quiet rather than loud, which is why only a test can hold it:
-    a reversed range is ignored by the API rather than refused, so the indicator
-    keeps returning its whole series and merely stops being incremental.
+    Quiet rather than loud, which is why a test has to hold it: the API ignores
+    a reversed range rather than refusing it, so the indicator keeps returning
+    its whole series and merely stops being incremental.
     """
     state = _state(monkeypatch, {})
     this_year = datetime.now(UTC).year
@@ -421,27 +420,20 @@ def test_load_groups_covers_every_resource_in_the_source_exactly_once():
 
 
 def test_source_tables_names_every_resource_in_the_source_exactly_once():
-    """`pipeline_status.SOURCE_TABLES` re-enumerates the seven dlt resources.
+    """`pipeline_status.SOURCE_TABLES` re-enumerates the dlt resources.
 
     `observability.build_sources` iterates only the names it is handed, so a
     resource missing here yields no row and the pipeline page under-reports
-    while looking complete. That exact symptom has already happened once from a
-    different cause — the Arrow path landing `retail_invoice_lines` with no
-    `_dlt_load_id`, so the page showed six sources for seven — and this list is
-    a second, unguarded route to the identical wrong page.
+    while looking complete.
 
-    Asserted rather than derived. Deriving would delete the list, but it would
-    also make `transform/` import from `ingest/`, which no transform module
-    does: `pipeline_status` is the one module that must run *after* dbt rather
-    than beside ingestion, and coupling it to the ingest layer at runtime to
-    avoid restating seven strings is the worse trade. It is also the shape every
-    other list in this repo already uses — `load_groups`, `PARTITIONED_RESOURCES`
-    and `TABLE_TO_ASSET_KEY` are all held to their source, none is derived from
-    it.
+    Asserted rather than derived: deriving would make `transform/` import from
+    `ingest/`, which no transform module does, to avoid restating eight strings.
+    `load_groups`, `PARTITIONED_RESOURCES` and `TABLE_TO_ASSET_KEY` are held to
+    their sources the same way.
 
     Lives here rather than in `tests/test_pipeline_status.py` because that
     module has an *autouse* fixture replacing `SOURCE_TABLES` with a one-name
-    stub. A guard written there would assert against the stub and pass forever.
+    stub, which a guard there would assert against and pass forever.
     """
     listed = list(pipeline_status.SOURCE_TABLES)
     assert sorted(listed) == sorted(r.name for r in pipeline.public_indicators().resources.values())
@@ -459,14 +451,10 @@ def test_partitioned_resources_is_a_subset_of_the_incremental_ones():
     """
     assert set(pipeline.PARTITIONED_RESOURCES) <= set(pipeline.INCREMENTAL_RESOURCES)
     # Named explicitly, because `orchestration/assets.py` splits this tuple again
-    # by partition *grain* — years for WDI and weather, months for retail — into
-    # two `@dlt_assets` blocks, and Dagster forces one `partitions_def` per
-    # block. A resource added here without a matching block would land in
-    # neither and disappear from the graph, which no other assertion here would
-    # catch. Two resources sharing the yearly grain is the case that makes the
-    # distinction between this tuple and the *blocks* worth keeping: they are
-    # one block, not two, and `full_refresh` would refuse to resolve if they
-    # carried separate partitions definitions.
+    # by partition grain — years for WDI and weather, months for retail — into
+    # two `@dlt_assets` blocks, one `partitions_def` each. A resource added here
+    # without a matching block would land in neither and leave the graph, which
+    # nothing else here would catch.
     assert set(pipeline.PARTITIONED_RESOURCES) == {
         "wb_wdi",
         "retail_invoice_lines",
@@ -486,10 +474,8 @@ def test_partitioned_resources_is_a_subset_of_the_incremental_ones():
 STG_WDI = Path(__file__).resolve().parent.parent / "dbt" / "models" / "staging" / "stg_wdi.sql"
 
 # `max(case when indicator = '<code>' then value end) as <column>`, the one line
-# shape `stg_wdi.sql` uses for every indicator. Read off the SQL text and not the
-# dbt manifest on purpose: this file runs in `just test`, which comes *before*
-# `dbt deps && dbt parse` in ci.yml, and a guard that needs the manifest would
-# skip itself exactly where a fresh clone needs it most.
+# shape `stg_wdi.sql` uses for every indicator. Read off the SQL text rather than
+# the dbt manifest, which does not exist yet when ci.yml first runs pytest.
 WDI_PIVOT = re.compile(
     r"max\(\s*case\s+when\s+indicator\s*=\s*'([^']+)'\s+then\s+value\s+end\s*\)\s+as\s+(\w+)",
     re.IGNORECASE,
@@ -499,38 +485,28 @@ WDI_PIVOT = re.compile(
 def test_the_wdi_pivot_maps_every_indicator_to_the_column_it_was_configured_for():
     """`WB_WDI_INDICATORS` and `stg_wdi.sql` restate the same mapping.
 
-    The dict in `ingest/pipeline.py` already carries the column name
+    The dict in `ingest/sources/worldbank.py` carries the column name
     (`"NY.GDP.MKTP.KD": "gdp_constant_usd"`), and `stg_wdi.sql` says it again as
-    a `max(case ...)` branch. Eleven entries, written twice, and until this test
-    nothing tied them — while CLAUDE.md documents "add indicators in two places"
-    as the workflow, so the divergence is invited rather than accidental.
+    a `max(case ...)` branch. Adding an indicator is a routine edit to a live
+    source, made in both places by hand.
 
-    Three ways they can drift and all three are silent. A configured indicator
-    with no branch lands in `raw.wb_wdi` and never reaches a column. A branch
-    with no indicator is a column of nulls. **Worst is a code against the wrong
-    column**, because the columns it can plausibly be crossed with are the ones
-    that look alike: swap `NY.GDP.MKTP.CD` for `.KD` and current-dollar GDP
-    lands in `gdp_constant_usd`, which is what every intensity figure downstream
-    divides by. All 14 of this model's data tests are `accepted_range`, and both
-    series are non-negative USD, so every one passes — and per CLAUDE.md's GDP
-    section that substitution flips the decarbonisation *sign* for 30 countries.
+    Three ways they can drift, all silent. A configured indicator with no
+    branch lands in `raw.wb_wdi` and never reaches a column. A branch with no
+    indicator is a column of nulls. **Worst is a code against the wrong
+    column**: swap `NY.GDP.MKTP.CD` for `.KD` and current-dollar GDP lands in
+    `gdp_constant_usd`, which every intensity figure downstream divides by.
+    `stg_wdi`'s data tests check ranges, nulls and the grain, and both series
+    are non-negative USD, so every one passes — while the substitution flips
+    the decarbonisation trend's sign for 30 countries (CLAUDE.md).
 
-    WDI is the reason this list is worth guarding when others are not: it is a
-    live source the World Bank revises, and adding an indicator is a routine
-    edit. A frozen source cannot drift into any of these states.
-
-    Every branch below has been seen to fire: deleting a pivot line, adding one
-    for an unconfigured code, crossing `.CD` with `.KD`, and changing the pivot
-    idiom so nothing matches. The whitespace tolerance is deliberate and was
-    checked too — reflowing one branch across a newline still matches, so a
+    Every branch below has been seen to fire. The whitespace tolerance is
+    deliberate: a branch reflowed across a newline still matches, so a
     `sqlfluff` reformat cannot silently empty this test.
     """
     pivot = dict(WDI_PIVOT.findall(STG_WDI.read_text()))
     configured = dict(worldbank.WB_WDI_INDICATORS)
 
-    # Vacuity guard, the same reason `test_documented_counts.py` carries one: a
-    # regex that stops matching passes by not looking, and this one reads a file
-    # nothing else in the suite parses.
+    # Vacuity guard: a regex that stops matching passes by not looking.
     assert len(pivot) >= 10, (
         f"WDI_PIVOT matched only {len(pivot)} branches in {STG_WDI.name}; "
         "the pattern or the model's formatting has drifted"
@@ -541,9 +517,8 @@ def test_the_wdi_pivot_maps_every_indicator_to_the_column_it_was_configured_for(
         f"configured in WB_WDI_INDICATORS but not pivoted in {STG_WDI.name}: {missing} — "
         "they land in raw.wb_wdi and reach no column"
     )
-    # Its own assertion, not folded into the one above: renaming a code produces
-    # a gap *and* an orphan, the first assert wins, and the orphan branch is then
-    # never measured. Same finding as the `RAW_DESCRIPTIONS` guard.
+    # Its own assertion: renaming a code produces a gap *and* an orphan, and in
+    # one assert the orphan would never be reported.
     orphaned = sorted(set(pivot) - set(configured))
     assert not orphaned, (
         f"pivoted in {STG_WDI.name} but not configured in WB_WDI_INDICATORS: {orphaned} — "
@@ -731,9 +706,9 @@ def test_ecb_fx_rates_asks_for_the_lookback_window_when_it_has_a_watermark(monke
 def retail_con(monkeypatch, tmp_path):
     """A connection over the *fixture* workbook, cached into a temp directory.
 
-    `INGEST_CACHE_DIR` is redirected for the same reason `just test-pipeline`
-    redirects `WAREHOUSE_PATH`: without it these tests would unpack into
-    `data/cache/`, and the fixture slice and the real 45 MB workbook share a
+    `INGEST_CACHE_DIR` is redirected for the reason `just test-pipeline`
+    redirects `WAREHOUSE_PATH`: otherwise these tests would unpack into
+    `data/cache/`, where the fixture slice and the real workbook share a
     filename.
     """
     monkeypatch.setenv(fixtures.ENV_VAR, "1")
@@ -748,9 +723,9 @@ def test_retail_fixture_and_live_caches_never_share_a_path(monkeypatch, tmp_path
 
     Both workbooks are named `online_retail_II.xlsx`. If a fixture run unpacked
     to the shared cache path, the next *live* run would find it, skip the
-    download and load the 41k-row slice into the real warehouse — green, silent
-    and wrong. Same failure the `_fixtures` pipeline-name suffix prevents for
-    dlt state.
+    download and load the fixture slice into the real warehouse — green, silent
+    and wrong. The `_fixtures` pipeline-name suffix prevents the same for dlt
+    state.
     """
     monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path))
     monkeypatch.setenv(fixtures.ENV_VAR, "1")
@@ -764,12 +739,11 @@ def test_retail_fixture_and_live_caches_never_share_a_path(monkeypatch, tmp_path
 def test_retail_cache_notices_a_re_recorded_archive(monkeypatch, tmp_path):
     """The same poisoning one level in: a stale *extract* under a fresh archive.
 
-    The cache used to be keyed on the directory alone — if the workbook was
-    there, it was returned — so it could not see that the zip underneath had
+    A cache keyed on the directory alone cannot see that the zip underneath
     changed. `just record-fixtures` rewrites that zip, and the next
-    `INGEST_FIXTURES=1` run would then load the *previous* slice: every fixture
-    test green against data the repo no longer contained, which is the failure
-    mode that makes a re-recording look like a no-op.
+    `INGEST_FIXTURES=1` run would load the *previous* slice: every fixture test
+    green against data the repo no longer holds, and the re-recording looking
+    like a no-op.
     """
     monkeypatch.setenv(fixtures.ENV_VAR, "1")
     monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path / "cache"))
@@ -794,13 +768,10 @@ def test_retail_cache_notices_a_re_recorded_archive(monkeypatch, tmp_path):
 
 
 def test_retail_yields_every_row_the_workbook_holds(retail_con):
-    """The silent truncation this cost once already.
-
-    `DuckDBPyRelation.arrow()` returns a streaming reader whose default batch is
-    1,000,000 rows, and treating it as a table lands the first batch and no
-    warning — the live load quietly stored exactly 1,000,000 of 1,067,371 rows
-    until the round number gave it away. Pinned against the workbook's own count
-    so a batch-size change can't bring it back.
+    """`DuckDBPyRelation.arrow()` returns a streaming reader whose default batch
+    is 1,000,000 rows; treated as a table it lands the first batch and no
+    warning (1,000,000 of the live workbook's 1,067,371). Pinned against the
+    workbook's own count so a batch-size change cannot bring it back.
     """
     expected = retail_con.sql("select count(*) from sheets").fetchone()[0]
     batches = list(retail.retail_invoice_lines())
@@ -813,8 +784,8 @@ def test_retail_line_number_is_stable_across_reads(retail_con):
 
     34,337 rows in the full workbook are exact duplicates of another row — same
     invoice, product, quantity, price, timestamp — so nothing in the content can
-    tell them apart. `workbook.connect()` pins `preserve_insertion_order`; this
-    is the assertion that makes that setting load-bearing rather than incidental.
+    tell them apart. `workbook.connect()` pins `preserve_insertion_order`, and
+    this is the assertion that holds it there.
 
     Sorted before comparing, because the claim is about the *assignment* and not
     about output order: `partition by invoice` lets DuckDB return the rows in
@@ -1025,13 +996,11 @@ def test_weather_start_date_follows_the_lookback_once_there_is_a_watermark():
 
 
 def test_a_cold_start_fits_inside_the_hourly_budget():
-    """The structural guard, and the one that would have caught the 24-hour hang.
+    """The bound over the whole cold start, not over any one window.
 
-    Every per-window assertion passed while the *whole* cold start cost more than
-    a day's allowance — each request was affordable and there were twenty of
-    them. So the bound that matters is over the total, not over any window, and
-    it is the hourly one: a load that cannot finish inside an hour is a load that
-    stalls a workflow rather than failing it.
+    Every request can be affordable while the total exceeds a day's allowance.
+    The bound is the hourly one: a load that cannot finish inside an hour stalls
+    a workflow rather than failing it.
     """
     windows = weather.weather_windows(watermark=None, today=date(2026, 8, 27))
     hourly = {window: budget for window, budget in weather.WEATHER_RATE_LIMITS}[3600.0]
@@ -1266,12 +1235,12 @@ def _weather_fetch(monkeypatch, responses):
 
 
 def test_a_transient_weather_failure_is_retried_like_every_other_source(monkeypatch):
-    """The class `_get_json` has always retried for the other six sources, and
-    which weather did not: a timeout, a reset connection, a 5xx.
+    """A timeout, a reset connection or a 5xx is retried, as `http.get_json`
+    does for the other sources.
 
-    Weather is the one source whose load cannot simply be re-run for free — a
-    backfill is paced against a daily budget — so a single hiccup killing the
-    whole load was the most expensive place in the project to not retry.
+    Weather is the one source whose load cannot be re-run for free — a backfill
+    is paced against a daily budget — so it is the most expensive place in the
+    project to let one hiccup kill a load.
     """
     result, calls, sleeps = _weather_fetch(
         monkeypatch,
@@ -1351,10 +1320,9 @@ EUROSTAT_GEO_TO_ISO2 = {"EL": "GR", "UK": "GB"}
 def _eurostat_price_countries() -> set[str]:
     """The ISO3 codes Eurostat publishes an electricity price for.
 
-    Derived from the two recorded fixtures rather than from the warehouse, so
-    this runs in `just test` — which has no database and, in a fresh clone, no
-    `dbt/target/manifest.json` either. Same reasoning as the WDI pivot guard
-    parsing `stg_wdi.sql` instead of the manifest.
+    Derived from the two recorded fixtures rather than the warehouse, so this
+    runs in `just test`, which has no database and, in a fresh clone, no
+    manifest either.
     """
     cube = json.loads(fixtures.path_for(eurostat.EU_ELEC_PRICES_API).read_text())
     geos = {geo for geo in cube["dimension"]["geo"]["category"]["index"] if len(geo) == 2}
@@ -1375,9 +1343,9 @@ def test_weather_countries_are_exactly_the_ones_eurostat_prices():
     """`WEATHER_COUNTRIES` is the scope decision written down, and the only thing
     that makes it defensible is that it matches the data it exists to join to.
 
-    Held to the source rather than to the comment beside it, for the same reason
-    `SOURCE_TABLES` and `RAW_DESCRIPTIONS` are: the list costs API budget to be
-    wrong in either direction. A country Eurostat starts publishing gets no
+    Held to the source rather than to the comment beside it, because the list
+    costs API budget to be wrong in either direction. A country Eurostat starts
+    publishing gets no
     weather and the mart column is quietly null for it; a country dropped from
     the price series keeps costing units forever for a join that no longer
     happens. Neither shows up as a failure anywhere else.

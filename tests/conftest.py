@@ -18,12 +18,9 @@ def _release_the_dlt_pipeline():
     machine that has loaded WDI at least once, and names pagination as the
     culprit.
 
-    Shared here rather than duplicated per file: `test_asset_checks.py` and
-    `test_definitions.py` both import the orchestration layer and both used to
-    carry an identical copy of this fixture. Module scope means every test
-    module that runs still gets its own teardown, so centralising it changes
-    nothing about when the deactivation happens — only that there is one
-    definition of it.
+    Shared here because `test_asset_checks.py` and `test_definitions.py` both
+    import the orchestration layer. Module scope means each test module still
+    gets its own teardown.
     """
     yield
     ctx = Container()[PipelineContext]

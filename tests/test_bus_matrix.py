@@ -3,8 +3,7 @@
 The matrix in `docs/WAREHOUSE.md` says which conformed dimensions each fact
 carries. Nothing in dbt can check that: a fact keyed on a column no dimension
 publishes builds green, passes its contract and passes its grain test, because
-every guard in this repo is scoped to a single relation. That blind spot is what
-let retail sit beside the country domain for months without a joinable key.
+every other guard in this repo is scoped to a single relation.
 
 So the derivation has to be right about two things that are easy to get wrong,
 and both are pinned below with the real model that would break them:
@@ -29,10 +28,8 @@ from modern_data_stack import bus_matrix
 from modern_data_stack.paths import dbt_manifest_path
 from publish.bus_matrix import KNOWN_UNCONFORMED, SCHEMA
 
-# Same reason as `tests/test_additivity.py`: `just test` runs before
-# `dbt deps && dbt parse` in ci.yml, so the manifest is not there yet. ci.yml
-# re-runs this file after the parse step, and `tests/test_workflows.py` is what
-# holds it to that — a gated file the workflow does not name runs nowhere.
+# ci.yml runs pytest before `dbt parse`, so the manifest is missing there; it
+# re-runs this file after the parse, which `tests/test_workflows.py` enforces.
 manifest_path = dbt_manifest_path()
 pytestmark = pytest.mark.skipif(
     not Path(manifest_path).exists(),
@@ -106,9 +103,7 @@ def test_every_conformed_dimension_is_used_by_at_least_one_fact(matrix):
     """The mirror of the test above, and it catches the opposite failure.
 
     A dimension no fact carries the key of is either unpublished work or dead
-    weight in a release consumers pay to download. `dim_country` spent months as
-    the first of those — promised by the `reference` group's own description and
-    not built.
+    weight in a release consumers pay to download.
     """
     unused = [
         dim.model

@@ -1,6 +1,7 @@
 name: warehouse
 type: duckdb
 options:
-  # Path is relative to this source directory -> repo-root data/warehouse.duckdb.
-  # Run `just run` first so the file exists before `evidence build`.
+  # Relative to this directory: the repo's data/warehouse.duckdb, which has to be
+  # built first. EVIDENCE_SOURCE__warehouse__filename overrides it, but is joined
+  # onto this directory too, so an absolute path is silently relocated.
   filename: ../../../data/warehouse.duckdb

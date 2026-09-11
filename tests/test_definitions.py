@@ -2,12 +2,8 @@
 
 `dg.Definitions` takes an explicit list, and nothing complains about an omission:
 the asset simply isn't in the graph, so `AssetSelection.all()` never sees it and
-`dagster definitions validate` passes. That is not a hypothetical — the retail
-ingest and `analytics.retail_rfm` were added to `assets.py` and never listed, so
-`full_refresh` ran without them and `dbt build` failed one layer later with
-`Catalog Error: Table with name retail_invoice_lines does not exist!`. The two
-asset checks added alongside the currency and retail work were missing the same
-way, and those fail *silently* — a check nobody registered just never runs.
+`dagster definitions validate` passes. An unlisted asset fails somewhere
+downstream; an unlisted check fails *silently*, because it just never runs.
 
 The explicit list stays (it is the one place that says what the graph is); this
 is what makes forgetting it loud.
@@ -44,8 +40,7 @@ def _defined_in_assets_module():
         # `AssetChecksDefinition` is a *subclass* of `AssetsDefinition`, so this
         # order is load-bearing: the other way round every check falls into the
         # first branch, contributes an empty `.keys`, and the check set comes out
-        # empty — a test that passes by measuring nothing. Caught by
-        # unregistering two checks and watching it stay green.
+        # empty — a test that passes by measuring nothing.
         if isinstance(value, dg.AssetChecksDefinition):
             check_keys.update(value.check_keys)
         elif isinstance(value, dg.AssetsDefinition):
@@ -60,8 +55,7 @@ def test_every_asset_defined_is_in_the_graph():
     # Executable, not `get_all_asset_keys()`: an unregistered asset that
     # something *depends on* still shows up in the graph as an external node, so
     # the wider set reports `analytics/retail_rfm` present purely because
-    # `pipeline_status` names it in `deps`. Verified by unregistering it — the
-    # wide assertion passes, this one fails.
+    # `pipeline_status` names it in `deps`.
     in_graph = defs.resolve_asset_graph().executable_asset_keys
 
     missing = defined - in_graph
@@ -85,22 +79,18 @@ def test_every_asset_check_defined_is_in_the_graph():
 
 
 def test_every_raw_resource_has_an_asset_description():
-    """`RAW_DESCRIPTIONS` is the second hand-maintained list re-enumerating the
-    seven dlt resources, and the only one that cannot be derived — the prose is
-    not computable from the source, so this list stays and gets held to it.
+    """`RAW_DESCRIPTIONS` re-enumerates the dlt resources, and cannot be derived:
+    the prose is not computable from the source, so it is held to it instead.
 
-    `assets.py:156` reads it as `RAW_DESCRIPTIONS.get(name)`, which returns
-    `None` for an unlisted resource. The asset then materialises with no
-    description and nothing anywhere is red: the Dagster UI simply shows a blank
-    where every sibling has a sentence, which is the sort of gap that survives
-    review indefinitely.
+    `assets.py` reads it as `RAW_DESCRIPTIONS.get(name)`, which returns `None`
+    for an unlisted resource. The asset then materialises with no description
+    and nothing is red: the Dagster UI shows a blank where every sibling has a
+    sentence.
 
     Lives here rather than in `tests/test_ingest.py` because reading the dict
-    means importing `orchestration.assets`, which needs both dagster (an
-    optional group) and the dbt manifest. This module already carries the
-    manifest skipif and CI re-runs the file after `dbt parse`, so the guard does
-    execute in CI; dragging a dagster import into `test_ingest.py` would only
-    spread the skip to the one module that runs clean in a fresh clone.
+    means importing `orchestration.assets`, which needs dagster (an optional
+    group) and the manifest; this module already carries that skip and is
+    re-run by CI after `dbt parse`.
     """
     from ingest import pipeline
     from orchestration.assets import RAW_DESCRIPTIONS
@@ -115,10 +105,9 @@ def test_every_raw_resource_has_an_asset_description():
         f"(they materialise with no description): {sorted(undescribed)}"
     )
 
-    # The reverse direction is the one nothing else could ever surface. `.get()`
-    # never consults a key that no resource matches, so a stale entry left by a
-    # rename is invisible for as long as it survives — where a *missing* entry at
-    # least shows as a blank in the UI next to six siblings that have prose.
+    # The reverse direction is the one nothing else could surface. `.get()`
+    # never consults a key no resource matches, so a stale entry left by a
+    # rename is invisible — where a *missing* one at least shows as a blank.
     orphaned = RAW_DESCRIPTIONS.keys() - resources
     assert not orphaned, (
         "RAW_DESCRIPTIONS entries naming no dlt resource — renamed or removed "
@@ -187,13 +176,12 @@ def test_retail_ingest_is_the_only_thing_full_refresh_leaves_out():
 def test_every_retail_month_has_a_partition_to_land_in():
     """`TimeWindowPartitionsDefinition`'s `end` is *exclusive*.
 
-    Passing `RETAIL_LAST_MONTH` straight through is the obvious thing to write
-    and it drops that month: 24 keys ending at 2011-11, with December 2011's
-    25,526 lines unreachable through the partitioned path and no key that could
-    ask for them. The unpartitioned path — every workflow, every justfile recipe
-    — loads the whole file regardless, so nothing was ever red; a backfill simply
-    stopped a month early. This asserts the closed interval the constants
-    describe, so the off-by-one cannot come back at either end.
+    Passing `RETAIL_LAST_MONTH` straight through drops that month: 24 keys
+    ending at 2011-11, and December 2011's lines unreachable through the
+    partitioned path. The unpartitioned path, which every workflow and recipe
+    uses, loads the whole file regardless, so only a backfill would stop a month
+    early. This asserts the closed interval the constants describe, at both
+    ends.
     """
     from ingest.sources.retail import RETAIL_FIRST_MONTH, RETAIL_LAST_MONTH
     from orchestration.assets import RETAIL_PARTITIONS
@@ -215,17 +203,13 @@ def test_the_dbt_build_writes_its_run_results_where_the_reader_looks():
 
     Left to itself dagster-dbt gives every invocation a unique target directory
     (`target/<op>-<run id>-<uuid>/`) so concurrent invocations cannot overwrite
-    each other's artifacts. Nothing here is ever concurrent, and
-    `observability.build_runs` reads `run_results.json` *by path* — so the
-    unique directory meant the orchestrated graph wrote `analytics.pipeline_runs`
-    with zero rows on every workflow while `just run`, which shells out to plain
-    dbt, filled it correctly. Evidence then refused to write the empty table to
-    Parquet and `pages.yml` failed three minutes into an npm build.
+    each other's artifacts. Nothing here is concurrent, and
+    `observability.build_runs` reads `run_results.json` *by path*, so without the
+    pin every orchestrated build writes `analytics.pipeline_runs` with zero rows.
 
-    This asserts the *call site* rather than the artifact, which is the half a
-    behavioural test misses: pointing a real invocation at an explicit path
-    proves dagster-dbt honours the argument and stays green when the argument is
-    dropped again.
+    This asserts the *call site* rather than the artifact: a real invocation
+    pointed at an explicit path proves dagster-dbt honours the argument, and
+    stays green when the argument is dropped.
     """
     from pathlib import Path
     from typing import Any
@@ -250,8 +234,7 @@ def test_the_dbt_build_writes_its_run_results_where_the_reader_looks():
     # site with no execution harness: nothing is materialized and no output is
     # yielded, which is exactly the part being asserted. Dagster types
     # `compute_fn` as a union that does not narrow to the decorated half, so the
-    # annotation states the gap rather than suppressing it — the tree carries
-    # two `ty: ignore`s and both sit next to a reason a checker cannot have.
+    # annotation states the gap rather than adding a `ty: ignore`.
     compute: Any = assets.dbt_models.op.compute_fn
     list(compute.decorated_fn(context=None, dbt=_Dbt()))
 

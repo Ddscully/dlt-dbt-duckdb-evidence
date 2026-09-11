@@ -133,9 +133,8 @@ def test_an_oversized_request_still_drains_when_the_charges_do_not_sum_back_to_z
     the loop falls off its end and `_window_delay` returns 0.0. That reads as
     "spend it now", which is the one answer this branch exists to avoid: the
     caller spends against a window it has not waited for and earns the 429.
-
-    The single charge in the test above sums back to zero exactly, which is why
-    it stayed green through all of this.
+    The single charge in the test above sums back to zero exactly, so it cannot
+    see this.
     """
     one_day = 1.757142857142857  # weather_call_units(41, 1)
     nine_days = 15.814285714285715  # weather_call_units(41, 9)

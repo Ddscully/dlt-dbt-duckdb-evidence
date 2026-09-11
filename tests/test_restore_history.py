@@ -193,18 +193,13 @@ def test_refuses_to_restore_a_warehouse_onto_itself(previous: Path):
 
 
 def test_a_landing_table_in_the_source_is_deliberately_not_carried(tmp_path: Path):
-    """`raw` is no longer in this file, and the rule that carried it is gone.
+    """A `raw` table in the database is not carried: `raw` lives in the catalog.
 
-    dlt lands in the DuckLake catalog now, so a published `warehouse.duckdb`
-    holds nothing from `raw` for a rule to find and `CARRIED` names `history`
-    alone. This test exists because the consequence is quiet and expensive:
-    `weather_watermark()` reads the destination, a fresh runner's catalog is
-    empty, and every release therefore cold-starts the archive at
-    `WEATHER_COLD_START_YEARS` without anything going red.
-
-    Asserting it against a source that *does* hold the table is the point — the
-    old behaviour would carry it, so this fails the moment the rule comes back
-    without the publishing decision that has to come with it.
+    dlt lands in DuckLake, so the weather archive travels as the release's
+    lakehouse tarball (see
+    `test_carries_the_published_lakehouse_in_beside_the_snapshot`), and a `raw`
+    copy inside `warehouse.duckdb` could only be a stale one. Asserted against a
+    source that *does* hold the table, so a rule carrying it again fails here.
     """
     source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT + WEATHER)
     dest = tmp_path / "new" / "warehouse.duckdb"
@@ -295,10 +290,9 @@ def test_a_source_without_the_weather_table_is_not_an_error(previous: Path, tmp_
 def test_irreplaceable_rows_counts_every_carried_relation(tmp_path: Path):
     """What `just clean warehouse` asks before deleting the file.
 
-    Two rows now, not four: the weather archive is real state and is no longer
-    *here*, so this gate no longer speaks for it. Deleting `data/lakehouse/` is
-    the act that costs days of API budget, and `just clean` guards that by not
-    listing the directory at all.
+    The weather archive is not in the warehouse, so this gate does not count
+    it. Deleting `data/lakehouse/` is what costs days of API budget, and
+    `just clean` guards that by not listing the directory at all.
     """
     warehouse = _db(tmp_path / "wh" / "warehouse.duckdb", SNAPSHOT + WEATHER)
 
@@ -315,14 +309,9 @@ def test_the_carried_schema_is_the_one_dlt_loads_into():
 
 
 def test_refuses_to_restore_the_lakehouse_when_dlt_has_local_state(tmp_path, monkeypatch):
-    """Measured, and re-measured after the mechanism changed completely.
-
-    This refusal was written when a landing *table* was carried into the
-    warehouse's `raw` schema. The carry is now a directory copy of a DuckLake
-    catalog — different code, different artifact — and the failure is byte for
-    byte the same: dlt with local state trusts what it knows, goes to update its
-    stored schema against a destination that has no `_dlt_version`, and dies.
-    Verified against the new path rather than inherited from the old one.
+    """dlt with local state trusts what it knows, goes to update its stored
+    schema against a restored catalog that has no `_dlt_version`, and dies —
+    measured against the DuckLake directory copy this restore performs.
     """
     source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT)
     _published_lakehouse(tmp_path / "prev")
@@ -334,25 +323,20 @@ def test_refuses_to_restore_the_lakehouse_when_dlt_has_local_state(tmp_path, mon
         run(source, dest, lakehouse_dir=tmp_path / "lh")
 
     assert not (tmp_path / "lh").exists(), "refused after writing"
-    # **And the snapshot half, which is the one that used to slip through.**
-    # `run` writes two artifacts. The refusal lived inside the second, so the
-    # first had already happened by the time it fired: the destination's
-    # `history` schema replaced by the previous release's, the landing zone
-    # untouched, and a `RuntimeError` claiming nothing had been done. A refusal
-    # is a promise about what did *not* happen, so it has to be asked before the
-    # first write, not before the second.
+    # **And the snapshot half.** `run` writes two artifacts, and a refusal is a
+    # promise about what did *not* happen, so it is asked before the first
+    # write: a refusal raised between them would leave `history` replaced
+    # beneath a `RuntimeError` saying nothing was done.
     assert not dest.exists(), "history was restored before the refusal fired"
 
 
 def test_the_refusal_leaves_existing_history_untouched(tmp_path, monkeypatch):
-    """The same defect where it costs something rather than merely being untidy.
+    """The same ordering, where it costs something.
 
     A destination that already holds local snapshot history is the case
-    `--force` exists to guard, and the partial restore drove straight through it:
-    `history.restore` ran first, saw no reason to stop (the *source* is a
-    legitimate release), and overwrote months of local revisions with last
-    month's — then the lakehouse step refused, so the operator saw an error and
-    had no reason to think anything had been written.
+    `--force` exists to guard. A restore that wrote `history` before the
+    lakehouse step refused would overwrite months of local revisions with last
+    month's, and the operator would see only an error.
     """
     source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT)
     _published_lakehouse(tmp_path / "prev")
@@ -405,9 +389,8 @@ def _published_lakehouse(release_dir: Path) -> None:
 
 
 def test_a_history_only_restore_is_unaffected_by_local_dlt_state(tmp_path, monkeypatch):
-    """The flow that already worked has to keep working. Carrying `history`
-    never creates the `raw` schema, so dlt's state is not contradicted and the
-    refusal must not fire — otherwise this change breaks the recipe it extends."""
+    """Carrying `history` alone never creates the `raw` schema, so dlt's state
+    is not contradicted and the refusal must not fire."""
     source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT)
     state = tmp_path / "dlt" / "pipelines" / "modern_data_stack"
     monkeypatch.setattr(lakehouse, "_local_pipeline_state", lambda: state)

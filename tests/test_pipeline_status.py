@@ -206,9 +206,8 @@ def test_a_test_on_a_versioned_model_is_labelled_with_the_relation_not_the_versi
     """`attached_node` for a versioned model ends in `.v1`, not in the model name.
 
     Splitting on the final dot labels every test on `fct_emissions_energy`
-    **`v1`** or **`v2`** — which is what the pipeline page rendered until the
-    bar chart became a table and made it readable. The alias is the relation the
-    test ran against, so it agrees with `pipeline_tables` one section above.
+    **`v1`** or **`v2`**. The alias is the relation the test ran against, so it
+    agrees with `pipeline_tables` one section above.
     """
     nodes = {
         "model.demo.fct_emissions_energy.v1": {
@@ -238,10 +237,8 @@ def test_an_audit_table_the_manifest_does_not_name_is_dropped_as_stale(warehouse
     """dbt writes the audit schema every build but never removes a dead table.
 
     Renaming a model orphans every audit table attached to it, because the alias
-    hash is over the test's arguments — versioning `fct_emissions_energy` to
-    `_v2` left 17 `dbt_utils_accepted_range_fct_e_<hash>` tables behind. They are
-    empty, so they scored as passing and silently inflated the test count while
-    showing no model.
+    hash is over the test's arguments. The orphans are empty, so they would
+    score as passing and inflate the test count while showing no model.
     """
     path = tmp_path / "partial.json"
     path.write_text(json.dumps({"nodes": {"test.demo.range": _range_node()}}))
@@ -300,12 +297,11 @@ def _equal_rowcount_case(tmp_path, diff_count):
 
 
 def test_a_passing_equal_rowcount_is_not_reported_as_a_failure(tmp_path):
-    """The bug this fixes: `count(*)` scored a passing test as one failing row.
+    """`count(*)` would score a passing test as one failing row.
 
-    Both `equal_rowcount` tests in this project reported `status='fail'` against a
-    `dbt build` that finished PASS=387, ERROR=0 — so the page whose job is
-    reporting pipeline health contradicted the build. The verdict is the test's
-    `fail_calc` applied to its result set, not the size of that result set.
+    The verdict is the test's `fail_calc` applied to its result set, not the
+    size of that result set; counting rows makes the health page contradict a
+    build that finished ERROR=0.
     """
     warehouse, manifest = _equal_rowcount_case(tmp_path, diff_count=0)
     con = duckdb.connect(str(warehouse), read_only=True)
@@ -336,9 +332,8 @@ def test_a_genuinely_failing_equal_rowcount_reports_the_row_difference(tmp_path)
 def test_a_warn_severity_test_with_failures_is_not_called_a_failure(warehouse, tmp_path):
     """dbt does not fail a build on a warn-severity test, so neither does this.
 
-    Nothing in the project uses `severity: warn` today; without this the first one
-    added would show up as a red pipeline for something dbt deliberately let
-    through.
+    The income-classification staleness test is `warn`; reported as a failure
+    it would show a red pipeline for something dbt deliberately let through.
     """
     manifest = tmp_path / "warn.json"
     manifest.write_text(
@@ -466,9 +461,8 @@ def test_a_run_row_is_labelled_with_the_relation_not_the_version(run_results):
     Both versioned nodes appear in `run_results.json`, so a `build_runs` that
     split the unique id by hand would file the model's own timing under **`v1`**
     — next to a `pipeline_tables` row calling the same relation
-    `fct_emissions_energy_v1`. Sharing `node_display_name` is what keeps the two
-    sections of the page agreeing, and is why that helper is no longer named
-    after tests.
+    `fct_emissions_energy_v1`. Sharing `node_display_name` keeps the two
+    sections of the page agreeing.
     """
     nodes = {
         "model.demo.fct_emissions_energy.v1": {"alias": "fct_emissions_energy_v1"},
@@ -478,10 +472,8 @@ def test_a_run_row_is_labelled_with_the_relation_not_the_version(run_results):
         "fct_emissions_energy_v1"
     ]
 
-    # Without the manifest it degrades to the id's last segment, which is the
-    # version. Asserted rather than left implicit: it is the difference the
-    # `nodes` argument buys, and a future refactor that stopped passing it would
-    # otherwise go green.
+    # Without the manifest it degrades to the id's last segment, the version:
+    # the difference the `nodes` argument buys, asserted so losing it fails.
     bare = observability.build_runs(str(run_results))
     assert bare.filter(bare["resource_type"] == "model")["node_name"].to_list() == ["v1"]
 
@@ -489,9 +481,9 @@ def test_a_run_row_is_labelled_with_the_relation_not_the_version(run_results):
 def test_a_run_row_carries_the_command_that_produced_it(run_results):
     """`dbt test` overwrites the artifact a `dbt build` left behind.
 
-    Without `dbt_command` a 36-row `dbt test --select test_type:unit` invocation
-    and a build that happened to run 36 nodes are the same row set, and the
-    trend line silently compares them.
+    Without `dbt_command`, a unit-test-only `dbt test` invocation and a build
+    that happened to run as many nodes are the same row set, and the trend line
+    silently compares them.
     """
     frame = observability.build_runs(str(run_results))
     assert frame["dbt_command"].unique().to_list() == ["build"]
@@ -501,10 +493,10 @@ def test_a_run_row_carries_the_command_that_produced_it(run_results):
 def test_the_two_timing_phases_are_split_and_do_not_have_to_sum(run_results):
     """Compile and execute are reported separately; the total is not their sum.
 
-    Measured on the real artifact: 65.14s of `execution_time` against 57.86s of
-    compile + execute, with neither phase null on any node. dbt's per-node total
-    includes work outside the two named phases, so a chart that derives one from
-    the other two is wrong — both are stored.
+    dbt's per-node total includes work outside the two named phases (measured
+    once at 65.14s against 57.86s of compile + execute, neither phase null on
+    any node), so a chart deriving one from the other two is wrong. Both are
+    stored.
     """
     frame = observability.build_runs(str(run_results))
     model = frame.filter(frame["resource_type"] == "model")
@@ -535,7 +527,6 @@ def test_appending_the_same_invocation_twice_adds_nothing(warehouse, run_results
     """`just pipeline-status` is its own recipe and can be run twice on one build.
 
     Replaying the same artifact must not double the run's cost in the history.
-    Mutation-checked: keying the insert on nothing appends 2 rows here.
     """
     frame = observability.build_runs(str(run_results))
     con = duckdb.connect(str(warehouse))
@@ -556,9 +547,8 @@ def test_appending_the_same_invocation_twice_adds_nothing(warehouse, run_results
 def test_the_run_history_is_kept_out_of_the_table_inventory(warehouse, manifest, run_results):
     """`pipeline_tables` must not count this module's own output.
 
-    It is excluded by the `pipeline_` prefix rather than by name, so the fourth
-    table inherited the exclusion — asserted because that is luck until it is
-    checked, and a table named `run_history` would have broken it.
+    It is excluded by the `pipeline_` prefix rather than by name, so the run
+    history is excluded only while its name keeps the prefix.
     """
     pipeline_status.run(
         str(warehouse), str(manifest), str(warehouse.parent / "lakehouse"), str(run_results)
@@ -571,10 +561,8 @@ def test_the_run_history_is_kept_out_of_the_table_inventory(warehouse, manifest,
         }
     finally:
         con.close()
-    # Named against the constant, not against the `pipeline_` prefix. The first
-    # version of this assertion checked the prefix, so renaming the table to
-    # `run_history` — which is exactly the change that breaks the exclusion —
-    # left it green.
+    # Named against the constant, not the prefix: renaming the table to
+    # `run_history` is exactly the change that breaks the exclusion.
     assert f"analytics.{pipeline_status.RUNS_TABLE}" not in listed
     assert not [name for name in listed if name.startswith("analytics.pipeline_")]
 
@@ -583,11 +571,9 @@ def test_the_wired_builder_reads_the_manifest_for_its_node_names(manifest, run_r
     """Through `pipeline_status`, not through `observability`, and that is the point.
 
     The direct test above hands `build_runs` a `nodes` dict and proves the
-    lookup. It cannot see the call site dropping that argument — mutation-proven:
-    deleting `observability.manifest_nodes(manifest_path)` from
-    `pipeline_status.build_runs` left all seventeen tests green. This one goes
-    through the wiring, so the version reaches the row only if the manifest is
-    actually read.
+    lookup, but cannot see the call site dropping that argument. This one goes
+    through the wiring, so the relation name reaches the row only if the
+    manifest is actually read.
     """
     frame = pipeline_status.build_runs(str(manifest), str(run_results))
     models = frame.filter(frame["resource_type"] == "model")

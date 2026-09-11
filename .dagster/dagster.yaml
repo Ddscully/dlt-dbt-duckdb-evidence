@@ -1,6 +1,6 @@
-# Dagster instance config. `just dagster` / `just materialize` point
-# DAGSTER_HOME at this directory; run + event storage land beside this file
-# (SQLite, gitignored), so the demo needs no external services.
+# Dagster instance config. The justfile exports DAGSTER_HOME as this directory;
+# run and event storage land beside this file (SQLite, gitignored), so the demo
+# needs no external services.
 telemetry:
   enabled: false
 

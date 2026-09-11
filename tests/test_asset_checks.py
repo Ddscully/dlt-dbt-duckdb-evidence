@@ -1,29 +1,23 @@
 """The eight `@dg.asset_check` bodies, run without materializing anything.
 
-`tests/test_definitions.py` proves each check is *registered* — that it will run
-at all. Nothing proved that any of them would *notice*: the seven function
-bodies were only ever executed by a full materialize, so `just test` could not
-tell a working check from one whose logic had inverted, and the answer arrived
-minutes later in `just test-pipeline` or CI's `full_refresh` instead of in the
-~1s loop.
+`tests/test_definitions.py` proves each check is *registered*; this proves each
+would *notice*. Otherwise the bodies run only in a full materialize, and
+`just test` cannot tell a working check from one whose logic has inverted.
 
-The property each test holds is the one its check exists for, so every case
-below has a failing half. A check that only ever sees healthy input is the same
-shape as a check nobody registered — green, and measuring nothing.
+Every case below has a failing half, because a check that only ever sees
+healthy input is green and measures nothing.
 
-`AssetChecksDefinition` is callable, and none of these seven take a `context`,
-so they need no execution harness: point the module's `DUCKDB_PATH` at a
-throwaway file — or its `LAKEHOUSE_DIR` at a throwaway catalog, for the checks
-that read `raw` — call the check, read the `AssetCheckResult`.
+`AssetChecksDefinition` is callable and none of these take a `context`, so they
+need no execution harness: point the module's `DUCKDB_PATH` at a throwaway file
+— or its `LAKEHOUSE_DIR` at a throwaway catalog, for the checks that read `raw`
+— call the check, read the `AssetCheckResult`.
 
 **Which of the two a check reads is itself the thing to get right**, and
-patching only the warehouse hides it. `wdi_indicators_all_present` went on
-reading `DUCKDB_PATH` after the landing zone moved into DuckLake: these tests
-kept passing because they handed it a file that did have `raw.wb_wdi` in it,
-while CI could not open the warehouse at all at that point in the graph. So the
-lakehouse cases assert `indicators_loaded` as well as the verdict — an unpatched
-`LAKEHOUSE_DIR` reads the developer's real catalog, where the count is every
-configured indicator and the verdict alone still looks right.
+patching only one hides it: a check reading the warehouse for `raw` passes here
+against a fixture that has the table, and fails in CI, where `raw` lives only in
+the catalog. So the lakehouse cases assert `indicators_loaded` as well as the
+verdict — an unpatched `LAKEHOUSE_DIR` reads the developer's real catalog, where
+the verdict alone still looks right.
 """
 
 from __future__ import annotations
@@ -39,12 +33,9 @@ from lake.lakehouse import ATTACH_ALIAS, catalog_path, data_path
 from modern_data_stack.ducklake import attach
 from orchestration.resources import dbt_project
 
-# Same guard as `tests/test_definitions.py`: `just test` runs before
-# `dbt deps && dbt parse` in ci.yml, and importing `orchestration.assets` needs
-# the manifest that parse writes. CI re-runs this file in the step after that
-# parse, alongside the other two gated files — it named only `test_definitions.py`
-# for months, which meant these bodies ran nowhere in CI while this header said
-# they did. `tests/test_workflows.py` holds that list to the tree now.
+# Importing `orchestration.assets` needs the manifest, which does not exist when
+# ci.yml first runs pytest. CI re-runs this file after `dbt parse`, which
+# `tests/test_workflows.py` enforces.
 pytestmark = pytest.mark.skipif(
     not dbt_project.manifest_path.exists(),
     reason="needs dbt/target/manifest.json — run `just dbt-deps` and `dbt parse` first",
@@ -217,11 +208,9 @@ def test_mart_check_fails_a_source_with_no_rows_at_all(tmp_path, monkeypatch, as
 
 
 def test_mart_check_passes_a_source_exactly_two_years_behind(tmp_path, monkeypatch, assets):
-    """The check's own docstring promises "within two years", so `lag == 2` is
-    the boundary case neither test above reaches: one has every source current
-    (`lag == 0`), the other has a source entirely absent (`lag is None`).
-    Mutating `lag <= 2` to `lag < 2` would pass both existing tests and fail
-    only this one.
+    """The check promises "within two years", so `lag == 2` is the boundary
+    neither test above reaches (`lag == 0` and `lag is None`). Mutating
+    `lag <= 2` to `lag < 2` passes both of them and fails only this one.
     """
     year = datetime.now(UTC).year
     path = _mart(
@@ -341,17 +330,14 @@ def test_rank_check_fails_on_a_gap(tmp_path, monkeypatch, assets):
 def test_rank_check_fails_a_cohort_that_does_not_start_at_one(tmp_path, monkeypatch, assets):
     """A cohort ranked 2, 3, 4 has no gaps at all and is still wrong.
 
-    The check states this as two terms, and the first of them is dead code:
-    deleting `min(co2_intensity_rank) <> 1` leaves this test green, because
-    `max(...) <> count(distinct ...)` already catches the case. That is not a
-    weak fixture, it is a redundancy — if `max == count(distinct) == k` then the
-    k distinct values are positive integers all <= k, so they are exactly
-    {1..k} and the minimum is necessarily 1. Brute-forced over every multiset
-    drawn from 1..8 up to length 6: no input reaches the first term.
-
-    The clause stays because it states the intent, and this test stays because
-    the *behaviour* is what matters. Recorded so the next reader does not spend
-    the afternoon writing a fixture that cannot exist.
+    The check states this as two terms, and the first is unreachable: deleting
+    `min(co2_intensity_rank) <> 1` leaves this test green, because
+    `max(...) <> count(distinct ...)` already catches the case. If
+    `max == count(distinct) == k`, the k distinct values are positive integers
+    all <= k, so they are exactly {1..k} and the minimum is 1. Brute-forced over
+    every multiset drawn from 1..8 up to length 6: no input reaches the first
+    term. The clause stays because it states the intent; no fixture can
+    separate it.
     """
     monkeypatch.setattr(assets, "DUCKDB_PATH", _ranks(tmp_path, [2, 3, 4]))
     assert not assets.co2_intensity_rank_is_dense().passed
@@ -473,15 +459,12 @@ def test_run_history_check_passes_when_this_build_left_rows(tmp_path, monkeypatc
 
 
 def test_run_history_check_fails_when_the_build_appended_nowhere(tmp_path, monkeypatch, assets):
-    """The defect this exists for, posed exactly as it happened.
+    """The build appended nothing, but the table is not empty.
 
-    dagster-dbt wrote `run_results.json` into a unique subdirectory of
-    `dbt/target/`; `build_runs` read the top-level path, found nothing, and
-    appended nothing. The table is *not* empty in that state on a developer's
-    machine — earlier shell-ordered runs are still in it — so a check asserting
-    `count(*) > 0` would have passed on the very tree that shipped the bug.
-    Asserting on the count as well as the verdict is what separates the two:
-    the history has rows, and none of them are this build's.
+    If dbt writes `run_results.json` somewhere `build_runs` does not read, it
+    appends nothing — yet on a developer's machine the table still holds earlier
+    runs, so `count(*) > 0` would pass. The history here has rows and none of
+    them are this build's.
     """
     warehouse = _history(tmp_path, "an-earlier-run", "an-earlier-run")
     monkeypatch.setattr(assets, "DUCKDB_PATH", warehouse)
@@ -519,12 +502,8 @@ def test_run_history_check_fails_when_dbt_left_no_artifact_at_all(tmp_path, monk
 # raw/om_weather_daily — weather_revisions_are_derivable
 # --------------------------------------------------------------------------- #
 #
-# The two checks this replaces are gone with the layer they guarded:
-# `lake_matches_warehouse` compared a hand-written Parquet copy against the
-# warehouse, and there is no copy any more, and `lakehouse_matches_warehouse`
-# caught an upsert whose prune failed, which dlt now performs inside one load
-# package. What is newly fragile is the *substitute for the change feed* — see
-# the check's own docstring.
+# What is fragile is the substitute for DuckLake's change feed — see the check's
+# own docstring.
 
 
 def _weather_lakehouse(tmp_path: Path, loads: list[list[tuple]]) -> Path:
@@ -534,13 +513,7 @@ def _weather_lakehouse(tmp_path: Path, loads: list[list[tuple]]) -> Path:
     test is the diff and not the loader — and a dlt run per load would put a
     network-shaped dependency into a unit test. The `_dlt_*` columns are set to
     a fresh value on every write, which is exactly what dlt does and exactly
-    what the diff has to ignore.
-
-    The layout is `_lakehouse`'s, not its own. This helper spelled
-    `catalog.duckdb`, `data` and `lakehouse` out by hand until the WDI check
-    needed a catalog too, and a second copy under the same name simply shadowed
-    the first — Python takes the last `def`, so the earlier one was unreachable
-    rather than ambiguous.
+    what the diff has to ignore. The layout is `_lakehouse`'s.
     """
     statements = [f"create schema if not exists {ATTACH_ALIAS}.raw"]
     for n, rows in enumerate(loads):

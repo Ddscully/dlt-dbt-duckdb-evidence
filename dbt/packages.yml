@@ -1,7 +1,7 @@
 packages:
-  # Only used for `unique_combination_of_columns` (the (country_iso3, year) grain
-  # contract) and `accepted_range`. `dbt deps` installs it into dbt/dbt_packages/,
-  # which is gitignored — `just dbt-build` and the CI workflows run deps first,
-  # and dagster-dbt runs it as part of preparing the project.
+  # For four generic tests: `unique_combination_of_columns` (the grain
+  # contracts), `accepted_range`, `expression_is_true` and `equal_rowcount`.
+  # `dbt deps` installs it into the gitignored dbt/dbt_packages/; the justfile
+  # recipes run it first, and dagster-dbt does too, under `dagster dev` only.
   - package: dbt-labs/dbt_utils
     version: [">=1.3.0", "<2.0.0"]

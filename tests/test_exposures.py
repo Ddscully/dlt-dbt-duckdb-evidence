@@ -75,16 +75,14 @@ def test_each_page_exposure_names_exactly_what_its_charts_read():
 def test_the_pages_with_no_exposure_are_the_two_that_cannot_have_one():
     """Two pages carry no exposure, for opposite reasons, and both are asserted.
 
-    `pipeline.md` reads three tables (`analytics.pipeline_sources`, `_tables`,
-    `_tests`), every one written by Polars, downstream of dbt and unknown to it —
-    so there is nothing an exposure could depend on and `depends_on` cannot be
-    empty. `index.md` reads *no* tables: it is a routing page, prose and links
-    only, which is also why no figure on it can go stale by hand.
+    `pipeline.md` reads the `analytics.pipeline_*` tables, every one written by
+    Polars, downstream of dbt and unknown to it — so there is nothing an exposure
+    could depend on, and `depends_on` cannot be empty. `index.md` reads *no*
+    tables: it is a routing page, prose and links only.
 
-    Telling the two apart is the point. Both look identical through
-    `page_models()` — an empty set — but only one of them would still be correct
-    after growing a chart on a mart. The table counts below are what separate
-    "dbt cannot describe this" from "there is nothing here to describe".
+    Both look identical through `page_models()` — an empty set — so the table
+    reads below are what separate "dbt cannot describe this" from "there is
+    nothing here to describe".
     """
     tables = build_report.page_tables()
     pages_without_models = {page for page, models in page_models().items() if not models}
@@ -127,15 +125,11 @@ def test_the_release_exposure_names_every_mart():
     # exposure names the model, and `ref()` without a `v=` resolves to the latest
     # version. Both relations ship in the release, and both are covered by the one
     # declaration.
-    # `rglob`, because the marts layer is one folder per dbt group. A flat glob
-    # matched nothing after that move and this test went red on an empty set —
-    # the right outcome, and the reason it compares in both directions rather
-    # than only asserting "nothing undeclared".
+    # `rglob`, because the marts layer is one folder per dbt group. Compared in
+    # both directions, so a glob that matches nothing fails rather than passing
+    # "nothing undeclared".
     marts = {re.sub(r"_v\d+$", "", sql.stem) for sql in MARTS_DIR.rglob("*.sql")}
     assert marts - declared == set(), "mart published by the release but not declared"
-    # And nothing but marts. `stg_country` was the one exception here until
-    # `dim_country` existed: the release notes named a *staging* model as the
-    # country dimension for want of a mart saying the same thing. A staging view
-    # in the promise a release makes is the gap that model closed, so the
-    # exception is gone and this asserts its absence rather than its shape.
+    # And nothing but marts: a staging model has no place in the promise a
+    # release makes.
     assert declared - marts == set()

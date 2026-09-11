@@ -6,13 +6,10 @@ real pipeline has been run. What's worth asserting is the packaging contract, no
 the numbers: which schemas ship, that the manifest describes what's on disk, and
 that the `staging` views still resolve after the database is copied.
 
-**That independence was briefly untrue and passed anyway**, which is the reason
-`lakehouse_dir` is now pinned by the fixture rather than defaulted. The second
-release asset is built from `lake.lakehouse.LAKEHOUSE_DIR`, so the exporter's
-output shape depended on whether the developer's machine had ingested: an empty
-`data/lakehouse/` gave five SHA256SUMS lines and a populated one gave six. CI
-builds from nothing, so it would never have gone red there — only on the machine
-of anyone who had run `just ingest` once.
+Every fixture names its `lakehouse_dir` rather than defaulting it. The default is
+`lake.lakehouse.LAKEHOUSE_DIR`, the developer's real landing zone, so the export's
+shape would otherwise depend on whether that machine had ever ingested — green in
+CI, which builds from nothing, and different on a laptop.
 """
 
 from __future__ import annotations
@@ -45,11 +42,10 @@ from publish.export_warehouse import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The two load times a migrated tree really has, and they are the measured ones:
-# on this project's working copy on 2026-08-27 the lakehouse's `_dlt_loads` read
-# 16:07:52 and the `raw` left behind in `warehouse.duckdb` read 11:47:47, 4h20m
-# adrift. They are deliberately different because the defect this pins is not "no
-# timestamp" — it is a believable wrong one, which `is not None` cannot see.
+# The load times a tree migrated to DuckLake has: the lakehouse's `_dlt_loads`
+# and the stale `raw` left in `warehouse.duckdb`. Different on purpose, because
+# the defect pinned here is a believable wrong timestamp, which `is not None`
+# cannot see.
 WAREHOUSE_LOADED_AT = "2026-08-27 11:47:47+00"
 LAKEHOUSE_LOADED_AT = "2026-08-27 16:07:52+00"
 
@@ -102,17 +98,14 @@ def warehouse(tmp_path: Path) -> Path:
 def export(warehouse: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     """The manifest, with `out` added for convenience.
 
-    The salt is required rather than defaulted (`tests/test_privacy.py` is where
-    that is asserted), so even a fixture warehouse holding no personal data at
-    all has to supply one. That is the policy working: there is no path through
-    the exporter that publishes without a decision about identifiers having been
-    made, including this one.
+    The salt is required rather than defaulted (asserted in
+    `tests/test_privacy.py`), so even a warehouse with no personal data in it
+    supplies one: no path through the exporter publishes without that decision.
     """
     monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
     out = tmp_path / "export"
-    # An empty directory, named rather than defaulted: see the module docstring.
-    # This is the no-lakehouse shape, which is a legitimate export and the one
-    # every other test here wants to be looking at.
+    # An empty directory, named rather than defaulted (see the module
+    # docstring): the no-lakehouse shape, which most tests here want.
     manifest = run(
         str(warehouse),
         str(out),
@@ -188,9 +181,8 @@ def test_the_period_column_reaches_every_table(tmp_path: Path):
 def test_sha256sums_is_checkable(export: dict):
     """`sha256sum -c` format: hash, two spaces, bare filename."""
     lines = (export["out"] / "SHA256SUMS").read_text().splitlines()
-    # Sorted by path, because the list is produced by walking the directory
-    # rather than by naming what we think we wrote — see `export()`. The
-    # warehouse is no longer first and no longer special.
+    # Sorted by path, because the list comes from walking the directory rather
+    # than naming what the exporter thinks it wrote — see `export()`.
     assert f"{export['warehouse']['sha256']}  warehouse.duckdb" in lines
     assert lines == sorted(lines, key=lambda line: line.split("  ", 1)[1])
     assert len(lines) == len(export["tables"]) + 1
@@ -212,7 +204,8 @@ def test_the_copied_warehouse_keeps_its_views_working(export: dict):
     assert con.execute(
         "select count(*) from warehouse.intermediate.int_country_year_observed"
     ).fetchone() == (2,)
-    # raw survives the copy too — the DuckDB file is the complete artifact.
+    # This fixture's in-file `raw` survives the copy. (A real warehouse has none:
+    # its `raw` lives in the lakehouse.)
     assert con.execute("select count(*) from warehouse.raw.owid_co2").fetchone() == (2,)
 
 
@@ -253,22 +246,20 @@ def test_tags_are_dated():
 
 # --- the storage format of the published file -------------------------------
 #
-# DuckDB 2.0 ships a new default storage format. Nothing in `pyproject.toml`
-# caps `duckdb>=1.1`, and `versioning-strategy: lockfile-only` means the bump
-# arrives as one line of a grouped monthly Dependabot PR. What follows splits
-# the guard across the two moments that matter: the *toolchain* test runs on
-# every PR and catches the bump before it merges; the *artifact* tests catch a
-# file that should not be uploaded.
+# A DuckDB release can change the default storage format, and nothing caps
+# `duckdb>=1.1`: the bump arrives as one line of a grouped Dependabot PR. The
+# guard is split across the two moments that matter — the *toolchain* test
+# catches the bump on its PR; the *artifact* tests catch a file that should not
+# be uploaded.
 
 
 def test_the_installed_duckdb_still_writes_the_format_the_release_promises(tmp_path: Path):
     """The tripwire, and the only one of these that fires on a dependency bump.
 
     A plain `duckdb.connect()` — no `STORAGE_VERSION` — is what the exporter
-    does, so what it writes by default *is* the published format. Everything
-    else here reads a file this same binary produced, which is exactly why none
-    of them can notice the default moving: a repo's tests all write and read
-    with one version of the library.
+    does, so what it writes by default *is* the published format. The other
+    tests read files this same binary wrote, so none of them can see the
+    default move.
 
     `<=` rather than `==` because a lower number is the more compatible file;
     only an increase strands a reader.
@@ -289,9 +280,9 @@ def test_the_installed_duckdb_still_writes_the_format_the_release_promises(tmp_p
 
 def test_the_manifest_records_the_format_and_not_only_the_writer(export: dict):
     """`duckdb_version` answers "who wrote this"; a consumer is asking "can I
-    open it", which is a different question with a different answer — 1.5.5
-    writes the format 0.10.0 reads. Both ship, and the format is measured off
-    the bytes that were uploaded rather than off the connection that made them.
+    open it", which has a different answer — 1.5.5 writes the format 0.10.0
+    reads. Both ship, and the format is read off the uploaded bytes rather than
+    the connection that made them.
     """
     published = export["out"] / "warehouse.duckdb"
     assert export["storage_version"] == storage_version(published)
@@ -348,10 +339,9 @@ def test_a_file_that_is_not_a_duckdb_database_is_named_as_such(tmp_path: Path):
 
 
 def test_the_release_notes_state_a_minimum_reader_version(export: dict):
-    """The old line named the writer and said "older clients may not read the
-    storage format", which is unmeasured and — as it turns out — pessimistic:
-    the file is readable by every DuckDB back to 0.10.0. A consumer cannot check
-    this for themselves without downloading the file first.
+    """A consumer cannot check which DuckDB opens the file without downloading
+    it first, so the notes state the oldest reader — measured from the storage
+    format, not guessed from the writer's version.
     """
     notes = release_notes(export, "acme/demo", export["tag"])
     assert f"DuckDB from {MIN_READER_VERSION} on" in notes
@@ -362,14 +352,12 @@ def test_the_release_notes_state_a_minimum_reader_version(export: dict):
 # Attribution — the licence obligation the release actually carries
 # --------------------------------------------------------------------------- #
 
-# Which publisher each *fetch* host's data belongs to. Neither string is
-# derivable from the other, which is the whole reason this map exists rather
-# than a hostname comparison: attribution names the publisher, not the CDN or
-# the API gateway in front of them. OWID is fetched from
-# `raw.githubusercontent.com` and credited at `github.com/owid`; the World Bank
-# from `api.worldbank.org` and credited at `data.worldbank.org`; the euro rates
-# arrive via `api.frankfurter.dev`, a third-party mirror ATTRIBUTION names
-# *beside* the ECB rather than instead of it.
+# Which publisher each *fetch* host's data belongs to. A map rather than a
+# hostname comparison, because attribution names the publisher, not the CDN or
+# API gateway in front of it: OWID is fetched from `raw.githubusercontent.com`
+# and credited at `github.com/owid`, the World Bank from `api.worldbank.org` and
+# credited at `data.worldbank.org`. The euro rates arrive via
+# `api.frankfurter.dev`, a third-party mirror ATTRIBUTION names beside the ECB.
 PUBLISHER_FOR_FETCH_HOST = {
     "raw.githubusercontent.com": "github.com/owid",
     "api.worldbank.org": "data.worldbank.org",
@@ -400,14 +388,9 @@ def _attribution_rows() -> list[tuple[str, ...]]:
     """The table's data rows, as `(source, publisher, licence)` cells.
 
     The header is matched by content and asserted rather than skipped by
-    position. `rows[1:]` looks equivalent and is not: edit or delete the header
-    line and the slice silently drops the first *source* instead, which is
-    exactly the row nothing else in this file would mention. Found by mutation —
-    removing the header left this test green.
-
-    The column order is what separates publisher from licence, so asserting the
-    header is also asserting that the two are still where the callers below
-    think they are.
+    position: with `rows[1:]`, a deleted header line makes the slice drop the
+    first *source* instead, silently. Asserting it also pins the column order
+    that tells publisher from licence.
     """
     lines = [ln for ln in ATTRIBUTION.splitlines() if ln.startswith("|") and "---" not in ln]
     cells: list[tuple[str, ...]] = [
@@ -423,23 +406,18 @@ def _attribution_rows() -> list[tuple[str, ...]]:
 def test_every_source_the_pipeline_fetches_is_attributed():
     """Adding a source without crediting its publisher is a licence breach.
 
-    The releases redistribute other people's data — all of it CC BY 4.0, a
-    Eurostat/ECB reuse policy or an EU reuse decision — and every one of those
-    permits redistribution *on condition of attribution*. `ATTRIBUTION` is the
-    single source of truth for both the shipped `ATTRIBUTION.md` and the release
-    notes, and CLAUDE.md carries the instruction "keep it in step with the
-    README's licence section when a source is added" with nothing enforcing it.
+    The releases redistribute other people's data — CC BY 4.0, a Eurostat/ECB
+    reuse policy or an EU reuse decision — and each permits redistribution *on
+    condition of attribution*. `ATTRIBUTION` is the single source for both the
+    shipped `ATTRIBUTION.md` and the release notes.
 
-    Tied to `ALL_URLS` because that is already the authority for what the
-    pipeline fetches, and it has its own guards (every URL resolves to a
-    fixture, every route is reachable). Restating the source list here would be
-    a third copy to drift.
+    Tied to `ALL_URLS`, already the authority for what the pipeline fetches and
+    guarded in its own right; restating the source list here would be a third
+    copy to drift.
 
     The CBAM seeds are the one credited row this cannot reach: they are
-    transcribed from a regulation by `scripts/build_cbam_seeds.py` rather than
-    fetched, so no URL represents them. That is a gap in coverage, not an
-    exemption — the row is in the table and is checked by the licence test
-    below.
+    transcribed from a regulation, not fetched, so no URL represents them. The
+    licence test below still checks their row.
     """
     fetched = {urlparse(url).netloc for url in ALL_URLS}
 
@@ -449,17 +427,14 @@ def test_every_source_the_pipeline_fetches_is_attributed():
         "add the host to PUBLISHER_FOR_FETCH_HOST and the publisher to ATTRIBUTION"
     )
     # Its own assertion: swapping one host for another produces a gap *and* a
-    # stale entry, the assert above wins, and the stale half is never measured.
-    # Same finding as the `RAW_DESCRIPTIONS` and WDI-pivot guards.
+    # stale entry, and in one assert the stale half would never be reported.
     stale = sorted(set(PUBLISHER_FOR_FETCH_HOST) - fetched)
     assert not stale, (
         f"PUBLISHER_FOR_FETCH_HOST names hosts the pipeline no longer fetches: {stale}"
     )
-    # Searched in the **Publisher column**, not across the whole document.
-    # Substring-matching the lot passes on a licence link that happens to
-    # contain the publisher's path: `ec.europa.eu/eurostat` sits inside the
-    # Eurostat copyright-notice URL, so deleting Eurostat as a *source* left
-    # this green. Found by mutation, not by review.
+    # Searched in the Publisher column, not the whole document: a licence link
+    # can contain the publisher's path (`ec.europa.eu/eurostat` sits inside the
+    # Eurostat copyright-notice URL), which would pass a deleted source.
     publishers = " ".join(row[1] for row in _attribution_rows())
     uncredited = sorted(
         publisher for publisher in PUBLISHER_FOR_FETCH_HOST.values() if publisher not in publishers
@@ -476,13 +451,10 @@ def test_the_release_attribution_and_the_readme_agree_on_the_licences():
     downloader reads beside the data, README's `## License` is prose a visitor
     reads — so this compares what they *say*, not how they say it.
 
-    Matching on the markdown **label or** the URL is what makes that possible
-    without a vocabulary of known licences, which would itself go stale the
-    first time a source arrived under a licence nobody had listed. It is also
-    load-bearing rather than defensive: ATTRIBUTION writes
-    `[CC BY 4.0](https://creativecommons.org/...)` and README writes the bare
-    words "CC BY 4.0" with no link, so a URL-only comparison fails today on a
-    difference that is entirely legitimate.
+    Matching on the markdown label *or* the URL does that without a vocabulary
+    of known licences, which would go stale with the first new one. Both are
+    needed: ATTRIBUTION writes `[CC BY 4.0](https://creativecommons.org/...)`
+    and README the bare words "CC BY 4.0", so URLs alone would fail.
     """
     rows = _attribution_rows()
     links = [
@@ -504,8 +476,7 @@ def test_the_release_attribution_and_the_readme_agree_on_the_licences():
         f"by name or by link: {unstated}"
     )
     # The other direction, so deleting a source from the table alone is caught.
-    # No allowlist is needed and that is worth knowing before someone adds one:
-    # every http link in that section is currently also an attribution link.
+    # No allowlist: every http link in that section is an attribution link.
     orphaned = sorted(
         url for url in set(re.findall(r"https?://[^\s)]+", section)) if url not in ATTRIBUTION
     )
@@ -515,12 +486,8 @@ def test_the_release_attribution_and_the_readme_agree_on_the_licences():
 
 
 # --------------------------------------------------------------------------
-# The second release asset
-#
-# `lakehouse.tar.gz` had no test at all until 2026-08-27, which is how the
-# ambient-directory bug above stayed green. It is a *published artifact*, so it
-# earns one on this repo's own terms — and the three properties below are the
-# ones a consumer or the next release actually depends on.
+# The second release asset, `lakehouse.tar.gz`: what a consumer or the next
+# release depends on.
 # --------------------------------------------------------------------------
 
 # Two tables, and only one of them may ship. `PUBLISHED_TABLES` is an allowlist
@@ -539,10 +506,10 @@ LAKEHOUSE_SETUP = [
         "raw.retail_invoice_lines",
         "select * from (values (17850, 'a-clear-customer-id')) t(customer_id, note)",
     ),
-    # Where dlt actually stamps the load time now. It does not ship — it is not
-    # in `PUBLISHED_TABLES` — but the manifest has to be able to read it, and the
-    # `warehouse` fixture holds an older one under the same name so that a read
-    # of the wrong catalog is a wrong *answer* rather than an error.
+    # Where dlt stamps the load time. It does not ship (it is not in
+    # `PUBLISHED_TABLES`) but the manifest reads it, and the `warehouse` fixture
+    # holds an older one under the same name so that reading the wrong catalog
+    # gives a wrong *answer* rather than an error.
     (
         "raw._dlt_loads",
         f"""
@@ -592,9 +559,8 @@ def decoy_lakehouse(tmp_path: Path) -> Path:
 
     Stands in for whatever happens to sit at `lake.lakehouse.LAKEHOUSE_DIR` on
     the machine running the export. Its rows differ from `lakehouse_dir`'s so
-    that reading the wrong one is a wrong *answer* rather than an error — the
-    same reasoning as the two `_dlt_loads` timestamps above, and the same reason
-    `assert ... is not None` was not enough there either.
+    that reading the wrong one is a wrong *answer* rather than an error, as with
+    the two `_dlt_loads` timestamps above.
     """
     from modern_data_stack.ducklake import attach
 
@@ -617,10 +583,9 @@ def warehouse_on_a_catalog(tmp_path: Path, lakehouse_dir: Path) -> Path:
     """The production shape: `raw` lives in a DuckLake and `staging` is views
     over it, written fully qualified the way dbt-duckdb writes them.
 
-    The `warehouse` fixture above deliberately carries its own in-file `raw` —
-    a legitimate thing to publish, and the case `solidify_staging`'s
-    `needs_catalog` test exists for. It is also why that fixture could never see
-    which catalog gets attached: it never attaches one.
+    The `warehouse` fixture above carries its own in-file `raw` — the case
+    `solidify_staging`'s `needs_catalog` check exists for — so it never attaches
+    a catalog and cannot see which one gets attached.
     """
     from modern_data_stack.ducklake import attach
 
@@ -663,18 +628,12 @@ def test_the_staging_views_are_solidified_against_the_catalog_the_caller_named(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """`solidify_staging` decides what the published `staging` layer contains,
-    and it was the last thing in the exporter still reading the module constant.
-
-    `run()` threads `lakehouse_dir` to the tarball and to `data_loaded_at`; this
-    third reader kept picking up whichever landing zone happened to be at
-    `./data/lakehouse`. Packaging a database from somewhere else therefore
-    materialised its staging views against an unrelated catalog — the wrong rows
-    where one existed, and an `IOException` naming a path the caller never
-    mentioned where one did not.
+    so it has to read the `lakehouse_dir` `run()` was given, like the tarball
+    and `data_loaded_at` do, and not the module constant.
 
     The constant is pointed at a catalog that *works* and holds different rows,
-    so the failure is a wrong answer rather than a crash. That is the shape this
-    defect actually had.
+    so reading it is a wrong answer rather than a crash — the realistic shape of
+    packaging a warehouse from somewhere other than `./data/lakehouse`.
     """
     from lake import lakehouse as lake_module
 
@@ -716,13 +675,12 @@ def test_an_intermediate_view_still_resolves_with_no_catalog_attached(
     `solidify_staging` materialises `staging` because those views read
     `lakehouse.raw`, which the consumer has not attached. An `int_*` view reads
     *staging*, so it is carried across as a view and inherits whatever staging
-    became. If staging ever shipped unsolidified — or if a future intermediate
-    read the catalog directly — this raises `Catalog "lakehouse" does not exist`
-    on the consumer's machine and nowhere before it, which is the same trap
-    `just sql` exists to work around, one layer up.
+    became. If staging shipped unsolidified — or an intermediate read the catalog
+    directly — this would raise `Catalog "lakehouse" does not exist` on the
+    consumer's machine and nowhere before it.
 
-    Opened with a bare read-only connect and no ATTACH, deliberately: that is the
-    consumer's position, and attaching the catalog here would hide the defect.
+    A bare read-only connect with no ATTACH, because that is the consumer's
+    position; attaching the catalog here would hide the defect.
     """
     monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
     out = tmp_path / "export-chained"
@@ -756,9 +714,9 @@ def test_the_landing_zone_ships_as_a_second_asset_and_is_checksummed(
     export_with_lakehouse: dict, tmp_path: Path
 ):
     """The tarball is a file in the release like any other, so `sha256sum -c`
-    has to cover it. It does only because SHA256SUMS is produced by *walking*
-    the export directory — a list built from what the exporter thinks it wrote
-    would have shipped the first hook-written artifact unverified."""
+    has to cover it. It does because SHA256SUMS is produced by *walking* the
+    export directory; a list of what the exporter thinks it wrote would miss an
+    artifact a hook added."""
     lh = export_with_lakehouse["lakehouse"]
     assert lh["file"] == "lakehouse.tar.gz"
     assert lh["tables"] == {"raw.om_weather_daily": 2}
@@ -781,12 +739,11 @@ def test_the_installed_ducklake_still_writes_the_spec_the_release_promises(tmp_p
     The DuckLake spec is decided by a binary from extensions.duckdb.org that no
     lockfile can name — `duckdb_extensions()` reports its version as a git hash —
     so **there is no PR to fail**. The extension can start writing a newer
-    catalog schema with nothing in this repo changing at all, and this assertion
-    on the next CI run is the only thing that would say so.
+    catalog schema with nothing in this repo changing, and this assertion on the
+    next CI run is the only thing that would say so.
 
-    A bare attach with no options, because that is what `publish` does, so what
-    it writes by default *is* the published spec. Every other test here reads a
-    catalog this same extension produced.
+    A bare attach with no options, as `publish` does, so what it writes by
+    default *is* the published spec.
     """
     lake = tmp_path / "lh"
     (lake / "data").mkdir(parents=True)
@@ -864,11 +821,9 @@ def test_the_release_path_applies_the_lakehouse_ceiling(
     """The ceiling has to *reach* the release, which is a different claim.
 
     `test_the_lakehouse_ceiling_is_inclusive` proves `publish` enforces a limit
-    it is handed; nothing there would notice `publish_lakehouse` quietly ceasing
-    to hand it one, and the manifest assertions would all still pass because the
-    spec would still be under the ceiling. So this drives the real entry point
-    with an impossible ceiling and requires it to refuse. Dropping the constant
-    from that call fails here and nowhere else.
+    it is handed; nothing there would notice `publish_lakehouse` ceasing to hand
+    it one. So this drives the real entry point with an impossible ceiling and
+    requires a refusal — dropping the constant from that call fails only here.
     """
     monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
     monkeypatch.setattr(_release, "MAX_PUBLISHED_LAKE_VERSION", "0.9")
@@ -900,10 +855,9 @@ def test_the_published_catalog_opens_with_a_bare_attach_from_anywhere(
 
     DuckLake stores that path verbatim and refuses an attach that disagrees with
     it, so an absolute one would force every consumer to pass
-    `OVERRIDE_DATA_PATH`. Measured here rather than assumed, including the part
-    that is easy to get wrong in the other direction: the relative path resolves
-    against the *catalog file*, not the process working directory, so unpacking
-    it anywhere and opening it from anywhere both work.
+    `OVERRIDE_DATA_PATH`. The relative path resolves against the *catalog file*,
+    not the working directory, so unpacking it anywhere and opening it from
+    anywhere both work.
     """
     unpacked = _unpack(export_with_lakehouse, tmp_path / "consumer")
 
@@ -928,11 +882,10 @@ def test_a_table_outside_the_allowlist_is_absent_at_every_version(
     copied-and-pruned.
 
     DuckLake keeps dropped tables in earlier snapshots: `select * from
-    lh.raw.secret at (version => 2)` returns the rows after a `drop table`, and
-    when this was measured on the real landing zone it returned a customer id.
-    So "ship the catalog, then drop what should not be in it" is not a
-    mitigation at all, and the assertion that matters is over *every* snapshot
-    rather than the current one.
+    lh.raw.secret at (version => 2)` still returns the rows after a
+    `drop table` — on the real landing zone, a customer id. So "ship the
+    catalog, then drop what should not be in it" is no mitigation, and the
+    assertion is over *every* snapshot.
     """
     unpacked = _unpack(export_with_lakehouse, tmp_path / "consumer")
 
@@ -960,19 +913,15 @@ def test_a_table_outside_the_allowlist_is_absent_at_every_version(
 def test_data_loaded_at_is_read_from_the_catalog_not_the_copy_left_beside_it(
     export_with_lakehouse: dict,
 ):
-    """The regression the DuckLake move shipped, and it was silent twice over.
+    """Reading an unqualified `raw._dlt_loads` off the copy fails silently twice.
 
-    `loaded_at` read an unqualified `raw._dlt_loads` off the published copy. On a
-    fresh or CI tree that raises `Catalog Error`, the `except` swallows it, and
-    every release body renders "Data last landed: unknown." On a tree migrated in
-    place — which still holds the pre-move `raw` — it returns the *stale* copy's
-    timestamp instead, believable and wrong.
+    On a fresh or CI tree it raises `Catalog Error`, the `except` swallows it,
+    and every release body renders "Data last landed: unknown." On a tree
+    migrated in place, which still holds the pre-DuckLake `raw`, it returns the
+    stale copy's timestamp — believable and wrong.
 
-    The fixture is built as that second tree on purpose: both `_dlt_loads` tables
-    exist and they disagree, so this asserts which one was read rather than that
-    something was. Point `landed_at` back at the file and it fails with the
-    warehouse's 11:47 against the catalog's 16:07 — the same 4h20m the working
-    copy showed.
+    The fixture is that second tree: both `_dlt_loads` tables exist and
+    disagree, so this asserts which one was read rather than that one was.
     """
     assert export_with_lakehouse["data_loaded_at"] == "2026-08-27T16:07:52+00:00"
 
