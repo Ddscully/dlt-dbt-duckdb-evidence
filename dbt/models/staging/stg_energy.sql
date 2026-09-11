@@ -25,11 +25,8 @@ select
     nuclear_share_elec as nuclear_share_elec_pct,
     coal_share_elec as coal_share_elec_pct,
     gas_share_elec as gas_share_elec_pct,
-    -- Which extract these numbers came out of. dlt stamps `_dlt_load_id` at
-    -- ingest as a unix epoch and `dbt source freshness` already reads it the
-    -- same way; carrying it forward is what lets `dim_grid_emission_factors`
-    -- say when the factor it publishes was pulled, which is the question an
-    -- assurance provider asks about a disclosure input.
+    -- When this extract was loaded (dlt's `_dlt_load_id`, a unix epoch), so
+    -- `dim_grid_emission_factors` can say when its factor was pulled.
     to_timestamp(cast(_dlt_load_id as double)) as source_loaded_at
 from source
 where

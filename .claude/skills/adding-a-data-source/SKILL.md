@@ -144,9 +144,9 @@ coverage in the column's YAML description either way — that's the convention.
 
 - **Polars** (`transform/co2_intensity.py`) — only if the metric is derived.
 - **Evidence** (`reports/`) — new mart columns need
-  `just report-clean`, not `just report`. Evidence caches each source's schema
-  keyed on the source SQL, so a `select *` that gained a column looks unchanged
-  and validation fails against the stale schema.
+  `just report-clean`, not `just report`: after a column change `just report`
+  can validate against a stale schema under `reports/.evidence/` (see
+  `building-evidence-reports`).
 - **Docs** — the source table belongs in the `raw` list in `CLAUDE.md` and the
   "Data sources" section of `README.md`.
 

@@ -9,7 +9,7 @@ name: nightly
 #   - a source renamed or dropped a column   -> stg_* breaks
 #   - a WDI indicator was retired            -> wdi_indicators_all_present fails
 #   - a publisher stopped updating           -> mart_covers_recent_years warns
-#   - an endpoint moved                      -> _get_json raises
+#   - an endpoint moved                      -> http.get_json raises
 #
 # When it fires, fix the pipeline and re-record with `just record-fixtures`.
 
@@ -35,11 +35,8 @@ jobs:
         with:
           groups: --group dev --group orchestration
 
-      # `just materialize` depends on `dbt-parse`, which is what writes the
-      # gitignored `dbt/target/manifest.json` that `@dbt_assets` reads at *import*
-      # time — `prepare_if_dev` only fires under `dagster dev`, so outside the UI
-      # the graph cannot load without it. It used to be a separate step in three
-      # workflows; the dependency is now the only place that is stated.
+      # `just materialize` depends on `dbt-parse`, which writes the manifest
+      # `@dbt_assets` reads at import time.
       - name: Materialize the asset graph against live sources
         run: just materialize
 

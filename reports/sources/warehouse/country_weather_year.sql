@@ -1,16 +1,12 @@
 -- Capital-city weather aggregated to the country-year, for the 41 EU/EEA
 -- countries the electricity-price mart also covers.
 --
--- The mart carries no country name — it is keyed on ISO3 like every other fact
--- here — so the dimension is joined in for the labels. That join is the reason
--- this query names two models rather than one, and both are declared in
--- `evidence_weather`'s `depends_on`.
+-- The mart is keyed on ISO3 only, so the dimension supplies the labels (both
+-- models are in `evidence_weather`'s `depends_on`).
 --
--- Unfiltered on purpose. `year_is_complete` is the filter almost every block on
--- the page applies, and applying it here instead would hide the partial current
--- year, which the page exists partly to explain. A source that filters is also a
--- source that can come back empty, and an empty source is a build failure rather
--- than an empty chart.
+-- Unfiltered: the page applies `year_is_complete` per block because it also
+-- explains the partial current year, and a filtered source can come back empty,
+-- which fails the build.
 select
     w.country_iso3,
     dim.country_name,

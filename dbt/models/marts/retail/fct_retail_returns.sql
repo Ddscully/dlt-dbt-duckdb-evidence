@@ -1,51 +1,29 @@
 -- Returns, matched back to the sale they reverse, with the match classified.
--- Grain: one row per cancellation line — every one of them, matched or not.
+-- Grain: one row per product return line, matched or not.
 --
--- The matching itself is `int_retail_return_matches`: the source carries no link
--- between a return and its original order, so the join is *inferred* from the
--- same customer's most recent prior purchase of the same product. This model is
--- the other half of that — deciding what counts as a match and then reporting
--- how often the decision failed.
+-- The match is inferred in `int_retail_return_matches` (the same customer's most
+-- recent prior purchase of the product); this model decides what counts as a
+-- match and reports how often it failed:
 --
--- What the rule cannot do, stated rather than hidden:
+--   * **352 lines have no customer id** and cannot be matched; they stay, as
+--     `match_status = 'no customer id'`, rather than flattering the rate.
+--   * **A return can predate the extract's purchase**, when the goods were
+--     bought before 2009-12-01 — left-censoring, the largest category of miss.
+--   * **Quantity is checked, not required.** A partial return is a match; a
+--     return larger than the purchase suggests the wrong sale
+--     (`quantity_is_consistent`).
 --
---   * **352 return lines have no customer id at all** and are structurally
---     unmatchable — there is nothing to match *on*. They are kept as rows with a
---     null match and `match_status = 'no customer id'`, because dropping them
---     would quietly improve the match rate by removing the hardest cases.
---   * **A return can precede its purchase in this window.** The extract opens on
---     2009-12-01 and goods bought in November 2009 come back in December, so the
---     original is simply not in the file. That is left-censoring, not a defect,
---     and it is the largest single category of miss.
---   * **Quantity is checked, not required.** A partial return (bought 12,
---     returned 4) is a genuine match; a return larger than the purchase it
---     points at is a sign the rule found the wrong sale. `quantity_is_consistent`
---     separates the two instead of a bare boolean pretending it can't happen.
---
--- Measured, over 18,286 return lines: **87.6% match cleanly**, 2.0% match but to
--- a purchase smaller than the return, 8.4% have no prior purchase in the window
--- and 1.9% have no customer id. Among the lines that *can* be matched at all the
--- rate is 91.4%. The honest way to read the remainder is as the cost of a source
--- without a foreign key, not as a bug to be tuned away — and the 2.0% is the
--- more interesting number than the 87.6%, because it is the rule being wrong
--- rather than the data being absent. That bucket is an upper bound rather than a
--- count; `int_retail_return_matches` measures why.
---
--- The distribution is a sanity check in itself and it passes: the median return
--- comes back **10 days** after purchase, the mean is 32, and 1,585 come back the
--- same day. A matching rule that had latched onto arbitrary sales would produce
--- a flat spread over the two-year window instead of that shape.
+-- Over 18,286 lines: 87.7% match cleanly, 2.0% match a smaller purchase, 8.4%
+-- have no prior purchase in the window and 1.9% no customer. The 2.0% is the
+-- rule being wrong rather than the data absent, and is an upper bound — see
+-- `int_retail_return_matches`. The median return comes back 10 days after
+-- purchase, the plausible shape; arbitrary matches would spread flat.
 with matched as (
     select * from {{ ref('int_retail_return_matches') }}
 ),
 
--- Joined for `date_key` alone, exactly as `fct_retail_order_line` does at the
--- identical grain. Re-deriving it here with `strftime` would work and is what
--- `fct_fx_rates_published` does — but that model buys its independence for a
--- stated reason (it is incremental and has to be rebuildable on its own), and
--- this one has none. Inner, like the sibling: `dim_date` spans every invoice
--- date in the archive, so it drops nothing, and that is measured rather than
--- assumed (18,286 rows before and after).
+-- For `date_key`, as `fct_retail_order_line` does at the same grain. Inner:
+-- `dim_date` spans every invoice date, so it drops nothing (measured).
 calendar as (
     select * from {{ ref('dim_date') }}
 )
@@ -61,11 +39,9 @@ select
     r.invoice_ts,
     r.invoice_date,
     r.invoice_month,
-    -- The return's own date, conformed to `dim_date`. Deliberately one key and
-    -- not two: `original_invoice_date` is a second date *role* on the same
-    -- dimension, and a role-playing key would have to be called something other
-    -- than `date_key` — which the bus matrix, matching on exact column names,
-    -- would not read as conformance anyway.
+    -- The return's own date. One key: `original_invoice_date` is a second role
+    -- on the dimension and would need another name, which the bus matrix would
+    -- not read as conformance.
     d.date_key,
     r.quantity_returned,
     r.unit_price,
@@ -76,8 +52,7 @@ select
     r.original_quantity,
     r.original_unit_price,
     r.original_amount_gbp,
-    -- Days on the shelf before it came back. Null when unmatched, which is the
-    -- one place a null here means "unknown" rather than "not applicable".
+    -- Null when unmatched: unknown, not zero.
     date_diff('day', r.original_invoice_date, r.invoice_date) as days_to_return,
     r.original_invoice is not null as is_matched,
     case
@@ -86,14 +61,11 @@ select
         when r.quantity_returned > r.original_quantity then 'matched, quantity exceeds purchase'
         else 'matched'
     end as match_status,
-    -- Null rather than false when unmatched: there is no quantity to be
-    -- consistent *with*, and a false here would read as a failed check.
+    -- Null, not false, when unmatched: there is nothing to be consistent with.
     case
         when r.original_invoice is not null then r.quantity_returned <= r.original_quantity
     end as quantity_is_consistent,
-    -- A price that moved between the sale and the return is worth seeing: it
-    -- either means the rule matched the wrong sale, or the item was refunded at
-    -- a different price than it was bought at. Both are worth a question.
+    -- A wrong match, or a refund at a different price; either is worth a look.
     case
         when r.original_unit_price > 0 then r.unit_price <> r.original_unit_price
     end as price_differs_from_original

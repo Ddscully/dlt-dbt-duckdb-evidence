@@ -23,9 +23,8 @@ EU_ELEC_PRICES_API = (
 
 @dlt.resource(name="eu_elec_prices", write_disposition="replace")
 def eu_elec_prices():
-    # Eurostat returns JSON-stat: a flat `value` dict keyed by the row-major
-    # index over all dimensions. We filtered every dimension but geo & time to a
-    # single category, so we walk geo × time and compute each flat index.
+    # Every dimension but geo and time has one category (see the URL), so each
+    # flat index is geo * stride + time * stride.
     j = http.get_json_object(EU_ELEC_PRICES_API)
     dim_ids: list[str] = j["id"]
     sizes: list[int] = j["size"]

@@ -3,20 +3,10 @@
 -- Pages read this instead of hardcoding a year literal, so the site dates itself
 -- from the data rather than from whenever someone last edited the markdown.
 --
--- It is not `max(year)`, and the difference matters. The mart sits on a
--- country-year spine, so its max year is whichever source runs furthest ahead
--- (Eurostat, 2025) — and coverage does not fall off evenly:
---
---   column                        2022   2023   2024   2025
---   co2_mt                         214    214    214      0
---   primary_energy_twh             210    210     79      0   <- cliff
---   carbon_intensity_elec_g_kwh    212    210    195     90
---   gdp_constant_usd               208    203    199    186
---   consumption_co2                120    120      0      0
---
--- Cutting the energy charts to the latest CO2 year would silently drop two
--- thirds of their countries. Each family therefore gets its own floor: the
--- latest year that still has a broad enough sample to chart honestly.
+-- Not `max(year)`: the mart's max year is whichever source runs furthest ahead,
+-- and coverage falls off unevenly — `primary_energy_twh` drops from about 210
+-- countries to 79 in a year where `co2_mt` still has 214. Each family gets the
+-- latest year that still has a broad enough sample to chart.
 --
 -- `*_label` copies exist because a year rendered through Evidence's numeric
 -- formatter comes out as "2,024".
@@ -28,10 +18,8 @@ with coverage as (
         count(carbon_intensity_elec_g_kwh) as n_elec,
         count(gdp_constant_usd)            as n_gdp,
         count(consumption_co2)             as n_consumption,
-        -- Complete years only. Eurostat publishes S1 around May and S2 the
-        -- following spring, and the annual column is an average over whichever
-        -- halves exist — so without this filter the newest year can be a
-        -- January-June figure charted against full-year ones.
+        -- Complete years only: the annual price averages whichever halves
+        -- exist, so the newest year can be January-June alone.
         count(electricity_price_eur_kwh) filter (
             where not price_is_partial_year
         ) as n_price

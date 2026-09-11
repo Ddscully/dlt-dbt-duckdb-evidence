@@ -1,31 +1,17 @@
 """Offline fixtures for the ingest layer — this project's routes.
 
-`ingest.pipeline` fetches from every endpoint in `_ROUTES` below. That makes CI a
-test of whether OWID, the World Bank and Eurostat happen to be up, which is not
-what a pull request is asking. Setting ``INGEST_FIXTURES=1`` swaps every fetch
-for a checked-in payload recorded from those same endpoints, so the *whole*
-pipeline — dlt schema inference, dbt, Polars, the asset checks — runs
-deterministically and offline.
+`INGEST_FIXTURES=1` swaps every fetch in `_ROUTES` for a checked-in payload
+recorded from the same endpoint, so the whole pipeline — dlt schema inference,
+dbt, Polars, the asset checks — runs offline and deterministically, and a CI
+failure means the repo broke rather than a publisher being down.
 
-The fixtures are trimmed to a representative set of countries; see
-`scripts/record_fixtures.py`, which is what produced them and what re-records
-them when a source changes shape. The FX series has no country in it and is kept
-whole — gzipped, because 3.6 MB of JSON compresses to 831 kB and every
-discontinuity in it is something a model is tested against.
+The fixtures are trimmed to a representative set of countries by
+`scripts/record_fixtures.py`, which also re-records them. Each is the source's
+own format (gzipped CSV for OWID, the API's response body for the JSON sources,
+a zip for retail), so the parsing paths production uses run in CI too.
 
-The mechanism (and the reasoning behind it) lives in
-`modern_data_stack.fixtures`. What's here is the URL-to-file map, which is the
-only part that's about this project's own sources. The OWID fixtures are gzipped
-CSV rather than Parquet so they still go through `pl.read_csv` with
-`infer_schema_length=None`, and the JSON fixtures are the API's own response
-body — the parsing gotchas that bite in production are exercised in CI too.
-
-**Neither paragraph counts the sources, deliberately.** The first said "six live
-endpoints" and the third "these five sources", while `_ROUTES` holds eight routes
-across six publishers — both stale, and already stale before the source that made
-them wrong arrived. `tests/test_documented_counts.py` scans markdown and YAML and
-never a `.py` docstring, so no guard here can go red on a number; naming the list
-is what survives the next source instead.
+The mechanism is `modern_data_stack.fixtures`; this module is the URL-to-file
+map for this project's sources.
 """
 
 from __future__ import annotations
@@ -54,19 +40,12 @@ _ROUTES: list[_fixtures.Route] = [
     # and an incremental run asking for a ten-day window gets all of it back.
     # That is safe because the resource merges on (rate_date, quote_currency).
     (re.compile(r"api\.frankfurter\.dev/v1/\d{4}-\d{2}-\d{2}\.\."), "ecb_fx_rates.json.gz"),
-    # The only fixture that is not a response body but a *file* — the retail
-    # source is a zip holding a workbook, and the fixture is a smaller zip
-    # holding a smaller workbook. Same container, so the unzip, the sheet
-    # discovery and the all-text read are all exercised in CI; a bare `.xlsx`
-    # here would skip the first two, and a CSV would skip all three.
+    # A smaller zip holding a smaller workbook, so the unzip, sheet discovery
+    # and all-text read all run in CI.
     (re.compile(r"archive\.ics\.uci\.edu/static/public/502/"), "retail_online_retail_ii.zip"),
-    # No capture for the coordinates or the date window, for the same reason the
-    # FX route captures no date range: the recorded payload is one window over
-    # every location, and the resource merges on `(country_iso3, weather_date)`,
-    # so re-landing a day replaces it. It matters more here than there — a live
-    # run asks for one window per calendar year, and all of them resolve to this
-    # one file, which is exactly what keeps a fixture run from making 19 requests
-    # against a rate limit that is not being enforced against it.
+    # No capture for coordinates or dates, as with FX: one recorded window over
+    # every location, and the merge on `(country_iso3, weather_date)` makes
+    # re-landing a day harmless.
     (re.compile(r"archive-api\.open-meteo\.com/v1/archive\?"), "om_weather_daily.json.gz"),
 ]
 

@@ -1,116 +1,65 @@
 # Lightweight orchestration. `just <recipe>`; run `just` to list.
 # (Install: `uv tool install rust-just` or use your package manager.)
+#
+# `just --list` shows only the comment line directly above a recipe, so each
+# recipe's one-line summary is the last line of its comment block.
 
 set dotenv-load := true
 
-# Dagster keeps its run/event storage here (gitignored except dagster.yaml).
-#
-# `env(...)` rather than a bare assignment, matching `LAKEHOUSE_DIR` below: a
-# recipe called from a context that already set this — CI does, from
-# `.github/actions/setup` — must take the caller's value rather than silently
-# substituting its own. The two agree in CI (`$GITHUB_WORKSPACE` *is*
-# `justfile_directory()` there), which is exactly why an override that quietly
-# won would be invisible until the day they differed.
+# Dagster run/event storage (gitignored except dagster.yaml). `env(...)` so a
+# caller's value wins — `.github/actions/setup` sets it in CI.
 export DAGSTER_HOME := env("DAGSTER_HOME", justfile_directory() / ".dagster")
 
-# **Absolute, and exported for every recipe — this one is not a convenience.**
-# A DuckLake catalog stores its `data_path` exactly as given and checks it on
-# every attach. dbt runs from `dbt/` and the Python layers from the repo root,
-# so a relative default means dbt creates a catalog recording
-# `../data/lakehouse/data/` that `lake.lakehouse` then cannot open — measured,
-# and the error names a path nobody typed. `WAREHOUSE_PATH` gets away with a
-# relative default because a plain file has no such record.
+# Absolute on purpose. DuckLake records the catalog's `data_path` as given and
+# compares it as a string on every attach; dbt runs from `dbt/` and the Python
+# layers from the repo root, so one relative path becomes two strings and the
+# attach is refused. The warehouse file needs no such care: it records no path.
 export LAKEHOUSE_DIR := env("LAKEHOUSE_DIR", justfile_directory() / "data/lakehouse")
 
 default:
     @just --list
 
-# **Which warehouse is this about to write to?** dbt's own answer to that is
-# `Concurrency: 4 threads (target='dev')` — it names the *target*, and there is
-# exactly one target here on purpose (the reasoning is in `dbt/profiles.yml`),
-# so that line is a constant carrying no information. What actually varies is
-# the **file**, and no dbt output ever prints it.
-#
-# So every recipe below that writes to the warehouse or the landing zone depends
-# on this one and says where it is going before it goes there. `just` runs a
-# shared dependency once per invocation, so `just run` prints this once rather
-# than four times.
-#
-# The three recipes that *set* `WAREHOUSE_PATH` themselves — `test-pipeline` and
-# the two course ones — deliberately do **not** depend on it: they export their
-# own path inside the recipe body and announce that, where this would print the
-# outer value and be actively wrong. Inheriting the variable is the dangerous
-# direction anyway: a shell that exported it for a course drill silently
-# redirects the next `just dbt-build`, and a fixture run that loses it merges a
-# 17-country slice into the real landing zone. Both are recorded in CLAUDE.md as
-# traps; neither was visible at the moment of running until this existed.
-# (`just --list` renders only the line directly above a recipe.)
+# dbt's log names the target (`target='dev'`, the only one) and never the file,
+# so every recipe that writes to the warehouse or the landing zone depends on
+# this. The recipes that export their own WAREHOUSE_PATH (`test-pipeline`, the
+# course ones) do not: this would print the outer value.
 # Print which warehouse file and landing zone the pipeline recipes will use
 where:
     @echo "warehouse: ${WAREHOUSE_PATH:-(unset - this repo's data/warehouse.duckdb)}"
     @echo "lakehouse: $LAKEHOUSE_DIR"
 
-# DuckLake is a 36 MB binary from extensions.duckdb.org, not a Python package —
-# nothing in `pyproject.toml` or `uv.lock` can name it, and its own version is a
-# git hash rather than a number. DuckDB autoloads it on first use, so this is not
-# what makes the lake work; what it buys is *where* the download happens. Without
-# it the first network failure lands inside a `dbt build` in a Dagster op,
-# several layers from the cause.
-#
-# The version is right by construction and needs no pinning: DuckDB asks the
-# repository for its own build, so running this through `uv run` fetches the one
-# matching `uv.lock`, into `~/.duckdb/extensions/v<duckdb>/<platform>/`. A
-# mismatched extension cannot even load — it refuses by version, naming both.
-# That path is keyed on the DuckDB version, so a bump re-fetches on the next
-# `just setup` rather than going stale, and `duckdb-cli` reads the same
-# directory, so this one install serves `just sql` too.
-#
-# `install`, not `force install`: the only case the no-op misses is the
-# repository republishing a build for an unchanged DuckDB version, and that is
-# not worth 36 MB on every setup.
-# (`just --list` renders only the line directly above a recipe.)
+# DuckLake is a binary from extensions.duckdb.org that no lockfile can name.
+# DuckDB would autoload it on first use; installing it here moves the download,
+# and any network failure, out of a `dbt build` inside a Dagster op. DuckDB
+# fetches the build for its own version, so under `uv run` it matches uv.lock.
 # One-time: install runtime + dev deps into the uv-managed venv, and the DuckLake extension
 setup:
     uv sync --group dev --group orchestration
     uv run python -c "import duckdb; duckdb.connect().execute('install ducklake')"
 
-# EL: pull public sources into DuckDB
+# EL: pull public sources into the DuckLake landing zone
 ingest: where
     uv run python -m ingest.pipeline
 
-# Same, but re-fetch the whole WDI series instead of the incremental window.
-# For a World Bank restatement older than the 5-year lookback (or to rebuild
-# history after the raw table was dropped out from under the watermark).
+# For a World Bank restatement older than the lookback window, or after the raw
+# table was dropped while dlt's watermark survived.
+# Re-fetch the whole WDI series instead of the incremental window
 ingest-wdi-full: where
     INGEST_WDI_FULL=1 uv run python -m ingest.pipeline
 
-# What the next incremental run will ask for. dlt keeps this in its own data dir
-# (~/.dlt/pipelines if ~/.dlt exists, else $XDG_DATA_HOME/dlt/pipelines — see
-# build_pipeline()), keyed on the pipeline *name* and not the destination, so it
-# is not in this repo
-# and no query against the warehouse can show it: WDI's `max_year_by_indicator`
-# (one entry per indicator, so a newly added code still pulls its whole series)
-# and the ECB's `max_rate_date`. Neither is the fetch floor — `wdi_start_year()`
-# subtracts WDI_LOOKBACK_YEARS from the watermark, because the World Bank revises
-# what it has already published.
-#
-# `just dlt-state modern_data_stack_fixtures` reads the fixture pipeline, which
-# carries the `_fixtures` suffix precisely so a fixture run cannot move the real
-# watermark. Needs at least one `just ingest` to have happened.
-# (`just --list` renders only the line directly above a recipe.)
+# The state lives in dlt's own directory, keyed on the pipeline name (see
+# `build_pipeline()`), so no warehouse query can show it. Each resource re-asks
+# a lookback window behind its watermark. `just dlt-state
+# modern_data_stack_fixtures` reads the fixture pipeline's.
 # Show dlt's incremental state — the WDI watermark and the ECB's last fixing
 dlt-state pipeline="modern_data_stack":
     uv run dlt pipeline {{ pipeline }} info -v
 
-# Install dbt packages (dbt_utils) into dbt/dbt_packages/ — gitignored, so this
-# is needed once per clone and after any packages.yml change
+# The mkdir is needed because dbt's profile attaches the DuckLake catalog on
+# every invocation (`dbt parse` and sqlfluff's templater included), and DuckLake
+# will not create the catalog's parent directory.
+# Install dbt packages (dbt_utils) into the gitignored dbt/dbt_packages/
 dbt-deps:
-    # The directory, not the catalog. dbt's profile attaches the DuckLake on
-    # every invocation — including `dbt parse` and sqlfluff's templater — and
-    # DuckLake will not create the catalog file's *parent*, so on a fresh clone
-    # `just lint` died with `Cannot open file .../catalog.duckdb: No such file or
-    # directory` before linting a single model. dbt creates the catalog itself
-    # once the directory is there; `just ingest` is what puts tables in it.
     mkdir -p "$LAKEHOUSE_DIR"
     cd dbt && uv run dbt deps
 
@@ -118,51 +67,36 @@ dbt-deps:
 dbt-build: where dbt-deps
     cd dbt && uv run dbt build
 
-# Every headless `dagster` recipe below depends on this, because @dbt_assets
-# reads dbt/target/manifest.json at *import* time and dbt/target/ is gitignored —
-# so on a fresh clone the graph raises DagsterDbtManifestNotFoundError before a
-# single asset runs. `just dagster` gets it for free (dbt_project.prepare_if_dev()
-# fires under the dev CLI, which sets DAGSTER_IS_DEV_CLI); `dagster job execute`
-# and `dagster asset` do not. All four workflows used to run this same pair by
-# hand; they call `just materialize` now, so the dependency below is the only
-# place the requirement is stated.
-# (`just --list` renders only the line directly above a recipe.)
+# `@dbt_assets` reads dbt/target/manifest.json at import time and dbt/target/ is
+# gitignored, so every headless `dagster` recipe depends on this. `just dagster`
+# does not: `prepare_if_dev()` parses under the dev CLI.
 # Write dbt/target/manifest.json — the Dagster graph won't load without it
 dbt-parse: dbt-deps
     cd dbt && uv run dbt parse
 
-# Unit tests only — mocked inputs, asserted outputs, no warehouse read. The inner
-# loop when changing model *logic*: `dbt build` runs these too, but this is ~2s
-# against a full build. Parents must exist in the warehouse (schema only is
-# enough); `just dbt-build` once if they don't.
+# The models' parents must exist in the warehouse (schema only); run
+# `just dbt-build` once if they don't.
+# dbt unit tests only — mocked inputs, the inner loop for model logic
 dbt-unit-test: dbt-deps
     cd dbt && uv run dbt test --select test_type:unit
 
-# Is the warehouse stale? Compares dlt's `_dlt_load_id` against the thresholds
-# in models/staging/_sources.yml (warn at 7 days, error at 30). This measures
-# when the pipeline last ran, not when the publishers last updated.
+# Thresholds are in models/staging/_sources.yml. `_dlt_load_id` is stamped at
+# ingest, so this measures when the pipeline last ran, not when a publisher last
+# published.
+# Is the warehouse stale? `dbt source freshness` against dlt's load ids
 dbt-freshness: dbt-deps
     cd dbt && uv run dbt source freshness
 
-# The catalog is read out of the warehouse, so run `just dbt-build` first or the
-# columns come back with no types. ~7s. Output is gitignored; `just clean` drops
-# it with the rest of dbt/target. Nothing else here displays this layer — the
-# Dagster UI shows the asset graph and check results, Evidence shows the data.
-# (`just --list` renders only the line directly above a recipe, so the one-line
-# summary goes last, not first.)
+# Needs a built warehouse, or the catalog's columns come back untyped.
 # Render the dbt metadata layer to dbt/target/ — columns, contracts, groups, exposures, versions, tests
 dbt-docs: dbt-deps
     cd dbt && uv run dbt docs generate
 
-# Regenerates first, so what you are reading is never behind the models.
-# Serve the dbt docs site on :8080 (blocks; ctrl-c to stop)
+# Serve the dbt docs site on :8080, regenerated first (blocks; ctrl-c to stop)
 dbt-docs-serve: dbt-docs
     cd dbt && uv run dbt docs serve
 
-# Report what the DuckLake landing zone holds: tables, rows, snapshot lineage.
-# It *reports* rather than writes — `just ingest` is what fills it, because dlt
-# now lands there directly. `lake.lakehouse.revisions()` is the other half:
-# what a table says now that it did not say at an earlier snapshot.
+# Report what the DuckLake landing zone holds — tables, rows, snapshots (read-only)
 lakehouse:
     uv run python -m lake.lakehouse
 
@@ -171,8 +105,8 @@ transform: where
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
 
+# Run after dbt-build: it reads dbt_test__audit and dbt's artifacts.
 # Pipeline observability tables (load times, layer inventory, dbt test failures)
-# Must run after dbt-build: it reads dbt_test__audit and dbt/target/manifest.json.
 pipeline-status: where
     uv run python -m transform.pipeline_status
 
@@ -183,36 +117,23 @@ run: ingest dbt-build transform pipeline-status
 test:
     uv run pytest
 
-# Line + branch coverage of `just test` — reports, gates nothing. Config and the
-# two caveats on reading the total are in [tool.coverage.*] / tests/README.md.
-# Two commands on purpose: a failing suite stops here rather than printing a
-# percentage measured over a red run.
+# Two commands so a failing suite stops before a percentage is printed.
+# Line + branch coverage of `just test` — reports, gates nothing
 coverage:
     uv run coverage run -m pytest
     uv run coverage report
 
-# The whole pipeline against checked-in fixtures, into a throwaway warehouse.
-# This is what CI runs on a pull request: deterministic, offline, ~30s.
+# The whole pipeline against checked-in fixtures, into a throwaway warehouse — what CI runs
 test-pipeline:
     #!/usr/bin/env bash
     set -euo pipefail
     export INGEST_FIXTURES=1
+    # Every piece of state the next real command reads is redirected, or the
+    # fixture run leaks into it: the warehouse, the landing zone (which holds
+    # the weather archive no rebuild can afford), and dbt's artifacts (which
+    # `pipeline-status` files into `analytics.pipeline_runs`).
     export WAREHOUSE_PATH="$(mktemp -d)/warehouse.duckdb"
-    # ...and the lakehouse beside it. This one is not an optimisation: dlt now
-    # *lands* in the lakehouse, so without the override a fixture run merges the
-    # 17-country slice into the real landing zone — whose snapshot lineage and
-    # weather archive no rebuild reproduces.
     export LAKEHOUSE_DIR="$(dirname "$WAREHOUSE_PATH")/lakehouse"
-    # ...and dbt's artifacts, for the third instance of the same lesson. dbt
-    # writes `run_results.json` into `dbt/target/` wherever the build pointed,
-    # and `analytics.pipeline_runs` records whatever that file last held — so a
-    # fixture run left the 17-country slice's timings sitting there and the next
-    # `just pipeline-status` filed them in the *real* warehouse's build history,
-    # as a build indistinguishable from a production one (`relation_name` says
-    # `"warehouse".…` either way, because both files are named warehouse.duckdb).
-    # Measured, not feared: it happened once here before this line existed.
-    # Same shape as dlt's state being keyed on the pipeline name rather than the
-    # destination, which is why `build_pipeline()` appends `_fixtures`.
     export DBT_TARGET_PATH="$(dirname "$WAREHOUSE_PATH")/dbt-target"
     export DBT_MANIFEST_PATH="$DBT_TARGET_PATH/manifest.json"
     export DBT_RUN_RESULTS_PATH="$DBT_TARGET_PATH/run_results.json"
@@ -224,41 +145,31 @@ test-pipeline:
     uv run python -m transform.pipeline_status
     uv run python -m lake.lakehouse
 
-# `.github/workflows/release-data.yml` runs this, then attaches the result to a
-# dated GitHub release.
-# The salt pseudonymises the classified identifiers on the way out and the
-# exporter refuses to run without one. A local export gets a throwaway, which is
-# right for a local export: it is not the artifact anyone publishes, and a
-# per-run salt makes that visible rather than letting a laptop's copy look like a
-# release. `release-data.yml` passes the stable repository secret instead — see
-# `docs/DATA_PROTECTION.md` for why that one has to be stable.
-#
+# The exporter refuses to run without PII_SALT. A local export gets a throwaway
+# salt, so its pseudonyms cannot pass for a release's; `release-data.yml` passes
+# the stable repository secret (docs/DATA_PROTECTION.md says why it is stable).
 # Package data/export/ for publishing: DuckDB copy, Parquet, checksums, notes
 export-data:
     PII_SALT="${PII_SALT:-$(uv run python -c 'import secrets; print(secrets.token_hex(32))')}" \
         uv run python -m publish.export_warehouse
 
-# Needs `just dbt-deps && dbt parse` first — the manifest is gitignored. Reads no
-# warehouse: the grain comes from the uniqueness tests and the columns from the
-# enforced contracts, both of which are metadata.
-#
+# Reads dbt/target/manifest.json (`just dbt-parse`), never the warehouse: grains
+# come from the uniqueness tests, columns from the enforced contracts.
 # Which conformed dimensions does each fact carry? -> docs/WAREHOUSE.md
 bus-matrix:
     uv run python -m publish.bus_matrix
 
-# Prints the table in docs/DATA_PROTECTION.md from the warehouse, so it can be
-# re-checked when the models move. Read-only.
-#
+# Reprints the table in docs/DATA_PROTECTION.md from the warehouse. Read-only.
 # How identifiable is a customer once the identifier is gone?
 disclosure-risk:
     uv run python -m scripts.measure_disclosure_risk
 
-# Copy `history` out of a published release into this warehouse, so `dbt build`
-# appends to that snapshot instead of starting a new one. release-data.yml runs
-# this before it builds; locally it's how you get real revision history without
-# waiting a month for OWID:
+# Copies `history` and `analytics.pipeline_runs` so the build appends to them,
+# plus the landing zone when `lakehouse.tar.gz` sits beside the file (refused
+# while dlt has local state). `release-data.yml` runs it before building; locally:
 #   gh release download --pattern warehouse.duckdb --dir prev
 #   just restore-history prev/warehouse.duckdb
+# Carry a published release's unreproducible tables into this warehouse
 restore-history from: where
     uv run python -m publish.restore_history {{ from }}
 
@@ -271,59 +182,41 @@ dagster:
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster dev
 
-# Full pipeline, ordered by the asset graph and recorded in the Dagster instance.
-# Excludes the Evidence site, which needs Node — see `just materialize-site`.
-#
-# Two jobs, because an asset job takes a single partitions definition and the
-# retail ingest is monthly where wb_wdi is yearly (see orchestration/definitions.py).
-# `load_retail` has to come first: dbt reads raw.retail_invoice_lines.
-# (`just --list` renders only the line directly above a recipe.)
+# Two jobs because an asset job takes one partitions definition and retail's is
+# monthly where wb_wdi's is yearly. `load_retail` first: dbt reads its table.
+# See orchestration/definitions.py.
 # Full pipeline ordered by the asset graph, minus the Evidence site
 materialize: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
     uv run --group orchestration dagster job execute -m orchestration.definitions -j full_refresh
 
-# The same graph plus the Evidence site on the end of it (requires Node).
-# This is what .github/workflows/pages.yml runs.
-# (`just --list` renders only the line directly above a recipe.)
+# What .github/workflows/pages.yml runs.
 # The same graph with the Evidence site on the end of it (needs Node)
 materialize-site: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
     uv run --group orchestration dagster job execute -m orchestration.definitions -j publish_site
 
-# A bare prefix is NOT a glob: `marts/*` reads as "everything downstream of the
-# key `marts/`", so it matches nothing and exits 0. Glob a key prefix with
-# `key:"marts/*"`; `group:`, `kind:`, `sinks(...)` and `roots(...)` work too.
-# See what a selection resolves to before materializing it, with
-# `dagster asset list -m orchestration.definitions --select '<sel>'`.
-# (`just --list` shows only the line below, so keep the summary last.)
+# A bare prefix is not a glob: `marts/*` means "downstream of the key `marts/`",
+# matches nothing and exits 0. Write `key:"marts/*"`; `group:`, `kind:`,
+# `sinks(...)` and `roots(...)` also work. Check with `just materialize-preview`.
 # Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi*'` (* = all downstream, + = one layer)
 materialize-select selection: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster asset materialize \
         -m orchestration.definitions --select '{{ selection }}'
 
-# The read-only half of the recipe above: resolves a selection and prints the
-# asset keys it matches, running nothing. Worth reaching for first, because a
-# selection that matches *nothing* is not an error — `dagster asset materialize`
-# exits 0 having done nothing at all. A bare prefix is the way to get one:
-# `marts/*` reads as "downstream of the key `marts/`" and matches none, where
-# `key:"marts/*"` matches the seventeen marts. `group:`, `kind:`, `sinks(...)`
-# and `roots(...)` work here and there alike.
-# (`just --list` renders only the line directly above a recipe.)
+# A selection matching no assets is not an error to `materialize`, so look first.
 # Print the assets a selection resolves to, without materializing any of them
 materialize-preview selection: dbt-parse
     uv run --group orchestration dagster asset list \
         -m orchestration.definitions --select '{{ selection }}'
 
-# Re-load WDI for one year or a range of years: `just backfill-wdi 1995` or
-# `just backfill-wdi 1990 1995`. Asks the World Bank for exactly that window and
-# merges it in, so it is re-runnable — the same year loaded twice leaves the same
-# table. Only `raw/wb_wdi` is partitioned, so this can't pull the downstream
-# models along (the CLI rejects a range over unpartitioned assets); follow with
-# `just dbt-build` or `just materialize`.
+# `just backfill-wdi 1995` or `just backfill-wdi 1990 1995`. Merges, so re-runs
+# are idempotent. Only the raw asset is partitioned and the CLI rejects a range
+# over unpartitioned ones, so follow with `just dbt-build` or `just materialize`.
+# Re-load WDI for one year or a range of years
 backfill-wdi start end='': where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
@@ -333,26 +226,14 @@ backfill-wdi start end='': where dbt-parse
         -m orchestration.definitions --select 'raw/wb_wdi' \
         --partition-range "{{ start }}...${end:-{{ start }}}"
 
-# Deepen the capital-city weather archive: `just backfill-weather 2012 2026`.
-# A routine load only fetches the last few years (WEATHER_COLD_START_YEARS), and
-# ERA5 reaches back to 1940, so this is how the history gets there — and unlike
-# `backfill-wdi` it is **slow on purpose**.
-# Open-Meteo's free tier allows 600 units a minute, 5,000 an hour and 10,000 a
-# day, one year of 41 capitals costs ~641, and the resource paces itself against
-# all three windows. So a decade is about an hour of mostly waiting, and
-# **fifteen years is the most one run can hold**: 2012-2026 is 9,401 units, 94%
-# of the day's allowance, and sixteen goes over it.
-#
-# Going over does not fail — it *sleeps*. The limiter honours the daily window by
-# waiting for it to drain, so a seventeen-year range paces for two hours and then
-# sits for twenty-two more with nothing on stdout. That is the same hang
-# `WEATHER_COLD_START_YEARS` exists to keep out of the three live workflows,
-# reached from the backfill side instead, so split a deeper history across two
-# days rather than rounding the range up.
-#
-# The rows are carried forward into the next release, which is what makes this
-# worth doing once rather than every run — see `publish/restore_history.py`.
-# Follow with `just dbt-build` or `just materialize`.
+# Routine loads fetch WEATHER_COLD_START_YEARS; this deepens the archive, back to
+# 1960 (the partitions' floor). Slow on purpose: the resource paces itself
+# against Open-Meteo's minute, hour and day budgets, and a year of 41 capitals
+# costs ~641 of the 10,000 daily units, so fifteen years is the most one run can
+# hold. A longer range does not fail — it sleeps, silently, until the daily
+# window drains — so split it across days. The rows are carried into the next
+# release (`publish/restore_history.py`). Follow with `just dbt-build`.
+# Deepen the capital-city weather archive, e.g. `just backfill-weather 2012 2026`
 backfill-weather start end='': where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
@@ -362,28 +243,11 @@ backfill-weather start end='': where dbt-parse
         -m orchestration.definitions --select 'raw/om_weather_daily' \
         --partition-range "{{ start }}...${end:-{{ start }}}"
 
-# Read-only is the default because DuckDB takes a single writer: a session
-# holding the write lock makes `just run` fail with a lock error two terminals
-# away. Pass `just sql write` when you actually mean to write.
-#
-# The CLI comes from the `duckdb-cli` dev dependency (pyproject.toml), not a
-# separate `curl | sh` install — `just setup` is then all that's needed, and
-# the CLI version is the one `uv.lock` resolved rather than whatever a person's
-# machine happened to have. Note that `just --list` shows only the LAST comment
-# line above a recipe, so that line has to be the summary.
-#
-# **The lakehouse has to be attached, or a third of the warehouse does not open.**
-# `raw` lives in DuckLake now and the nine `staging` models are *views* over it,
-# so a bare `duckdb data/warehouse.duckdb` binds `marts`, `analytics` and
-# `history` fine and fails every staging view with `Catalog "lakehouse" does not
-# exist!`. That is the mirror of the trap the release guards from the other side
-# — a published copy renamed away from `warehouse` breaks its views the same way
-# — and the export solves it by materialising staging (`solidify_staging`), which
-# is exactly what an interactive session cannot do.
-#
-# Attached in the same mode as the warehouse, so `just sql write` can fix a
-# landing table and the default cannot touch one by accident.
-#
+# Read-only unless `write`, so a session cannot change anything by accident.
+# Either mode blocks a build while it is open: DuckDB allows one writer or many
+# readers, never both. The lakehouse is attached in the same mode because the
+# staging views read `lakehouse.raw`; without it they fail with `Catalog
+# "lakehouse" does not exist!`. The CLI is the `duckdb-cli` dev dependency.
 # Open the warehouse in the DuckDB CLI (`just sql write` for a writer)
 sql mode="read":
     #!/usr/bin/env bash
@@ -395,29 +259,26 @@ sql mode="read":
       uv run duckdb -readonly data/warehouse.duckdb -cmd "$attach, read_only);"
     fi
 
-# Lint SQL — from dbt/, because the dbt templater opens the warehouse via the
-# profile's relative path (`../data/…`) without chdir'ing into the project first
+# From dbt/, because the dbt templater resolves the profile's relative
+# `../data/…` default against the working directory.
+# Lint the dbt models and snapshots with sqlfluff
 lint: dbt-deps
     cd dbt && uv run sqlfluff lint models snapshots
 
-# ty is pre-1.0 and nothing in pre-commit or CI runs it, so a version bump can
-# move the count without turning a workflow red. Suppressions go inline as
-# `# ty: ignore[rule]` at the decision rather than into a rules list; [tool.ty]
-# in pyproject.toml overrides nothing. `uv run`, not a global `ty`, so the
-# locked version is the one that answers — the sqlfluff single-pin rule.
+# ty is pre-1.0 and runs in neither pre-commit nor CI; `uv run` so the locked
+# version answers. Suppressions go inline as `# ty: ignore[rule]`.
 # Type-check the Python — reports, gates nothing
 typecheck:
     uv run ty check
 
-# Build the Evidence dashboard (requires Node; see reports/README.md).
-# Wraps the same module the `reports/evidence_site` asset calls, so the recipe and
-# the asset graph can't run different builds.
+# The same module the `reports/evidence_site` asset calls.
+# Build the Evidence dashboard (requires Node; see reports/README.md)
 report:
     uv run python -m publish.build_report
 
-# Evidence caches each source's schema keyed on the source SQL, so a `select *`
-# that gains columns looks unchanged and validation fails against the stale schema.
-# Nuke the cache + reprocess sources, then build. Use after mart columns change.
+# Evidence caches each source's schema and does not notice a column change, so
+# use this rather than `report` after any mart or analytics column changes.
+# Drop Evidence's schema cache, re-extract the sources, then build
 report-clean:
     uv run python -m publish.build_report --clean
 
@@ -425,83 +286,23 @@ report-clean:
 # Running as a service (docs/RUNNING_AS_A_SERVICE.md)
 # ---------------------------------------------------------------------------
 
-# Where `just serve` serves the dashboard from, and `env(...)` for the reason
-# DAGSTER_HOME is: a deployment's answer lives in the systemd unit's
-# EnvironmentFile and has to win over this one.
-#
-# `reports/build` is the fixed path `publish/build_report.py` writes to, which is
-# also why it is a starting point rather than the end state: that module clears
-# the directory on every run, `--clean` or not, so the site is *down* for the
-# length of a rebuild. §4 of the design points this at a `current` symlink
-# flipped after the build instead. Nothing below assumes either shape.
+# `env(...)` so a deployment's EnvironmentFile wins. `publish/build_report.py`
+# empties reports/build on every run, so the site is down while it rebuilds —
+# §4 of the design swaps a symlink instead.
 export SITE_ROOT := env("SITE_ROOT", justfile_directory() / "reports/build")
 
-# The always-on shape: the asset graph scheduling itself and the dashboard served
-# without a deploy step. Three processes and no container — §2 of
-# docs/RUNNING_AS_A_SERVICE.md has the argument, and the short version is that
-# this file is already the single definition of the environment, so a Dockerfile
-# would be a fifth restatement of it that `tests/test_workflows.py` cannot guard.
-#
-# **`dagster-webserver` + `dagster-daemon`, not `dagster dev`.** The shipped help
-# calls dev a "local deployment", and the docs list what it does not give you —
-# chiefly *automatic daemon restart*, which is the systemd unit's whole job.
-# Splitting the two is what leaves room for a supervisor.
-#
-# **`dbt-parse` is the dependency that actually breaks.** `prepare_if_dev()`
-# fires only under the dev CLI (it reads DAGSTER_IS_DEV_CLI), so running the
-# webserver directly does not prepare the dbt project, and `dbt/target/` is
-# gitignored — so it bites on every fresh deploy. The trap is that **the
-# webserver comes up healthy either way**: it answers HTTP and the daemon keeps
-# running while the code location inside it is dead with
-# DagsterDbtManifestNotFoundError. A liveness probe on the port calls that fine;
-# `uv run dagster definitions validate -m orchestration.definitions` is what
-# tells the two apart, and it names the cause.
-#
-# **All three carry `--group orchestration`, and the file server is the one that
-# proves why.** It does not import Dagster and does not need the group; what it
-# needs is to not *change* the venv underneath the other two. `uv run` syncs
-# before it executes, and `default-groups` is deliberately unset in
-# pyproject.toml, so a bare `uv run` resolves to `dev` alone — measured,
-# `uv sync --dry-run` here would uninstall 46 packages, `dagster`,
-# `dagster-webserver` and `grpcio` among them. The three jobs start milliseconds
-# apart and uv serialises on the venv lock, so which sync lands last is a race.
-# When the strip wins, the webserver and daemon survive on imports they already
-# hold in memory and everything they *fork later* dies: the grpc code servers,
-# and the run worker the daemon forks per schedule tick. The ports answer,
-# `wait -n` never returns, `Restart=on-failure` never fires, and nothing
-# materialises. **It is reachable from outside this recipe too** — any recipe
-# here without the group (`just report`, `just test`, `just sql`) strips the
-# venv under a running service, which is why §10 says to stop it first.
-#
-# **The ports.** 3000 is `just dagster`'s and `evidence dev`'s alike, so the site
-# gets its own. It is a *static* site — `evidence build` renders HTML that
-# queries Parquet in the browser with DuckDB-WASM and never opens
-# data/warehouse.duckdb — so a plain file server is the entire requirement, and
-# `evidence dev` (a hot-reloading dev server) is the wrong tool for it. Dagster
-# binds to localhost because its webserver has no authentication; the site binds
-# everywhere because §6 judges it safe to expose, remembering that it ships the
-# underlying Parquet to the browser, so "the site is public" means "these tables
-# are public".
-#
-# **A dead child has to take the unit down**, which is `wait -n` and not `wait`:
-# plain `wait` returns only once *every* child has exited, so a webserver that
-# died would leave this recipe running, systemd seeing a healthy unit and nothing
-# materialising. That is the paragraph above one level out, and `Restart=on-failure`
-# means nothing without it.
-#
-# **`kill` the recorded PIDs, not `kill 0`.** Measured: `uv run` forwards SIGTERM
-# to the process it spawned and the cascade carries on down to the grpc code
-# servers, so the three PIDs are enough to stop twelve processes.
-# `kill 0` signals the whole group including this shell, which would then die
-# *by SIGTERM* — and systemd's `Restart=on-failure` excludes SIGHUP, SIGINT,
-# SIGTERM and SIGPIPE, so the unit would exit looking clean and never come back.
-#
-# **It does not start the schedule.** `daily_refresh` ships STOPPED, and starting
-# it is instance state under DAGSTER_HOME rather than code:
-# `uv run dagster schedule start -m orchestration.definitions daily_refresh`,
-# once per instance and again if that directory is ever wiped. Skipping it looks
-# exactly like a working service that serves an ageing site and ingests nothing.
-# (`just --list` renders only the line directly above a recipe.)
+# The reasoning is §2 of docs/RUNNING_AS_A_SERVICE.md; the constraints it sets:
+#   - webserver + daemon rather than `dagster dev`, so a supervisor can restart them;
+#   - `dbt-parse`, because outside the dev CLI nothing writes the manifest and the
+#     webserver still answers HTTP with a dead code location;
+#   - `--group orchestration` on the Dagster processes (the file server carries
+#     it too, harmlessly): `uv run` only ever adds packages, and it is a bare
+#     `uv sync` that would strip Dagster from under a running service (§10);
+#   - Dagster binds localhost (no auth); the site binds every interface (§6);
+#   - `wait -n`, so one dead child ends the unit, and `kill` of the recorded
+#     PIDs rather than `kill 0`, which would end this shell by SIGTERM — a clean
+#     exit as far as `Restart=on-failure` is concerned.
+# It does not start the `daily_refresh` schedule, which ships STOPPED (§10).
 # Run the graph and the dashboard as one always-on service (blocks; ctrl-c to stop)
 serve dagster_port="3000" site_port="8081": where dbt-parse
     #!/usr/bin/env bash
@@ -515,10 +316,8 @@ serve dagster_port="3000" site_port="8081": where dbt-parse
         [ ${#pids[@]} -eq 0 ] || kill "${pids[@]}" 2>/dev/null || true
         wait 2>/dev/null || true
     }
-    # A signal is somebody stopping the service; a child exiting on its own is
-    # the service failing. A supervisor has to tell those apart, so they leave
-    # different exit statuses behind — `systemctl stop` is not a restart trigger
-    # and a dead webserver is.
+    # Stopped by a signal: exit 0. A child exiting on its own: exit 1 (below), so
+    # a supervisor restarts on failure and not on `systemctl stop`.
     trap 'stop; exit 0' INT TERM
     trap stop EXIT
 
@@ -540,16 +339,9 @@ serve dagster_port="3000" site_port="8081": where dbt-parse
 # Course (docs/course/) — the sandbox the exercises break on purpose
 # ---------------------------------------------------------------------------
 
-# Same offline, deterministic build as `just test-pipeline`, but at a *stable*
-# path instead of a mktemp one — a drill breaks a model, looks at the wrong
-# number, then fixes it, and the warehouse has to still be there on the next
-# command.
-#
-# It is the 17-country fixture slice, which the course leans on rather than
-# apologises for: a threshold those 17 pass and the full 200+ would break is one
-# of the failures the material is about. Investigate-the-data exercises read the
-# real warehouse instead.
-#
+# `test-pipeline` at a stable path, so a deliberately broken model is still there
+# on the next command. It is the 17-country fixture slice; exercises that
+# investigate the data read the real warehouse instead.
 # Build the course sandbox in data/course/ (gitignored) from the fixtures
 course-sandbox:
     #!/usr/bin/env bash
@@ -569,9 +361,7 @@ course-sandbox:
     uv run python -m transform.pipeline_status
     echo "sandbox ready — 'just course-rebuild' after you change a model"
 
-# Seconds rather than a full `just course-sandbox`, because the fixtures have
-# already landed and nothing about a broken *model* requires re-ingesting.
-#
+# No re-ingest: a broken model needs only the dbt layer rebuilt.
 # The drill inner loop: rebuild the dbt layer against the sandbox
 course-rebuild:
     #!/usr/bin/env bash
@@ -580,12 +370,9 @@ course-rebuild:
     test -f "$WAREHOUSE_PATH" || { echo "no sandbox yet — run: just course-sandbox" >&2; exit 1; }
     cd dbt && uv run dbt build
 
-# The Polars layer runs *after* dbt and is not part of `just course-rebuild`, so
-# a drill on a derived metric (module 04's denominator) needs this instead. It is
-# a recipe rather than a line in the material for one reason: the raw form is
-# `WAREHOUSE_PATH=... uv run python -m transform.co2_intensity`, and a learner who
-# forgets the variable rewrites `analytics` in the *real* warehouse.
-#
+# `course-rebuild` stops at dbt. A recipe rather than a command in the material,
+# because the raw form forgets WAREHOUSE_PATH once and rewrites the real
+# warehouse's `analytics`.
 # Re-run the Polars derived metrics against the course sandbox
 course-transform:
     #!/usr/bin/env bash
@@ -595,72 +382,39 @@ course-transform:
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
 
-# Read-only on purpose: DuckDB takes one writer at a time, so a REPL left open is
-# what makes the next `just course-rebuild` fail on a lock.
+# One query and exit, so no open session holds the file when the next
+# `course-rebuild` needs it:
 #   just course-query 'select count(*) from marts.dim_country_year'
-#
 # Run one read-only query against the course sandbox
 course-query sql:
     @uv run python -c "import duckdb,sys; \
         print(duckdb.connect('{{ justfile_directory() }}/data/course/warehouse.duckdb', read_only=True).sql(sys.argv[1]))" \
         {{ quote(sql) }}
 
-# Reclaim gitignored build output. Every target below is produced by a recipe in
-# this file, so deleting it costs rebuild time and nothing else — with exactly
-# one exception, which is why this recipe takes a scope instead of just running.
-#
-# The exception is `data/warehouse.duckdb`. It holds the `history` schema: two
-# dbt snapshots that accumulate one row per revision and that NO rebuild can
-# reproduce, because they are a record of what the sources said on the days we
-# asked. Delete the file and those versions are gone for good — `just
-# restore-history` can only recover what a published release happened to carry.
-#
-# `just clean` reclaims the safe tier; `just clean deep` also takes
-# reports/node_modules (694 MB, restored by `just report`, needs Node).
-#
+# Everything this deletes is regenerable except data/warehouse.duckdb, whose
+# `history` snapshots and `analytics.pipeline_runs` no rebuild reproduces — so
+# that one is its own scope and is gated. `deep` adds reports/node_modules
+# (restored by `just report`, needs Node).
 # Reclaim gitignored build output (`deep` adds node_modules; `warehouse` needs --force)
 clean scope="safe" force="":
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{ justfile_directory() }}"
 
-    # `just clean warehouse [--force]` — the one target that is not derived.
-    #
-    # The gate runs BEFORE anything is deleted. A refused `just clean warehouse`
-    # used to still take the whole safe tier with it on the way to saying no,
-    # which is a poor thing for a command that refused to do.
-    #
-    # Mirrors `publish/restore_history.py`: the gate is not "is this scary", it
-    # is "is there anything here a rebuild cannot make again". A warehouse with
-    # no snapshots and no carried landing tables (a fresh clone, or one built
-    # but never snapshotted) goes without ceremony. Anything else stops it until
-    # `--force`, and the message names the count — the same shape, and the same
-    # sentence, as the refusal in `modern_data_stack.history`.
-    #
-    # The count comes from `irreplaceable_rows()` rather than SQL written out
-    # here, because there are now two *kinds* of unreproducible table and the
-    # list will grow again: the `history` snapshots, and `raw.om_weather_daily`,
-    # which is bounded by Open-Meteo's daily budget rather than by principle.
-    # A gate with its own copy of the list is a gate that waves through whatever
-    # was added last.
+    # `just clean warehouse [--force]`: gated before anything is deleted. The
+    # count is `irreplaceable_rows()`, the same one `restore-history` and
+    # `release-data.yml` use, so the three cannot disagree about what is
+    # unreproducible. Passed the path explicitly because the deletion below names
+    # data/warehouse.duckdb, whatever WAREHOUSE_PATH says.
     if [ "{{ scope }}" = "warehouse" ]; then
       if [ ! -e data/warehouse.duckdb ]; then
         echo "  data/warehouse.duckdb is already gone"
       else
-        # The path is passed explicitly rather than left to `warehouse_path()`:
-        # the deletion below names `data/warehouse.duckdb`, so the gate has to
-        # count that file and not whatever `WAREHOUSE_PATH` currently points at.
         count='from publish.restore_history import irreplaceable_rows; print(irreplaceable_rows("data/warehouse.duckdb"))'
         held=$(uv run python -c "$count") || held=""
-        # An unreadable count must refuse, not fall through. `[ "" -gt 0 ]` is an
-        # error, but inside an `if` that reads as *false* and `set -e` does not
-        # fire — so a warehouse whose state could not be counted would have
-        # been deleted by the safe-looking branch. Fail closed instead.
-        #
-        # `--force` deliberately does not override this one. The check cannot
-        # tell a corrupt file from one a running Dagster job holds the lock on,
-        # and deleting the second is the worse mistake. `rm` by hand is the
-        # escape hatch, and it is the right amount of friction.
+        # Fail closed on an unreadable count: `[ "" -gt 0 ]` inside an `if` is
+        # false, not an error. `--force` does not override this, because a
+        # corrupt file and one a running job holds locked look the same here.
         case "$held" in
           ''|*[!0-9]*)
             echo "could not count the unreproducible rows in data/warehouse.duckdb" >&2
@@ -670,7 +424,7 @@ clean scope="safe" force="":
         esac
         if [ "$held" -gt 0 ] && [ "{{ force }}" != "--force" ]; then
           echo "data/warehouse.duckdb holds $held rows a rebuild cannot make again" >&2
-          echo "(snapshot history and carried landing tables). Pass --force if" >&2
+          echo "(snapshot history and dbt run history). Pass --force if" >&2
           echo "that is really what you want:" >&2
           echo "  just clean warehouse --force" >&2
           echo "A published release can restore some of it: just restore-history <file>" >&2
@@ -690,33 +444,21 @@ clean scope="safe" force="":
       done
     }
 
-    # Regenerable with no state in them at all.
+    # Regenerable, holding no state:
     #   dbt/target        `dbt parse` / `just dbt-build`   (the manifest)
     #   dbt/dbt_packages  `just dbt-deps`
+    #   dbt/logs          any dbt command
     #   data/export       `just export-data`
     #   data/course       `just course-sandbox`
     #   data/cache        re-downloaded on the next ingest
     #   reports/build     `just report`
     #   reports/.evidence `just report-clean`
+    # data/lake is dead: the hive archive DuckLake replaced wrote it, and nothing
+    # reads it.
     #
-    # data/lake is the odd one out: it is not regenerable, it is *dead*. The
-    # hand-rolled hive archive DuckLake replaced on 2026-08-27 wrote it, the
-    # recipe that built it (`just lake`) no longer exists, and nothing reads it
-    # — `lake/lakehouse.py`'s docstring has said "`data/lake/` is gone with it"
-    # while 60 MB of it sat on every machine that predates the move. Listed
-    # here so the claim becomes true rather than aspirational.
-    #
-    # **`data/lake` and `data/lakehouse` differ by four characters and the rule
-    # for them is opposite.** `drop` takes exact paths and never globs, which is
-    # what keeps that safe; a `data/lake*` here would destroy the weather
-    # archive and say "removed" while doing it.
-    #
-    # data/lakehouse is deliberately absent, and the reason got stronger when it
-    # stopped being a mirror: it is now the *only* copy of every landing table.
-    # Deleting it costs the snapshot lineage (which no rebuild invents, the same
-    # property that makes `history` unreproducible) and the weather archive
-    # (which no rebuild can afford — days of Open-Meteo's budget). Silently, in
-    # both cases: nothing in the output would say so.
+    # data/lakehouse is deliberately absent — it is the only copy of every
+    # landing table, including the weather archive. `drop` takes exact paths and
+    # never globs, which is what keeps `data/lake` from reaching it.
     drop dbt/target dbt/dbt_packages dbt/logs \
          data/export data/course data/cache data/lake \
          reports/build reports/.evidence

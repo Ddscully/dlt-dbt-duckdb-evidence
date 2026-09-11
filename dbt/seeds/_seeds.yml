@@ -230,28 +230,15 @@ seeds:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [country_or_territory, good_key]
-      # Direct + indirect = total. This is what the mark-up tests used to do —
-      # check the annex against itself — and with the mark-up columns gone it is
-      # the only internal consistency the source still offers. Rows where any of
-      # the three is blank are out of scope: a missing value is the annex's
-      # fallback rule, not an arithmetic claim.
+      # Direct + indirect = total: the only internal consistency the annex offers.
+      # Rows with a blank are out of scope (a blank is the fallback rule), so this
+      # reaches only the 2,781 of 12,540 rows with all three values; the 8,129
+      # with no indirect value are not checked.
       #
-      # **Which means it reaches 2,781 of the 12,540 rows, not most of them.**
-      # `indirect` is published only for cement, fertilisers and 34 iron-and-steel
-      # rows, so only that many rows have three values to add up; a further 8,129
-      # carry direct and total with no indirect and nothing here checks them.
-      # Worth stating, because "the annex checked against itself" invites the
-      # assumption that it is checked throughout.
-      #
-      # The tolerance is 0.02 and it is not slack for its own sake. The annex
-      # rounds each of the three columns *independently* before printing, so the
-      # sum of two rounded numbers is not the rounding of their sum: Albania's
-      # nitric acid is published 2,73 + 0,04 = 2,76, which is off by 0,01 and is
-      # not an error in either the regulation or this transcription. 711 of those
-      # 2,781 rows are inexact that way, every one of them by 0.001 to 0.01, so
-      # 0.02 is double the worst case the source contains. What it still catches
-      # is the failure that matters — a column read from the wrong position,
-      # which is off by whole units, not hundredths.
+      # Tolerance 0.02: the annex rounds each column independently (Albania's
+      # nitric acid prints 2,73 + 0,04 = 2,76), and the 711 inexact rows are off
+      # by at most 0.01. A column read from the wrong position is off by whole
+      # units.
       - dbt_utils.expression_is_true:
           arguments:
             expression: >
@@ -319,18 +306,11 @@ seeds:
           arguments:
             combination_of_columns: [product_group, year]
       # Every group the goods dimension knows must appear here with **all three
-      # years**, or the mart's left join prices that group at null with nothing
-      # to say why. This is the gate that replaces deriving the schedule from the
-      # data — the old arrangement could not have this failure, because a group
-      # with goods necessarily had published columns to divide.
-      #
-      # Checking presence alone is not enough, and that was the first version of
-      # this test. The mart reads each year with its own
-      # `max(markup_pct) filter (where year = ...)`, so a group seeded with only
-      # a 2026 row yields null rates for 2027 and 2028 — and null euro figures in
-      # two of the three years of a published Parquet, on a green build. The
-      # `not_null` tests on the 2027 and 2028 columns in `_compliance.yml` are the
-      # other half of that; this is the half that names the cause.
+      # years**, or the mart's left join prices it at null. Presence alone is not
+      # enough: the mart reads each year separately, so a group seeded only for
+      # 2026 would publish null euro figures for 2027 and 2028 on a green build.
+      # The `not_null` tests in `_compliance.yml` catch the symptom; this names
+      # the cause.
       - dbt_utils.expression_is_true:
           arguments:
             expression: >
@@ -382,24 +362,14 @@ seeds:
           1,000,000:1 and 10,000:1. A series charted by code rather than by money
           has a cliff at those two dates.
     data_tests:
-      # Every retirement date the seed asserts has to be consistent with what the
-      # ECB actually published — the last quote strictly before it. All twelve
-      # land on the business day before, which is why the dates can be trusted at
-      # all. Lives here rather than on the mart because it is the *seed* being
-      # checked; the mart is only where the evidence lives.
+      # Every retirement date the seed asserts must match what the ECB published:
+      # the last quote falls strictly before it (all twelve on the business day
+      # before). On the seed, because it is the seed being checked.
       #
-      # **Both sides are qualified, and that stopped being cosmetic on
-      # 2026-09-08.** While staging spelled the column `quote_currency` the
-      # inner and outer names differed, so a bare `currency_code` could only
-      # mean the seed's. Renaming staging to the conformed name puts the same
-      # identifier in both scopes, and DuckDB binds an unqualified one to the
-      # *inner* table — turning the correlation into `r.currency_code =
-      # r.currency_code` and comparing every retirement date against the last
-      # fixing of the whole panel. Measured rather than assumed, and it lands
-      # the safe way up: GRD's own last fixing is 2000-12-29 but the panel's is
-      # today, so all twelve retired rows would go red rather than quietly
-      # green. A collision that fails loudly is still a collision — the next one
-      # in this repo may not point that way.
+      # **Both sides are qualified**: the seed and staging share the name
+      # `currency_code`, and DuckDB binds an unqualified name in a correlated
+      # subquery to the *inner* table, which would compare every date against
+      # the whole panel's last fixing.
       - dbt_utils.expression_is_true:
           arguments:
             expression: >

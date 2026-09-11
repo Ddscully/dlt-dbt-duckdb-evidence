@@ -2,53 +2,28 @@ version: 2
 
 # Who reads this warehouse, declared to dbt.
 #
-# `dbt ls --select +exposure:evidence_retail` now answers "what breaks if I
-# change this model" for one page, and `dbt ls --select +exposure:*` for every
-# consumer at once. Before this file, that dependency existed only as
-# `TABLE_TO_DBT_MODEL` in `publish/build_report.py` — a hand-maintained Python
-# dict that exists because the site→mart edge was invisible to dbt.
+# `dbt ls --select +exposure:evidence_retail` answers "what breaks if I change
+# this model" for one page; `+exposure:*` for every consumer.
 #
-# The two are not duplicates and neither replaces the other, which is the useful
-# part:
+# Not a duplicate of `TABLE_TO_DBT_MODEL` in `publish/build_report.py`: that map
+# is per *site* (the Dagster graph's edge, Polars tables included), these are per
+# *page* and can only name nodes dbt builds. `tests/test_exposures.py` resolves
+# page → source query → warehouse table and fails if the two disagree.
 #
-#   - The dict is per *site*: it makes `reports/evidence_site` land in the right
-#     place in the Dagster graph, and it has to cover the Polars tables too.
-#   - These exposures are per *page*, and they can only name nodes dbt builds.
+# dbt cannot see the Polars outputs in `analytics` (`co2_intensity`,
+# `retail_rfm`, the four `pipeline_*` tables), so the Findings, Countries and
+# Retail exposures each name one fewer dependency than their page reads; the test
+# asserts that remainder is exactly `TABLE_TO_ASSET_KEY`. Two pages have no
+# exposure: `pipeline.md` reads only Polars tables and `index.md` reads nothing.
 #
-# `tests/test_report.py::test_exposures_match_what_the_pages_read` checks them
-# against each other by resolving page → source query → warehouse table, so
-# adding a chart on a new mart fails the build rather than quietly leaving one of
-# the two stale.
-#
-# **What dbt cannot say here.** Everything in `analytics` is written by Polars,
-# downstream of dbt and invisible to it, so no exposure can depend on
-# `co2_intensity`, `retail_rfm` or the three `pipeline_*` tables. That is why
-# `reports/pages/pipeline.md` has no exposure at all — every table it reads is a
-# Polars output — and why the Findings, Countries and Retail exposures each name one
-# fewer dependency than their page actually has. The test asserts that remainder
-# is *exactly* `TABLE_TO_ASSET_KEY`, so the gap is measured rather than assumed.
-#
-# **Two pages have no exposure, for opposite reasons.** `pipeline.md` reads tables
-# dbt cannot name; `index.md` reads nothing at all. It is a routing page — prose
-# and links, no SQL — so there is no dependency to declare and no number on it
-# that can go stale. `tests/test_exposures.py` asserts both cases by name, so
-# either page growing a chart fails the test rather than silently losing its
-# lineage.
-#
-# `maturity:` is deliberately not set. Every page here deploys from the same
-# workflow on the same schedule, so a column of `high` would be decoration; the
-# one real distinction (the Scope 2 page's worked example is invented data) is
-# stated on the page and in the mart's description, where a reader will meet it.
+# `maturity:` is not set: every page deploys from one workflow on one schedule.
 exposures:
-  # Named for the page file (`pages/countries.md`), not for what the page is
-  # called, because the test maps `evidence_<slug>` to a slug mechanically.
+  # Named `evidence_<page file slug>`, which the test maps mechanically.
   #
-  # The file is `countries.md` and not `explore.md` because **`explore` is a
-  # reserved Evidence route**: the template ships its own `pages/explore/` (the
-  # SQL console and schema browser) with no `+page.md`, so a page of that name is
-  # never copied in and the build dies on `/api/explore/evidencemeta.json` 500
-  # rather than on anything naming the page. `settings` and `api` are reserved
-  # the same way.
+  # The page is `countries.md`, not `explore.md`: **`explore` is a reserved
+  # Evidence route** (the template's SQL console), so a page of that name is never
+  # copied in and the build dies on `/api/explore/evidencemeta.json` 500.
+  # `settings` and `api` are reserved too.
   - name: evidence_countries
     label: Dashboard — Country Explorer
     type: dashboard
@@ -148,9 +123,7 @@ exposures:
     description: >
       The FX layer: the calendar gap, the currency panel's retirements, spot
       against average, and the euro-versus-dollar reading of the Eurostat
-      electricity price. Reads more marts than any other page, and is the reason
-      `fct_eu_electricity_prices_semiannual` now has two consumers rather than
-      one.
+      electricity price. Reads more marts than any other page.
     depends_on:
       - ref('dim_currency')
       - ref('dim_date')
@@ -162,10 +135,8 @@ exposures:
       name: Daniel Scully
       email: danieldscully@gmail.com
 
-  # Reads `dim_country_year` as well as the weather mart, because the fact is
-  # keyed on ISO3 and carries no country name — the source query joins the
-  # dimension in for chart labels. A page that reads a model only for its labels
-  # still breaks when that model changes, so it is declared like any other.
+  # Includes `dim_country_year`, read only for chart labels: a label source still
+  # breaks the page when it changes.
   - name: evidence_weather
     label: Dashboard — Weather
     type: dashboard
@@ -201,17 +172,10 @@ exposures:
       name: Daniel Scully
       email: danieldscully@gmail.com
 
-  # Not a page — the monthly GitHub release, which is the consumer nobody can see
-  # from inside the repo and the only one that is genuinely *outside* this
-  # project. It is also why every mart model is `access: public` rather than
-  # `protected`: those files land on somebody else's disk.
-  #
-  # `dim_country` is in the list because the release notes point a reader at
-  # it by name as the country dimension. It used to be `stg_country` here, for
-  # want of a mart saying the same thing — a staging model in the promise a
-  # release makes, which is exactly the gap `dim_country` closed. The nine
-  # staging views ship as Parquet too (`PUBLISHED_SCHEMAS`), but nothing in the
-  # notes promises them, so they are not declared here.
+  # The monthly GitHub release: the one consumer outside the project, and why
+  # every mart is `access: public`. Exactly the marts — the staging layer ships
+  # as Parquet too (`PUBLISHED_SCHEMAS`), but the release notes promise nothing
+  # about it.
   - name: published_data_release
     label: Monthly data release (GitHub)
     type: application

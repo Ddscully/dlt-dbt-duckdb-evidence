@@ -154,8 +154,7 @@ def test_a_view_and_the_mart_below_it_still_agree_after_the_rewrite(warehouse):
 
 def test_the_sweep_finds_the_copy_nobody_declared(warehouse):
     """`raw_staging` is dlt's merge scratch. No yml describes it, nothing reads
-    it, and it holds a full copy of the landing table — including, before this,
-    824,364 clear customer ids in every release."""
+    it, and it holds a full copy of the landing table, clear ids included."""
     found = privacy.expand_by_name(warehouse, DECLARED)
     assert ("raw_staging", "lines", "customer_id") in found
 
@@ -231,21 +230,12 @@ def yml_classifications(path) -> dict[tuple[str, str], str]:
 def yml_columns(path) -> dict[str, dict]:
     """`{model: {"group": …, "columns": [names]}}`.
 
-    **A mart's group comes from its folder and a staging model's from its yml,
-    and that asymmetry is dbt's rather than this file's.** `+group:` is set once
-    per `marts/<group>/` folder in `dbt_project.yml`, so a mart's yml block does
-    not carry one at all; the nine staging models share a single folder and span
-    three groups, so theirs has to be declared per model.
-
-    **Reading `config.group` for both is what this did until 2026-09-02, and it
-    went silently blind the day the marts layer was subdivided.** Every mart
-    then reported `group: None`, so the name-collision test below narrowed to
-    the one staging model that still declared a group and stopped seeing
-    `dim_retail_product` — the exact column pair it exists for — while staying
-    green. Deriving it from the path keeps the whole coverage half free of the
-    dbt manifest, which is the constraint the module docstring describes; the
-    guard against this going quiet a second time is
-    `test_the_group_filter_still_reaches_the_mart_models`.
+    **A mart's group comes from its folder and a staging model's from its yml.**
+    `+group:` is set once per `marts/<group>/` folder in `dbt_project.yml`, so a
+    mart's yml block carries none; the staging models share one folder and span
+    several groups, so theirs is declared per model. Reading `config.group` for
+    both would give every mart `None` and silently narrow the collision test
+    below; `test_the_group_filter_still_reaches_the_mart_models` guards that.
     """
     parsed = yaml.safe_load(path.read_text())
     folder_group = path.parent.name if path.parent.parent == MARTS_DIR else None
@@ -261,19 +251,10 @@ def yml_columns(path) -> dict[str, dict]:
 def marts_ymls() -> list[Path]:
     """Every models-shaped yml in the marts folder.
 
-    A glob rather than a named file: this was one 2,183-line `_marts.yml` until
-    it was split per dbt group, and the split is exactly the kind of change that
-    leaves a coverage test reading three quarters of the tree while still
-    passing. A fifth group file has to be seen without anyone remembering to add
-    it here. `_unit_tests.yml` carries no `models:` key and drops out on its own.
-
-    **Recursive, because the flat version went blind and the guard below caught
-    it.** The group ymls moved into `marts/<group>/` when the marts layer was
-    subdivided one folder per dbt group; `glob("*.yml")` then matched nothing but
-    `_unit_tests.yml`, which has no `models:` key — so `declared()` came back
-    empty and the two coverage tests that assert an *absence* both passed on it.
-    That is the case `test_the_yml_scan_finds_every_mart_it_should` names in its
-    own docstring as hypothetical. It arrived.
+    A recursive glob rather than named files, because the group ymls live in
+    `marts/<group>/` and a fifth group has to be seen without anyone remembering
+    to add it here. `_unit_tests.yml` carries no `models:` key and drops out on
+    its own.
     """
     return sorted(
         p for p in MARTS_DIR.rglob("*.yml") if (yaml.safe_load(p.read_text()) or {}).get("models")
@@ -300,16 +281,11 @@ def test_the_yml_scan_finds_every_mart_it_should():
 
     Two of the three coverage tests below assert an *absence* — no unlabelled
     name collision, no unclassified copy of the identifier — so both would pass
-    on an empty scan, which is precisely what a mistyped suffix or a fifth file
-    in a subfolder would produce. Deriving the expected set from the `.sql`
-    files means a model whose yml block went missing in a move is a failure
-    rather than a silence.
-
-    The subfolder case stopped being hypothetical when the marts layer was
-    subdivided one folder per dbt group. Both globs above are `rglob` now, and
-    this test is what said so — it went red on a tree where `dbt parse`,
-    `dbt build` and every other test were green, because dbt does not care which
-    file declares a model and only this one reads the files as files.
+    on an empty scan, which is what a mistyped suffix or a file in an unscanned
+    folder would produce. Deriving the expected set from the `.sql` files means
+    a model whose yml block went missing in a move is a failure rather than a
+    silence — and only this test would notice, because dbt does not care which
+    file declares a model.
 
     `fct_emissions_energy` is the one collapse: `_v1.sql` and `_v2.sql` are two
     files under one `versions:` entry, so the suffix comes off before comparing.
@@ -337,15 +313,11 @@ def declared_groups() -> set[str]:
 
 
 def test_the_group_filter_still_reaches_the_mart_models():
-    """The vacuity guard for the group in `yml_columns`, and it arrived a
-    refactor late.
+    """The vacuity guard for the group in `yml_columns`.
 
     The test below filters on `group == "retail"` and then asserts an
     *absence*, which is the combination that fails open: narrow the filter to
-    nothing and there is nothing left to be missing. That is exactly what
-    happened when `+group:` moved out of the mart ymls into `dbt_project.yml` —
-    every mart resolved to `None`, the filter kept only `stg_retail_lines`, and
-    deleting a label from `dim_retail_product` left the suite green.
+    nothing and there is nothing left to be missing.
 
     Two assertions, because they catch different mistakes. Every mart must
     resolve to a group `_groups.yml` actually declares, which catches a folder
@@ -410,9 +382,9 @@ def test_the_identifier_is_classified_everywhere_it_appears():
 
 
 def test_the_landing_table_declares_the_identifier():
-    """Classification starts at the source, not at staging: `raw` ships inside
-    the published DuckDB file, so a policy beginning one layer down has already
-    let the clear value into the artifact."""
+    """Classification starts at the source, not at staging: the landing table is
+    where the clear value enters, and the published `staging` tables are
+    solidified straight from it."""
     parsed = yaml.safe_load(SOURCES_YML.read_text())
     tables = {table["name"]: table for source in parsed["sources"] for table in source["tables"]}
     columns = {c["name"]: c for c in tables["retail_invoice_lines"]["columns"]}
@@ -458,8 +430,9 @@ def test_an_empty_classified_set_is_refused_at_the_boundary(warehouse, monkeypat
 
 def test_a_missing_manifest_degrades_instead_of_raising(warehouse, monkeypatch):
     """`dbt/target/` is gitignored and `just test` runs before `dbt parse`, so an
-    exporter that required a manifest broke every test in `tests/test_export.py`
-    on a fresh clone. Degrading is safe only because the sweep is by column name:
+    exporter that required a manifest would break every test in
+    `tests/test_export.py` on a fresh clone. Degrading is safe only because the
+    sweep is by column name:
     `EXTRA_CLASSIFICATIONS` still names `customer_id`, so every copy of it is
     still found."""
     monkeypatch.setattr(

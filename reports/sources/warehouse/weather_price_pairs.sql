@@ -1,34 +1,23 @@
 -- Year-over-year change in heating demand beside year-over-year change in
 -- household electricity price, one row per country and year.
 --
--- This is a *source* query and not a block on the page for two reasons. Evidence
--- resolves source tables when it prerenders a page but does not resolve a query
--- that reads another query, so a chained version builds with `Table with name
--- pairs does not exist` in the middle of the page and 200 OK around it. And the
--- window functions below then run once at build time rather than in every
--- visitor's browser.
+-- A source query rather than a page block: Evidence prerendering does not
+-- resolve a query that reads another query (the page builds with `Table with
+-- name pairs does not exist` inside a 200), and the windows run once at build
+-- time instead of in every browser.
 --
--- Three things this query is careful about:
+-- 1. **Both halves of the price year.** Eurostat publishes S1 around May and S2
+--    the next spring, so `having count(*) = 2` drops a half-reported year.
+-- 2. **`year_is_complete`** on the weather side, for the same reason.
+-- 3. **Adjacent years only.** Neither series is guaranteed contiguous, so both
+--    gaps must be exactly one year; a `lag` over a hole would compare 2012 with
+--    2007.
 --
--- 1. **Both halves, or the annual price is not an annual price.** Eurostat
---    publishes S1 around May and S2 the following spring, so `having count(*) =
---    2` drops the year that is only half reported. Without it the newest year is
---    a January-June average being compared against whole ones.
--- 2. **`year_is_complete`, for the same reason on the weather side.** The
---    archive stops a few days short of today, and a degree-day total over a
---    partial year is not comparable with a whole one.
--- 3. **A "year over year" change across a gap is not one.** Neither series is
---    guaranteed contiguous — the weather archive holds whichever years have been
---    fetched — so both gaps are computed and both must be exactly one year. A
---    `lag` over a hole silently compares 2012 against 2007.
---
--- **This is a filtered source, which is the shape that can come back empty**, and
--- an empty source is a build failure (`too small to be a Parquet file`) rather
--- than an empty chart. It needs two *adjacent* complete years present in both
--- series. A fresh clone or `pages.yml` cold-starts the weather archive at
--- `WEATHER_COLD_START_YEARS` (three years, so two complete ones), which clears
--- that bar by one year — so if this ever fails to write, the cause is the weather
--- archive being shallower than the overlap needs, not the SQL.
+-- **It can come back empty**, and an empty source fails the build (`too small to
+-- be a Parquet file`). It needs two adjacent complete years in both series; a
+-- cold-started weather archive (`WEATHER_COLD_START_YEARS`, three years, so two
+-- complete ones) just meets that. If it fails to write, the weather archive is
+-- too shallow.
 with weather as (
     select
         country_iso3,
@@ -80,9 +69,8 @@ adjacent as (
         and price_change is not null
 ),
 
--- How far apart the countries were that year. Two passes rather than one,
--- because a window function cannot be nested inside another one and the flag
--- below is a max over these per-year spreads.
+-- How far apart the countries were each year; a separate pass because the flag
+-- below is a window over these windows.
 spreads as (
     select
         country_iso3,
@@ -105,8 +93,6 @@ select
     price_spread,
     hdd_spread,
 
-    -- Carried so the page can point at "the year prices diverged most" without
-    -- three copies of the same argmax subquery, and so that which year that is
-    -- stays a fact about the data rather than a literal somebody typed.
+    -- So the page can name the year prices diverged most without hardcoding it.
     price_spread = max(price_spread) over () as is_widest_spread_year
 from spreads

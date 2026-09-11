@@ -1,36 +1,25 @@
 -- UCI Online Retail II order lines, cleaned and classified.
 -- Grain: one row per (invoice, line_number) — unchanged from the source.
 --
--- This model adds no rows, removes no rows and computes no money. All it does is
--- give names to distinctions the source encodes and never documents, because
--- every one of them is a place a naive read gets a wrong number:
+-- No rows added or removed, and no money computed: this names distinctions the
+-- source encodes and never documents, each a place a naive read goes wrong.
 --
---   * **Three invoice prefixes, not two.** 45,330 invoices are plain sales,
---     8,292 carry a `C` (cancellation), and 6 carry an `A` — bad-debt
---     adjustments, worth -GBP 147,614 between them. `A` is the one nobody
---     expects, it is the only place a *negative price* occurs, and at six rows
---     it survives no sampling. Left in `raw` and named here.
---   * **A negative quantity is not a return.** 3,457 negative-quantity lines sit
---     on *sale* invoices, and every single one has a zero price and no customer:
---     they are inventory write-offs ("faulty", "crushed ctn", "given away",
---     "wrong barcode") posted through the transaction table. Counting them as
---     returns overstates the return count by 3,457 and the returned value by
---     exactly GBP 0, which is the tell.
---   * **`stock_code` is not only products.** Postage, carriage, bank charges,
---     Amazon fees, CRUK commission, gift vouchers, samples, manual adjustments
---     and a literal `TEST001` all arrive in the same column as the mugs.
---     AMAZONFEE alone is -GBP 260,764. Any revenue figure has to say which of
---     these it includes, so `item_type` exists to let it.
+--   * **Three invoice prefixes.** 45,330 invoices are sales, 8,292 carry `C`
+--     (cancellation) and 6 carry `A` — bad-debt adjustments worth -GBP 147,614,
+--     and the only negative prices.
+--   * **A negative quantity is not always a return.** 3,457 negative-quantity
+--     lines on *sale* invoices, all zero-priced and anonymous, are inventory
+--     write-offs posted through the transaction table.
+--   * **`stock_code` is not only products.** Postage, fees, vouchers, samples,
+--     manual adjustments and `TEST001` share the column (AMAZONFEE alone is
+--     -GBP 260,764), so `item_type` says which a revenue figure includes.
 --
--- `is_revenue_line` is the one opinion in the file: a product sale or return
--- that a customer was actually charged for. Everything else stays, flagged, so
--- the alternative definitions are a `where` clause rather than a rebuild.
+-- `is_revenue_line` is the one opinion: a product sale or return a customer was
+-- charged for. Everything else stays, flagged.
 --
--- It also resolves the source's country *label* to the `country_iso3` the rest
--- of the warehouse keys on, which is what lets retail be joined to the country
--- domain at all. The map is a seed because 9 of the 43 labels do not match the
--- dimension's own names and a join on name loses them without saying so — see
--- `retail_country_map` in `_seeds.yml` for the nine and what they cost.
+-- It also resolves the country label to `country_iso3` through the
+-- `retail_country_map` seed, since 9 of the 43 labels differ from the
+-- dimension's names and a join on name would silently lose them.
 with source as (
     select * from {{ source('raw', 'retail_invoice_lines') }}
 ),
@@ -43,27 +32,19 @@ renamed as (
     select
         invoice,
         line_number,
-        -- Upper-cased because 173 codes differ from another only by case — `M`
-        -- and `m` are the same manual adjustment — and a dimension keyed on the
-        -- raw value would carry both as separate products.
+        -- Upper-cased: many codes differ only by case (`M` and `m` are one
+        -- manual adjustment), and would otherwise be separate products.
         upper(trim(stock_code)) as stock_code,
-        -- Kept as sent, including the 4,382 nulls. `dim_retail_product` picks
-        -- one label per code; a per-line coalesce here would invent text.
+        -- Nulls kept (4,382); `dim_retail_product` picks one label per code.
         nullif(trim(description), '') as description,
         quantity,
         unit_price,
-        -- The blank customer is 22.8% of lines and is *not* a data error — it is
-        -- a real sale nobody was signed in for. Nulled explicitly so it joins as
-        -- an absence rather than as an empty-string customer.
+        -- A blank customer (22.8% of lines) is a real, signed-out sale, nulled
+        -- so it joins as an absence rather than an empty-string customer.
         nullif(trim(customer_id), '') as customer_id,
-        -- `nullif` for the same reason as `description` and `customer_id` above,
-        -- and unreachable for the same reason as several other clauses here:
-        -- the workbook read returns NULL for an empty cell, so all 1,067,371
-        -- rows carry a country and none of them is blank. An empty string
-        -- would otherwise survive the trim and join to the seed as its own
-        -- country — a 44th label the map has never seen, indistinguishable in
-        -- `relationships` from a real one. Pinned by fixture in
-        -- `_unit_tests.yml` rather than left to the reader.
+        -- Unreachable today (the workbook read yields NULL for an empty cell),
+        -- but an empty string would join to the seed as an unknown 44th label.
+        -- A unit test in `_unit_tests.yml` pins it.
         nullif(trim(country), '') as country,
         invoice_ts,
         cast(invoice_ts as date) as invoice_date,
@@ -80,9 +61,8 @@ classified as (
             else 'sale'
         end as invoice_type,
         case
-            -- Order matters: the specific codes are checked before the generic
-            -- five-digit product pattern, because `DCGS0058` and `TEST001` both
-            -- start with letters and only one of them is a product.
+            -- Specific codes first; everything else is a product (`DCGS0058` is,
+            -- `TEST001` is not, though both start with letters).
             when stock_code in ('POST', 'DOT', 'C2') then 'shipping'
             when stock_code in ('BANK CHARGES', 'AMAZONFEE', 'CRUK') then 'fee'
             when stock_code = 'D' then 'discount'
@@ -95,15 +75,11 @@ classified as (
     from renamed
 ),
 
--- **Left, and an inner join here would be the silent version of this model.**
--- The seed is exhaustive, so a null code means one of the three labels that are
--- not countries (`European Community`, `West Indies`, `Unspecified`) — and
--- anything else means a label the seed has never seen, which the
--- `relationships` test in `_staging.yml` exists to name. An inner join deletes
--- those rows instead, and then that test *passes*, because the rows it reads
--- are the ones that went. Measured against a warehouse copy: 17,866 lines and
--- GBP 615,520 gone with all 90 nodes green. The unit test
--- `..._keeps_a_line_whose_country_the_map_has_never_seen` is what catches it.
+-- **A left join, never inner.** A null code means one of the three non-country
+-- labels (`European Community`, `West Indies`, `Unspecified`) or a label the
+-- seed has never seen, which the `relationships` test in `_staging.yml` names.
+-- An inner join would delete those rows and that test would then pass. The unit
+-- test `..._keeps_a_line_whose_country_the_map_has_never_seen` guards it.
 resolved as (
     select
         c.*,
@@ -121,29 +97,21 @@ select
     description,
     quantity,
     unit_price,
-    -- Signed, always: a cancellation's negative quantity times a positive price
-    -- is a negative amount, and that is what makes net revenue a `sum` rather
-    -- than a `sum` minus another `sum` that someone will one day forget.
+    -- Signed, so net revenue is a single `sum`.
     quantity * unit_price as line_amount_gbp,
     customer_id,
     country,
-    -- The conformed key. Kept beside the source's own label rather than
-    -- replacing it: the label is what the file says, and the 871 lines
-    -- (GBP 11,515) whose label is an aggregate or an absence resolve to no code
-    -- at all — dropping the label would make those countryless rather than
-    -- merely un-joinable.
+    -- The conformed key, beside the source's label: the 871 lines (GBP 11,515)
+    -- whose label is an aggregate or an absence resolve to no code.
     country_iso3,
     invoice_ts,
     invoice_date,
     invoice_month,
-    -- A write-off, not a return: negative quantity on a *sale* invoice. The
-    -- zero-price condition is asserted rather than assumed — `_staging.yml`
-    -- tests that no such line has ever carried a price, so the day one does the
-    -- classification fails loudly instead of quietly booking it as revenue.
+    -- Negative quantity on a sale invoice. `_staging.yml` tests that none
+    -- carries a price, so a priced one fails rather than being booked.
     invoice_type = 'sale' and quantity < 0 as is_stock_write_off,
-    -- The one opinion here. Excludes shipping, fees, discounts, samples,
-    -- vouchers, the test SKU, manual adjustments and write-offs; includes both
-    -- sales and genuine cancellations, so it sums to revenue net of returns.
+    -- Products only, sales and cancellations, no write-offs or adjustments:
+    -- sums to revenue net of returns.
     item_type = 'product'
     and not (invoice_type = 'sale' and quantity < 0)
     and invoice_type <> 'adjustment' as is_revenue_line

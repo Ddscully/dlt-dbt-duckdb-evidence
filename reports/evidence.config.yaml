@@ -2,11 +2,10 @@ appearance:
   default: system
   switcher: true
 
-# Colors below are validated for both light and dark mode: every categorical
-# pair clears the OKLab colorblind-separation floor (protanopia/deuteranopia)
-# and the normal-vision floor, so series stay distinguishable in every chart
-# and to every reader. See reports/README.md ("Chart colors") for the
-# per-series conventions built on top of this palette.
+# Chosen for both modes against colorblind (protanopia/deuteranopia) and
+# normal-vision separation floors. Not every pair clears every check:
+# reports/README.md ("Chart colors") says which subsets do, and has the
+# per-series `seriesColors` maps built on them.
 theme:
   colors:
     primary:

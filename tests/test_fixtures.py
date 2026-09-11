@@ -149,10 +149,9 @@ def test_retail_fixture_holds_every_shape_the_models_handle():
             .pl()
             .row(0, named=True)
         )
-        # `.pl()`, not `.df()`: pandas is not a dependency of this project. It
-        # used to arrive as harlequin's grand-transitive, so this line worked
-        # without anything declaring it. `.row(named=True)` gives a dict; the
-        # namespace is what keeps the assertions below reading as `row.n_rows`.
+        # `.pl()`, not `.df()`: pandas is not a dependency of this project.
+        # `.row(named=True)` gives a dict; the namespace keeps the assertions
+        # below reading as `row.n_rows`.
         row = SimpleNamespace(**row)
 
     assert row.n_rows > 20_000, "too thin for the cohort and RFM models to say anything"
@@ -200,9 +199,8 @@ def test_every_route_is_reachable_from_some_pipeline_url():
     them agree.
 
     It is the only check here that can see a *missing* `ALL_URLS` entry. The
-    other two iterate URLs, so a source absent from the list is absent from them
-    as well — which is how `ecb_fx_rates` sat outside every fixture test for the
-    whole life of the FX source, with its route never once exercised.
+    other two iterate URLs, so a source absent from the list is absent from
+    them as well, and its route is never exercised.
     """
     reached = {template for url in ALL_URLS for _, template in _routes_matching(url)}
     unreachable = [template for _, template in fixtures._ROUTES if template not in reached]

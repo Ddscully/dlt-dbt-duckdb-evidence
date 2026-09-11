@@ -32,9 +32,11 @@ a name with a classified one and carries no label of its own. That's the rule
 that keeps the classification from rotting, without labelling ninety columns
 nobody would ever read.
 
-Classification starts at the **source**, not at staging. `raw` ships inside the
-published DuckDB file, so a policy that begins one layer down has already let the
-clear value into the artifact.
+Classification starts at the **source**, not at staging: `raw.retail_invoice_lines`
+is where the identifier enters, and every copy downstream of it is found by name
+from there. `raw` itself never reaches the published DuckDB file — dlt lands it in
+the DuckLake catalog, and the release's `lakehouse.tar.gz` carries only the weather
+table.
 
 ## What the labels are worth: the measurement
 
@@ -109,21 +111,22 @@ shouldn't look like one.
 ## Why the boundary and not the model
 
 The obvious place to mask a column is the staging model that reads it, so that
-nothing downstream ever sees the clear value. That doesn't work here, for two
-reasons that only appear once you look at the published artifact rather than at
-the warehouse:
+nothing downstream ever sees the clear value. That doesn't work here, because the
+published file holds copies of the identifier that no model declares:
 
-* **`raw` ships too.** The release is a `COPY FROM DATABASE` of everything, so a
-  mask applied in staging leaves the original one schema away in the same file.
-* **The staging models are views.** A view in the published copy recomputes from
-  `raw` when a consumer queries it. Mask the raw column *as well* and the view
-  hashes an already-hashed value, so the shipped views and the shipped marts
-  disagree about who each customer is, with matching row counts and no error.
+* **The staging models are materialised on the way out.** They are views over
+  `lakehouse.raw`, which the published file does not contain, so the export turns
+  them into tables (`solidify_staging`) holding whatever the views selected —
+  clear ids included. The export does that *before* pseudonymising; the other
+  order ships a `staging` layer that disagrees with `marts` about who each
+  customer is, with matching row counts and no error.
+* **The test-failure audit tables ship.** `store_failures` is on project-wide, so
+  a failing retail test writes customer rows into `dbt_test__audit`.
 
-Applying the policy once, to the finished copy, avoids both: base tables are
-rewritten, views recompute from the rewritten tables, and the two agree because
-the value was hashed exactly once. `tests/test_privacy.py` builds that exact
-shape (landing table, view, mart) and asserts the join still lands.
+Applying the policy once, to the finished copy, covers all of them: base tables
+are rewritten, and any view over them reads the pseudonym. A second application
+would hash a hash, so it is refused. `tests/test_privacy.py` builds the shape
+(landing table, view, mart) and asserts the join still lands.
 
 ## The columns nobody would have declared
 

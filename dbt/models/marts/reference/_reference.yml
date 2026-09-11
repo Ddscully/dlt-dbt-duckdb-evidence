@@ -97,21 +97,16 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "length(country_iso3) = 3"
-      # The dimension and the spine must know the same countries. `dim_country_year`
-      # is this crossed with the years, which is what makes the interesting failure
-      # wholesale rather than per-row: no single country can go missing from one
-      # side, but an empty `int_country_year_observed` collapses the *whole* spine,
-      # and that is silent everywhere else — `not_null` and
-      # `unique_combination_of_columns` both pass on zero rows, and
-      # `fct_emissions_energy` inner-joins the spine, so the country-stats mart
-      # empties out with nothing red.
+      # The dimension and the spine must know the same countries. The failure it
+      # catches is wholesale: an empty `int_country_year_observed` empties the
+      # spine, which `not_null` and uniqueness tests pass, and the country-stats
+      # mart (which inner-joins the spine) empties with it.
       #
-      # **Every `except` here has to be parenthesised, and this test could not fail
-      # for want of it.** `EXCEPT` and `UNION` share a precedence level in ANSI SQL
-      # and associate left, so `A except B union all B except A` parses as
-      # `((A−B) ∪ B) − A`, which is `B \ A` — the one direction the cross join
-      # makes impossible. Measured against the warehouse with the spine forced
-      # empty: the unparenthesised form returns 0 and the parenthesised one 228.
+      # **Each `except` must be parenthesised.** `EXCEPT` and `UNION` share a
+      # precedence level and associate left, so `A except B union all B except A`
+      # parses as `((A−B) ∪ B) − A` = `B \ A`, the one direction that cannot
+      # happen. With the spine forced empty (measured): 0 rows unparenthesised,
+      # 228 parenthesised.
       - dbt_utils.expression_is_true:
           name: dim_country_holds_exactly_the_countries_the_spine_does
           arguments:

@@ -206,18 +206,12 @@ models:
       - name: country_iso3
         data_tests: [not_null]
       - name: year
-        # WDI starts in 1960; anything earlier means the pivot has picked up a
+        # WDI starts in 1960; anything earlier means the pivot picked up a
         # dimension that isn't the year.
         #
-        # **No ceiling, deliberately.** This carried `max_value: 2030` until
-        # the World Bank served population projections out to 2050 on
-        # 2026-09-07 and it fired -- correctly, and far too late to help. A
-        # maximum here can only ever redden a build; it cannot keep a projected
-        # year out of the spine, and everything the publisher projected below
-        # 2031 would have passed it unremarked. The rule is a `where` clause in
-        # `stg_wdi.sql` now, cut at `current_date`, so a ceiling restated here
-        # would be a test that cannot fail and a fresh time bomb for
-        # 2031-01-01.
+        # No ceiling: `stg_wdi.sql` removes future years itself (cut at
+        # `current_date`), so a maximum here could never fail — and a literal
+        # one would eventually fail a correct build.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -398,26 +392,14 @@ models:
           arguments:
             expression: "temp_min_c <= temp_mean_c and temp_mean_c <= temp_max_c"
       # **No day can need heating and cooling at once**, because the heating base
-      # (15.5) is below the cooling base (22.0): a mean temperature under 15.5
-      # gives a positive `hdd_c` and one over 22.0 a positive `cdd_c`, and no
-      # number is both. It is the base *ordering* written down, and it is the
-      # only place that ordering is checkable at all.
+      # (15.5) is below the cooling base (22.0). This is the only place that
+      # ordering is checkable. With the two vars swapped (measured on a warehouse
+      # copy) heating totals rose 89% and cooling 336%, yet
+      # `stg_weather_daily`'s 27 data tests and `fct_country_weather_year`'s 28
+      # data tests all passed; this expression fails on 52,253 days of it.
       #
-      # It replaces a ceiling that used to sit on the mart above
-      # (`cdd_total < hdd_total + 5000`) whose comment said it was there to catch
-      # "a base-temperature mix-up". Measured, by rebuilding the model against a
-      # warehouse copy with the two vars swapped: heating totals rose 89% and
-      # cooling totals 336% — a comprehensively wrong warehouse — and
-      # `max(cdd_total - hdd_total)` moved from 637.5 to 975.2, still five times
-      # under the 5,000 bound. **`stg_weather_daily`'s 27 data tests and
-      # `fct_country_weather_year`'s 28 data tests all passed.** A
-      # ceiling on the difference cannot see it because a swap moves *both*
-      # totals the same way; the annual grain has already summed away the thing
-      # that breaks. This expression fails on 52,253 days of the same mutation.
-      #
-      # `coalesce` because a degree day is null when its temperature is (see
-      # `stg_weather_daily.sql`), and `where not(expression)` treats a null as a
-      # pass — so an unguarded null here would be silently green rather than red.
+      # `coalesce` because a degree day is null when its temperature is, and
+      # `where not(expression)` treats null as a pass.
       - dbt_utils.expression_is_true:
           arguments:
             expression: "coalesce(hdd_c, 0) = 0 or coalesce(cdd_c, 0) = 0"
@@ -575,25 +557,13 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
 
-  # The other `protected` staging model, and the more interesting of the two:
-  # three groups ref it (`country_stats`, `compliance` and the spine), because it
-  # is the answer to "what is a country" and there is no mart above it that says
-  # the same thing. `dim_country_year` is the *spine*, not the dimension — it is
-  # every country crossed with every year, so a model wanting one row per country
-  # would have to deduplicate it. The honest alternative is to promote this to a
-  # `dim_country` mart and make it public; that is a rename touching every model
-  # here, and until it is worth doing, `protected` says what is true: it is an
-  # interface in practice, and it is still shaped like a staging model.
   - name: stg_country
     config:
       group: reference
-      # `protected`, and the reason is smaller than it was. It used to be that
-      # marts in two other groups read this model directly for want of a
-      # published country dimension; `marts.dim_country` is that dimension now
-      # and they read it instead. What is left is two *staging* peers in
-      # `country_stats` — `stg_weather_daily` needs the capital coordinates and
-      # `stg_eu_electricity_prices_semiannual` needs the ISO2 -> ISO3 map — and
-      # pointing those at a mart would invert the layering to save an override.
+      # `protected` for two staging models in `country_stats`:
+      # `stg_weather_daily` needs the capital coordinates and
+      # `stg_eu_electricity_prices_semiannual` the ISO2 -> ISO3 map. Marts read
+      # `marts.dim_country`; pointing these two at it would invert the layering.
       access: protected
     description: >
       The World Bank `/country` endpoint cleaned, plus the `country_overrides`

@@ -6,8 +6,9 @@ templater = dbt
 dialect = duckdb
 max_line_length = 120
 indent_unit = space
-# ST06: column ordering in `select *` expansions — the wide mart groups columns
-#       by source on purpose. RF04: keywords used as identifiers ("year").
+# ST06: select-list order (wildcards, plain columns, then calculations) — facts
+#       order keys → dimensions → measures instead, measures grouped by source.
+# RF04: keywords used as identifiers (`year`).
 exclude_rules = ST06, RF04
 
 [sqlfluff:templater:dbt]
@@ -45,7 +46,7 @@ aliasing = explicit
 [sqlfluff:rules:aliasing.expression]
 allow_scalar = False
 
-# Name the columns in `group by` rather than `group by 1, 2` (dbt does the
-# opposite; both staging models that group already spell the columns out).
+# Name the columns in `group by` rather than `group by 1, 2`, which dbt Labs'
+# guide prefers: the grain is the contract, so a change to it shows in the diff.
 [sqlfluff:rules:ambiguous.column_references]
 group_by_and_order_by_style = explicit

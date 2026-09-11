@@ -364,14 +364,12 @@ models:
           additivity: additive
       - name: net_revenue_gbp
         data_type: DOUBLE
-        # A quasi-identifier, and the one that surprises people. Measured over the
-        # built warehouse, `net_revenue_gbp` on its own is unique for 97.4% of the
-        # 5,881 customers; with `first_order_gbp` and `n_orders` beside it, 98.6%.
-        # (Shares, not counts: the counts are not reproducible between builds —
-        # `sum()` over doubles has no fixed order. See `docs/DATA_PROTECTION.md`.)
-        # A near-continuous money column at person grain is an
-        # identifier whatever it is called, which is why deleting `customer_id`
-        # from an extract does not anonymise it. See `docs/DATA_PROTECTION.md`.
+        # A quasi-identifier: on its own it is unique for 97.4% of the 5,881
+        # customers, and with `first_order_gbp` and `n_orders` for 98.6%. Shares,
+        # not counts — the counts move between builds, since `sum()` over doubles
+        # has no fixed order. A near-continuous money column at person grain is an
+        # identifier, which is why deleting `customer_id` does not anonymise an
+        # extract (`docs/DATA_PROTECTION.md`).
         meta:
           additivity: additive
           pii: quasi_identifier
@@ -385,22 +383,16 @@ models:
           order rather than as an unpriced one.
         # Part of the same quasi-identifying set as `net_revenue_gbp`, and the
         # sharper half of it: `(country, first_order_date, first_order_gbp)` is
-        # unique for 99.6% of the 5,881 customers.
+        # unique for about 99.5% of the 5,881 customers.
         meta:
           additivity: additive
           pii: quasi_identifier
         data_tests:
-          # A first order cannot be negative: the first *purchase* invoice is a
-          # sale invoice, and a sale line with a negative quantity is a stock
-          # write-off, which `is_revenue_line` already excludes. So this is the
-          # check that the two definitions have not drifted apart.
-          #
-          # The test this replaced was `first_order_gbp <= net_revenue_gbp` for
-          # customers with no returns, which is true by construction and **fails
-          # on 272 rows** — every one of them a one-order customer where the two
-          # columns are the same money summed in a different order. The excess
-          # tops out at 1.8e-12. Comparing two independently-summed doubles for
-          # containment is a float-equality test wearing an inequality.
+          # A first order cannot be negative: the first purchase is a sale
+          # invoice, and a negative sale line is a write-off `is_revenue_line`
+          # excludes. Not `first_order_gbp <= net_revenue_gbp`: for one-order
+          # customers those are the same money summed in a different order, and
+          # comparing two independently summed doubles is a float-equality test.
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: avg_order_value_gbp

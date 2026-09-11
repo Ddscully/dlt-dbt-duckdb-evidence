@@ -1,8 +1,8 @@
 """Record the ingest fixtures that CI runs against.
 
-Hits the seven live endpoints once, trims each payload to a representative slice,
-and writes `tests/fixtures/ingest/`. Everything downstream of dlt then has real
-data to chew on without a pull request depending on OWID being up.
+Fetches every source once, trims each payload to a representative slice, and
+writes `tests/fixtures/ingest/`, so CI runs on real data without depending on
+any publisher being up.
 
 Run:  uv run python -m scripts.record_fixtures
 
@@ -72,7 +72,7 @@ from modern_data_stack.ratelimit import WeightedWindowLimiter
 #   - TWN, which the World Bank omits, so the `country_overrides` seed and the
 #     union in `stg_country` are actually exercised;
 #   - GRC and GBR, whose Eurostat geo codes (EL, UK) are the two the
-#     `stg_eu_electricity_prices` remap exists for.
+#     `stg_eu_electricity_prices_semiannual` remap exists for.
 COUNTRIES = [
     "USA",  # North America, high income
     "CHN",  # East Asia & Pacific, upper middle
@@ -168,12 +168,10 @@ def record_eurostat() -> None:
 def record_fx() -> None:
     """The whole ECB reference-rate series, gzipped.
 
-    Not trimmed at all, which is the exception `COUNTRIES` doesn't cover: there
-    is no country in this payload, and the interesting structure is *when each
-    currency starts and stops*. Cutting the date range would throw away the euro
-    changeovers, the 2022 rouble suspension and Iceland's nine-year gap — which
-    are the four shapes `fct_fx_rates_daily` exists to handle, and so the four
-    things CI should be exercising. 3.6 MB whole, 831 kB compressed.
+    Untrimmed: there is no country to filter on, and the structure worth testing
+    is when each currency starts and stops — the euro changeovers, the 2022
+    rouble suspension and Iceland's nine-year gap that `fct_fx_rates_daily`
+    handles. 3.6 MB whole, 844 kB compressed.
     """
     url = fx_url(FX_FIRST_DATE)
     payload = json.dumps(get_json(url))
@@ -183,29 +181,19 @@ def record_fx() -> None:
 def record_weather() -> None:
     """Three calendar years of daily weather for all 41 capitals, gzipped.
 
-    Two departures from `COUNTRIES`, and both are forced rather than chosen:
+    Every location, never a subset: the response is matched to the request by
+    position, so a subset read back against all 41 would hand each country its
+    neighbour's weather. The trim is the date range instead — 2020-2022 holds a
+    leap day, two year boundaries and the 2021/2022 pair the heating-degree-day
+    comparison uses.
 
-    * **Every location, never a subset.** Open-Meteo matches a multi-location
-      response to its request *by position* — the entries carry a `location_id`
-      except the first, which has none — so a fixture recorded for a subset would
-      be read back against the full 41 and hand each country its neighbour's
-      weather. There is no key to repair that with.
-    * **A short date range instead**, which is the trim `COUNTRIES` would
-      normally be. 2020-2022 is chosen for what it contains: a leap day, two
-      calendar-year boundaries, and the 2021/2022 pair the heating-degree-day
-      comparison is built on, so CI computes the same numbers the analysis does.
+    ~1,900 of Open-Meteo's units (see `weather_call_units`), so a re-record is
+    not free, even one that fails partway.
 
-    ~1,900 units of Open-Meteo's budget, which is the one recorder call here with
-    a price attached — see `weather_call_units`. Recording is therefore not free
-    to repeat, and a re-record that fails partway costs the budget anyway.
-
-    **Fetched through the paced path, not `http.get_json`.** That is not defensive
-    tidying: this call is the single largest weather request the repo ever makes,
-    and it is typically made right after someone has been exploring the API by
-    hand, so it is the *most* likely of all of them to meet a 429. Going through
-    `http.get_json` — as this did in its first draft — gives it three retries over
-    4.5 seconds against a limit that wants a minute or an hour, and the recorder
-    then fails having spent the budget it needed.
+    Fetched through the paced path, not `http.get_json`: this is the largest
+    weather request the repo makes and the likeliest to meet a 429, and
+    `http.get_json`'s three retries over 4.5 seconds would fail against a limit
+    that wants a minute or an hour.
     """
     locations = weather_locations()
     url = weather_url(locations, WEATHER_FIXTURE_FIRST_DAY, WEATHER_FIXTURE_LAST_DAY)
@@ -223,10 +211,8 @@ def record_weather() -> None:
     print(f"  {'':<28} {len(locations):>9,} locations, {days:,} days")
 
 
-# The recorded window. Not a lookback off today: a fixture whose contents moved
-# with the recording date would make every downstream assertion about it — the
-# degree-day figures in the course material, the row counts in the tests — true
-# only until the next re-record.
+# Fixed dates, not a lookback from today, so the course's degree-day figures and
+# the tests' row counts survive a re-record.
 WEATHER_FIXTURE_FIRST_DAY = "2020-01-01"
 WEATHER_FIXTURE_LAST_DAY = "2022-12-31"
 
@@ -238,26 +224,16 @@ def record_retail() -> None:
     *invoice*, and whole invoices only. Half an invoice would break every
     invoice-level test for a reason that exists nowhere but the fixture.
 
-    **The slice is defined by the shapes the models have to handle, not by a
-    row count**, because this source's value is its mess. Sampling invoices at
-    random would keep the volume and lose the point: 6 bad-debt adjustments and
-    a single positive line on a cancellation invoice do not survive a 3% sample,
-    and those are exactly the rows the staging taxonomy exists for. So each
-    shape is selected explicitly and capped, and `tests/test_fixtures.py`
-    asserts the recorded file still holds all of them.
+    The slice is chosen by the shapes the models must handle, not sampled: six
+    bad-debt adjustments and one positive line on a cancellation invoice would
+    not survive a random 3%. Each shape is selected and capped
+    (`RETAIL_FIXTURE_SELECTION`), and `tests/test_fixtures.py` asserts the file
+    still holds all of them.
 
-    Two departures worth naming:
-
-    * **One sheet, named for the span it covers**, where the real workbook has
-      two. DuckDB's xlsx writer replaces a file per `COPY`, so a two-sheet
-      fixture would have to be assembled at the zip level by hand. The union-by-
-      name path that would exercise is covered directly and more sharply by
-      `tests/test_workbook.py`, which builds a two-sheet book with its columns
-      deliberately out of order — a thing the real source doesn't even do.
-    * **It is the largest fixture in the repo** (~1.5 MB against the FX series'
-      843 kB) and it does not compress further, because an `.xlsx` is already a
-      deflated zip and the outer zip is pure container. That is the price of the
-      container being part of what CI tests.
+    One sheet where the real workbook has two, because DuckDB's xlsx writer
+    replaces the file per `COPY`; `tests/test_workbook.py` covers the multi-sheet
+    union directly. At ~1.9 MB it is the largest fixture and does not compress
+    further — an `.xlsx` is already a deflated zip.
     """
     con = workbook.connect()
     con.execute(f"create or replace view sheets as {workbook.sheets_sql(retail_workbook())}")
@@ -288,11 +264,9 @@ def record_retail() -> None:
     print(f"  {'':<28} {kept:>9,} of {total:,} rows ({100 * kept / total:.1f}%)")
 
 
-# One CTE per shape the staging taxonomy has to cope with, each capped. Order
-# matters only in that `monthly_topup` runs last and guarantees all 25 months are
-# present however the others fell — a month missing from the fixture would be a
-# Dagster partition that legitimately loads nothing, which is indistinguishable
-# from one that failed.
+# One CTE per shape the staging taxonomy handles, each capped. `monthly_topup`
+# guarantees all 25 months: a month missing from the fixture would be a
+# partition that loads nothing, indistinguishable from one that failed.
 RETAIL_FIXTURE_SELECTION = """
 create or replace table kept_invoices as
 with special_codes as (          -- POST, DOT, M, D, S, BANK CHARGES, AMAZONFEE, TEST001…

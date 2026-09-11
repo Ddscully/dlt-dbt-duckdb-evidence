@@ -8,8 +8,8 @@
 -- 1 January, Good Friday, Easter Monday, 1 May and 25-26 December, and the
 -- Easter pair lands on a different date every year.
 --
--- Three complete years rather than the whole 1999-onward series, because the
--- point is that the pattern moves, and 27 years of calendar renders as a wall.
+-- Three complete years, not the whole series: enough to show the pattern move
+-- without rendering a wall of calendar.
 with published_days as (
     select distinct rate_date from marts.fct_fx_rates_published
 ),

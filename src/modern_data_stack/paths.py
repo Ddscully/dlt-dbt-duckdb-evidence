@@ -1,17 +1,7 @@
 """Where the project's files live.
 
-Every layer needs the same few answers — where the project root is, which
-DuckDB file to open, where the landing zone goes — and they have to agree,
-because dbt resolves its copy of the warehouse path from `dbt/` while the Python
-layers resolve theirs from the root.
-
-They agree by all asking here. The alternative, which this repo ran on for a
-while, is one layer computing the root from its own location and the rest
-importing it: `REPO_ROOT` lived in `ingest/pipeline.py` and meant "the parent of
-`ingest/`", so the landing zone, the observability tables, the exporter and the
-report builder all took their sense of where the project was from the ingestion
-layer. Moving any one of those directories would have repointed the others,
-silently.
+Every layer asks here for the project root, the DuckDB file and the landing
+zone, so they agree — rather than each computing the root from its own location.
 
 ## Resolution order for the root
 
@@ -22,16 +12,12 @@ silently.
 3. The nearest ancestor of the cwd holding a `pyproject.toml`, for a
    non-editable install where (2) lands in `site-packages`.
 
-Steps 2 and 3 are in that order on purpose: the Dagster daemon and the `dagster`
-CLI don't necessarily run from the project directory, so a cwd-first search would
-make the warehouse path depend on where the process happened to start.
+The cwd comes last because the Dagster daemon and CLI need not start in the
+project directory.
 
-**All three exhausted raises.** Falling back to the cwd is the tempting fourth
-step and it fails in the worst available way: a non-editable install started
-outside any project tree resolves the warehouse to `./data/warehouse.duckdb`,
-DuckDB *creates* that file, and the run goes green against an empty database.
-There is no error to read, because nothing went wrong — the answer was just
-somewhere else. `PROJECT_ROOT` is the escape hatch, and the exception names it.
+**All three exhausted raises.** A bare cwd fallback would resolve the warehouse
+to `./data/warehouse.duckdb`, which DuckDB then *creates*, and the run would go
+green against an empty database. The exception names `PROJECT_ROOT`.
 """
 
 from __future__ import annotations
@@ -83,10 +69,9 @@ def project_root() -> Path:
 def warehouse_path() -> str:
     """The DuckDB file every layer reads and writes.
 
-    ``WAREHOUSE_PATH`` overrides it so a fixture run can target a throwaway file.
-    **It must be absolute** when set: dbt resolves its own copy of this from
-    `dbt/` (via `profiles.yml`) and the Python layers resolve theirs from the
-    root, so a relative override gives you two different warehouses and no error.
+    ``WAREHOUSE_PATH`` overrides it (a fixture run's throwaway file). Set it
+    absolute: dbt resolves it from `dbt/`, the Python layers from the root, so a
+    relative value names two different warehouses without an error.
     """
     return os.environ.get(WAREHOUSE_ENV_VAR) or str(project_root() / "data" / "warehouse.duckdb")
 
@@ -94,12 +79,9 @@ def warehouse_path() -> str:
 def lakehouse_dir() -> str:
     """The DuckLake lakehouse — catalog and data files. ``LAKEHOUSE_DIR`` overrides.
 
-    **Absolute when set, and here that is not the convention it is for
-    ``WAREHOUSE_PATH``.** DuckLake records the data path it was created with and
-    compares it as a *string* on every attach, so the same directory under two
-    spellings is refused outright — dlt writes the catalog from the project root
-    and dbt resolves its own copy from ``dbt/``, one level down. A plain DuckDB
-    file keeps no such record and forgives the difference; this does not.
+    Absolute when set, and stricter than ``WAREHOUSE_PATH``: DuckLake compares
+    the recorded data path as a string on every attach, so the same directory
+    spelt relative to the root (dlt) and to ``dbt/`` (dbt) is refused.
     """
     return os.environ.get(LAKEHOUSE_ENV_VAR) or str(project_root() / "data" / "lakehouse")
 
@@ -107,11 +89,9 @@ def lakehouse_dir() -> str:
 def cache_dir() -> str:
     """Where a source too big to re-fetch per use is kept between runs.
 
-    ``INGEST_CACHE_DIR`` overrides it, as above. Gitignored and safe to delete —
-    everything here is a byte-identical copy of something a URL still serves, so
-    losing it costs a download and never data. It exists for bulk-drop sources
-    that arrive as one file: re-downloading 45 MB once per partition is the
-    difference between a backfill you can run and one you won't.
+    ``INGEST_CACHE_DIR`` overrides it. Gitignored and safe to delete: it holds
+    copies of what a URL still serves, for bulk-file sources that would
+    otherwise be re-downloaded per partition.
     """
     return os.environ.get(CACHE_ENV_VAR) or str(project_root() / "data" / "cache")
 
@@ -124,19 +104,11 @@ def dbt_dir() -> Path:
 def dbt_target_path() -> str:
     """The directory dbt writes its artifacts into.
 
-    `DBT_TARGET_PATH` is dbt's own environment variable for this, so setting it
-    moves the manifest and the run results together — which is what
-    `just test-pipeline` relies on to keep a fixture build's artifacts out of
-    the real tree.
-
-    It exists as a *directory* helper, rather than each artifact resolving its
-    own file, because one caller needs to name the directory and not a file in
-    it: `orchestration.assets.dbt_models` hands it to `dbt.cli(...)`.
-    dagster-dbt otherwise picks a unique per-invocation subdirectory of it, and
-    then nothing that reads `run_results.json` by path can find the artifact the
-    orchestrated build just wrote — measured, and the reason
-    `analytics.pipeline_runs` was empty in every workflow while being correct
-    on a laptop.
+    `DBT_TARGET_PATH` is dbt's own variable for it; `just test-pipeline` sets it
+    to keep a fixture build's artifacts out of the real tree.
+    `orchestration.assets.dbt_models` passes this directory to `dbt.cli(...)`,
+    because dagster-dbt would otherwise write to a unique subdirectory that
+    `run_results.json` readers cannot find.
     """
     return os.environ.get("DBT_TARGET_PATH") or str(dbt_dir() / "target")
 
@@ -153,11 +125,8 @@ def dbt_manifest_path() -> str:
 def dbt_run_results_path() -> str:
     """dbt's run results, written by every invocation that executes nodes.
 
-    Gitignored like the manifest, and staler in a way the manifest is not: a
-    `dbt test` overwrites what a `dbt build` left, and a bare `dbt parse` leaves
-    it alone entirely (measured — the file's md5 is unchanged across one). So an
-    absent file means no build has ever run here, and a *present* one only
-    describes whichever command last executed nodes. `observability.build_runs`
-    carries `dbt_command` on every row for that reason.
+    Gitignored. It describes whichever command last executed nodes — a
+    `dbt test` overwrites a build's, a `dbt parse` leaves it untouched — which
+    is why `observability.build_runs` records `dbt_command` on every row.
     """
     return os.environ.get("DBT_RUN_RESULTS_PATH") or str(dbt_dir() / "target" / "run_results.json")

@@ -14,10 +14,13 @@ Component reference lives at <https://docs.evidence.dev>.
 
 ## The one gotcha that will cost you an hour
 
-**Evidence caches each source's schema keyed on the source SQL.** A source query
-like `select * from marts.fct_emissions_energy` that gains a column produces
-*identical SQL text*, so the cache looks fresh — and the build then validates
-your page against the stale schema and fails with a missing-column error.
+**`just report` can validate against a stale schema after a column change.** It
+has happened here after mart columns were added and dropped: the build checked a
+page against the old columns and failed with a missing-column error. Deleting
+`reports/.evidence/` fixes it. It is not Evidence's query-hash cache (an md5 of
+each source's SQL): `evidence sources` consults that only with `--changed`,
+which `package.json` does not pass. So treat `.evidence/` as state that can go
+stale.
 
 After any change to mart or analytics columns:
 

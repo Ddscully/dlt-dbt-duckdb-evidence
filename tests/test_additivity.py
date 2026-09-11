@@ -8,14 +8,12 @@ the warehouse states it: `meta: {additivity: …}` on the column, in the same ym
 that carry the contract, and `publish/export_warehouse.py` carries the labels
 into the release manifest so a consumer who cannot be paged has them too.
 
-**Every count in this docstring is a manifest count, which is the basis
-`numeric()` below returns and the only one anything here can check.** The ymls
-carry 193 literal `additivity:` lines; the manifest carries 229 labelled
-columns, because `fct_emissions_energy_v1` inherits 36 through `include: all`
-and declares one. Quoting the first while naming the second is how these figures
-went stale once already, so
+**Every count in this docstring is a manifest count**, the basis `numeric()`
+below returns. The ymls carry 193 literal `additivity:` lines; the manifest
+carries 229 labelled columns, because `fct_emissions_energy_v1` inherits 36
+through `include: all` and declares one.
 `test_every_documented_additivity_count_is_one_the_labels_actually_carry`
-now reads them out of the prose.
+reads these figures out of this docstring and checks them.
 
 The vocabulary is four values and closed, for `pii`'s reason exactly — a blank
 is ambiguous between "additive" and "nobody looked", and only one of those can
@@ -52,10 +50,8 @@ from modern_data_stack.paths import dbt_manifest_path
 from publish.export_warehouse import EXTRA_ADDITIVITY, additivity
 from transform.retail_rfm import build_retail_rfm
 
-# Same reason as `tests/test_definitions.py`: `just test` runs before
-# `dbt deps && dbt parse` in ci.yml, so the manifest is not there yet. ci.yml
-# re-runs this file after the parse step, and `tests/test_workflows.py` is what
-# holds it to that — a gated file the workflow does not name runs nowhere.
+# ci.yml runs pytest before `dbt parse`, so the manifest is missing there; it
+# re-runs this file after the parse, which `tests/test_workflows.py` enforces.
 manifest_path = dbt_manifest_path()
 pytestmark = pytest.mark.skipif(
     not Path(manifest_path).exists(),
@@ -67,20 +63,16 @@ LABELS = {"additive", "semi_additive", "non_additive", "not_a_measure"}
 # The contract gives every mart column a `data_type`, so "is this a measure-
 # shaped column" is answerable without opening the warehouse.
 #
-# **A pattern rather than a list, because a list fails in the wrong direction.**
-# The literal set this replaced held seven names and no `DECIMAL` — the most
-# natural type for money — so a column contracted `DECIMAL(18,2)` was exempt
-# from `test_every_numeric_mart_column_carries_an_additivity_label`, and
-# labelling it anyway reddened `test_only_numeric_columns_are_labelled`: doing
-# the right thing broke the suite. Five types appear in the contracts today
-# (BIGINT, DOUBLE, HUGEINT, INTEGER and VARCHAR/BOOLEAN/DATE/TIMESTAMP), so the
-# gap was invisible and would have stayed invisible until the first fixed-point
-# column arrived.
+# **A pattern rather than a list, because a list fails in the wrong direction**:
+# a numeric type missing from it (say `DECIMAL`, the natural type for money)
+# exempts its columns from the coverage test, and labelling one anyway fails
+# `test_only_numeric_columns_are_labelled`. The contracts hold only a few types
+# today, so such a gap would stay invisible until the first column arrived.
 #
-# The `\b` is load-bearing twice over: `INTERVAL` begins `INT` and is not a
-# measure, and `INTEGER[]` is a list rather than something to sum, which is what
-# the lookahead excludes. `test_the_numeric_pattern_knows_a_measure_from_a_
-# timestamp` pins both, along with the DECIMAL case that started this.
+# The `\b` matters twice: `INTERVAL` begins `INT` and is not a measure, and
+# `INTEGER[]` is a list rather than something to sum, which the lookahead
+# excludes. `test_the_numeric_pattern_knows_a_measure_from_a_timestamp` pins
+# both, and `DECIMAL`.
 NUMERIC = re.compile(
     r"^(?:"
     r"U?(?:TINY|SMALL|BIG|HUGE)INT"  # TINYINT … HUGEINT, signed and unsigned
@@ -149,12 +141,9 @@ def test_the_numeric_pattern_knows_a_measure_from_a_timestamp():
     """The pin for `NUMERIC`, which decides what the two coverage tests below
     even look at.
 
-    It is the one thing here nothing else can check: a type absent from the
-    contracts is invisible to every other assertion in this file, so the rule
-    has to be exercised against types the warehouse does not hold *yet*. That is
-    the whole failure the literal set had — no `DECIMAL`, no column to notice
-    it, and a suite that went red on the correct label rather than the missing
-    one.
+    A type absent from the contracts is invisible to every other assertion in
+    this file, so the rule has to be exercised against types the warehouse does
+    not hold *yet*.
 
     The near-misses are the point of the negative list: `INTERVAL` starts `INT`,
     `INTEGER[]` is a list of measures rather than a measure, and `STRUCT(…)`
@@ -295,11 +284,9 @@ def test_a_copied_column_keeps_the_label_the_mart_gave_it():
     runtime is that inheriting fails *open*.
 
     Rename or relabel a column in the mart and a derived map would follow it
-    silently, publishing a `co2_intensity` that has quietly lost a label or
-    gained a wrong one. Stated and asserted, the same rename fails here, naming
-    both sides. Which is the general rule this repo already applies to every
-    hand-maintained list: assert against the authority rather than derive from
-    it, and take the restatement as the price.
+    silently, publishing a `co2_intensity` that has lost a label or gained a
+    wrong one. Stated and asserted, the same rename fails here, naming both
+    sides.
 
     The set is checked as well as the values. A mart column added without a
     matching entry would otherwise leave one published column of a `select *`

@@ -6,7 +6,7 @@
 **Why this exists.** `dim_country.income_group` comes from the World Bank's
 `/country` endpoint, which publishes only the *current* answer — so the warehouse
 stamps one classification onto every year it holds. The World Bank reclassifies
-every July, and of the 163 economies classified in both 1987 and 2025, **74 (45%)
+every July, and of the 161 economies classified in both 1987 and 2025, **79 (49%)
 are in a different group at the two ends**. "Emissions by income group in 1990"
 is therefore a 2026 grouping of 1990 emissions: the textbook Type-1 distortion,
 and a wrong answer that looks entirely right.
@@ -39,11 +39,9 @@ Three things this file cost, none of them guessable from the data:
   while the history sheet runs to FY27. The header row of the history sheet is
   the only authority for what the file covers; nothing else in it is.
 
-DuckDB's `read_xlsx` is not usable here and that is worth recording next to the
-`openpyxl` import: the sheet opens with three merged title rows and a blank row,
-and the reader stops there, returning 3 rows of 1 column rather than failing.
-`modern_data_stack.workbook` is built on it, so it is the wrong tool for this
-shape despite being the repo's own.
+DuckDB's `read_xlsx` (and so `modern_data_stack.workbook`) cannot read it: the
+sheet opens with three merged title rows and a blank row, and the reader stops
+there, returning 3 rows of 1 column rather than failing.
 """
 
 from __future__ import annotations
@@ -85,12 +83,9 @@ CODE_TO_GROUP = {
 }
 UNCLASSIFIED = ".."
 
-# `LM*` appears on exactly one economy in two years — Yemen, 1987 and 1988, when
-# the Yemen Arab Republic and the PDR were still separate and the workbook
-# footnotes the pair. It is a lower-middle-income classification carrying a
-# footnote, not a fifth group, so it maps to `LM` and the star is dropped. Left
-# unmapped it would fail the guard below, which is the intended behaviour for any
-# *new* starred code: stop and make a person read the footnote.
+# `LM*` is Yemen in 1987 and 1988, footnoted for the then-separate Yemen Arab
+# Republic and PDR: lower middle income with a footnote, not a fifth group. Any
+# other starred code fails the guard below, so a person reads its footnote.
 CODE_ALIASES = {"LM*": "LM"}
 
 
@@ -99,9 +94,8 @@ def parse_history(xlsx_path: Path) -> list[dict]:
     try:
         import openpyxl  # ty: ignore[unresolved-import]  # optional; see below
     except ModuleNotFoundError:
-        # Same treatment as `scripts/build_cbam_seeds.py`: openpyxl is a
-        # transcription-time dependency for a script that runs once a year, not
-        # a runtime one, so it is not in any dependency group.
+        # A once-a-year transcription dependency, in no dependency group — as
+        # for `scripts/build_cbam_seeds.py`.
         sys.exit(
             "openpyxl is required: "
             "uv run --with openpyxl python -m scripts.build_income_classification_seed"

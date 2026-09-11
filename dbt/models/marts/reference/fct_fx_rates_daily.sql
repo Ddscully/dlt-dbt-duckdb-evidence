@@ -2,66 +2,30 @@
 -- Grain: one row per (date_day, currency_code), within each currency's quoted
 -- lifetime.
 --
--- The ECB publishes on TARGET settlement days, so 7,066 of the 10,078 calendar
--- days since 1999-01-04 carry a fixing and **the other 30% carry nothing** —
--- 2,878 weekend days and 134 weekday closures (Good Friday, Easter Monday,
--- 1 May, 25-26 December, and 1999-12-31 for the millennium changeover). A
--- consumer with a transaction dated on a Sunday has to do *something*, and every
--- option is a modelling decision rather than a lookup:
+-- The ECB publishes on TARGET settlement days, so about 30% of calendar days
+-- (weekends, and closures such as Good Friday, 1 May and 25-26 December) carry
+-- no fixing. This model carries the last fixing forward, as a finance system
+-- does: Sunday's contractual rate is Friday's. (Interpolating would invent a rate
+-- nobody could deal at; nulls would push the decision into every query.)
 --
---   * **carry the last fixing forward** — what this model does, and what a
---     finance system does, because Sunday's contractual rate is Friday's;
---   * interpolate — plausible-looking and wrong: it invents a mid-market rate
---     nobody could have dealt at, and it needs the future to compute the past;
---   * leave it null — correct and useless, since it pushes the same decision
---     into every downstream query, differently each time.
+-- The carry has two limits, both handled here:
 --
--- Carrying forward is the same operation as a slowly-changing lookup ("what was
--- true as at this date"), and it has the same two failure modes, both handled
--- here rather than left to the caller:
+-- 1. **Nothing outside a currency's lifetime.** The spine runs from
+--    `first_published_date` to `last_published_date`, so the kuna stops on
+--    2022-12-30 rather than being carried into the euro era.
+-- 2. **A suspended quote is not a long weekend.** The carry is capped at
+--    `fx_max_carry_forward_days`. Every closure fits; two interior gaps do not,
+--    both currency crises — the krona's 3,333 days from 2008 to 2018 and the
+--    Argentine peso's 26 in 2002. Those rows exist with `is_rate_stale` set and
+--    a null rate.
 --
--- 1. **Outside a currency's lifetime there is nothing to carry.** The spine is
---    built between `first_published_date` and `last_published_date` per
---    currency, so the Croatian kuna stops on 2022-12-30 instead of being carried
---    into the euro era, and no currency has rates before it was quoted.
--- 2. **A suspended quote is not a long weekend.** Within the lifetime, the carry
---    is capped at `fx_max_carry_forward_days` (7). The longest closure in the
---    whole series is 5 days, so every real weekend and holiday is filled, and
---    exactly two interior gaps are not — both of them currency crises rather
---    than calendars. The Icelandic krona has 3,333 stale days between the 2008
---    banking collapse and February 2018; the Argentine peso has 26, from the
---    January 2002 breaking of the dollar peg. Those rows exist, with
---    `is_rate_stale` set and a null rate — an absence you can count, rather than
---    nine years of a rate nobody could have dealt at.
+-- `rate_source_date` says which fixing each row quotes.
 --
--- Today that is 265,035 published rows, 113,020 carried forward (29.6%, which is
--- the weekend and holiday share of a calendar) and 3,359 stale.
---
--- `rate_source_date` says which fixing each row is actually quoting, which is
--- the column that makes the whole thing auditable.
---
--- **For a rate over a *period*, use `fct_fx_rates_periods` — and do not average
--- this model to get one.** This table answers "what rate applied *on* this
--- date"; the sibling answers "what rate applied *across* this month", which is
--- the spot-or-average decision its own header explains. The two are not
--- reachable from each other by aggregation, because the gap-filling above is a
--- *weighting*: every Friday appears three times here (Friday, Saturday and
--- Sunday all carry Friday's fixing) and four or five times around a holiday, so
--- a `group by month` over this table averages the calendar rather than the
--- market. `fct_fx_rates_periods` reads `fct_fx_rates_published` for that reason.
---
--- The cost is measured rather than asserted: across the 12,425 complete
--- currency-months, **11,881 of them (96%) come out different**, by a median of
--- 0.033%, a 99th percentile of 0.33% and a worst case of 1.59% (the Argentine
--- peso, December 2015). Even EUR/USD is out by more than 0.1% in 55 of its 331
--- months, worst December 2000 at +0.40%.
---
--- Small enough to read as rounding, which is exactly what earns it a comment —
--- and the *ranking* is what names the mechanism. Mean absolute error by calendar
--- month tracks the closure count almost exactly: December (10.4 non-publishing
--- days, 0.073%), April (10.2, 0.072%), May (9.6, 0.070%) and January (9.4,
--- 0.066%) at the top, October (8.8, 0.039%) at the bottom. That is Christmas,
--- Easter, 1 May and New Year, in that order.
+-- **For a rate over a period, use `fct_fx_rates_periods`; do not average this
+-- table.** Gap-filling weights it — Friday's fixing appears on Saturday and
+-- Sunday too — so a monthly average here averages the calendar, not the market.
+-- Most currency-months come out slightly different; the `currency-and-calendar`
+-- skill has the measurement.
 with calendar as (
     select * from {{ ref('dim_date') }}
 ),
@@ -75,8 +39,8 @@ published as (
     select * from {{ ref('fct_fx_rates_published') }}
 ),
 
--- One row per currency per day it was quoted on. Not the full cross join: a
--- dense rectangle over all 46 currencies would be 40% rows that never existed.
+-- One row per currency per day within its quoted lifetime, not a full cross
+-- join over every currency and date.
 spine as (
     select
         c.currency_code,
@@ -119,9 +83,7 @@ filled as (
         last_value(eur_per_unit ignore nulls) over carried as carried_eur_per_unit,
         last_value(rate_date ignore nulls) over carried as rate_source_date
     from observed
-    -- Unbounded preceding to the current row: the last *known* value as at this
-    -- day, never a later one. A default window frame would reach forward and
-    -- backfill the past with the future.
+    -- Up to the current row only, so a day never takes a later fixing.
     window carried as (
         partition by currency_code
         order by date_day

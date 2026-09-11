@@ -211,12 +211,12 @@ anything built this way:
 - **DuckDB's `COPY … (overwrite true)` only replaces the partitions it writes.** A
   partition whose last row disappeared upstream keeps answering from a stale file.
   Delete the directory first.
-- **Evidence caches each source's schema keyed on the source SQL.** A `select *`
-  that gained a column looks unchanged, and validation fails against the stale
-  schema, hence `just report-clean` after any mart change.
+- **Evidence's build state can go stale after a column change.** `just report`
+  has validated a page against a dropped column's old schema; clearing
+  `reports/.evidence/` (`just report-clean`) after any mart change fixes it.
 - **`evidence build` exits 0 for a site missing a page.** Check rendered file
-  *size*, not exit status: the pages here render at 17–74 kB and the check's floor
-  is 8 kB, which catches a route that emitted nothing but the framework shell.
+  *size*, not exit status: the pages here render at over 20 kB and the check's
+  floor is 8 kB, which catches a route that emitted nothing but the framework shell.
 - **A column named `tests` or `rows` silently draws no bars** in an Evidence chart.
   No error, no warning, and the same column is fine in a table three lines below.
 - **Assets must be listed explicitly in `Definitions`.** `definitions validate`

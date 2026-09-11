@@ -1,13 +1,11 @@
 """The World Bank: the country dimension and the WDI indicator panel.
 
-Two resources with opposite dispositions. `wb_country` replaces a small
+Two resources with opposite dispositions: `wb_country` replaces a small
 dimension; `wb_wdi` merges a five-year lookback window over a per-indicator
-watermark, and is the one resource whose column types are declared rather than
-inferred.
+watermark.
 
 `country_pages` is public because `ingest.sources.weather` reads it for capital
-coordinates — a cross-source dependency that was invisible while everything
-shared one namespace.
+coordinates.
 """
 
 from __future__ import annotations
@@ -38,9 +36,8 @@ WB_COUNTRY_API = wb_country_url()
 WB_WDI_INDICATORS = {
     "NY.GDP.PCAP.CD": "gdp_per_capita_usd",  # GDP per capita, current US$
     "NY.GDP.MKTP.CD": "gdp_usd",  # GDP, current US$
-    # Constant-price GDP is what carbon intensity is divided by: current US$
-    # moves with inflation and the exchange rate, which made a 21% emissions
-    # cut in Japan look like a 10% intensity *rise* on a depreciating yen.
+    # The carbon-intensity denominator: current US$ moves with inflation and the
+    # exchange rate, so dividing by it can turn an emissions cut into a rise.
     "NY.GDP.MKTP.KD": "gdp_constant_usd",  # GDP, constant 2015 US$
     "SP.DYN.LE00.IN": "life_expectancy",  # Life expectancy at birth, years
     "SP.POP.TOTL": "population",  # Population, total
@@ -52,11 +49,9 @@ WB_WDI_INDICATORS = {
     "EG.IMP.CONS.ZS": "energy_imports_pct",  # Energy imports (net), % of energy use
 }
 
-# WDI is loaded incrementally (`merge`), so its grain has to be a real key: these
-# three identify a row and dlt uses them as the merge predicate. `country_code`
-# (the World Bank's own 2-3 char code) and not `country_iso3`, which the API
-# leaves empty on its aggregate series — five of those share `(indicator, '',
-# year)`, and a merge silently keeps one of them.
+# The merge key. `country_code` (the World Bank's own code), not `country_iso3`,
+# which is empty on the aggregate series — five of them would share
+# `(indicator, '', year)` and the merge would keep one.
 WDI_PRIMARY_KEY = ("indicator", "country_code", "year")
 
 # How far back each incremental run re-fetches. See `wdi_start_year`.
@@ -69,14 +64,11 @@ WDI_FIRST_YEAR = 1960
 # Where the per-indicator watermarks live inside dlt's resource state.
 WDI_WATERMARK_KEY = "max_year_by_indicator"
 
-# Spelled out because this table's schema is no longer dropped and re-inferred
-# every run (the point of `REFRESH` below) — an incremental resource keeps dlt's
-# persisted schema, which only *widens*. `value` is the one that matters: the
-# indicators are a mix of counts and ratios, and a window that happened to
-# contain only integers would otherwise infer bigint and turn the first ratio
-# into a `value__v_double` variant column. The key columns are non-nullable so a
-# null key fails the load rather than silently escaping the merge predicate
-# (`null = null` is never true, so those rows would duplicate on every run).
+# Declared because a merge resource keeps dlt's persisted, widen-only schema (no
+# `REFRESH`): a window of integer-valued indicators would infer bigint for
+# `value` and send the first ratio into a `value__v_double` variant column. Key
+# columns are non-nullable so a null key fails the load instead of duplicating
+# on every run (`null = null` never matches the merge predicate).
 WDI_COLUMNS: dict[str, TColumnSchema] = {
     "indicator": {"data_type": "text", "nullable": False},
     "country_code": {"data_type": "text", "nullable": False},
@@ -89,14 +81,9 @@ WDI_COLUMNS: dict[str, TColumnSchema] = {
 def country_pages():
     """Each page of the World Bank /country endpoint, as a list of rows.
 
-    Paginated like wb_wdi: the dimension table fits on one page today, but
-    nothing guarantees it stays under WB_PER_PAGE rows forever, and a second page
-    arriving with no pagination would be silently truncated.
-
-    Split out of the resource because `weather_locations` needs the same rows for
-    a different reason — the capital coordinates — and reading them through the
-    same iterator is what stops the two from disagreeing about pagination or
-    about what an error payload looks like.
+    Paginated although the table fits on one page today: a second page would
+    otherwise be silently dropped. Shared with `weather_locations`, so the two
+    agree on pagination and on what an error payload looks like.
     """
     page = 1
     while True:
@@ -203,28 +190,18 @@ def _fetch_wdi_indicator(
     columns=WDI_COLUMNS,
 )
 def wb_wdi(years: tuple[int, int] | None = None):
-    """The one incremental resource: `merge` on `WDI_PRIMARY_KEY` with a lookback
-    window, where the other four are full `replace` reloads.
+    """WDI indicators, merged on `WDI_PRIMARY_KEY` over a lookback window.
 
-    Merge is what makes a partial fetch safe — the rows the window re-fetches
-    replace their previous versions instead of appending a second copy, so a run
-    that asks for five years still leaves 1960 onwards intact. What it gives up
-    is `replace`'s guarantee that the table is exactly what the API just served:
-    a country-year the World Bank *withdraws* stays here until a full reload.
+    Merge makes a partial fetch safe: re-fetched rows replace their previous
+    versions, so a five-year window leaves 1960 onwards intact. The cost is that
+    a country-year the World Bank withdraws stays until a full reload.
 
-    `years` is the *backfill* path — an explicit `(first, last)` window asked for
-    verbatim, for every indicator, which is what a Dagster partition key means
-    here. The same merge key makes it re-runnable: loading 1995 twice leaves the
-    table exactly as it was after the first time.
+    `years` is the backfill path — an explicit `(first, last)` window for every
+    indicator, which is what a Dagster partition key means here. The merge key
+    makes it idempotent.
     """
-    # Paginated: a single 20k-row page used to cover every indicator, but the
-    # series grow by ~270 rows a year and were already at 87% of that cap, so
-    # the next few years would have silently truncated the oldest indicators.
-    #
-    # The watermark is per *indicator*, not one number for the table: adding a
-    # code to WB_WDI_INDICATORS then has no watermark for it and pulls the whole
-    # series, where a table-wide watermark would have given the new column five
-    # years of history and no error.
+    # Per-indicator watermarks: a code newly added to WB_WDI_INDICATORS has none
+    # and pulls its whole series, where a table-wide one would give it five years.
     watermarks = dlt.current.resource_state().setdefault(WDI_WATERMARK_KEY, {})
     full_reload = wdi_full_reload_requested()
 
@@ -235,10 +212,8 @@ def wb_wdi(years: tuple[int, int] | None = None):
             return (None, None)
         return (wdi_start_year(watermarks.get(code)), None)
 
-    # Each indicator's fetch (and its pages) is independent of the others and
-    # only hits the World Bank API — nothing here touches the DuckDB writer
-    # lock — so a small thread pool fetches them concurrently instead of one
-    # blocking call at a time.
+    # Indicators are independent HTTP fetches that never touch the writer lock,
+    # so they run concurrently.
     with ThreadPoolExecutor(max_workers=8) as pool:
         pending = {
             code: pool.submit(_fetch_wdi_indicator, code, *window(code))
@@ -248,34 +223,15 @@ def wb_wdi(years: tuple[int, int] | None = None):
             rows = future.result()
             loaded = [row["year"] for row in rows if row["year"] is not None]
             if loaded and years is None:
-                # Advanced only after a clean fetch, and committed by dlt only if
-                # the load succeeds — a half-failed run can't move the watermark
-                # past years that never landed.
+                # Advanced after a clean fetch; dlt commits it only if the load
+                # succeeds. Clamped to the current year because the World Bank
+                # has served projections (population to 2050, which `stg_wdi.sql`
+                # cuts): a 2050 watermark asks for `&date=2046:2026`, which the
+                # API ignores rather than refuses, silently turning every run
+                # into a full fetch. `min()` also heals a watermark already set.
                 #
-                # **Clamped to the current year, because the publisher can send
-                # one that is not.** The World Bank served `SP.POP.TOTL`
-                # projected to 2050 on 2026-09-07 (see `stg_wdi.sql`, which cuts
-                # them out one layer down). Landing those would set this to 2050,
-                # and `wdi_start_year` would then ask for `&date=2046:2026` on
-                # every subsequent run — for a year nobody can have observed,
-                # forever, since `max()` alone can only ever raise it.
-                #
-                # What that costs is not what it looks like. A reversed range is
-                # *ignored* by the API rather than refused: measured against the
-                # live endpoint, `date=2046:2026` returns the whole 17,490-row
-                # series, exactly as an out-of-range one does. So the indicator
-                # keeps updating and silently stops being incremental — a
-                # permanent ~190k-row fetch where the window buys ~15k — rather
-                # than going stale. The clamp also heals a watermark already
-                # poisoned, which is why it is `min()` here and not a refusal on
-                # the way in.
-                #
-                # A backfill deliberately doesn't touch it. The watermark means
-                # "everything up to here is loaded", and a partition run only
-                # claims its own window: backfilling 2020-2025 into an empty
-                # warehouse would otherwise leave a 2025 watermark, and the next
-                # incremental run would look back five years over sixty years of
-                # history that was never fetched.
+                # A backfill leaves it alone: the watermark means "loaded up to
+                # here", and a partition run only covers its own window.
                 watermarks[code] = min(
                     max(loaded + [watermarks.get(code, 0)]), datetime.now(UTC).year
                 )

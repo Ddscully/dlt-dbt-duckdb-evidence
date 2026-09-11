@@ -18,11 +18,9 @@ Three decisions, all of which cost something to get wrong:
   list silently drops the new one — a load that succeeds and is short. They are
   read out of the container's own `xl/workbook.xml`, which needs no dependency,
   because a spreadsheet is a zip of XML.
-* **Excel dates are serial numbers and its epoch is wrong on purpose.** Day 1 is
-  1900-01-01, but Excel also believes 1900 was a leap year, so every date after
-  February 1900 is one day further from the epoch than it should be. Counting
-  from **1899-12-30** absorbs both, which is why that constant is here with an
-  explanation rather than inline somewhere as a magic date.
+* **Excel dates are serial numbers from a deliberately wrong epoch.** Day 1 is
+  1900-01-01, but Excel treats 1900 as a leap year, so every later date is one
+  day further out; counting from **1899-12-30** absorbs both.
 
 Nothing here knows what is in the workbook; the caller supplies the path and
 does the casting.
@@ -37,9 +35,8 @@ from pathlib import Path
 
 import duckdb
 
-# Excel's day 0. See the module docstring: 1899-12-30 rather than 1899-12-31
-# because of the phantom 29 February 1900. Serial values carry the time of day
-# as a fraction, so the conversion is seconds rather than days.
+# Excel's effective day 0 (see the module docstring). Serials carry the time of
+# day as a fraction, so the conversion is in seconds.
 EXCEL_EPOCH = "1899-12-30"
 
 _SHEET_NAME = re.compile(r"<sheet[^>]*\bname=\"([^\"]*)\"")
@@ -83,24 +80,14 @@ def extract_member(archive_path: Path | str, dest_dir: Path | str, suffix: str) 
 def sheets_sql(path: Path | str, sheets: list[str] | None = None) -> str:
     """SQL reading every sheet of a workbook as all-text, with a `sheet_name` column.
 
-    A SQL string rather than a relation or a frame, for two reasons. The caller
-    is about to cast columns and filter, and wants to do that in one query
-    against its *own* connection — a relation belongs to the connection that made
-    it and can't be joined across. And for a large workbook the alternative is
-    materialising a million rows of Python strings before the first cast.
+    A SQL string, so the caller casts and filters in one query on its own
+    connection, without materialising a million rows of Python strings first.
 
-    The union is by column *name*, not position, so a publisher reordering
-    columns between sheets can't silently shift the data one across — the failure
-    mode that makes a hand-converted spreadsheet untrustworthy.
-
-    **What it does not protect against is a sheet that is missing a column
-    entirely.** `union all by name` pads that with NULL and returns rows, so a
-    truncated sheet arrives as data with a hole in it rather than as an error.
-    There is no DuckDB setting that makes it strict, so the guard has to be
-    downstream: the caller's `not_null` tests are what turn a padded column into
-    a failure, which is the reason `stg_retail_lines` tests columns that "cannot"
-    be null. `tests/test_workbook.py` pins the padding behaviour so that this
-    stays a known property rather than a discovery.
+    The union is by column name, so a publisher reordering columns between
+    sheets cannot shift data one across. A sheet *missing* a column is padded
+    with NULL rather than refused, and no DuckDB setting makes it strict — the
+    caller's `not_null` tests are the guard (hence `stg_retail_lines` testing
+    columns that "cannot" be null). `tests/test_workbook.py` pins the padding.
     """
     path = Path(path)
     sheets = sheets or sheet_names(path)
@@ -115,11 +102,8 @@ def sheets_sql(path: Path | str, sheets: list[str] | None = None) -> str:
 def connect() -> duckdb.DuckDBPyConnection:
     """An in-memory connection with the `excel` extension loaded and row order pinned.
 
-    `preserve_insertion_order` is set explicitly rather than left at DuckDB's
-    default. A workbook has no key of its own, so file position is often the only
-    thing that can distinguish two otherwise identical rows — and a caller that
-    builds an identifier out of it is depending on this setting, not on a
-    default that a future release is free to change.
+    `preserve_insertion_order` is set explicitly: a caller that builds an
+    identifier from file position depends on it, and a default may change.
     """
     con = duckdb.connect()
     con.execute("install excel; load excel; set preserve_insertion_order = true;")

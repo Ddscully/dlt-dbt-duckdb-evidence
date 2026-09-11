@@ -9,33 +9,19 @@ few tables are not, and they are not all unreproducible for the same reason.
   a weaker claim with the same consequence: the data exists upstream and cannot
   be fetched again this month.
 
-Either way a project whose CI builds from an empty file republishes the thin
-version forever. This module is the other half: copy those relations out of the
-previous release into the fresh database *before* the graph runs.
+A project whose CI builds from an empty file would otherwise republish the thin
+version forever, so this copies those relations out of the previous release
+into the fresh database *before* the graph runs — dbt appends to a snapshot
+during `dbt build`, so the old rows must already be there. A dlt destination
+holding only carried *data* tables is still judged fresh (dlt reads its own
+bookkeeping tables), which is why a rule over a landing schema must name its
+tables rather than copy that bookkeeping too.
 
-## Why before the build, and why pre-creating the file is safe
-
-dbt appends during `dbt build`, so the previous rows have to be on disk before
-that — which means writing the database file before dlt has created it. That is
-fine: dlt keys "is this destination fresh?" on its own bookkeeping tables, so a
-file holding only carried *data* tables still gets a full load. **This is also
-why a carry rule over a landing schema must name its tables**: copying that
-schema wholesale would bring dlt's bookkeeping with it and change the answer.
-
-## What it refuses to do
-
-Overwrite what is already there. Deleting the warehouse is normally the only
-destructive act in a project like this and this would be the second one, so a
-destination table with rows in it stops the restore unless `force`.
-
-It also checks each source relation carries the bookkeeping columns that make it
-the thing the caller thinks it is — **and the two kinds look for opposite
-things**. A snapshot proves itself with dbt's SCD2 columns; a landing table
-proves itself with dlt's. Both failures are otherwise deferred and much less
-legible: a snapshot-shaped-but-not-a-snapshot dies inside `dbt build`, and a
-landing table missing `_dlt_load_id` dies at the next load with DuckDB's
-`Adding columns with constraints not yet supported`, because dlt tries to add
-the column `NOT NULL` to a table that already has rows.
+It refuses to overwrite a destination table that holds rows, unless `force`.
+And it checks each source relation carries the columns that prove what it is:
+dbt's SCD2 columns for a snapshot, dlt's for a landing table. Otherwise the
+failure comes later and less legibly — inside `dbt build`, or at the next load
+as DuckDB's `Adding columns with constraints not yet supported`.
 """
 
 from __future__ import annotations
@@ -60,15 +46,9 @@ DLT_COLUMNS = ("_dlt_load_id", "_dlt_id")
 class Carry:
     """One rule: which relations to copy forward, and what proves they qualify.
 
-    `tables=None` means every table in the schema, which is right for a schema
-    that exists *only* to hold unreproducible state. Naming tables explicitly is
-    required wherever the schema holds anything else — a landing schema, most
-    obviously, where copying the whole thing would carry dlt's own bookkeeping
-    and make the next load think the destination was not fresh.
-
-    `kind` is prose, and it is only ever read in the refusal message. It is a
-    field rather than a lookup off `required_columns` so that the message names
-    what the caller *meant*, which is the thing a person can act on.
+    `tables=None` means every table in the schema — right only for a schema
+    that holds nothing but unreproducible state. `kind` is prose for the refusal
+    message, naming what the caller meant the relation to be.
     """
 
     schema: str
@@ -102,10 +82,8 @@ def _rows(con: duckdb.DuckDBPyConnection, qualified: str) -> int:
 def _wanted(con: duckdb.DuckDBPyConnection, database: str, rule: Carry) -> list[str]:
     """The tables `rule` selects that the source actually has.
 
-    A named table the source lacks is **skipped, not an error**. The release
-    that first carries a new table has a predecessor that predates it, so
-    treating the gap as fatal would make exactly one release fail — and it is
-    the same "restoring nothing is a normal outcome" rule, one level down.
+    A named table the source lacks is skipped: the first release to carry a new
+    table has a predecessor without it.
     """
     present = _tables(con, database, rule.schema)
     if rule.tables is None:
@@ -121,15 +99,9 @@ def restore(
 ) -> dict:
     """Copy the relations `carry` names out of `source` into `duckdb_path`.
 
-    `carry` has no default, matching `db.write_frames`'s `schema` and
-    `export`'s `max_storage_version`: what a project cannot reproduce is a fact
-    about that project, and this module knows nothing about it. A default would
-    be invisible to the caller that means something else, and `create or
-    replace` does not ask twice.
-
-    Restoring nothing is a normal outcome — the first release ever cut has no
-    predecessor, and a source with none of the named relations is the same case.
-    Only a *destination* that already holds them is an error.
+    `carry` has no default: what a project cannot reproduce is its own fact.
+    Restoring nothing is normal (the first release has no predecessor); only a
+    destination that already holds the relations is an error.
     """
     src = Path(source)
     if not src.exists():
@@ -211,10 +183,8 @@ def carried_rows(
 ) -> dict[str, int]:
     """Rows currently held in each relation `carry` names, for the guards.
 
-    One function so that the "how much did we carry" count, the "did it shrink"
-    assertion and the "is there anything here to lose" gate cannot drift apart
-    as the rules change — which is the failure the release workflow already
-    documents for a snapshot added later and never verified.
+    One function, so the carried-in count, the did-it-shrink assertion and the
+    anything-to-lose gate cannot drift apart as the rules change.
     """
     prefix = f"{database}." if database else ""
     counts = {}

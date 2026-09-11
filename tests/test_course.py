@@ -1,10 +1,10 @@
 """The course material and the project skills, checked against the repo they cite.
 
 `docs/course/` and `.claude/skills/*/SKILL.md` quote file paths, `just` recipes
-and module links out of the rest of the tree. None of that is executable, so it rots in exactly the way an
-exposure does: the module still renders, the prose still reads correctly, and the
-path it tells a learner to open was renamed six commits ago. A course that sends
-someone to a file that is not there is worse than no course, because the reader
+and module links out of the rest of the tree. None of that is executable, so it
+rots the way an exposure does: the module still renders and reads correctly, and
+the path it tells a learner to open was renamed six commits ago. A course that
+sends someone to a missing file is worse than no course, because the reader
 assumes they are the one who is wrong.
 
 The same argument as `tests/test_exposures.py` and `tests/test_report.py`: an
@@ -33,9 +33,8 @@ JUSTFILE = project_root() / "justfile"
 # rot the same way and are checked by the same two citation tests below. Not by
 # the structural ones: those are about a module's exercises.
 #
-# Globbed, not listed. A hand-maintained list is the `definitions.py` failure
-# CLAUDE.md documents: the omission is not an error, it is simply a file nothing
-# checks. A skill added later is guarded whether or not anyone remembers this.
+# Globbed, not listed: from a hand-maintained list a skill could be omitted
+# without any error, and nothing would check it.
 SKILLS_DIR = project_root() / ".claude" / "skills"
 
 # Top-level directories a module may cite. `data/` is deliberately absent: it is
@@ -55,8 +54,9 @@ CITABLE_ROOTS = (
     "transform",
 )
 
-# A backticked path, e.g. `dbt/models/marts/country_stats/dim_country_year.sql`. Anchored on the
-# citable roots so prose like `country_iso3` and `PASS=402` can't match.
+# A backticked path, e.g. `dbt/models/marts/country_stats/dim_country_year.sql`.
+# Anchored on the citable roots so prose like `country_iso3` and `PASS=402`
+# cannot match.
 _CITED_PATH = re.compile(
     r"`((?:" + "|".join(CITABLE_ROOTS) + r")/[A-Za-z0-9_./*-]+)`",
 )
@@ -140,23 +140,16 @@ def ignored(paths: set[str]) -> set[str]:
 
     A gitignored path is a build artifact: correct to cite, and absent on a fresh
     clone. This is the general form of the rule that keeps `data/` out of
-    `CITABLE_ROOTS`, and `reports/` is why the general form is needed —
-    `reports/pages/` and `reports/sources/` are source, while `reports/build/`,
-    `reports/node_modules/` and `reports/.evidence/` are output of
-    `just report`. Splitting that by prefix would be a second list to drift;
-    asking git is the same question the .gitignore already answers.
-
-    Without this the guard passes on a developer's machine, where the site has
-    been built, and fails in CI — the exact shape of rot it exists to catch.
+    `CITABLE_ROOTS`, needed because `reports/` mixes source (`pages/`,
+    `sources/`) with the output of `just report` (`build/`, `node_modules/`,
+    `.evidence/`). Asking git avoids a second list that could drift from the
+    .gitignore.
 
     Every path is asked about twice, with and without a trailing slash, because
-    `git check-ignore` is not a pure function of the .gitignore. A directory-only
-    pattern — `dbt/target/`, written with the slash — matches only a path git can
-    see is a directory, and it asks the filesystem to decide. So a cited
-    `dbt/target` was exempt on a machine that had built and exempt nowhere else:
-    green locally, red on a fresh checkout, which is this helper's own failure
-    mode arriving inside the exemption meant to prevent it. A trailing slash on
-    the probe answers the directory question without the filesystem.
+    a directory-only pattern (`dbt/target/`) matches only a path the filesystem
+    says is a directory. Without the slashed probe, a cited `dbt/target` would be
+    exempt on a machine that had built and nowhere else — green locally, red on
+    a fresh checkout.
     """
     if not paths:
         return set()
@@ -228,14 +221,13 @@ def test_the_index_lists_every_module_that_exists():
 _ANCHOR_LINK = re.compile(r"\]\((\.{0,2}[/A-Za-z0-9_.-]*\.md)#([A-Za-z0-9_-]+)\)")
 
 # Anything that is not a letter, digit, space, hyphen or underscore. GitHub's
-# slug drops it — which is why `## The lake (`lake/archive.py`)` anchors as
-# `#the-lake-lakearchivepy`, backticks, brackets and slashes all gone.
+# slug drops it — which is why `## The lakehouse (`lake/lakehouse.py`)` anchors
+# as `#the-lakehouse-lakelakehousepy`, backticks, brackets and slashes all gone.
 _NOT_IN_SLUG = re.compile(r"[^a-z0-9 \-_]")
 
-# Any heading level, with its text captured. Deliberately not `_HEADING`, which
-# this module already uses for `^## .*$` in the structural checks below — the
-# second definition silently won, and `m.group(1)` then raised on a pattern with
-# no group at all. A collision, not a typo.
+# Any heading level, with its text captured. Not `_HEADING`, which this module
+# already uses for `^## .*$` in the structural checks below; a second definition
+# under that name would silently replace the first.
 _ANY_HEADING = re.compile(r"^#+\s+(.+)$", re.MULTILINE)
 
 
@@ -261,12 +253,9 @@ def headings_in(path: pathlib.Path) -> set[str]:
 def test_every_cross_file_anchor_resolves():
     """A heading that moves leaves the link green in review and dead on click.
 
-    `docs/WAREHOUSE.md` pointed at `CLAUDE.md#cbam-exposure-…` for three days
-    after that section was split out into `.claude/skills/compliance-models/`.
-    Nothing could have said so: the two citation tests above check backticked
-    *paths* and `just` recipes, and the path in a `](…)` link was still correct —
-    it was the `#fragment` after it that named a heading no longer there. Every
-    split of CLAUDE.md is a chance to do it again, and there have been two.
+    The citation tests above check backticked paths and `just` recipes; a
+    `](file#fragment)` link can keep a correct path while its fragment names a
+    heading that has gone — which every split of CLAUDE.md into a skill risks.
     """
     dead = []
     for doc, target, fragment in anchor_links():
@@ -281,23 +270,11 @@ def test_every_cross_file_anchor_resolves():
 def test_the_anchor_scan_still_finds_anchors():
     """The guard above passes by not looking if `_ANCHOR_LINK` stops matching.
 
-    Same failure as `_ROUTES` reachability and `seen > 35` in
-    `tests/test_documented_counts.py`: a scanner whose pattern drifts reports no
-    findings, which is indistinguishable from a clean tree.
+    A scanner whose pattern drifts reports no findings, which is
+    indistinguishable from a clean tree.
 
-    Non-emptiness and nothing else. A floor on the *number* of anchors would go
-    red on a legitimate deletion — there are only four, and removing one is a
-    normal edit — which is a worse trade here than in
-    `tests/test_documented_counts.py`, where claims only ever accumulate.
-
-    A second assertion, that at least one anchor is written `../`-relative and
-    so exercises the `doc.parent / target` join, was written and then dropped:
-    resolving from the repo root instead fails
-    `test_every_cross_file_anchor_resolves` with "(no such file)" on both docs/
-    links, so it was never the assertion doing the catching — and it would fire
-    on a tree whose only anchors happened to sit in the root, which is a correct
-    state. A guard whose effect another test already has is not evidence either
-    way; the rule is CLAUDE.md's, applied to itself.
+    Non-emptiness and nothing else: there are only a handful of anchors, and a
+    floor on their number would go red on a legitimate deletion.
     """
     assert anchor_links(), (
         "the anchor scan found no `](file.md#fragment)` links at all — "
@@ -332,27 +309,20 @@ def missing_verification(heading: str, body: str) -> str | None:
 
     `docs/course/README.md` promises a learner: "Every drill ends with a
     **verification query**, because 'it looks right now' is the failure mode the
-    course exists to break." All five drills written so far honour it, and
-    nothing enforces it — which is the exact shape this file exists to catch, one
-    level up. An unenforced promise in the index is a claim about the outside of
-    the material, and it rots the same way a renamed path does.
+    course exists to break." An unenforced promise in the index rots the way a
+    renamed path does.
 
-    Two levels of strictness, because the literal alone is not worth much: a
-    drill could carry the words and no command, which is the promise broken in
-    the way that reads as kept.
+    Two checks, because a drill could carry the words and no command:
 
     - the `**Verification.**` marker is present, and
     - a fenced block follows it, before the reveal.
 
-    "Before the reveal" is doing real work and is not an ordering rule for its
-    own sake. Every reveal is full of fenced SQL, so an unbounded search finds a
-    block whatever the drill itself carries and the second check measures
-    nothing. Bounding it at `<details>` is what makes the fenced half an
-    assertion about the drill rather than about the answer.
+    "Before the reveal" matters: every reveal is full of fenced SQL, so an
+    unbounded search would find a block whatever the drill itself carries.
 
-    Deliberately *not* checked: that the marker sits on a line of its own.
-    `01-grain.md` writes "**Verification.** When you think it is fixed:" with the
-    block on the next line, which is good prose and a bad thing to forbid.
+    Not checked: that the marker sits on a line of its own. `01-grain.md` writes
+    "**Verification.** When you think it is fixed:" with the block on the next
+    line, which is good prose.
 
     Called once per section; only 🔧 sections are passed in.
     """
@@ -389,23 +359,19 @@ def missing_sections(text: str, name: str) -> list[str]:
     module, so a half-written one fails here rather than shipping and
     disappointing someone.
 
-    Two rules beyond the boilerplate, and the second is the interesting one:
+    Two rules beyond the boilerplate:
 
-    - **`00-setup.md` is exempt from the exercise rules by name.** It is setup
-      and deliberately carries no drills. Exempting it by name rather than by
-      "this module happens to have no markers" matters — the latter excuses every
-      module that forgot to write any, which is the case the check exists for.
-    - **One reveal per exercise marker, enforced as a section-level bijection:**
-      every `##` section whose heading is marked must contain at least one
-      `<details>`, and no `<details>` may sit outside a marked section. Strict in
-      both directions — an exercise with no answer fails, and so does an answer
-      with no question.
+    - **`00-setup.md` is exempt from the exercise rules by name.** It carries no
+      drills by design; exempting "modules with no markers" instead would excuse
+      every module that forgot to write any.
+    - **Reveals match exercises section by section:** every `##` section whose
+      heading is marked must contain at least one `<details>`, and no
+      `<details>` may sit outside a marked section. An exercise with no answer
+      fails, and so does an answer with no question.
 
-      Not `count(marker) == count(<details>)`, which sounds like the same rule
-      and is not: `01-grain.md` has three marked headings and five reveals,
-      because its design-defence section asks (a), (b) and (c) and answers each.
-      Counting would fail the one module we know is complete, which is an
-      argument about the rule rather than about the module.
+      Not `count(marker) == count(<details>)`: `01-grain.md` has three marked
+      headings and five reveals, because its design-defence section asks (a),
+      (b) and (c) and answers each.
 
     Returns human-readable names, so the assertion tells an author what to write
     rather than only that something is wrong.

@@ -1,24 +1,15 @@
 -- EU household electricity prices at Eurostat's own grain.
 -- Grain: one row per (country_iso3, year, half).
 --
--- The one fact here that isn't annual. It exists because averaging the two
--- half-years — which `fct_emissions_energy.electricity_price_eur_kwh` does, and
--- has to, to sit on the country-year spine — erases the sharpest price movement
--- in the series. Reach for this model for anything about prices *over time*, and
--- the annual column for anything joining prices to emissions or GDP.
+-- The country-stats group's one sub-annual fact. Averaging the halves, as
+-- `fct_emissions_energy.electricity_price_eur_kwh` must to sit on the
+-- country-year spine, erases the sharpest price movements: use this for prices
+-- over time, the annual column for joining prices to emissions or GDP.
 --
--- **It is also the warehouse's one genuinely mixed-currency question**, which is
--- why the USD columns hang off this model and not another. Everything else here
--- is denominated in US dollars (the World Bank's GDP series) or in nothing at
--- all (tonnes, kWh); this is the only euro-denominated measurement, so before
--- `fct_fx_rates_periods` existed a euro price and a dollar GDP simply could not
--- be put in the same sentence.
---
--- A price over a half-year is a **flow**, so it converts at the period average
--- and not at the closing rate — see the header of `fct_fx_rates_periods`. The
--- rate used ships beside the converted number, and so does the closing rate that
--- was *not* used, because a converted figure whose rate you can't see is a
--- figure nobody can check.
+-- The USD columns put a euro price beside dollar-denominated GDP. A half-year
+-- price is a flow, so it converts at the period average (see
+-- `fct_fx_rates_periods`); the average used and the closing rate not used both
+-- ship beside it.
 with semiannual as (
     select * from {{ ref('stg_eu_electricity_prices_semiannual') }}
 ),
@@ -27,8 +18,7 @@ spine as (
     select * from {{ ref('dim_country_year') }}
 ),
 
--- USD per EUR at Eurostat's own half-year grain — the join `dim_date`'s
--- Eurostat-shaped `half` column exists to make possible.
+-- USD per EUR at Eurostat's half-year grain.
 usd as (
     select
         period_start_date,
@@ -39,10 +29,8 @@ usd as (
     where period_type = 'half' and currency_code = 'USD'
 ),
 
--- Half-over-half change. `lag` returns the previous row this country *has*, which
--- is not always the previous half — countries enter the series at different dates
--- and a few have gaps — so the change is only reported when the preceding row is
--- exactly six months back, and is null at the start of each country's series.
+-- Half-over-half change, only where the previous row is exactly six months back
+-- (`lag` returns the previous row the country has, and some have gaps).
 with_change as (
     select
         country_iso3,
@@ -84,9 +72,7 @@ select
     -- The same price in dollars, at the average rate over the same half-year.
     s.electricity_price_eur_kwh * f.avg_units_per_eur as electricity_price_usd_kwh,
     f.avg_units_per_eur as usd_per_eur_period_avg,
-    -- Shipped, not used: the closing rate is the right one for a balance and the
-    -- wrong one for a price, and having both in the table is how that stays a
-    -- visible choice rather than a buried one.
+    -- Shipped, not used: the closing rate suits a balance, not a price.
     f.period_end_units_per_eur as usd_per_eur_period_end,
     not f.period_is_complete as usd_conversion_is_partial_period
 from with_change as s

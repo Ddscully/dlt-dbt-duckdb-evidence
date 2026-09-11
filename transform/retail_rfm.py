@@ -6,13 +6,10 @@ transaction log into something a marketing team can act on: score every customer
 1–5 on how recently they bought, how often, and how much, then read the (R, F)
 pair off a grid to get a segment name.
 
-**This is the first transform here that Polars is genuinely better at than SQL**,
-and the reason is narrow enough to state exactly. The operation is "cut a column
-into quintiles"; SQL's primitive for that is `ntile`, and `ntile` is *wrong* for
-this. See `assign_quintiles` below — it splits equal values across buckets, and
-in this data that hits 3,227 of 5,881 customers. Doing it correctly in SQL means
-computing four quantiles per column and hand-writing a five-branch `case` over
-them, three times over. Polars has the correct operation as a primitive.
+Polars rather than SQL for one narrow reason: cutting a column into quintiles.
+SQL's primitive, `ntile`, splits equal values across buckets (see
+`assign_quintiles`); the correct SQL is four quantiles and a five-branch `case`
+per column, where Polars has `qcut`.
 
 Run:  uv run python -m transform.retail_rfm
 """
@@ -29,25 +26,14 @@ from modern_data_stack.paths import warehouse_path
 
 DUCKDB_PATH = warehouse_path()
 
-# The quintile cut points. Five buckets is convention, not arithmetic — it is
-# small enough to name each cell of the 5x5 grid below and large enough that the
-# top bucket is a shortlist rather than a fifth of the file.
+# The quintile cut points — five buckets by convention.
 QUINTILES = (0.2, 0.4, 0.6, 0.8)
 
-# The (recency score, frequency score) -> segment grid, written out in full.
-#
-# The widely-copied version of this is a list of rules ("Champions: R>=4 and
-# F>=4", "Loyal: R>=3 and F>=3", ...) whose conditions **overlap**, so which
-# label a customer gets depends on the order the rules are evaluated in — a
-# customer at R=4, F=4 matches both of those. That is invisible in review and
-# survives a refactor that reorders the branches. Twenty-five cells, each named
-# once, cannot be ambiguous, and the whole policy is legible as a table.
-#
-# Monetary is deliberately *not* in the grid. It is carried as a score, because
-# it answers a different question: R and F say what the relationship is doing,
-# M says what it is worth. Folding M in would make "a lapsed big spender" and "a
-# frequent small one" compete for the same cell, and the two need different
-# interventions.
+# The (recency score, frequency score) -> segment grid, written out in full. The
+# common rule-list form ("Champions: R>=4 and F>=4", "Loyal: R>=3 and F>=3")
+# overlaps, so a label depends on rule order; twenty-five cells named once
+# cannot. Monetary is carried as a score but kept out of the grid: R and F say
+# what the relationship is doing, M what it is worth.
 SEGMENT_GRID: dict[tuple[int, int], str] = {
     # R=5 — bought most recently
     (5, 1): "New Customers",
@@ -94,36 +80,18 @@ def segment_frame() -> pl.DataFrame:
 def assign_quintiles(values: pl.Series, *, higher_is_better: bool = True) -> pl.Series:
     """Score a column 1–5 by **value**, not by rank position.
 
-    This is the whole argument for doing the scoring here. The obvious SQL is
-    `ntile(5) over (order by n_orders)`, which fills five buckets of equal
-    *size* — so when values tie, it splits the tie wherever the boundary happens
-    to fall. Frequency is a small integer with enormous ties, and the damage is
-    measurable: 1,626 customers have placed exactly one order and `ntile` puts
-    some of them in quintile 1 and the rest in quintile 2. Across the four tied
-    values that straddle a boundary (1, 2, 4 and 8 orders) that is **3,227 of
-    5,881 customers — 54.9%** who could be scored differently from someone whose
-    behaviour is identical to theirs.
-
-    That is not a rounding detail. The score is supposed to be a property of the
-    customer; under `ntile` it is a property of where they landed in a sort, and
-    two identical customers can end up in different marketing campaigns.
-
-    `qcut` cuts on the *break points* instead, so equal values always score
-    equally. The price is that the buckets are no longer equal in size — here
-    they run 1,626 / 944 / 1,150 / 1,033 / 1,128 — and that is the correct trade:
-    the unevenness is a fact about the customer base, not an artefact.
-
-    `allow_duplicates` covers the case where ties are heavy enough that two
-    quantiles land on the same value; the bucket between them is then empty
-    rather than the call failing.
+    `ntile(5)` fills equal-sized buckets, so it splits tied values wherever a
+    boundary falls: 3,227 of the 5,881 customers share a frequency with someone
+    it would score differently. `qcut` cuts on break points, so equal values
+    score equally and bucket sizes follow the data (frequency: 1,626 / 944 /
+    1,150 / 1,033 / 1,128). `allow_duplicates` leaves a bucket empty, rather than
+    failing, when ties put two break points on one value.
     """
     labels = [str(i) for i in range(1, len(QUINTILES) + 2)]
     scores = (
         values.qcut(list(QUINTILES), labels=labels, allow_duplicates=True)
-        # Casting a Categorical straight to an integer yields the *physical*
-        # dictionary index — the order the labels were first seen, which for a
-        # sorted-by-quantile column is not the label order. Via String is the
-        # only reading that means what it says.
+        # Via String: casting a Categorical straight to an integer yields its
+        # physical dictionary index, not the label.
         .cast(pl.String)
         .cast(pl.Int32)
     )
@@ -133,24 +101,16 @@ def assign_quintiles(values: pl.Series, *, higher_is_better: bool = True) -> pl.
 def build_retail_rfm(customers: pl.DataFrame, as_of_date: dt.date) -> pl.DataFrame:
     """Score every customer and attach a segment.
 
-    `as_of_date` is a parameter and has no default, which is the second thing
-    worth knowing about this model. Recency is days-since-last-order, and the
-    natural expression for that is `today - last_order_date` — which, against a
-    2011 extract, makes every customer in the file equally and enormously
-    lapsed. Recency then has almost no spread left to cut into quintiles, and
-    the segmentation quietly becomes a frequency ranking with a recency column
-    stapled to it. So recency is measured against the **last day the extract
-    observed**, and that date ships as a column so nothing downstream has to
-    guess which clock the scores are on.
+    `as_of_date` has no default. Measured from today, every customer of a 2011
+    extract is equally lapsed and recency loses its spread; it should be the
+    extract's last observed day, and it ships as a column.
     """
     scored = customers.with_columns(
         pl.lit(as_of_date).alias("as_of_date"),
         (pl.lit(as_of_date) - pl.col("last_order_date")).dt.total_days().alias("recency_days"),
         pl.col("n_orders").alias("frequency"),
-        # Net of returns. A customer who bought GBP 10k and sent GBP 9k of it
-        # back is not a GBP 10k customer, and gross revenue says they are — the
-        # seven customers whose net is negative are exactly the ones a gross
-        # measure would flatter most.
+        # Net of returns: a customer who bought GBP 10k and returned GBP 9k is
+        # not a GBP 10k customer.
         pl.col("net_revenue_gbp").alias("monetary_gbp"),
     )
 
@@ -163,18 +123,10 @@ def build_retail_rfm(customers: pl.DataFrame, as_of_date: dt.date) -> pl.DataFra
     return (
         scored.join(segment_frame(), on=["recency_score", "frequency_score"], how="left")
         .with_columns(
-            # The concatenated cell, e.g. "555". Kept as text on purpose: it is
-            # a label, and 155 is not eleven times 55.
-            #
-            # **Null for the 28 customers with no revenue line**, and left that
-            # way. `monetary_gbp` is `net_revenue_gbp`, which `dim_retail_customer`
-            # already publishes as null for the customers whose orders held only a
-            # `Manual` adjustment or postage — so `qcut` returns null, and both of
-            # these propagate it. Coalescing to 0 would score them in the bottom
-            # monetary quintile, which reads as "we measured them and they are
-            # worth nothing" rather than "there is nothing to measure", and it is
-            # the model's existing convention that the second is a null. `segment`
-            # is unaffected: the grid is R and F only, so all 5,881 are segmented.
+            # The cell as text ("555"): a label, not a number. Both columns stay
+            # null for the 28 customers with no revenue line (null
+            # `net_revenue_gbp`); coalescing to 0 would score "nothing to measure"
+            # as "worth nothing". `segment` is unaffected — the grid is R and F.
             pl.concat_str(
                 pl.col("recency_score"), pl.col("frequency_score"), pl.col("monetary_score")
             ).alias("rfm_cell"),
@@ -185,9 +137,7 @@ def build_retail_rfm(customers: pl.DataFrame, as_of_date: dt.date) -> pl.DataFra
         .select(
             "customer_id",
             "country",
-            # The conformed key beside the label, so an RFM segment can be
-            # grouped by region or put beside a country-stats figure. It is the
-            # dimension's own resolution — carried, not recomputed here.
+            # The conformed key, carried from the dimension, not recomputed.
             "country_iso3",
             "as_of_date",
             "cohort_month",
@@ -207,11 +157,8 @@ def build_retail_rfm(customers: pl.DataFrame, as_of_date: dt.date) -> pl.DataFra
             "return_rate_pct",
             "is_left_censored_cohort",
         )
-        # `nulls_last` is not a default worth taking here. Polars sorts nulls
-        # *first*, so descending by `rfm_total` opened the table with the 28
-        # customers who have no monetary score at all — the least informative
-        # rows in the file sitting where the best customers belong, on a table
-        # whose whole purpose is "read the top of it".
+        # Polars sorts nulls first, which would open the table with the
+        # unscored customers where the best belong.
         .sort(["rfm_total", "monetary_gbp"], descending=True, nulls_last=True)
     )
 
@@ -224,13 +171,10 @@ def run(duckdb_path: str = DUCKDB_PATH) -> int:
     con = duckdb.connect(duckdb_path)
     try:
         customers = con.sql("select * from marts.dim_retail_customer").pl()
-        # The extract's own horizon, read from the data rather than assumed, so
-        # a re-run against a longer extract re-bases the scores automatically.
+        # The extract's own horizon, read from the data.
         as_of_date = customers["last_order_date"].max()
-        # `Series.max()` returns None on an empty frame and is typed as a
-        # ten-element union either way, so both failures land deep inside the
-        # recency expression as arithmetic against the wrong thing. Name them
-        # here instead — and they are two different faults, not one.
+        # `Series.max()` is None on an empty frame and typed as a wide union;
+        # name both faults here rather than inside the recency arithmetic.
         if as_of_date is None:
             raise ValueError("marts.dim_retail_customer is empty — build the mart before scoring")
         if not isinstance(as_of_date, dt.date):

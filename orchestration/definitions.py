@@ -1,41 +1,24 @@
 """Dagster entry point: `dagster dev` (see `[tool.dagster]` in pyproject.toml).
 
-Everything `just run` does in sequence, expressed as one asset graph, plus the
-Evidence site on the end of it.
+Everything `just run` does, as one asset graph, plus the Evidence site. Three jobs:
 
-Three jobs. The first split is about Node; the second is forced by Dagster:
-
-* `load_retail` — the month-partitioned retail load, on its own because **an
-  asset job may not span two partitions definitions**. `raw/wb_wdi` is yearly and
-  `raw/retail_invoice_lines` is monthly, and `define_asset_job` resolves the
-  selection to one `partitions_def` or raises ("Selected assets must have the
-  same partitions definitions"). There is no opt-out: the flag that permits it
-  (`allow_different_partitions_defs`) is hardcoded `False` for named asset jobs
-  and set `True` only for Dagster's own implicit global job. So the second
-  partitioned source has to leave, and this is the one that leaves — WDI is
-  wired into `daily_refresh` and the incremental watermark, retail is a closed
-  archive whose partitions only ever get replayed by hand.
+* `load_retail` — the month-partitioned retail load. `define_asset_job` resolves
+  a selection to one `partitions_def` or raises, with no opt-out for a named job,
+  and retail is monthly where `raw/wb_wdi` and `raw/om_weather_daily` are yearly.
 * `full_refresh` — everything else bar the site. Pure Python, so `ci.yml`,
-  `nightly.yml` and `release-data.yml` can run it on a bare uv checkout, and it is
-  what the daily schedule targets.
-* `publish_site` — `full_refresh`'s selection *plus* `reports/evidence_site`,
-  which shells out to npm. `pages.yml` runs this one, after `setup-node`.
+  `nightly.yml` and `release-data.yml` run it without Node; the daily schedule
+  targets it.
+* `publish_site` — `full_refresh` plus `reports/evidence_site`, which shells out
+  to npm. `pages.yml` runs it.
 
-**`load_retail` has to run first**, and every caller pairs them: the justfile
-recipes, all four workflows. `dbt build` reads `raw.retail_invoice_lines`, so a
-`full_refresh` on a warehouse that never had the retail job run against it fails
-in `stg_retail_lines` with `Catalog Error: Table with name retail_invoice_lines
-does not exist!` — which is exactly how the omission was found.
+`load_retail` must run first, because `dbt build` reads
+`raw.retail_invoice_lines`; the justfile recipes and all four workflows pair the
+jobs. It is not called `ingest_retail` because jobs share a namespace with ops,
+and the retail `@dlt_assets` op has that name.
 
-It is `load_retail` and not `ingest_retail` because a job shares a namespace with
-the *ops*, and `@dlt_assets(name="ingest_retail")` already took that one:
-`Conflicting definitions found in repository with name 'ingest_retail'` at
-definition time, naming `__ASSET_JOB` rather than the asset, which is not an
-obvious read.
-
-Both selections here name what they leave out. An asset added to `assets.py`
-still joins `full_refresh` automatically; a second npm-shaped or
-differently-partitioned one would have to be excluded by hand.
+Both selections name what they exclude, so a new asset joins `full_refresh`
+automatically; a second npm-shaped or differently-partitioned asset has to be
+excluded by hand.
 """
 
 from __future__ import annotations
@@ -64,8 +47,8 @@ full_refresh_job = dg.define_asset_job(
     selection=dg.AssetSelection.all() - site - retail_ingest,
     description=(
         "Ingest every source bar retail, rebuild the dbt models, recompute derived "
-        "metrics, rewrite the lake. Excludes the Evidence site, which needs Node, "
-        "and `load_retail`, which must run first."
+        "metrics. Excludes the Evidence site, which needs Node, and "
+        "`load_retail`, which must run first."
     ),
 )
 
@@ -93,9 +76,8 @@ defs = dg.Definitions(
     # in the graph at all, and `AssetSelection.all()` won't tell you.
     assets=[
         assets.raw_assets,
-        # Separate from the four above because each is partitioned and Dagster
-        # gives a multi-asset one partitions_def for all of its assets: WDI by
-        # year, retail by month.
+        # The partitioned multi-assets, one per grain: WDI and weather by year,
+        # retail by month.
         assets.raw_year_partitioned_assets,
         assets.raw_retail_asset,
         assets.dbt_models,
@@ -117,8 +99,7 @@ defs = dg.Definitions(
     jobs=[load_retail_job, full_refresh_job, publish_site_job],
     schedules=[daily_schedule],
     resources=RESOURCES,
-    # DuckDB is a single-writer file. The default multiprocess executor would
-    # happily start the Polars step next to a dlt load and lose the race for the
-    # lock; one process keeps the writes serialised.
+    # DuckDB takes one writer. The default multiprocess executor would run steps
+    # side by side and lose the race for the lock; one process serialises them.
     executor=in_process_executor,
 )

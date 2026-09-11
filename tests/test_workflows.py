@@ -1,21 +1,15 @@
 """`pages.yml`'s path allowlist classifies every tracked file, both ways.
 
-That workflow is a full ingest -> dbt -> Polars -> lake -> Evidence run against
-the live public APIs, and it used to trigger on every push to `main` with no
-filter at all — so a README-only commit cost the same Actions minutes and the
-same API load as a data change. 23 of the 94 commits on main were that.
-
-The filter is an allowlist rather than `paths-ignore`, because the dashboard
-*is* markdown (`reports/pages/`) and a blanket `**.md` ignore would stop
-republishing the site exactly when a page changed. An allowlist gets the
-mistakes the right way round, but it is still a hand-maintained list that has to
-agree with the tree — which in this repo means it gets a test. A new top-level
-directory that the site is built from would otherwise be omitted here in
-silence, and the only symptom would be a site that stopped moving.
+That workflow is a full ingest -> dbt -> Polars -> Evidence run against the live
+public APIs, so a docs-only push should not trigger it. The filter is an
+allowlist rather than `paths-ignore`, because the dashboard *is* markdown
+(`reports/pages/`) and a blanket `**.md` ignore would stop republishing the site
+exactly when a page changed. But a hand-maintained allowlist can omit a new
+build input in silence, and the only symptom is a site that stops moving.
 
 So every tracked file must be claimed by exactly one side: the allowlist in the
 workflow, or `NOT_A_SITE_INPUT` below. A new path claimed by neither is a red
-test asking someone to decide, which is the whole point.
+test asking someone to decide.
 """
 
 from __future__ import annotations
@@ -46,21 +40,15 @@ NOT_A_SITE_INPUT = (
     ".pre-commit-config.yaml",  # lint gates, and this job does not lint
     ".sqlfluff",
     ".github/dependabot.yml",
-    # Community-health files: the front door for contributors, not for the
-    # build. They arrived after the filter was written and this test is what
-    # named them.
+    # Community-health files: the front door for contributors, not the build.
     ".github/CODE_OF_CONDUCT.md",
     ".github/CONTRIBUTING.md",
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/ISSUE_TEMPLATE/**",
     # `.github/actions/**` is on the *allow* side, not here: the setup action
     # installs the toolchain and exports the paths this build runs under, so a
-    # change to it changes the site. `justfile` moved across for the same reason
-    # — it used to sit here reading "pages.yml calls uv and dagster directly,
-    # never a recipe", which stopped being true the day the build became
-    # `just materialize-site`. That comment is why this test exists: the premise
-    # a classification rests on goes stale silently, and the only symptom would
-    # have been a site that stopped moving.
+    # change to it changes the site. So is `justfile`: the build is
+    # `just materialize-site`.
     #
     # The other three workflows. Listed one by one rather than as
     # `.github/workflows/*`: a *new* workflow should land here unclassified and
@@ -68,12 +56,9 @@ NOT_A_SITE_INPUT = (
     ".github/workflows/ci.yml",
     ".github/workflows/nightly.yml",
     ".github/workflows/release-data.yml",
-    # `scripts/**` crossed to this side on 2026-09-01, when the three
-    # load-bearing modules left it for `publish/`. What remains is one-off:
-    # `build_cbam_seeds.py` (its output is the checked-in seeds, so the site
-    # moves when `dbt/**` does), `record_fixtures.py` (this job runs live) and
-    # `measure_disclosure_risk.py` (read-only). The allowlist was coarse only
-    # because the directory was mixed.
+    # One-off scripts: the seed builders (their output is the checked-in seeds,
+    # so the site moves when `dbt/**` does), `record_fixtures.py` (this job runs
+    # live) and `measure_disclosure_risk.py` (read-only).
     "scripts/**",
 )
 
@@ -82,12 +67,10 @@ def pages_allowlist() -> list[str]:
     """The `paths:` entries under `on: push:` in `pages.yml`.
 
     Scanned rather than parsed with PyYAML, which is not a declared dependency
-    here — it arrives as dbt's transitive, and this repo has already been bitten
-    once by a runtime import that was really some other package's grand-child
-    (see the pyarrow bullet in CLAUDE.md). The block is a flat list of quoted
-    scalars, so a scan is honest about what it can read; `test_the_scan_reads
-    _the_block_it_thinks_it_does` is the vacuity guard, because a scanner whose
-    pattern stops matching passes by not looking.
+    — it arrives as dbt's transitive (see the pyarrow bullet in the
+    `dependency-versions` skill for why that matters). The block is a flat list
+    of quoted scalars, so a scan can read it, and the first test below is the
+    vacuity guard.
     """
     lines = PAGES_WORKFLOW.read_text().splitlines()
     if "    paths:" not in lines:
@@ -162,9 +145,8 @@ def test_no_pattern_has_outlived_the_path_it_named(side):
 
     A rename fires the *unclassified* assertion above and never reaches this
     one — the new path is uncovered, so the first test wins and the orphaned
-    pattern sits there measuring nothing. Same shape as the RAW_DESCRIPTIONS
-    guard in `test_definitions.py`: isolating the stale branch takes its own
-    assertion, not a second look at the same mutation.
+    pattern measures nothing. Isolating the stale branch takes its own
+    assertion.
     """
     patterns = pages_allowlist() if side == "allow" else list(NOT_A_SITE_INPUT)
     tracked = tracked_files()
@@ -178,9 +160,7 @@ def test_no_pattern_has_outlived_the_path_it_named(side):
 
 
 # Anchored at column 0, so it matches a real module-level `pytestmark` and not a
-# file that merely *mentions* one. The first draft searched for the two strings
-# anywhere and flagged this module — which writes both, in the code below — as
-# gated. A guard that reads source as text has to say where it is looking.
+# file that merely mentions one — this module writes both strings itself.
 _GATED = re.compile(
     r"^pytestmark\s*=\s*pytest\.mark\.skipif\((?:.|\n)*?manifest_path", re.MULTILINE
 )
@@ -210,15 +190,12 @@ def test_every_manifest_gated_test_file_is_re_run_after_dbt_parse():
     """A file that skips itself in CI's first step and is not named in its second
     runs **nowhere** in CI, and nothing says so.
 
-    That is not hypothetical: `ci.yml` named only `test_definitions.py` while
-    `test_asset_checks.py` and `test_documented_counts.py` carried the same
-    skipif, so the asset-check bodies and every count cited in the docs went
-    unchecked on every pull request — and both files' own headers claimed CI
-    re-ran them. The skip is the loud-looking part and it is the honest half; the
-    silence is in the step that was supposed to pick them back up.
+    The skips show in every build log and read as normal; the silence is in the
+    step that should pick the files back up.
 
-    Compared as a set both ways, so adding a gated file without adding it here
-    fails, and removing one from the workflow while it still skips fails too.
+    Compared as a set both ways, so adding a gated file without adding it to
+    the workflow fails, and removing one from the workflow while it still skips
+    fails too.
     """
     gated, re_run = manifest_gated(), re_run_after_parse()
     assert gated == re_run, (
@@ -258,15 +235,12 @@ def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
     it a directory with no tarball in it — which is the module's documented
     "restoring nothing is a normal outcome" path, not an error. Nothing fails.
 
-    What it costs is measured one layer down. Every workflow here rebuilds the
-    marts from `raw`, and since `raw` moved into the DuckLake catalog the
-    published database carries no weather rows at all — so the archive is not
-    carried, `weather_watermark()` reads null, the ingest cold-starts at
-    `WEATHER_COLD_START_YEARS`, and `marts.fct_country_weather_year` is built
-    three years deep instead of the release's fifteen. The Weather page then
-    renders correctly off a thin mart: green build, green checks, right shape,
-    wrong depth. `pages.yml` shipped exactly that between the DuckLake move and
-    2026-08-27.
+    The cost shows one layer down. `raw` lives in the DuckLake catalog, so the
+    database alone carries no weather rows: `weather_watermark()` reads null,
+    the ingest cold-starts at `WEATHER_COLD_START_YEARS`, and
+    `marts.fct_country_weather_year` is built three years deep instead of the
+    release's full archive. The Weather page renders correctly off the thin
+    mart — green build, green checks, right shape, wrong depth.
 
     The asset names come from the code rather than from string literals here, so
     renaming either one fails this instead of quietly matching nothing.
@@ -338,20 +312,14 @@ def test_the_setup_action_defines_every_pipeline_path():
 
 
 def test_no_workflow_defines_a_pipeline_path_itself():
-    """These were set in all four workflows behind an identical six-line comment,
-    and `WAREHOUSE_PATH` in exactly one of them.
+    """One definition, in the setup action, so a new path reaches every workflow.
 
-    Both halves of that shape have already cost this repo something. When the
-    landing zone moved into DuckLake all four needed the same new absolute
-    `LAKEHOUSE_DIR` and none of them got it — dlt wrote the catalog from the repo
-    root, dbt resolved its own copy from `dbt/`, and DuckLake compares the two as
-    *strings*, so the same directory under two spellings was refused inside
-    `dbt build`, one layer downstream of the layer that chose the spelling. No
-    recipe could reproduce it, because every recipe exported the variable that
-    hid it.
-
-    A workflow that sets one of these again is not wrong on its own — it is a
-    second definition, which is how the first one drifted.
+    Four copies drift: a new variable lands in some and not others. For
+    `LAKEHOUSE_DIR` that is loud but misplaced — DuckLake compares `data_path`
+    as a *string*, so dlt (from the repo root) and dbt (from `dbt/`) spelling
+    one directory two ways is refused inside `dbt build`, a layer downstream of
+    the cause. A workflow setting one of these again is not wrong on its own; it
+    is a second definition, which is how the first one drifts.
     """
     offenders = {
         path.name: [name for name in PIPELINE_PATHS if _assigns(path.read_text(), name)]
@@ -414,9 +382,7 @@ def dependabot_action_directories() -> list[str]:
     """The `directory`/`directories` values on the `github-actions` entry.
 
     Scanned rather than parsed, for `pages_allowlist`'s reason: PyYAML is not a
-    declared dependency here — it arrives as dbt's transitive, and this repo has
-    been bitten once by a runtime import that was really some other package's
-    grand-child.
+    declared dependency.
     """
     lines = DEPENDABOT.read_text().splitlines()
     found: list[str] = []
@@ -457,15 +423,13 @@ def test_the_dependabot_scan_reads_the_entry_it_thinks_it_does():
 def test_dependabot_watches_every_composite_action_that_pins_one():
     """A bare `directory: /` scans `.github/workflows/` and nothing else.
 
-    So moving the four workflows' shared setup into `.github/actions/setup` took
-    the exactly-pinned `astral-sh/setup-uv` out of Dependabot's view with it —
-    still pinned, no longer watched, and frozen with nothing to say so. Nothing
-    goes red when a guard stops looking, which is why this is a test and not a
-    comment in the config.
+    So a composite action's exactly-pinned `uses:` — `astral-sh/setup-uv` in
+    `.github/actions/setup` — is unwatched unless its directory is listed:
+    still pinned, frozen, and nothing goes red.
 
     `setup-uv` is the one that makes it matter: it stopped publishing moving
-    major tags at v8, so a grouped monthly PR is the only thing that can ever
-    bump it (see the `dependency-versions` skill).
+    major tags at v8, so a Dependabot PR is the only thing that can bump it
+    (see the `dependency-versions` skill).
     """
     watched = dependabot_action_directories()
     unwatched = sorted(
@@ -484,9 +448,7 @@ JUSTFILE = REPO_ROOT / "justfile"
 
 # Running any of these writes to the warehouse or the landing zone. The set is
 # derived from what a recipe *does*, not from a list of recipe names, so a new
-# writing recipe has to opt out deliberately instead of being forgotten — which
-# is the whole failure mode here, since nothing about a silent destination is
-# visible until afterwards.
+# writing recipe is covered without anyone remembering to add it.
 WRITING_COMMANDS = (
     "python -m ingest.pipeline",
     "python -m transform.",
@@ -606,8 +568,7 @@ def _recipe(name: str) -> str:
 def test_the_fixture_pipeline_isolates_every_piece_of_state_it_touches():
     """`just test-pipeline` must not leave anything behind for the next real run.
 
-    Four overrides, and each one was added after the leak it prevents was
-    observed rather than predicted:
+    Four overrides, each for a leak that was observed:
 
     * `WAREHOUSE_PATH` — without it a fixture run overwrites the real warehouse
       with the 17-country slice.
@@ -615,10 +576,8 @@ def test_the_fixture_pipeline_isolates_every_piece_of_state_it_touches():
       merges into a landing zone holding a weather archive no rebuild affords.
     * `DBT_RUN_RESULTS_PATH` (with `--target-path`) — dbt writes its artifacts
       to `dbt/target/` wherever the build pointed, and `analytics.pipeline_runs`
-      records whatever that file last held. A fixture run therefore left its
-      timings there and the next `just pipeline-status` filed them in the real
-      warehouse's build history, as a build nothing could tell from a production
-      one.
+      records whatever that file last held, so the next `just pipeline-status`
+      would file the fixture timings in the real warehouse's build history.
     * `DBT_MANIFEST_PATH` — the same directory, so the test inventory reads the
       fixture build's manifest rather than a real one alongside it.
 

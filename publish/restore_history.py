@@ -3,41 +3,24 @@
 Run:  uv run python -m publish.restore_history <previous warehouse.duckdb>
       (or `just restore-history prev/warehouse.duckdb`)
 
-Every workflow builds from an empty file, so `history.snap_co2_estimates` held
-one version per row and the Restatements page shipped permanently in its
-"nothing revised yet" branch — the tables here that a rebuild cannot reproduce
-were the tables the published copy never had. This script is the other half: it
-copies them out of the previous release into the fresh warehouse *before* the
-graph runs, so `dbt snapshot` compares this month's numbers against last month's
-and appends a version where OWID has restated. Monthly releases then accumulate a
-real revision log, and `pages.yml` borrows the newest one so the published page
-shows it.
+Every workflow builds from an empty file, so without this the published
+snapshots would hold one version per row forever. Copying the previous release's
+tables in *before* the graph runs lets `dbt snapshot` compare this month's
+numbers against last month's and append real revisions; `pages.yml` borrows the
+newest release the same way. When `lakehouse.tar.gz` sits beside the source
+file the landing zone comes too, so the weather archive deepens instead of
+cold-starting.
 
-**There are two reasons a table lands here and they are not the same reason.**
-A dbt snapshot is state *in principle* — no rebuild can invent a revision.
-`raw.om_weather_daily` is unreproducible within a *budget*: Open-Meteo's free
-tier allows 10,000 weighted units a day and the archive costs more than that, so
-the data exists upstream and simply cannot be re-fetched on every run. The
-consequence is identical, which is why one mechanism covers both.
+Unreproducible for different reasons, carried by one command: a snapshot or a
+run record in principle (no rebuild can invent a past revision or a finished
+invocation), the weather archive within a budget (refetching it costs more than
+Open-Meteo's daily allowance).
 
-## Why before the build, and why it is safe to pre-create the file
-
-dbt appends to the snapshot during `dbt build`, so the previous rows have to be
-on disk before that — which means writing into `data/warehouse.duckdb` before dlt
-has created it. That is fine: dlt keys "is this destination fresh?" on its own
-bookkeeping tables, which a carried *data* table is not, so it still performs a
-full load (and still resets the WDI watermark). Verified rather than assumed: a
-fixture load into a restored file still fetched the full WDI series.
-
-## What it refuses to do
-
-Overwrite what is already there. Deleting `data/warehouse.duckdb` is the only act
-in this repo that destroys something a rebuild cannot make again, and this script
-would be the second one; a destination table with rows in it stops the restore
-unless `--force`. `just clean warehouse` gates the deletion itself on the same
-question, with the same answer, and asks it through `irreplaceable_rows()` below
-so the two cannot drift. It also checks each source relation carries the
-bookkeeping columns that make it what it claims to be — see `Carry`.
+It refuses to overwrite. A destination table with rows stops the restore unless
+`--force`; a landing zone with rows, or dlt local state, stops it outright (see
+`lake.lakehouse.preflight`). `just clean warehouse` asks the same question
+through `irreplaceable_rows()`, so the two cannot drift. Each source relation
+must also carry the columns that make it what it claims to be — see `Carry`.
 """
 
 from __future__ import annotations
@@ -73,51 +56,16 @@ RUN_COLUMNS = ("invocation_id", "execution_time_s")
 # and cold-start the weather archive with nothing going red.
 LAKEHOUSE_ASSET = "lakehouse.tar.gz"
 
-# What this warehouse cannot rebuild, and what proves each relation is the thing
-# it claims to be. The package knows nothing about either — see `Carry`.
-#
-# **The `raw` rule is gone because its job moved, not because it stopped
-# mattering.** `raw.om_weather_daily` was carried here while `raw` lived in the
-# DuckDB file; dlt lands it in the DuckLake catalog under `data/lakehouse/` now,
-# so there is nothing in a published `warehouse.duckdb` for a schema-aware rule
-# to find. It is still unreproducible within Open-Meteo's daily budget, and it is
-# still carried — by `_restore_lakehouse` below, out of the `LAKEHOUSE_ASSET`
-# that `publish/export_warehouse.py` writes and `release-data.yml` downloads,
-# counts and holds against the previous release's row count. A DuckLake is a
-# directory, so that restore is a copy rather than a `create or replace`, which
-# is why it is the *simpler* half of this module rather than the harder one.
-#
-# What that leaves `CARRIED` is the schema whose unreproducibility is a property
-# of the relation rather than of where it happens to live: `history` is carried
-# whole, because every table in it is there *because* no rebuild can invent a
-# revision, so naming them would be a list to forget to update.
-# `release-data.yml` learned that once already, having asserted "history didn't
-# shrink" against `snap_co2_estimates` by name until `snap_grid_emission_factors`
-# arrived and was carried but never verified.
-#
-# **This comment described the carry-forward as unbuilt for as long as it was
-# built**, which is the failure the module is about wearing the other face: a
-# reader would have concluded every release cold-starts the weather archive at
-# `WEATHER_COLD_START_YEARS`, and nothing here would have contradicted them.
-# Corrected 2026-09-08 against the tree — `export_warehouse.LAKEHOUSE_ASSET`,
-# `_restore_lakehouse` and `release-data.yml`'s "published lakehouse holds N
-# rows" check are the three places that say otherwise.
+# What this warehouse cannot rebuild, and the columns that prove each relation is
+# what it claims to be (see `Carry`). `history` is carried whole, since everything
+# in it is a snapshot, so a new snapshot needs no edit here. The landing zone is
+# not a rule: it lives outside the DuckDB file, and `_restore_lakehouse` copies it.
 CARRIED: tuple[Carry, ...] = (
     Carry(schema=HISTORY_SCHEMA, kind="dbt snapshot", required_columns=SCD2_COLUMNS),
-    # The run history, and the first rule here that has to *name* its tables.
-    # `analytics` holds five other relations and every one of them is rebuilt
-    # from the warehouse on each run — carrying the schema whole would restore a
-    # stale `co2_intensity` over a fresh one and, worse, would restore the three
-    # `pipeline_*` snapshots that describe the *previous* release's warehouse.
-    # That is the distinction `Carry.tables` exists for, and this is the case its
-    # docstring predicted: a schema that holds anything besides unreproducible
-    # state has to be an allowlist.
-    #
-    # Unreproducible for a different reason from the other two. A snapshot cannot
-    # be rebuilt because the revision it recorded is gone, and the weather
-    # archive because Open-Meteo will not serve it again within a day's budget.
-    # A run cannot be rebuilt because it is an *event*: the invocation is over,
-    # and `dbt/target/run_results.json` holds only the most recent one.
+    # The dbt run history: the invocation is over and `run_results.json` holds
+    # only the latest. Named rather than the whole schema, because the other
+    # `analytics` tables are rebuilt every run and carrying them would restore
+    # last month's.
     Carry(
         schema=ANALYTICS_SCHEMA,
         kind="dbt run history",
@@ -149,25 +97,15 @@ def run(
 ) -> dict:
     """Copy `source`'s unreproducible tables into `duckdb_path`. Returns a summary.
 
-    Restoring nothing is a normal outcome — the first release ever cut has no
-    predecessor, and a source holding none of `CARRIED` is the same case. Only a
-    *destination* that already holds them is an error.
-
-    **Refuses when a landing table would be carried and dlt already has local
-    state**, because the two together do not work — see `_refuse_warm_state`.
-    That refusal is asked *first*, before the snapshot is touched: this function
-    writes two artifacts and only one of them can be rolled back by not writing
-    it. Raising from inside the second step used to leave the `history` schema
-    already replaced by the previous release's — a partial restore that both this
-    docstring and CLAUDE.md described as a refusal.
+    Restoring nothing is normal — the first release has no predecessor. The
+    landing zone's refusals (`lakehouse.preflight`) are asked before anything is
+    written, so a refusal cannot leave `history` already replaced.
     """
     src = Path(source)
     archive = src.parent / LAKEHOUSE_ASSET
     if archive.exists():
-        # Only when there is a landing zone in the release. A history-only
-        # restore never creates the `raw` schema, so dlt's local state is not
-        # contradicted and must not be refused over — the recipe that already
-        # worked has to keep working, which `tests/test_restore_history.py` pins.
+        # Only with a landing zone to restore: a history-only restore does not
+        # touch what dlt's local state describes, so it must not be refused.
         from lake import lakehouse
 
         lakehouse.preflight(lakehouse.LAKEHOUSE_DIR if lakehouse_dir is None else lakehouse_dir)
@@ -178,22 +116,11 @@ def run(
 
 
 def _restore_lakehouse(source: Path, lakehouse_dir: str | Path | None) -> dict[str, int]:
-    """Carry the published landing zone in beside the snapshot, if there is one.
+    """Carry the published landing zone in, if the release has one beside `source`.
 
-    Both halves of the release are unreproducible and they are unreproducible for
-    different reasons — `history` in principle, the weather archive within a
-    budget — so one command carries both and a release either has the pair or has
-    neither. The lakehouse sits next to the database in the release, so it is
-    found rather than named: a `--lakehouse` flag would be a second thing to get
-    right on a path that is already fixed by the export's own layout.
-
-    A release that predates the lakehouse asset simply has no directory, which is
-    the same "restoring nothing is a normal outcome" rule the snapshot follows.
-
-    `run()` has already asked `lakehouse.preflight` about this same archive, so
-    by the time this is reached the refusals have passed. `lakehouse.restore`
-    asks again — it is a public entry point in its own right and cannot assume a
-    caller checked — and the second answer costs a `stat` and a row count.
+    Found by position rather than a flag, because the export's layout fixes it.
+    A release without one is the normal nothing-to-restore case.
+    `lakehouse.restore` repeats `run()`'s preflight, as a public entry point must.
     """
     import tarfile
     import tempfile
@@ -213,11 +140,10 @@ def _restore_lakehouse(source: Path, lakehouse_dir: str | Path | None) -> dict[s
 def irreplaceable_rows(duckdb_path: str | Path = DUCKDB_PATH) -> int:
     """Rows in this warehouse that no rebuild could make again.
 
-    The question `just clean warehouse` asks before deleting the file, and the
-    question `release-data.yml` asks on both sides of the build. One function so
-    that adding a rule to `CARRIED` updates all three at once: the gate that used
-    to count `history` alone would have waved through the deletion of a weather
-    archive that costs days of API budget to refetch.
+    Asked by `just clean warehouse` before deleting the file and by
+    `release-data.yml` on both sides of the build — one function, so a rule added
+    to `CARRIED` reaches all three. The landing zone's counterpart is
+    `lake.lakehouse.carried_rows`.
     """
     path = Path(duckdb_path)
     if not path.exists():

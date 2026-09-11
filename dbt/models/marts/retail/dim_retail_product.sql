@@ -1,24 +1,14 @@
 -- One row per stock code the retailer ever transacted.
 -- Grain: `stock_code`.
 --
--- The interesting column is `description`, and the reason is survivorship. 1,192
--- of the 5,131 codes carry more than one description and one carries nine
--- — variant spellings, corrections, and the odd line where the field was used as
--- a note ("wrong barcode", "damages"). A dimension has to pick one, and *which
--- rule picks it* is a decision with a visible consequence on every chart the
--- product name appears on.
+-- 1,192 of the 5,131 codes carry more than one description (one carries nine):
+-- variant spellings, corrections, and notes such as "wrong barcode". The label
+-- is the description used on the most lines, ties broken alphabetically —
+-- deterministic between builds, and preferring what the business used over the
+-- latest text, which is often a one-off note.
 --
--- The rule here is modal-then-alphabetical: the description used on the most
--- lines wins, ties broken by sorting. Two properties earn it — it is
--- deterministic (a rebuild picks the same label, so the diff between two builds
--- means something) and it prefers the label the business actually used over the
--- most recent one, which on this source is frequently a one-off correction note
--- rather than the product's name.
---
--- `item_type` comes from `stg_retail_lines` and is constant per code by
--- construction, so it is an `any_value` rather than a mode — and `_retail.yml`
--- tests that it really is constant, because "constant by construction" is the
--- kind of claim that stops being true when somebody edits the CASE expression.
+-- `item_type` is constant per code by construction, hence `any_value`;
+-- `_retail.yml` tests that it stays so.
 with lines as (
     select * from {{ ref('stg_retail_lines') }}
 ),
@@ -46,17 +36,12 @@ activity as (
         min(invoice_date) as first_sold_date,
         max(invoice_date) as last_sold_date,
         sum(quantity) filter (where invoice_type = 'sale' and quantity > 0) as units_sold,
-        -- Negated, for the same reason `fct_retail_returns` negates its own:
-        -- a returned quantity of 4 reads better than -4 everywhere downstream.
-        -- This column kept the source's sign until 2026-08-18, so the two
-        -- models disagreed about which way a return points — the one place a
-        -- reader would compare them, `units_returned / units_sold`, came out
-        -- negative, and a bar chart of returns per product drew below the axis.
+        -- Positive, like `fct_retail_returns.quantity_returned`, so
+        -- `units_returned / units_sold` is a positive ratio.
         -sum(quantity) filter (where invoice_type = 'cancellation') as units_returned,
         sum(line_amount_gbp) filter (where is_revenue_line) as net_revenue_gbp,
-        -- Median rather than mean: this retailer discounts heavily and sells the
-        -- same SKU at a wholesale and a retail price, so the mean sits between
-        -- two prices that both exist and lands on one that doesn't.
+        -- Median: a SKU sold at both a wholesale and a retail price has a mean
+        -- that matches neither.
         median(unit_price) filter (where unit_price > 0) as median_unit_price_gbp,
         min(unit_price) filter (where unit_price > 0) as min_unit_price_gbp,
         max(unit_price) as max_unit_price_gbp,
@@ -81,9 +66,7 @@ select
     a.min_unit_price_gbp,
     a.max_unit_price_gbp,
     a.n_descriptions,
-    -- Flagged rather than resolved. A code whose label moved is a candidate for
-    -- a data-quality conversation, not something a mart should quietly smooth
-    -- over — and at 1,192 codes it is a real backlog, not a curiosity.
+    -- Flagged, not resolved: a moved label is a data-quality question.
     a.n_descriptions > 1 as has_multiple_descriptions,
     a.item_type <> 'product' as is_non_product
 from activity as a

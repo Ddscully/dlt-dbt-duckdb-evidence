@@ -11,8 +11,9 @@ dependencies = [
     "dlt[duckdb]>=1.5",   # EL: API/file ingestion into DuckDB with schema inference
     "duckdb>=1.1",        # in-process analytical warehouse
     "polars>=1.17",       # heavy/columnar transforms in Python
-    # Runtime, not a convenience: DuckDB reaches it for `to_arrow_reader()` and
-    # for `.pl()`, so an install without it fails in three places. See CLAUDE.md.
+    # Runtime: DuckDB needs it for `to_arrow_reader()` and `.pl()`, so the retail
+    # ingest and both Polars transforms fail without it. See the
+    # `dependency-versions` skill.
     "pyarrow>=17",        # DuckDB's Arrow bridge — needed by the ingest and both transforms
     "dbt-duckdb>=1.9",    # T: dbt adapter targeting the DuckDB file
 ]
@@ -20,24 +21,23 @@ dependencies = [
 [dependency-groups]
 # `uv sync --group dev` — tooling that isn't needed to run the pipeline
 dev = [
-    # Exact, and the *only* place it is pinned — the upstream pre-commit hook
-    # carried a second `rev` and the two drifted. Don't reintroduce one. (ruff is
-    # the mirror image: pinned only in .pre-commit-config.yaml.) See CLAUDE.md.
+    # Exact, and pinned only here: pre-commit runs `just lint` against this copy.
+    # (ruff is the mirror image, pinned only in .pre-commit-config.yaml.) The
+    # templater requires the same version, so bump the two lines together.
     "sqlfluff==4.3.0",     # SQL linter/formatter (dbt templater)
     "sqlfluff-templater-dbt==4.3.0",  # .sqlfluff sets templater = dbt; useless without this
     "pre-commit>=4.0",     # git hooks
     "pytest>=8.3",         # unit tests over the ingest/transform logic (see tests/)
-    # Driven as `coverage run -m pytest`, not via pytest-cov: that wrapper
-    # measured identically for one more package. `>=` and no CI gate, for ty's
-    # reason below. Rationale and the traps are in CLAUDE.md's commands table.
+    # Driven as `coverage run -m pytest`: pytest-cov measured identically for one
+    # more package. `>=` and no CI gate, for ty's reason below. See CLAUDE.md's
+    # Testing section.
     "coverage>=7.0",       # `just coverage`; reports, gates nothing
     # `>=` unlike sqlfluff because nothing gates on it. It is 0.0.x and its
     # diagnostics move between patches — promote to an exact pin *before* putting
     # it in pre-commit or a workflow. See CLAUDE.md.
     "ty>=0.0.74",           # `just typecheck`; agent/editor LSP via `ty server`
-    # The official CLI wheel, not the `duckdb` library above (which ships no
-    # binary). Here rather than a curl install or `uvx` so `just sql` can't drift
-    # from the locked library version — both are on 1.5.5. See CLAUDE.md.
+    # The official CLI wheel (the `duckdb` library ships no binary), locked here
+    # rather than installed by curl or `uvx`, so `just sql` tracks uv.lock.
     "duckdb-cli>=1.5.5",    # `just sql`; the CLI binary, via `uv run duckdb`
 ]
 # `uv sync --group orchestration` — the Dagster asset graph in orchestration/.
@@ -57,9 +57,11 @@ requires = ["uv_build>=0.12.0,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv]
-# `default-groups` left unset, so uv's own default (`dev`) applies — which is how
-# pyarrow stayed undeclared and green for months. `uv sync --no-default-groups`
-# is what reproduces a runtime-only install. See CLAUDE.md.
+# `default-groups` deliberately unset, so uv's default (`dev`) applies and a bare
+# `uv sync` removes `orchestration`. A wider default would hide an undeclared
+# runtime dependency behind a group, as harlequin once hid pyarrow.
+# `uv sync --no-default-groups` is a runtime-only install. See the
+# `dependency-versions` skill.
 
 [tool.ruff]
 # The Python here was written to ~100 columns and `.sqlfluff` caps SQL at 120;
@@ -88,9 +90,9 @@ combine-as-imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `ingest`, `transform` and `scripts` are top-level directories, not installed
-# packages (only src/modern_data_stack is). Everything else reaches them via
-# `python -m` from the repo root; pytest needs telling.
+# `ingest`, `lake`, `orchestration`, `publish`, `transform` and `scripts` are
+# top-level directories, not installed packages (only src/modern_data_stack is);
+# everything else reaches them via `python -m` from the repo root.
 pythonpath = ["."]
 # The unit tests mock every HTTP call; `just test-pipeline` is the integration
 # path and runs the real modules against checked-in fixtures instead.
@@ -111,20 +113,16 @@ branch = true
 # either — hiding a deliberate gap is how it stops being a decision.
 # tests/README.md has the two caveats on reading the total.
 show_missing = true
-# The default, restated because it is a decision and not an accident: a file at
-# 100% is evidence, and the short report is the tempting edit. It is what shows
-# `history.py` fully covered, which is the fact that corrected a survey calling
-# it untested — grep finds importers, coverage finds coverage.
+# The default, stated as a decision: a file at 100% is evidence too.
 skip_covered = false
 
 [tool.ty]
-# No `rules` overrides, like ruff above: uv.lock is what holds the defaults
-# still. Suppressions are inline `# ty: ignore[rule]` at the decision instead.
+# No `rules` overrides: the version in uv.lock holds the defaults still, and
+# suppressions are inline `# ty: ignore[rule]` beside their reason.
 
 [tool.ty.environment]
-# Explicit though ty finds it unaided: the LSP is launched from a cwd this
-# project does not choose, and a checker that cannot see the venv does not fail —
-# it buries real diagnostics under phantom missing imports. See CLAUDE.md.
+# Explicit though ty finds it unaided: a checker that cannot see the venv does
+# not fail, it buries real diagnostics under phantom missing imports.
 python = "./.venv"
 
 [tool.dagster]

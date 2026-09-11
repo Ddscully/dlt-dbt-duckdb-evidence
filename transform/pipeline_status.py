@@ -9,17 +9,14 @@ Writes four flat tables into `analytics`:
 * `pipeline_runs`    — one row per node per dbt invocation: what ran, and how
   long it took. The only one that accumulates.
 
-`reports/pages/pipeline.md` renders them. The first three are a *snapshot*
-written at run time; `pipeline_runs` is the exception and is a history, because
-the invocation it describes is over and its artifact is overwritten by the next
-one. That makes it the third thing in this warehouse no rebuild can reproduce,
-alongside the dbt snapshots and the weather archive, and it is carried between
-releases by the same machinery — `publish/restore_history.CARRIED`.
+`reports/pages/pipeline.md` renders them. The first three are replaced each run;
+`pipeline_runs` is appended, because each invocation's artifact is overwritten by
+the next — so no rebuild can reproduce it, and `publish/restore_history.CARRIED`
+carries it between releases.
 
-The queries live in `modern_data_stack.observability`; what's here is this
-project's landing tables and layer names. It must run **after** `dbt build`: it
-reads `dbt_test__audit` and `dbt/target/manifest.json`, neither of which exists
-before one.
+The queries live in `modern_data_stack.observability`; this module holds the
+project's landing tables and layer names. Run it after `dbt build`, whose audit
+schema and artifacts it reads.
 
 Run:  uv run python -m transform.pipeline_status
 """
@@ -36,35 +33,21 @@ from modern_data_stack.paths import dbt_manifest_path, dbt_run_results_path, war
 
 DUCKDB_PATH = warehouse_path()
 
-# dbt writes the manifest into the gitignored `dbt/target/`, so this is only
-# present after a `dbt build`/`dbt parse`. Absent, the test inventory falls back
-# to whatever audit tables exist — see `observability.manifest_tests`.
+# Both in the gitignored `dbt/target/` and both optional: without the manifest
+# the test inventory falls back to bare audit-table names.
 MANIFEST_PATH = dbt_manifest_path()
-
-# dbt's per-node timings for the last invocation that executed anything. Same
-# gitignored directory as the manifest and the same tolerance for absence, but
-# it is read for a different purpose: the three tables below describe the
-# warehouse *now*, and this one accumulates what each build cost.
 RUN_RESULTS_PATH = dbt_run_results_path()
 
-# The one table here that is appended rather than replaced, and so the one this
-# project cannot rebuild. `publish/restore_history.CARRIED` carries it between
-# releases for that reason — see the rule there.
+# Appended rather than replaced — see the module docstring.
 RUNS_TABLE = "pipeline_runs"
 
-# The schemas that make up the modelled warehouse, in pipeline order. `raw` is
-# covered separately by `build_sources` (it has freshness, these don't) and
-# dbt's own bookkeeping schemas are deliberately absent.
+# The modelled schemas, in pipeline order. `raw` is `build_sources`' (it has
+# load times); dbt's bookkeeping schemas are left out.
 LAYERS = ("staging", "intermediate", "marts", "analytics", "history")
 
-# dlt's landing tables, minus its internal `_dlt_*` bookkeeping.
-#
-# `ecb_fx_rates` and `retail_invoice_lines` report a null year span, because both
-# are keyed on a date rather than a year and neither has a `year` column to take
-# one from. That is the same shape `stg_country` and
-# the currency dimension already have in `pipeline_tables`, and it is left as a
-# null rather than derived: the row's job here is the row count and the load
-# time, which is the freshness half of the page.
+# dlt's landing tables, without its `_dlt_*` bookkeeping. Those with no `year`
+# column (the country dimension; FX, retail and weather, which are date-keyed)
+# report a null span.
 SOURCE_TABLES = (
     "owid_co2",
     "owid_energy",
@@ -82,12 +65,9 @@ def build_sources(
 ) -> pl.DataFrame:
     """Row counts, year span and load time for each dlt landing table.
 
-    Reads the **lakehouse**, not the warehouse: dlt lands in the DuckLake catalog
-    and the DuckDB file holds only what dbt builds. `con` must therefore have the
-    catalog attached — `run()` below does it, and naming the database explicitly
-    is not decoration. `information_schema` spans every attached catalog, so a
-    `raw` schema in either one would match a query that filtered on the schema
-    alone, and this project now genuinely has two catalogs open at once.
+    Reads `raw` from the lakehouse, which `con` must have attached (`run()`
+    does). The catalog is named explicitly because `information_schema` spans
+    every attached database.
     """
     return observability.build_sources(con, SOURCE_TABLES, raw_database=raw_database)
 
@@ -107,8 +87,7 @@ def build_runs(
 ) -> pl.DataFrame:
     """One row per node in the last dbt invocation, with its timings.
 
-    Reads no database at all — both inputs are files dbt wrote — which is why it
-    takes no connection where the other three builders do.
+    Reads only dbt's files, so it takes no connection.
     """
     return observability.build_runs(run_results_path, observability.manifest_nodes(manifest_path))
 
@@ -121,15 +100,12 @@ def run(
 ) -> dict[str, int]:
     """Write the four `analytics.pipeline_*` tables. Returns rows written each.
 
-    Three are replaced and `pipeline_runs` is appended; the returned count for it
-    is rows *added*, which is 0 when the artifact has already been recorded and
-    is the honest answer rather than the table's height.
+    For `pipeline_runs` the count is rows added — 0 when this invocation was
+    already recorded.
     """
     con = duckdb.connect(duckdb_path)
     try:
-        # `raw` is in the lakehouse, so the inventory cannot be built without
-        # it attached — the three tables describe one pipeline across two
-        # catalogs now.
+        # `raw` lives in the lakehouse.
         attach(
             con,
             catalog_path(lakehouse_dir),

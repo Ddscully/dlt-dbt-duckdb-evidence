@@ -4,37 +4,17 @@ config-version: 2
 
 profile: "modern_data_stack"
 
-# A deprecation date is a promise, and until this block existed nothing kept it.
+# Keep the deprecation date the release notes promise. When
+# `fct_emissions_energy_v1`'s `deprecation_date` (2026-11-01) passes, dbt by
+# default logs a warning and exits 0 (measured); promoted, it fails `dbt parse`,
+# CI's cheapest step.
 #
-# `fct_emissions_energy_v1` carries `deprecation_date: 2026-11-01`, restated in
-# `docs/DATA_QUALITY.md`, `docs/PRACTICES.md`, `CLAUDE.md` and the release notes
-# `publish/export_warehouse.py` writes. On the day it passes, dbt logs
+# * `DeprecatedModel` — the date has passed (fires at parse, on the producer).
+# * `DeprecatedReference` — a `ref` to a model past its date.
 #
-#     [WARNING]: Model fct_emissions_energy.v1 has passed its deprecation date
-#
-# and exits 0 — measured, by setting the date to 2020 and running `dbt parse`.
-# `release-data.yml` runs monthly and would have published a compatibility view
-# past its own advertised removal date, with the reason in a log nobody reads.
-# Promoted, the same line fails `dbt parse`, which is `ci.yml`'s cheapest step
-# and runs before anything is built. Same shape as the storage-format ceiling in
-# `publish/export_warehouse.py`: a date the project has committed to should stop
-# the build rather than annotate it.
-#
-# * `DeprecatedModel` is the deadline itself — it fires at *parse*, on the
-#   producer, from the day the date passes.
-# * `DeprecatedReference` is a `ref` to a model whose date has already gone.
-#   Nothing here refs v1 today, so it cannot fire yet; it is the half that
-#   catches the migration being started and not finished.
-# * `UpcomingReferenceDeprecation` is deliberately left a warning. It fires on a
-#   ref to a model whose date is still in the *future*, which is exactly what a
-#   migration window is for — erroring on it would forbid the thing the window
-#   exists to permit.
-#
-# Not `error: all`. dbt's own docs warn against it in production for the reason
-# that applies here: a warning added in a future dbt version would fail the
-# monthly release for a reason nobody chose. `dagster<3.15` is the only hard
-# upper bound in this tree and this is not a second one — it is a list of two
-# warnings this project has decided are errors.
+# `UpcomingReferenceDeprecation` stays a warning: a ref inside the migration
+# window is what the window is for. Not `error: all`, which would fail the
+# monthly release on any warning a future dbt adds.
 flags:
   warn_error_options:
     error:
@@ -47,75 +27,44 @@ target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
 vars:
-  # The EU ETS spot price an importer will pay per CBAM certificate. It is a
-  # *parameter*, not a measurement: there is no clean free API for EUA spot (ICAP's
-  # allowance price explorer is the usual public reference), and a hardcoded number
-  # would go stale silently inside a euro figure. EUAs traded around EUR 72/t in
-  # April 2026 on a EUR 60-95 range across 2025-26, and the Commission's own
-  # industrial decarbonisation fund was costed at EUR 75/t, so that is the default.
-  #
-  # Override per run — `dbt build --vars '{eu_ets_price_eur_per_t: 100}'` — and note
-  # that `fct_cbam_exposure` also ships the tonnage, so the Evidence page derives its
-  # whole sensitivity band from one build rather than needing one build per price.
+  # The EU ETS price per CBAM certificate. A parameter, not a measurement: there is
+  # no free API for EUA spot. EUR 75/t sits in the 2025-26 trading range (about
+  # EUR 60-95) and matches the Commission's own costing. Override per run with
+  # `dbt build --vars '{eu_ets_price_eur_per_t: 100}'`; `fct_cbam_exposure` also
+  # ships tonnages, so the Evidence page re-prices without a rebuild.
   eu_ets_price_eur_per_t: 75
 
-  # The outdoor temperature below which buildings are assumed to need heating,
-  # and above which they need cooling. Degree days are the standard way to turn
-  # a temperature series into a demand proxy, and both numbers are *conventions*
-  # rather than measurements — the same winter produces different degree-day
-  # totals depending on which base a statistical office uses.
-  #
-  # 15.5 C is the UK/Eurostat convention for heating (Eurostat's HDD formula
-  # uses it, and the UK Met Office's degree-day service defaults to it); the US
-  # uses 65 F = 18.3 C. Cooling is conventionally set higher than heating rather
-  # than at the same point, because the gap between them is the band in which a
-  # building needs neither.
-  #
-  # Vars, not literals, for `fiscal_year_start_month`'s reason exactly: they are
-  # policies, the warehouse only ever builds one value of each, and so every
-  # other value they claim to support is untested by construction unless a unit
-  # test poses it. `stg_weather_daily` carries the base it used on every row, so
-  # a number lifted out of the warehouse says which convention produced it.
+  # Degree-day bases: the outdoor temperatures below which buildings are assumed
+  # to need heating, and above which cooling. Conventions, not measurements.
+  # 15.5 C is the UK Met Office heating base; the US uses 65 F (18.3 C); Eurostat
+  # counts from 18 C on days at or below a 15 C threshold. Cooling sits above
+  # heating, leaving a band where a building needs neither. Vars because they are
+  # policies (only unit tests pose other values), and `stg_weather_daily` carries
+  # the base it used on every row.
   heating_degree_day_base_c: 15.5
   cooling_degree_day_base_c: 22.0
 
-  # The month a fiscal year starts in. 4 = April, which is the UK, Indian and
-  # Japanese convention; the US federal year starts in October and most of
-  # continental Europe runs on the calendar (1).
-  #
-  # It is a var and not a column because it is a *policy*, not a fact about a
-  # date: the same Tuesday belongs to FY2024 or FY2025 depending on whose books
-  # you are keeping. `dim_date` ships `fiscal_year` and `fiscal_quarter` next to
-  # the calendar ones so the difference is visible rather than assumed — set this
-  # to 1 and the two collapse onto each other, which is the honest default for a
-  # warehouse with no company in it. Anything joining on fiscal periods has to
-  # know which convention built the table, hence the `fiscal_year_start_month`
-  # column carried on every row.
+  # The month a fiscal year starts in: 4 = April (UK, India, Japan); 10 is the US
+  # federal year, 1 the calendar. A var because it is a policy, not a fact about a
+  # date; `dim_date` ships fiscal and calendar columns side by side and carries
+  # `fiscal_year_start_month` on every row so a reader knows which built it.
   fiscal_year_start_month: 4
 
-  # How many days a published FX rate may be carried forward before the dense
-  # daily series gives up and returns null.
-  #
-  # The bound is measured, not guessed: across 7,066 publication days the longest
-  # gap the ECB has ever left is 5 calendar days (36 times — the Christmas/New
-  # Year runs), so 7 covers every weekend and TARGET holiday closure with room to
-  # spare. What it deliberately does *not* cover is a currency the ECB stopped
-  # quoting: the Icelandic krona has a 3,341-day hole from the 2008 banking
-  # collapse to February 2018, and an uncapped carry-forward would fill nine
-  # years with a pre-collapse rate that no one could have traded at.
+  # Days a published FX rate may be carried forward before the dense daily series
+  # returns null. The ECB's longest gap is 5 calendar days (Christmas/New Year),
+  # so 7 covers every closure; it deliberately does not bridge a currency that
+  # stopped trading, such as the krona's nine-year gap from 2008.
   fx_max_carry_forward_days: 7
 
-  # How far back `fct_fx_rates_published` re-processes on an incremental run.
-  # Must be no smaller than `FX_LOOKBACK_DAYS` in `ingest/pipeline.py` (10), and
-  # is set larger on purpose — see the comment in that model.
+  # How far back `fct_fx_rates_published` re-processes on an incremental run. At
+  # least `FX_LOOKBACK_DAYS` in `ingest/sources/ecb.py` (10), and larger on
+  # purpose — see that model.
   fx_incremental_lookback_days: 30
 
-  # The largest cohort age `fct_retail_customer_cohorts` generates rows for. It
-  # is an upper bound, not the answer: each cohort is then cut to the months the
-  # extract could actually have observed it in, so a value larger than the span
-  # costs nothing and a value smaller than it silently truncates the oldest
-  # cohorts into what looks like churn. The Online Retail II extract spans 25
-  # months (2009-12 to 2011-12), so 24 is exactly enough and 36 is the headroom.
+  # The largest cohort age `fct_retail_customer_cohorts` generates. An upper
+  # bound: each cohort is then cut to the months the extract observed, so too
+  # large costs nothing and too small truncates old cohorts into apparent churn.
+  # The extract spans 25 months, so 24 is exactly enough.
   retail_max_cohort_age_months: 36
 
 models:
@@ -123,41 +72,25 @@ models:
     staging:
       +materialized: view
       +schema: staging
-      # A staging model is its group's working copy of a source, not an
-      # interface: `private` means only models in the same group may `ref` it,
-      # and dbt fails the build rather than warning. Two models override this to
-      # `protected` in `_staging.yml`, and those two overrides are the whole
-      # point — they are the only places one domain reaches into another's
-      # cleaning layer, so they are visible instead of implied.
+      # A group's working copy of a source, not an interface: only models in the
+      # same group may `ref` it. The two `protected` overrides in `_staging.yml`
+      # are the only places one domain reads another's cleaning layer.
       +access: private
     intermediate:
-      # `view`, not `ephemeral`, and the reason is testability rather than
-      # storage: an ephemeral model is inlined into its consumer and has no
-      # relation of its own, so it cannot carry a unit test — which is the whole
-      # reason these three exist. A DuckDB view costs nothing, and `just sql` can
-      # read one.
+      # `view`, not `ephemeral`: an ephemeral model has no relation, so it cannot
+      # carry the unit tests these exist for.
       +materialized: view
       +schema: intermediate
-      # Same rule as staging, and here it needs no exception at all: each of
-      # these is consumed only inside its own group. That is what makes the
-      # layer cheap — the groups are by *domain*, so a derivation shared between
-      # two models of one domain never crosses a boundary. A layer-shaped group
-      # split would have made every one of these `protected`.
+      # Each is consumed only inside its own (domain) group.
       +access: private
     marts:
       +materialized: table
       +schema: marts
-      # The marts *are* the interface. `public` is not decoration here: the
-      # monthly data release ships every one of them as a standalone Parquet
-      # file, so a consumer outside this project is not hypothetical.
+      # The interface: the monthly release ships every mart as Parquet.
       +access: public
-      # One folder per *mart* in the BI sense — the subject area a reader works
-      # with — which is what `marts/` is the layer name for, not a synonym for.
-      # The four match `_groups.yml` exactly, so `+group:` is stated once here
-      # instead of the eighteen times it was repeated across the group ymls, in
-      # files whose own names already said it. `+schema: marts` above is
-      # inherited by all four, so the relations, the release layout and the
-      # Dagster asset keys are unchanged by the nesting.
+      # One folder per subject area, matching `_groups.yml`, so `+group:` is set
+      # per folder. All four inherit `+schema: marts`, so relation names, the
+      # release layout and asset keys ignore the nesting.
       country_stats:
         +group: country_stats
       reference:
@@ -176,10 +109,8 @@ seeds:
         country_iso3: varchar
     cbam_goods:
       +column_types:
-        # "7601" is a CN code, not a number. Left to inference it lands as BIGINT,
-        # loses the leading structure of the 4/6/8-digit forms, and stops joining
-        # to the values seed's varchar key. Same lesson as dlt's type inference on
-        # `wb_wdi`, one layer down.
+        # "7601" is a code, not a number: inferred as BIGINT it loses the spaced
+        # 4/6/8/10-digit form and stops joining to the values seed.
         cn_code: varchar
     currencies:
       +column_types:
@@ -190,12 +121,11 @@ seeds:
 
 snapshots:
   modern_data_stack:
-    # The one schema that isn't reproducible from the sources — see
-    # snapshots/snap_co2_estimates.sql.
+    # The one schema no rebuild can reproduce.
     +schema: history
 
 data_tests:
-  # A red check then links to the offending rows instead of just a count —
-  # each test's failures land in <schema>/dbt_test__audit.<test_name>.
+  # Each test's failing rows land in `dbt_test__audit.<test alias>`, so a red
+  # check comes with the rows rather than a count.
   +store_failures: true
   +schema: dbt_test__audit

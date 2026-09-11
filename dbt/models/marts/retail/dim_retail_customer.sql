@@ -1,35 +1,19 @@
 -- One row per identified customer.
 -- Grain: `customer_id`.
 --
--- **The 243,007 lines with no customer are not in here, and that is the single
--- most important thing about this table.** They are not errors and they are not
--- droppable: they are GBP 2.67M of real revenue from people who never signed in.
--- Every per-customer figure downstream — cohort retention, RFM, average order
--- value — is therefore computed over a *subset* of the business, and the honest
--- way to say so is to make the subset explicit here rather than to let a
--- `where customer_id is not null` disappear into a join. `fct_retail_order_line`
--- keeps every line; this dimension covers the ones a customer can be attached
--- to, and the Evidence page reports both totals side by side.
+-- **The 243,007 lines with no customer are not in here.** They are GBP 2.67M of
+-- real revenue from people who never signed in, so every per-customer figure
+-- downstream (cohorts, RFM, average order value) covers a subset of the
+-- business. `fct_retail_order_line` keeps every line, and the Evidence page
+-- reports both totals. Anonymous rows are 22.8% of lines but 13.8% of revenue —
+-- quote the share you mean.
 --
--- The two shares differ and the gap is the point: anonymous rows are **22.8% of
--- lines but 13.8% of revenue**, because an order nobody signed in for is a
--- smaller order. Quoting the line share as if it were the revenue share
--- overstates the hole by nine points.
+-- 5,881 of the 5,942 customer ids reach this table; the other 61 never made a
+-- purchase (cancellations or zero-priced rows only). `cohort_month` is the month
+-- of the first *purchase*, not the first appearance.
 --
--- **5,881 of the 5,942 customer ids reach this table.** The 61 that don't never
--- made a purchase — they appear only on cancellations or zero-priced rows — and
--- a customer dimension built by `select distinct customer_id` would have carried
--- them with a null cohort and a zero tenure forever. `cohort_month` is
--- likewise the month of the first *purchase*, not of the first appearance: 140
--- customers have an earlier non-purchase row, and dating them from it would put
--- them in a cohort they bought nothing in.
---
--- The left-censoring caveat is real and is carried as a column. The extract
--- starts on 2009-12-01, so every customer whose first order falls in that month
--- may well have been a customer for years already — their "cohort" is an
--- artefact of when the file starts. `is_left_censored_cohort` marks them so a
--- retention chart can drop or annotate them instead of reporting the extract's
--- start date as a customer's tenure.
+-- `is_left_censored_cohort` marks the extract's first month (2009-12): those
+-- customers may have been customers for years before the file starts.
 with lines as (
     select * from {{ ref('stg_retail_lines') }}
     where customer_id is not null
@@ -49,18 +33,10 @@ first_purchase as (
     group by customer_id
 ),
 
--- What the customer arrived with. `first_order_date` says when they turned up;
--- this says how much they spent doing it, and it is the only thing about a
--- customer that is knowable on day one — everything else in this table needs a
--- relationship to have happened first.
---
--- **An invoice, not a day.** `n_orders` counts invoices, so "order" has to mean
--- the same thing in both columns or they quietly disagree, and 393 of the 5,881
--- customers bought twice on the day they arrived. Ordering on `min(invoice_ts)`
--- because 83 invoices in the file carry more than one timestamp, then on
--- `invoice` because 11 customers opened two at the same minute — a tie-break
--- that isn't deterministic is a column that changes between builds for no
--- change in the data.
+-- The first order — the one thing about a customer knowable on day one. An
+-- invoice, not a day, so "order" means what `n_orders` counts. Ordered by
+-- `min(invoice_ts)` (an invoice can carry several timestamps), then `invoice`
+-- (a customer can open two in one minute), so the pick is stable between builds.
 first_order_line as (
     select
         customer_id,
@@ -72,13 +48,10 @@ first_order_line as (
     group by customer_id, invoice
 ),
 
--- Summed over `is_revenue_line` exactly as `net_revenue_gbp` is, so the two are
--- the same measurement over different windows and the ratio between them means
--- something. That also makes it **null, not zero, for the 47 customers whose
--- first invoice carried no product line at all** — a `Manual` adjustment or the
--- test SKU. Zero would say they bought nothing; null says this order has no
--- revenue reading, which is what happened. 28 customers already have a null
--- `net_revenue_gbp` for the same reason.
+-- Summed over `is_revenue_line`, as `net_revenue_gbp` is, so the two compare.
+-- Null, not zero, for the 47 customers whose first invoice held no product line
+-- (a `Manual` adjustment or the test SKU): no revenue reading, rather than no
+-- revenue. 28 have a null `net_revenue_gbp` for the same reason.
 first_order_value as (
     select
         o.customer_id,
@@ -90,9 +63,8 @@ first_order_value as (
     group by o.customer_id
 ),
 
--- The extract's first month, as a row rather than as a scalar subquery in the
--- select. Same value, but it joins instead of correlating — which is the house
--- style and, here, also the difference between one pass and one per row.
+-- The extract's first month, as a row to cross join rather than a scalar
+-- subquery.
 censoring as (
     select min(cohort_month) as first_cohort_month from first_purchase
 ),
@@ -109,31 +81,17 @@ activity as (
         sum(line_amount_gbp) filter (where is_revenue_line) as net_revenue_gbp,
         sum(line_amount_gbp) filter (where is_revenue_line and quantity > 0) as gross_revenue_gbp,
         sum(line_amount_gbp) filter (where is_revenue_line and quantity < 0) as returned_gbp,
-        -- The country a customer transacts from is *almost* fixed: 13 of 5,942
-        -- move. Both are carried — one as the dimension's answer, the
-        -- count as the reason not to trust it blindly — because a Type-1
-        -- overwrite that silently relabels a customer's whole history is the
-        -- classic dimension bug, and 13 rows is exactly the size at which
-        -- nobody notices.
+        -- A customer's country is almost fixed (13 customers have two). The
+        -- count ships beside the label, so a Type-1 overwrite of a moved
+        -- customer's history is visible.
         count(distinct country) as n_countries,
         max(country) as country,
-        -- `max_by`, not `max`: the code has to be the one belonging to the
-        -- label the line above picked. For the 13 customers who transact from
-        -- two countries a plain `max` on each column independently can name
-        -- one country and code another, which is a row that agrees with
-        -- nothing and reads as a mapping bug.
-        --
-        -- **The struct is load-bearing, because `max_by` skips nulls.**
-        -- DuckDB's `arg_max` ignores rows whose *value* argument is null, and
-        -- three seed labels map to no code on purpose (`Unspecified`,
-        -- `West Indies`, `European Community`, all `not_a_country`). So a
-        -- customer transacting from both `United Kingdom` and `Unspecified`
-        -- took the label `Unspecified` and the code `GBR` — exactly the
-        -- mismatch the paragraph above says this line prevents. A struct
-        -- holding a null field is not itself null, so the row survives the
-        -- aggregate and the pairing holds. Latent on current data: all 13
-        -- multi-country customers use mapped labels, which is why the guard is
-        -- a unit test rather than a data test.
+        -- The code belonging to the label picked above, not an independent
+        -- `max`. Inside a struct because `max_by` skips null values and three
+        -- seed labels map to no code (`Unspecified`, `West Indies`, `European
+        -- Community`): a customer seen in `United Kingdom` and `Unspecified`
+        -- would otherwise pair `Unspecified` with `GBR`. A struct with a null
+        -- field is not null. Latent on current data; a unit test guards it.
         (max_by({ 'country_iso3': country_iso3 }, country)).country_iso3
             as country_iso3
     from lines
@@ -149,9 +107,8 @@ select
     f.first_order_date,
     f.cohort_month,
     a.last_order_date,
-    -- Tenure in whole days between first and last purchase. Zero for the 1,626
-    -- customers who ordered once — which is a fact about the business, not a
-    -- missing value, so it is not nulled.
+    -- Whole days between first and last purchase. Zero, not null, for the 1,626
+    -- one-order customers.
     date_diff('day', f.first_order_date, a.last_order_date) as tenure_days,
     a.n_orders,
     a.n_cancellations,
@@ -165,9 +122,8 @@ select
     case
         when a.n_orders > 0 then a.net_revenue_gbp / a.n_orders
     end as avg_order_value_gbp,
-    -- Return rate by value, not by order count: a customer who returns one item
-    -- from each of ten orders is not the same risk as one who sends back a
-    -- pallet, and the count treats them identically.
+    -- By value, not order count: one item from each of ten orders is not a
+    -- returned pallet.
     case
         when a.gross_revenue_gbp > 0 then -100.0 * a.returned_gbp / a.gross_revenue_gbp
     end as return_rate_pct,

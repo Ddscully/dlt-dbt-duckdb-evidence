@@ -1,6 +1,6 @@
-"""Build the Evidence site — the one layer that was still built by hand.
+"""Build the Evidence site.
 
-Wraps the two npm commands the dashboard needs, in the order it needs them:
+Wraps the npm commands the dashboard needs, in the order it needs them:
 
     npm ci / npm install          Evidence + its DuckDB adapter
     npm run sources[:strict]      warehouse tables -> reports/.evidence/ parquet
@@ -9,46 +9,23 @@ Wraps the two npm commands the dashboard needs, in the order it needs them:
 Run:  uv run python -m publish.build_report            (or `just report`)
       uv run python -m publish.build_report --clean    (or `just report-clean`)
 
-This exists so the site is reachable from the asset graph
-(`reports/evidence_site` in `orchestration/assets.py`) rather than only from a
-shell recipe, and so both callers run *the same* three commands. Everything below
-is knowledge that was previously spread across the justfile, the Pages workflow
-and `reports/README.md`.
+The `reports/evidence_site` asset and `just report` both call this, so the two
+cannot run different builds.
 
-## Why `sources` is a separate step from `build`
+`evidence build` does not run the sources: it renders whatever parquet the
+gitignored `reports/.evidence/` holds, so on a cold clone it succeeds and every
+chart reads "Table … does not exist". `--strict` (the default here) makes an
+empty or missing warehouse a non-zero exit instead.
 
-`evidence build` does not run the sources. It renders against whatever parquet
-`reports/.evidence/` already holds, and that directory is gitignored — so a build
-from a cold clone *succeeds* and produces a site where every chart reads "Table
-with name emissions_energy does not exist". `--strict` (the default here) turns an
-empty or missing warehouse into a non-zero exit instead of a green build of a
-blank dashboard.
+`--clean` also drops `.evidence/`, whose cached per-source schemas do not notice
+a column change (CI always starts cold). `build/` is emptied on every run
+regardless — see `run()`. The file count still varies by one or two between
+runs, because Evidence emits an `api/` route per query hash and the
+`pipeline_*` queries carry load timestamps.
 
-## Why `--clean` exists, and what happens without it
-
-Evidence caches each source's schema keyed on the source SQL. A `select *` that
-gains a column is unchanged as a string, so the cache keeps the old schema and
-validation fails against it. Deleting `.evidence/` is the fix; it is only ever
-needed locally, since CI always starts cold.
-
-`build/` is a different matter and is cleared on *every* run, `--clean` or not:
-`evidence build` writes into the directory without emptying it first, so repeated
-builds pile up orphaned `_app/immutable/` chunks (139 of them after three runs
-here) and a renamed page goes on serving from its old route.
-
-Clearing it makes the reported size real, not the output reproducible: the file
-count still drifts by one or two between local runs, because Evidence emits an
-`api/` route per query hash and the `pipeline_*` queries carry load timestamps
-that change. Nothing stale survives in `build/` — every file in it is from the
-run that just finished — so this is cosmetic, and a cold CI checkout doesn't see
-it at all.
-
-## What it does not do
-
-It does not touch `evidence.config.yaml`. GitHub Pages serves a project site from
-a subpath and Evidence reads that from `deployment.basePath`, which has no
-env-var equivalent — so `pages.yml` appends it before calling this, and a
-committed value would break `npm run dev` on localhost.
+It does not touch `evidence.config.yaml`. GitHub Pages serves from a subpath,
+which Evidence reads from `deployment.basePath` and no env var; `pages.yml`
+appends it before calling this, and a committed value would break `npm run dev`.
 """
 
 from __future__ import annotations
@@ -75,20 +52,15 @@ BUILD_DIR = REPORTS_DIR / "build"
 # dependencies out of the SQL — see `source_tables`.
 WAREHOUSE_SCHEMAS = ("raw", "staging", "marts", "analytics", "history")
 
-# What writes each table the source queries read. `orchestration/assets.py` turns
-# these two into the Evidence asset's deps — dbt models by model name (their
-# Dagster keys come out of the manifest, so they can't be spelled here), the
-# Polars outputs by asset key. Three tables share one key: `pipeline_status`
-# writes all three in a single op.
+# What writes each table the source queries read; `orchestration/assets.py` turns
+# these into the Evidence asset's deps. dbt models go by model name (their asset
+# keys come from the manifest), Polars outputs by asset key — the four
+# `pipeline_*` tables share one, written by a single op. No page reads
+# `history.snap_*` directly; the snapshots reach the site through the marts that
+# summarise them.
 #
-# `history.snap_*` is a legal schema for a source query to read but no page does:
-# the snapshots reach the site through the marts that summarise them
-# (`fct_co2_estimate_versions`, `dim_grid_emission_factors`), which is also the
-# only shape `get_asset_key_for_model` can resolve.
-#
-# They live here rather than beside the asset so `tests/test_report.py` can check
-# them against the SQL without importing Dagster — which `just test` cannot do,
-# because the dbt manifest it needs is gitignored and built later in CI.
+# Here rather than beside the asset so `tests/test_report.py` can check them
+# against the SQL without Dagster, whose dbt manifest `just test` does not have.
 TABLE_TO_DBT_MODEL = {
     "marts.dim_country_year": "dim_country_year",
     "marts.dim_currency": "dim_currency",
@@ -170,9 +142,9 @@ def page_tables(
     """`{"retail": {"marts.fct_retail_order_line", …}, …}` — warehouse tables per page.
 
     Two hops: a page's SQL blocks read `warehouse.<query>`, and the query reads the
-    warehouse. This is what the exposures in `dbt/models/_exposures.yml` are checked
-    against, so that `dbt ls --select +exposure:retail_dashboard` answers "what
-    breaks if I change this model" for one page rather than for the whole site.
+    warehouse. The exposures in `dbt/models/_exposures.yml` are checked against
+    this, so `dbt ls --select +exposure:evidence_retail` answers "what breaks if I
+    change this model" for one page.
 
     A page naming a query that doesn't exist raises: Evidence fails that build
     anyway, and getting the error here means `just test` catches it without Node.
@@ -256,22 +228,17 @@ def run(
     reports_dir = Path(reports_dir)
     build_dir = reports_dir / "build"
 
-    # Always rewrite `build/` from empty. `evidence build` adds to the directory
-    # rather than replacing it — three builds of this site left 139 orphaned
-    # `_app/immutable/` chunks behind — so without this the reported file count
-    # and size creep upward every run, and a page that was renamed or deleted
-    # keeps serving from its old route. Same lesson as the lake's `overwrite true`.
+    # `evidence build` adds to `build/` rather than replacing it, so without this
+    # orphaned chunks accumulate and a renamed or deleted page keeps serving.
     if build_dir.exists():
         shutil.rmtree(build_dir)
-    # `.evidence/` is the expensive one (it holds the extracted parquet), so it
-    # only goes when asked.
+    # `.evidence/` holds the extracted parquet, so it only goes when asked.
     if clean and (reports_dir / ".evidence").exists():
         shutil.rmtree(reports_dir / ".evidence")
 
     if install:
         _install(reports_dir)
-    # Extract first: `build` renders whatever parquet is already there, so the
-    # order is load-bearing rather than conventional.
+    # Extract first: `build` renders whatever parquet is already there.
     _npm("run", "sources:strict" if strict else "sources", cwd=reports_dir)
     _npm("run", "build", cwd=reports_dir)
 

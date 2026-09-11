@@ -14,24 +14,14 @@ name: pages
 on:
   push:
     branches: [main]
-    # An allowlist of what the site is actually built from, because this job is
-    # a full ingest -> dbt -> Polars -> Evidence run against the LIVE
-    # public APIs. Without it the cheapest commit in the repo costs the same
-    # Actions minutes and the same API load as a data change: 23 of the 94
-    # commits on main have been docs, skills or tests, and every one of them
-    # rebuilt and redeployed an identical site.
+    # What the site is built from. This job is a full run against the live
+    # APIs, so a docs-only commit should not trigger it.
     #
-    # `paths-ignore: ['**.md']` is the obvious version and it is wrong. The
-    # dashboard *is* markdown — `reports/pages/` holds the eleven pages — so a
-    # blanket markdown ignore would stop republishing the site exactly when a
-    # page changed, which is this repo's collected failure mode: green and
-    # wrong.
-    #
-    # An allowlist rather than an exclusion list, because the two get their
-    # mistakes the right way round. A build input missing from this list makes
-    # the site stale, which is visible and which the weekly cron below caps at
-    # seven days. A doc directory missing from an exclusion list is invisible
-    # and permanent.
+    # Not `paths-ignore: ['**.md']`: the dashboard pages under `reports/pages/`
+    # are markdown. An allowlist fails the right way round — a missing build
+    # input leaves the site stale, which the weekly cron caps at seven days,
+    # where a missing entry in an ignore list would be invisible.
+    # `tests/test_workflows.py` holds this list to the tree.
     paths:
       - "ingest/**"
       - "transform/**"
@@ -52,9 +42,7 @@ on:
       - "uv.lock"
       - ".python-version"
       - ".github/workflows/pages.yml"
-      # The build now runs through a recipe and a composite action, so both are
-      # build inputs. Leaving either out is the stale-site case above: a change
-      # to how the site is built would not rebuild the site.
+      # The build runs through a recipe and a composite action.
       - "justfile"
       - ".github/actions/**"
   schedule:
@@ -85,61 +73,31 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      # 24 is the active LTS; 20 went end-of-life in April 2026 and the runners
-      # now force node20 actions onto 24 anyway. `package.json` only asks for
-      # >=18, so this is the floor moving with upstream rather than a
-      # requirement — but keep it an even (LTS) major.
+      # The active LTS. `package.json` asks only for >=18; keep this an even
+      # (LTS) major.
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: reports/package-lock.json
 
-      # Project Pages serve from https://<user>.github.io/<repo>/, so every
-      # asset and link needs that prefix. Evidence reads it from
-      # `deployment.basePath` in evidence.config.yaml and has no env-var
-      # equivalent, so it's appended here at build time instead of committed —
-      # a committed basePath would break `npm run dev` on localhost. It has to
-      # happen before the site is built, i.e. before the job below.
-      # Delete this step if you move the site to a custom domain or a
-      # <user>.github.io repo, where the site is served from the root.
+      # Project Pages serve from https://<user>.github.io/<repo>/, and Evidence
+      # reads that prefix only from `deployment.basePath` — appended here rather
+      # than committed, which would break `npm run dev`. Must precede the build.
+      # Delete it for a custom domain or a <user>.github.io repo.
       - name: Set the Pages base path
         run: |
           printf '\ndeployment:\n  basePath: /%s\n' \
             '${{ github.event.repository.name }}' >> reports/evidence.config.yaml
 
-      # ingest -> dbt build + test -> Polars -> Evidence, in asset-graph
-      # order. `publish_site` is `full_refresh` plus `reports/evidence_site`,
-      # which shells out to npm (install, `sources:strict`, `build`) — so the
-      # site is a node in the graph here rather than three steps bolted on after
-      # it. The site asset is why this job and not `full_refresh`, and why
-      # `setup-node` runs above; the other three workflows use `full_refresh`
-      # and need no Node at all.
+      # This job builds from an empty file, so without the latest release's
+      # history the Restatements page could show no revisions. Both assets: the
+      # weather archive is in `lakehouse.tar.gz`, and without it the ingest
+      # cold-starts at `WEATHER_COLD_START_YEARS` and the Weather page silently
+      # thins.
       #
-      # `sources:strict` is the load-bearing part: `evidence build` renders
-      # whatever parquet `reports/.evidence/` already holds, that directory is
-      # gitignored, and without the extraction this would deploy a site whose
-      # every query reads "Table with name emissions_energy does not exist".
-      # --strict makes an empty warehouse a red build instead.
-      # The Restatements page can only show revisions the snapshot was present
-      # for, and this job builds from an empty file — so the published page sat
-      # permanently in its "nothing revised yet" branch. `release-data.yml`
-      # accumulates that history across monthly releases; borrowing the newest
-      # one here means the page shows what OWID has actually restated since.
-      #
-      # **Both release assets, and the second one is not a nicety.** This job
-      # rebuilds every mart model from `raw`, so one is only ever as deep as the
-      # landing table under it — and since `raw` moved into the DuckLake catalog,
-      # `warehouse.duckdb` carries no weather rows at all. Download the database
-      # alone and `weather_watermark()` reads null, the ingest cold-starts at
-      # `WEATHER_COLD_START_YEARS`, and the Weather page deploys with three years
-      # of archive against the release's fifteen. Nothing goes red: a cold start
-      # is a valid state, the mart builds, the page renders, and the only symptom
-      # is a thin chart. The two assets are one artifact and are downloaded as one.
-      #
-      # Soft-failing on purpose, unlike release-data.yml: there the pair is the
-      # artifact and losing it is permanent, here it is a read-only display.
-      # A missing release should cost one section of one page, not the deploy.
+      # Soft-failing, unlike release-data.yml: here it is a display, and a
+      # missing release should cost a section of a page, not the deploy.
       - name: Borrow snapshot history and the landing zone from the latest data release
         continue-on-error: true
         env:
@@ -153,21 +111,17 @@ jobs:
             exit 0
           fi
           gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
-          # `restore_history` finds the landing zone beside the database rather
-          # than being told where it is, so this only has to land in the same
-          # directory. `|| true` because `gh` calls a pattern that matches
-          # nothing a failure, and a release cut before the asset existed has
-          # none — the same "restoring nothing is normal" rule the snapshot
-          # follows, and the same line release-data.yml uses.
+          # Beside the database, where `restore_history` looks. `|| true`: a
+          # release cut before the asset existed has none.
           gh release download "$prev" --pattern lakehouse.tar.gz \
             --dir prev-release || true
           uv run python -m publish.restore_history prev-release/warehouse.duckdb
           rm -rf prev-release
 
-      # `materialize-site`, not `materialize`: this is the one workflow whose job
-      # is `publish_site`, which is `full_refresh` plus `reports/evidence_site`.
-      # That asset is why `setup-node` runs above and why the other three
-      # workflows need no Node at all.
+      # `materialize-site`: `publish_site` is `full_refresh` plus
+      # `reports/evidence_site`, which runs npm (hence `setup-node`). Its
+      # `sources:strict` makes an empty warehouse a red build rather than a site
+      # of empty charts.
       - name: Build the warehouse and the site from live sources
         run: just materialize-site
 

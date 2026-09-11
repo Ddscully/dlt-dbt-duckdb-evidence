@@ -5,22 +5,17 @@ Parquet per modelled table, a manifest of row counts and checksums, `SHA256SUMS`
 an attribution file and release notes. Nothing here touches the network: it reads
 a warehouse that already exists.
 
-**The DuckDB copy keeps the source file's name, and that is load-bearing.** dbt
-creates views against a catalog named after the file's stem, and their stored SQL
-says `warehouse.raw.owid_co2`. Copy the database to `snapshot.duckdb` and every
-view raises `Catalog "warehouse" does not exist` while the tables keep working —
-a half-broken artifact. The same trap catches consumers, which is why the release
-notes have to tell them which alias to `ATTACH` as.
+**The DuckDB copy keeps the source file's name.** DuckDB names a catalog after
+the file's stem and dbt qualifies view SQL with it (`warehouse.marts.…`), so a
+copy renamed `snapshot.duckdb` has every view raise `Catalog "warehouse" does
+not exist` while the tables work. Consumers hit the same trap, which is why the
+release notes say which alias to `ATTACH` as.
 
-**A published database file also has a storage format, and it is not the writer's
-version.** DuckDB 1.5.5 writes storage version 64 — the format `v0.10.0` through
-`v1.1.3` all read — because 1.x keeps the old default deliberately. So the
-manifest's `duckdb_version` says who wrote the file and answers a *different*
-question from "can I open it", which is the only one a consumer has. `export()`
-records the format itself and takes a ceiling it refuses to exceed, because the
-mechanism that would move it is a lockfile bump reviewed as routine drift, and
-every test in a repo passes such a bump: they all write and read with the same
-binary.
+**The file's storage format is not the writer's version.** DuckDB 1.x writes
+storage version 64 by default, readable by every DuckDB since v0.10.0, so the
+manifest records `storage_version` beside `duckdb_version`, and `export()` takes
+a ceiling it refuses to exceed — a DuckDB bump that changed the format would
+pass every test, since they write and read with one binary.
 
 Which schemas ship, who the data belongs to, and what the release notes say are
 all the project's to answer; see `publish/export_warehouse.py`.
@@ -54,12 +49,8 @@ def sha256(path: Path) -> str:
 def storage_version(path: Path) -> int:
     """The storage format version recorded in a DuckDB file's header.
 
-    Read off the bytes rather than asked of a connection, because there is no SQL
-    that answers it: `duckdb_databases()` reports an empty `options` map, there is
-    no pragma, and the only surface DuckDB offers is `ATTACH … (STORAGE_VERSION
-    …)` on the *write* side. Reading the artifact is the right shape for a release
-    gate regardless — it describes the file that ships rather than the process
-    that produced it.
+    Read off the bytes because no SQL, pragma or connection property reports it;
+    DuckDB exposes it only on the write side (`ATTACH … (STORAGE_VERSION …)`).
 
     The header is an 8-byte checksum, the 4-byte magic `DUCK`, then the version as
     a little-endian uint64. Measured against files written with an explicit
@@ -144,17 +135,10 @@ def loaded_at(
     """When the pipeline last landed data, which is not when this ran: an export
     of a stale warehouse should look stale.
 
-    **`raw_database` is what keeps that promise once the landing zone leaves the
-    file.** A project whose `raw` moved into an attached catalog — DuckLake here —
-    has to name it, and the two ways of not naming it fail in opposite
-    directions, both silently. On a warehouse that never held `raw`, the
-    unqualified read raises, the `except` returns `None`, and every release ships
-    `data_loaded_at: null`. On a warehouse *migrated in place*, which still holds
-    the pre-move `raw` beside the catalog, it returns a **plausible timestamp
-    that is simply wrong** — measured at 4h20m adrift on this project's own
-    working copy. The second is worse, and only the qualified read can tell them
-    apart: `con` must have the catalog attached, and `raw_database` says which of
-    the two the answer came from.
+    Pass `raw_database` when `raw` lives in an attached catalog (and attach it
+    to `con`). Unqualified, the read either fails — returning `None` — or, on a
+    warehouse that still holds an old in-file `raw`, returns a plausible wrong
+    timestamp.
     """
     try:
         row = con.execute(
@@ -239,36 +223,21 @@ def export(
     generic manifest can't know about. `release_notes` receives the finished
     manifest, the repo slug and the tag.
 
-    `prepare_copy` runs against the copy **writable**, before anything is read or
-    measured, and whatever it returns is merged into the manifest. It is the hook
-    for a policy that has to hold over the whole artifact rather than over one
-    table — rewriting a classified column, say. Doing it here and not in the
-    models is what keeps a view and the table it reads in agreement: the copy's
-    views recompute from whatever `prepare_copy` left behind, and the checksums,
-    the row counts and the Parquet all describe the result rather than the
-    input.
+    `prepare_copy` runs against the copy, writable, before anything is read or
+    measured; what it returns is merged into the manifest. It is the hook for a
+    policy over the whole artifact (rewriting a classified column), so the
+    checksums, row counts and Parquet describe the result, and the copy's views
+    recompute from it.
 
-    `read_loaded_at` overrides how `data_loaded_at` is read, and exists because
-    *where* the landing tables live is the project's business rather than this
-    module's. The default reads `raw._dlt_loads` out of the copy, which is right
-    for a warehouse that holds its own landing zone and wrong for one whose `raw`
-    sits in an attached catalog — so a project that moved it passes a reader that
-    attaches the catalog first. It is the same division as `extra_artifacts`,
-    which is how the DuckLake tarball is published without this module knowing
-    what a DuckLake is.
+    `read_loaded_at` replaces the default read of `raw._dlt_loads` from the
+    copy, for a project whose `raw` sits in an attached catalog.
+    `extra_artifacts` writes further files into `out_dir` and returns manifest
+    fields. `period_column`'s min/max becomes each table's coverage bounds.
 
-    `period_column` is the column whose min/max becomes each table's coverage
-    bounds; a table without it is described without them. It's threaded through
-    rather than left to `export_table`'s default because a project whose period
-    is `month` or `fiscal_year` would otherwise get a manifest silently missing
-    coverage for every table.
-
-    `max_storage_version` is the format ceiling the published file may not exceed
-    (see `storage_version`). It has **no default**: a package that picked one
-    would be asserting a compatibility promise on behalf of a project whose
-    consumers it knows nothing about, and the number is only meaningful next to
-    the minimum reader version a project actually states. `None` records the
-    format in the manifest and refuses nothing.
+    `max_storage_version` is the format ceiling (see `storage_version`). No
+    default: it is a promise to the project's consumers, meaningful only beside
+    the minimum reader version the project states. `None` records the format and
+    refuses nothing.
     """
     src = Path(duckdb_path)
     if not src.exists():
@@ -292,16 +261,11 @@ def export(
             prepared = prepare_copy(writable) or {}
         finally:
             writable.close()
-        # Copy the database again, rather than `CHECKPOINT`. DuckDB reuses freed
-        # blocks but never returns them to the filesystem, so a checkpoint after
-        # a rewrite of a million-row column leaves the file *larger* — measured
-        # here at 185 MB before and 210 MB after, for identical contents. Only a
-        # fresh `COPY FROM DATABASE` compacts, which is what `snapshot_warehouse`
-        # already does and what the release notes promise consumers.
-        #
-        # Into a directory rather than a sibling file, because the copy's *stem*
-        # is the catalog name the published views were compiled against — a
-        # `warehouse.compacting.duckdb` would break every one of them.
+        # Copy again rather than `CHECKPOINT`: DuckDB never returns freed blocks
+        # to the filesystem, so after rewriting a large column a checkpointed file
+        # is larger than before; only `COPY FROM DATABASE` compacts. Into a
+        # directory, because a sibling file would need a different stem — and the
+        # stem is the catalog name the views were compiled against.
         staging_dir = dest_dir / ".compacting"
         staging_dir.mkdir(exist_ok=True)
         compacted = staging_dir / warehouse_copy.name
@@ -311,17 +275,10 @@ def export(
         finally:
             shutil.rmtree(staging_dir, ignore_errors=True)
 
-    # Measured on the finished copy, after `prepare_copy`'s recompaction: that is
-    # the file that gets uploaded, and the recopy rewrites every block.
+    # Measured on the finished copy, the file that is uploaded.
     published_storage = storage_version(warehouse_copy)
-    # `>`, not `>=`: a *lower* storage version is the more widely readable file,
-    # so only an increase strands a reader, and publishing at the ceiling is the
-    # ordinary case rather than the edge one. Raised here rather than at the end
-    # because everything after it is the publishable part — the Parquet, the
-    # manifest, `SHA256SUMS`, the notes. The copied database is already on disk
-    # by now (it is what was measured) and is deliberately left there to be
-    # inspected; what a refusal guarantees is that no *release* was assembled
-    # around it, not that the directory is empty.
+    # `>`: publishing at the ceiling is the ordinary case. Raised before the
+    # Parquet, manifest and notes are written; the copy is left for inspection.
     if max_storage_version is not None and published_storage > max_storage_version:
         raise ValueError(
             f"refusing to publish {warehouse_copy.name}: storage version "
@@ -332,8 +289,7 @@ def export(
             "is a decision about which readers to strand, not a lockfile edit."
         )
 
-    # Read the tables out of the snapshot, not the original: it's the copy that
-    # gets published, so the manifest should describe what shipped.
+    # Read from the copy, so the manifest describes what shipped.
     con = duckdb.connect(str(warehouse_copy), read_only=True)
     try:
         manifest = {
@@ -345,9 +301,7 @@ def export(
             **(extra_manifest(con) if extra_manifest else {}),
             "git_sha": git_sha(),
             "duckdb_version": duckdb.__version__,
-            # Beside the writer's version, not instead of it: they answer
-            # different questions, and only this one is about whether a consumer
-            # can open the file.
+            # What decides whether a consumer can open the file.
             "storage_version": published_storage,
             "grain": grain,
             "warehouse": {
@@ -366,14 +320,9 @@ def export(
     (dest_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (dest_dir / "ATTRIBUTION.md").write_text(attribution)
     (dest_dir / "RELEASE_NOTES.md").write_text(release_notes(manifest, repo or repo_slug(), tag))
-    # **Checksums are computed by walking the directory, not by listing what we
-    # think we wrote.** The two were identical when the release was a database
-    # and some Parquet, and they stop being identical the moment anything else
-    # ships — an `extra_artifacts` hook writing a directory of files would have
-    # been published unverified, and nothing would have said so. Walking makes
-    # SHA256SUMS a statement about the artifact rather than about this function's
-    # memory. The four excluded names are the metadata *about* the release, which
-    # cannot describe themselves.
+    # Walk the directory rather than list what was written, so anything an
+    # `extra_artifacts` hook added is covered too. The four excluded files
+    # describe the release and cannot checksum themselves.
     described = {"SHA256SUMS", "manifest.json", "RELEASE_NOTES.md", "ATTRIBUTION.md"}
     sums = [
         f"{sha256(path)}  {path.relative_to(dest_dir).as_posix()}"

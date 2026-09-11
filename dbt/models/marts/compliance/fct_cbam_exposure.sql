@@ -2,36 +2,21 @@
 -- made.
 --
 -- From 2026 an importer of cement, fertiliser, aluminium, hydrogen or iron and
--- steel must surrender CBAM certificates for the emissions embedded in it. Where
--- they cannot get verified data from the installation that made it, they use the
--- country-specific default value from Annex I of Implementing Regulation (EU)
--- 2025/2621 — as corrected by (EU) 2026/1740, which replaced that annex in full
--- with retroactive effect from 1 January 2026 — with a mark-up. That annex is a
--- country x good carbon-intensity table; multiplied by a carbon price it is a
--- euro figure with a statutory deadline, and this model is that multiplication.
+-- steel surrenders CBAM certificates for the emissions embedded in it. Without
+-- verified installation data it uses the country default from Annex I of
+-- Implementing Regulation (EU) 2025/2621 (as corrected by 2026/1740) plus a
+-- phase-in mark-up. This model multiplies that by a carbon price.
 --
--- The mark-up is the part the correction moved. The annex used to publish each
--- good's marked-up value for 2026, 2027 and 2028 and this model read the
--- schedule off those columns; it now publishes only direct, indirect and total,
--- so the schedule comes from the `cbam_markup_schedule` seed instead. Two
--- columns went with the published ones — see `markup_2026_pct` below.
+-- Grain: one row per (country or territory the annex lists, good), plus the
+-- annex's "other countries and territories" table as its own flagged row.
+-- Unlisted countries are absent: the regulation sends all of them to that table.
 --
--- Grain: one row per (country or territory listed in the annex, good). 121
--- countries plus the fallback table, x the goods the annex actually prices.
--- Countries the annex does not list are deliberately absent — the regulation
--- sends every one of them to the same "other countries and territories" table,
--- so ranking them against each other would be ranking a hundred copies of one
--- number. That table is here as its own row instead, flagged.
---
--- **A screening tool, not a filing.** These are administrative values, and the
--- mark-up exists to make them worse than reality so that going and getting
--- verified supplier data pays. What this answers is which sourcing lanes are
--- worth that effort.
+-- A screening tool, not a filing: the mark-up deliberately makes defaults worse
+-- than reality so verified supplier data pays, and this shows which sourcing
+-- lanes are worth that effort. The annex's history and quirks are in the
+-- `compliance-models` skill.
 with resolved as (
-    -- Annex I's numbers with its own fallback rule already applied. Extracted
-    -- so the rule can be checked against the annex alone — see
-    -- `int_cbam_default_factors`, which carries the reasoning that used to sit
-    -- in four CTEs here.
+    -- Annex I with its fallback rule applied — see `int_cbam_default_factors`.
     select * from {{ ref('int_cbam_default_factors') }}
 ),
 
@@ -39,23 +24,10 @@ goods as (
     select * from {{ ref('cbam_goods') }}
 ),
 
--- The phase-in mark-up, asserted from the regulation rather than measured off
--- the annex — which is a change, and not one this project chose.
---
--- Until the 2026/1740 correction the annex published each good's value
--- *including* the mark-up for 2026, 2027 and 2028 beside the plain total, so
--- this model divided one by the other and read the schedule off the data. That
--- was the better arrangement: an amendment moving a rate needed no edit here,
--- and it is how the fertiliser exception was found rather than assumed. The
--- correction publishes only direct, indirect and total, so there is nothing left
--- to divide and the schedule has to be stated.
---
--- Stated as a seed and not as a `case` or a var, so it is still reviewable as
--- data. The values are confirmed twice over: against the articles (10 / 20 / 30%
--- for cement, iron and steel, aluminium and hydrogen; a flat 1% for fertilisers,
--- a food-security carve-out) and against the February annex's own published
--- columns, where every one of the 10,929 priced rows implies exactly those rates
--- to within the third decimal the OJ prints.
+-- The phase-in mark-up per product group, from the `cbam_markup_schedule` seed:
+-- the corrected annex no longer publishes marked-up values to read it off. 10 /
+-- 20 / 30% for cement, iron and steel, aluminium and hydrogen; a flat 1% for
+-- fertilisers. The pre-correction annex's published columns imply exactly these.
 markup as (
     select
         product_group,
@@ -70,12 +42,9 @@ countries as (
     select * from {{ ref('dim_country') }}
 ),
 
--- The grid factor from `dim_grid_emission_factors`, purely as context. The
--- annex's *indirect* column is embedded electricity, so a country's grid is what
--- moves it — but the annex's own indirect figures come from IEA data under a
--- non-commercial licence this project deliberately does not redistribute, so
--- these are OWID's factors sitting beside the annex's numbers rather than
--- reconciled against them. Do not read the two as the same measurement.
+-- The grid factor from `dim_grid_emission_factors`, as context only. The annex's
+-- indirect figures come from IEA grid data this project does not redistribute
+-- (non-commercial licence); these are OWID's factors, not the same measurement.
 grid as (
     select
         country_iso3,
@@ -86,12 +55,6 @@ grid as (
 ),
 
 -- Certificates per tonne: the annex's total plus the group's statutory mark-up.
--- Every row is computed the same way now. Until the 2026/1740 correction the
--- annex published these three columns itself and this model preferred the
--- published figure, falling back to the computed one only where a cell was blank
--- — so `markup_is_inferred` marked the handful of rows where that happened. With
--- no published column left there is no distinction to draw, and the flag has
--- been dropped rather than shipped as a constant `true`.
 priced as (
     select
         r.*,
@@ -106,11 +69,8 @@ priced as (
     left join markup as m on g.product_group = m.product_group
 ),
 
--- The cheapest *listed* source of each good, which is the baseline the
--- procurement column below measures against. Named here rather than inlined
--- into that column because the exclusion is the whole content of it, and a
--- `filter` clause buried inside a window inside a `case` reads as an
--- afterthought.
+-- The cheapest *listed* source of each good: the baseline for
+-- `excess_over_cleanest_source_t_co2e_per_t`. The fallback table is excluded.
 benchmarked as (
     select
         p.*,
@@ -124,16 +84,10 @@ select
     p.country_or_territory,
     p.country_iso3,
     c.country_name,
-    -- What to put on a chart. `country_or_territory` is the annex's label and is
-    -- kept because it is the legally meaningful one, but it arrives via Excel
-    -- sheet names — which are capped at 31 characters, so North Korea is
-    -- published here as "North Korea (Democratic People’" and South Korea as
-    -- "Korea, Republic of (South Korea", both cut mid-parenthesis. (Before the
-    -- 2026/1740 correction relabelled them the mangled pair were "Democratic
-    -- Republic of the Cong" and "Myanmar_Burma" — the truncation moves with the
-    -- names, which is the argument for coalescing rather than patching labels.)
-    -- Falling back to the annex label covers the fallback table and any
-    -- territory the country dimension does not carry.
+    -- For charts. `country_or_territory` is the annex's legal label, but it comes
+    -- from Excel sheet names capped at 31 characters ("North Korea (Democratic
+    -- People’"). The annex label remains for the fallback table and territories
+    -- the dimension lacks.
     coalesce(c.country_name, p.country_or_territory) as country_display_name,
     c.region,
     c.income_group,
@@ -152,49 +106,21 @@ select
     p.certificates_2026_t_co2e_per_t,
     p.certificates_2027_t_co2e_per_t,
     p.certificates_2028_t_co2e_per_t,
-    -- Kept although it is now derivable from the product group alone: it is the
-    -- number a reader checks the mark-up with, and one column beats knowing the
-    -- schedule. `markup_schedule_is_irregular` sat beside it until the 2026/1740
-    -- correction, flagging the five Angola and Argentina cement rows that
-    -- *compounded* the mark-up where the other 10,926 added it. That was a
-    -- statement about the published columns, which no longer exist — with the
-    -- schedule applied uniformly nothing can be irregular, so a column that is
-    -- false on every row would be worse than no column.
+    -- Derivable from the product group, but the column a reader checks the
+    -- mark-up with.
     100 * (p.certificates_2026_t_co2e_per_t / nullif(p.total_t_co2e_per_t, 0) - 1) as markup_2026_pct,
-    -- The euro figure. One reference price rather than a band, because the
-    -- tonnage columns above are right there: the Evidence page multiplies them to
-    -- draw the sensitivity across EUR 60-120 without rebuilding the model.
+    -- The euro figure, at one reference price: the Evidence page multiplies the
+    -- tonnage columns to draw the price sensitivity without a rebuild.
     {{ var('eu_ets_price_eur_per_t') }} as ets_price_eur_per_t,
     p.certificates_2026_t_co2e_per_t * {{ var('eu_ets_price_eur_per_t') }} as cbam_cost_2026_eur_per_t,
     p.certificates_2027_t_co2e_per_t * {{ var('eu_ets_price_eur_per_t') }} as cbam_cost_2027_eur_per_t,
     p.certificates_2028_t_co2e_per_t * {{ var('eu_ets_price_eur_per_t') }} as cbam_cost_2028_eur_per_t,
-    -- How this country compares with the cheapest source of the same good, which
-    -- is the procurement question. Over the annex's listed countries only, and
-    -- in both directions: the fallback table cannot *set* the baseline, and it
-    -- does not *get* a figure, because "excess over the cleanest source"
-    -- presupposes the row is a source and this one is a rule covering every
-    -- country the annex does not name. `reports/pages/cbam.md` has drawn that
-    -- line since it was written — the fallback "must not become the cheapest
-    -- source of anything" — and this comment asserted it for a year while the
-    -- window did not implement it.
-    --
-    -- Filtering the window moves no number in the warehouse, and that is not the
-    -- argument against it. The fallback is below the cheapest listed source for
-    -- none of the 260 goods, and for 48 of them it cannot be: the resolution
-    -- rule copies the fallback row onto every listed country the annex prints
-    -- "-" for, so those goods carry a guaranteed tie and strict undercutting is
-    -- unreachable by construction. The other 212 are safe only by the shape of
-    -- this month's annex — the fallback is dearer than 87.5% of listed sources
-    -- at the median good and the narrowest margin is 72% — which is a fact
-    -- about the regulation and not about this model.
-    --
-    -- Nulling the fallback's own figure is what makes the rule observable: it is
-    -- the only half of this that changes data, 260 cells of it, so the policy
-    -- can be read out of the warehouse instead of out of a comment. Nothing is
-    -- lost with it: the fallback's penalty against listed countries is one
-    -- subtraction away in `certificates_2026_t_co2e_per_t`, and the Evidence
-    -- page already computes a better version of it against the median rather
-    -- than the minimum.
+    -- How much dearer than the cheapest listed source of the same good — the
+    -- procurement question. The fallback table neither sets that baseline nor
+    -- gets a figure: it is a rule covering every unlisted country, not a source.
+    -- Excluding it from the baseline changes no number with today's annex (it is
+    -- never below the cheapest listed source), so the null on its own row is what
+    -- makes the rule visible in the data; a unit test holds the exclusion.
     case
         when not p.is_fallback_table
             then
@@ -203,9 +129,7 @@ select
     end as excess_over_cleanest_source_t_co2e_per_t,
     grid.grid_factor_year,
     grid.grid_factor_t_co2_per_mwh,
-    -- Lineage, constant per row and deliberately so — this table ships as a
-    -- standalone Parquet in the data release, and a euro figure detached from the
-    -- instrument that sets it is worse than no figure.
+    -- Lineage on every row: the table ships as a standalone Parquet file.
     'Implementing Regulation (EU) 2025/2621, Annex I, '
     || 'as corrected by (EU) 2026/1740' as source_instrument,
     'location-based, administrative default' as factor_basis
