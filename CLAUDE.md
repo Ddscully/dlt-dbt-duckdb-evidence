@@ -18,9 +18,8 @@ Starting a *different* project on this shape is
 what has to be rewritten, and the decisions that are expensive to change later.
 The rest of this file is about *this* warehouse.
 
-**The README is the tour; the reference prose sits in `docs/`.** It was one
-1,200-line file until 2026-08-10 and is now split by topic:
-[`WAREHOUSE.md`](docs/WAREHOUSE.md) (sources, grains, schemas, the lake),
+**The README is the tour; the reference prose sits in `docs/`, one file per
+topic:** [`WAREHOUSE.md`](docs/WAREHOUSE.md) (sources, grains, schemas, the lake),
 [`ORCHESTRATION.md`](docs/ORCHESTRATION.md) (the asset graph and its three jobs),
 [`DATA_QUALITY.md`](docs/DATA_QUALITY.md) (tests, contracts, groups, exposures,
 versions), [`PUBLISHED_DATA.md`](docs/PUBLISHED_DATA.md) (the release and how to
@@ -29,71 +28,45 @@ column and what the release does to it),
 [`DASHBOARD.md`](docs/DASHBOARD.md) (the eleven Evidence pages and the deploy)
 and [`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). Those files carry the
 *explanation*; this one carries what it cost to learn, and the two should not
-start duplicating each other. A change to how a layer works usually needs an edit
-in `docs/` **and** here.
+duplicate each other. A change to how a layer works usually needs an edit in
+`docs/` **and** here.
 
-[`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) (2026-09-02) is the one
-file in `docs/` that mostly describes **something the repo has not built** — an
-always-on deployment and publish-and-swap around the single-writer lock. Its §2
-stopped being one of those on 2026-09-05, when `just serve` became a recipe; the
-unit file and §4's swap asset have not. Its first paragraph is what says which is
-which, and it is the only thing stopping a reader typing a recipe that does not
-exist: `tests/test_course.py` checks backticked paths and `just` recipes in the
-*course* and the *skills*, never in `docs/`, so a doc proposing unbuilt tooling
-fails no guard.
+- **[`PRACTICES.md`](docs/PRACTICES.md) is the README's main entry point** — an
+  index over the topics: each practice, the failure it prevents, the number that
+  measures it, and where in the code it happens. It restates figures from five
+  other files, so a claim added there is a claim to keep in step;
+  `tests/test_documented_counts.py` covers its test, mart and additivity counts,
+  and nothing covers the rest.
+- **[`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) mostly describes
+  what the repo has not built** — an always-on deployment and publish-and-swap
+  around the single-writer lock. Its §2 exists as `just serve`; the unit file and
+  §4's swap asset do not. Its first paragraph says which is which, and nothing
+  else does: `tests/test_course.py` checks cited paths and recipes in the course
+  and the skills, never in `docs/`.
 
-**Building §2's recipe found two defects in it, and both were the failure the
-document is about** — a service that looks fine and is not. `trap 'kill 0' EXIT`
-takes the recipe's own shell down with the children, so it dies *by SIGTERM*,
-which `man systemd.service` (259) lists as successful termination alongside exit
-0: the `Restart=on-failure` four paragraphs below it would never have fired. A
-bare `wait` returns only once *every* child has exited, so a dead webserver
-leaves the recipe running and the unit healthy. Neither is visible by reading,
-and both needed twelve processes and five ways of killing them to see. **A design
-block nobody has executed is prose** — the measure-it standard does not apply
-itself to a code block just because it is written in the right language.
+Three lessons from building `just serve` apply well beyond it:
 
-**Then a review found a third, which the implementation had introduced rather
-than inherited, and it is a repo-wide fact rather than a `serve` one.** **`uv
-run` is a mutating command wearing an executing command's clothes**: it *syncs*
-the venv before it runs anything, and `[tool.uv] default-groups` is deliberately
-unset here, so a bare `uv run` resolves to `dev` alone and uninstalls 46
-packages — `dagster`, `dagster-webserver`, `grpcio`. Sequentially that is
-invisible, because the next `--group orchestration` recipe re-syncs; `just serve`
-is the first recipe to run three `uv run`s *at once*, and the file server was
-missing the group, so which sync landed last was a race. The running webserver
-and daemon survive on imports they already hold and everything they fork later
-dies — ports up, nothing materialising, `Restart=on-failure` never firing. **The
-lesson generalises past this recipe**: any recipe without the group (`just
-report`, `just test`, `just sql`) strips the venv under a running service, which
-is why `docs/RUNNING_AS_A_SERVICE.md` §10 says to stop it first. Setting
-`default-groups = ["dev", "orchestration"]` would close it globally and is
-deliberately *not* done — the narrow default is what caught pyarrow being
-undeclared, and the note on that key says so.
-
-**Writing the document corrected a skill, which is the other part worth
-carrying.**
-`querying-the-warehouse` said `just sql` "can sit alongside a build" because it
-opens read-only. Measured on the pinned DuckDB 1.5.5, across processes and in
-both directions, that is false: the rule is **one writer XOR many readers**, so a
-read-only connection fails while a build holds the file and a build fails while
-anyone is reading it. `read_only=True` buys compatibility with other *readers*,
-never with a build — the one read that genuinely works mid-build is
-`lake.lakehouse.read_only_connection()`, which opens the catalog and never the
-warehouse. The measured table lives in that skill; the second finding, that
-Evidence's `filename` can be redirected by `EVIDENCE_SOURCE__warehouse__filename`
-but is `path.join`ed onto the source directory so an absolute path is silently
-relocated, is in `building-evidence-reports`. Both are skill knowledge rather
-than a new section here.
-
-**[`PRACTICES.md`](docs/PRACTICES.md) is the odd one out and is the README's main
-entry point** (2026-09-01): not a topic but an *index over* the topics — each
-practice this repo demonstrates, the failure it prevents, the number that
-measures it, and a link to where in the code it happens. It is deliberately thin
-on argument, because the argument is here. **The risk it carries is the one the
-docs split already names**: it restates figures that live in five other files, so
-a claim added to it is a claim to keep in step. `tests/test_documented_counts.py`
-covers the test, mart and additivity counts in it; nothing covers the rest.
+- **A design block nobody has executed is prose.** §2's recipe carried two
+  defects, both the failure that document is about — a service that looks fine
+  and is not. `trap 'kill 0' EXIT` kills the recipe's own shell by SIGTERM, which
+  systemd counts as a clean exit, so `Restart=on-failure` never fires; a bare
+  `wait` returns only once *every* child has exited, so a dead webserver leaves
+  the unit healthy. Neither was visible by reading. The doc's "Stopping it"
+  section has the measurements.
+- **The DuckDB lock is one writer XOR many readers**, across processes, on the
+  pinned 1.5.5: a read-only connection fails while a build holds the file, and a
+  build fails while anyone is reading it. The one read that works mid-build is
+  `lake.lakehouse.read_only_connection()`, which opens the catalog and never the
+  warehouse. The measured table is in `querying-the-warehouse`.
+- **`uv sync` strips the venv; `uv run` does not.** `[tool.uv] default-groups` is
+  deliberately unset, so a bare `uv sync` installs `dev` alone and removes the
+  `orchestration` group — 46 packages including `dagster` and `grpcio`, per
+  `uv sync --dry-run` — from under any running service. `uv run` only adds what
+  its own groups need (measured 2026-09-11 on uv 0.12.12: a bare `uv run` left
+  Dagster installed). This file briefly said the opposite, citing that same dry
+  run: **a measurement of one command is not evidence about another.** Widening
+  `default-groups` would close the `uv sync` hazard and is deliberately not done;
+  the note on that key in `pyproject.toml` says why.
 
 ## The layers, and what each directory is for
 
@@ -111,45 +84,28 @@ scripts/    genuinely one-off: seed transcription, fixture recording, a
 src/modern_data_stack/   the domain-neutral mechanisms every layer calls
 ```
 
-Two of those moved on 2026-09-01 and the reasons are worth keeping.
-
-- **`ingest/` is six source modules plus a coordination layer**, where it was one
-  1,540-line namespace holding 8 resources, 45 module constants, 5 URL builders,
-  3 watermark functions, the rate limiter and `main()`. Measured by *statements*
-  no function was oversized (the largest is 24), which is why an earlier review
-  filed the split as a decoy — it was measuring complexity, and the defect was
-  cohesion. The dependency closure partitioned almost perfectly: 26 names
-  exclusive to weather, 11 to the World Bank, 10 each to the ECB and retail, and
-  **only five shared**.
-  - **It made one real dependency visible.** `weather_locations` reads capital
-    coordinates from the World Bank's country endpoint, so
-    `ingest/sources/weather.py` now says `from ingest.sources import worldbank`
-    where the flat file made it look like a local helper.
-  - **The four coordination tuples deliberately did *not* become per-source
-    metadata**, which is the half of the finding that was wrong.
-    `PARTITIONED_RESOURCES` carries a comment arguing the rule across all four
-    candidates *comparatively* — "`ecb_fx_rates` merges for the same reason WDI
-    does and is deliberately not partitioned" cannot be read if the two facts
-    live in different files. Deriving the tuples would have filed a comparison
-    in six places.
+- **`ingest/` is six source modules plus a coordination layer.** It was split for
+  cohesion, not size: no function was oversized, but the names partitioned almost
+  perfectly by publisher, with only five shared.
+  - The split made one real dependency visible: `weather_locations` reads capital
+    coordinates from the World Bank, so `ingest/sources/weather.py` imports
+    `worldbank`.
+  - **The coordination tuples stay together in `ingest/pipeline.py`** rather than
+    becoming per-source metadata, because the comment on `PARTITIONED_RESOURCES`
+    argues the rule *comparatively* ("`ecb_fx_rates` merges but is not
+    partitioned: its whole series is one request"), which cannot be read if the
+    facts live in different files.
   - **Shared helpers are reached as `http.get_json(...)`, never imported by
-    name.** `tests/test_ingest.py` monkeypatches that function in ten places via
-    a *string literal* (`setattr(http, "get_json", …)`), which no reference
-    rewrite can see. Binding the name into each source would leave those patches
-    pointing at something nothing looks up — green tests against the live fetch
-    path. The same trap is why the split refused a re-export facade in
-    `ingest/pipeline.py`: without one the stale patches raise `AttributeError`,
-    which is how they were found.
-- **`publish/` exists because `orchestration/assets.py` imported the top of its
-  own dependency graph out of `scripts/`.** `export_warehouse.py` is 853 lines
-  and *is* the publication boundary — the personal-data policy, the storage
-  ceiling, attribution — in a directory whose name said "helper". The three
-  load-bearing modules moved; the three genuinely one-off ones stayed.
-  - **It also made `pages.yml`'s allowlist accurate.** `scripts/**` was a
-    trigger path only because the directory was mixed; it is now on the
-    not-an-input side, and `publish/**` is the trigger. The guard in
-    `tests/test_workflows.py` caught the move and made the classification a
-    decision rather than an oversight.
+    name.** `tests/test_ingest.py` monkeypatches them through string literals
+    (`setattr(http, "get_json", …)`); a name bound into each source would leave
+    those patches pointing at nothing — green tests against the live fetch path.
+    There is no re-export facade either, so a stale patch raises
+    `AttributeError`.
+- **`publish/` is the boundary outward** — the personal-data policy, the storage
+  ceiling, attribution. It was carved out of `scripts/` so that
+  `orchestration/assets.py` stopped importing the top of its own graph from a
+  directory named for helpers, and `pages.yml` triggers on `publish/**` rather
+  than `scripts/**`.
 
 ## The package (`src/modern_data_stack/`)
 
@@ -158,38 +114,27 @@ The domain-neutral mechanisms live here — `paths`, `fixtures`, `ducklake`,
 arguments. The project modules that call them (`ingest/fixtures.py`,
 `lake/lakehouse.py`, `transform/pipeline_status.py`, `publish/export_warehouse.py`,
 `publish/restore_history.py`) hold this project's constants and stay the entry
-points, so `python -m lake.lakehouse`, the justfile recipes and the asset keys are
-all unchanged.
+points.
 
 - **`modern_data_stack.paths` is the single answer to "where is the project".**
-  It used to be `REPO_ROOT` in `ingest/pipeline.py`, defined as the parent of
-  `ingest/` and imported from there by the lake, the observability tables, the
-  exporter and the report builder — so every layer's sense of where it was
-  depended on where the *ingestion* layer sat. Resolution is now `PROJECT_ROOT`,
-  then the package's own grandparent when it looks like a project, then a
-  marker search up from the cwd. The cwd comes last on purpose: the Dagster
+  Resolution is `PROJECT_ROOT`, then the package's own grandparent when it looks
+  like a project, then a marker search up from the cwd — last, because the Dagster
   daemon and the CLI don't necessarily run from the project directory.
-  **Exhausting all three raises**, and a cwd fallback must not be added back: it
-  would resolve the warehouse to `./data/warehouse.duckdb`, which DuckDB then
-  *creates*, so a non-editable install started outside the tree runs green
-  against an empty database with nothing to read. `tests/test_paths.py` pins it.
+  **Exhausting all three raises**, and a cwd fallback must not be added: it would
+  resolve the warehouse to `./data/warehouse.duckdb`, which DuckDB then
+  *creates*, so an install started outside the tree runs green against an empty
+  database. `tests/test_paths.py` pins it.
 - **Config reaches a package module as a parameter, never as a constant.**
-  Nothing under `src/` knows what a country is, and that is the whole of the
-  split — a hardcoded table name there undoes it.
-- **A general operation belongs in the general module, and placement is the
-  problem even when the duplication is small.** `db.write_frames` — register a
-  Polars frame, `create or replace`, unregister — lived in `observability` as
-  `write_status` because that is where it was first needed, so the two Polars
-  transforms hand-rolled their own copy rather than import a module about
-  dbt/dlt metadata to write a carbon metric. Both copies omitted the
-  `unregister` the original does. Its `schema` parameter deliberately has **no
-  default**: all three callers write `analytics`, which is exactly what makes a
-  default invisible to the fourth caller that means something else, and
-  `create or replace` does not ask twice.
-
-- **`RawSchemaDltTranslator` stays in `orchestration/assets.py`** — twenty lines
-  around two of that module's constants, and moving it would put Dagster (an
-  optional dependency group) behind a package import.
+  Nothing under `src/` knows what a country is; a hardcoded table name there
+  undoes the split.
+- **A general operation belongs in the general module, even when the duplication
+  is small.** `db.write_frames` (register a Polars frame, `create or replace`,
+  unregister) first lived in `observability`, so both Polars transforms
+  hand-rolled a copy — and both omitted the `unregister`. Its `schema` parameter
+  has **no default**: every caller writes `analytics`, which is exactly what
+  would make a default invisible to the caller that means something else.
+- **`RawSchemaDltTranslator` stays in `orchestration/assets.py`**: moving it would
+  put Dagster, an optional dependency group, behind a package import.
 
 ## Commands
 
@@ -198,11 +143,12 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | Command | What it does |
 |---------|--------------|
 | `just setup` | `uv sync --group dev --group orchestration`, then `install ducklake` — the extension is a binary from extensions.duckdb.org that no lockfile can name, so it is fetched rather than pinned (DuckDB asks for its own build, so it matches `uv.lock` by construction) |
-| `just ingest` | run the dlt pipeline → `raw` schema in DuckDB |
+| `just ingest` | run the dlt pipeline → `raw` in the DuckLake catalog |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
 | `just dbt-build` | `dbt deps` then `dbt build` (33 models, 2 snapshots, 8 seeds + 482 data tests + 36 unit tests) |
+| `just dbt-unit-test` | the dbt unit tests alone — the inner loop for model logic |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
 | `just dbt-docs-serve` | the same, then serve it on :8080 |
@@ -219,8 +165,10 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just backfill-weather 2012 2026` | deepen the capital-city weather archive one year at a time — paced against Open-Meteo's budget, so a decade is about an hour and fifteen years is the most one run can hold |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
 | `just serve` | run the graph and the dashboard as one always-on service — webserver, daemon and a static file server, no container (`docs/RUNNING_AS_A_SERVICE.md`) |
-| `just export-data` | package `data/export/` — the DuckDB copy + Parquet + checksums that `release-data.yml` publishes |
-| `just restore-history prev/warehouse.duckdb` | copy the unreproducible tables (`history`, `raw.om_weather_daily`) out of a published release so the build appends to them — refuses if dlt has local state |
+| `just export-data` | package `data/export/` — the DuckDB copy, Parquet, the lakehouse tarball and checksums that `release-data.yml` publishes |
+| `just restore-history prev/warehouse.duckdb` | carry a published release's unreproducible state into this build — `history`, `analytics.pipeline_runs`, and the lakehouse tarball beside the file — refuses if dlt has local state |
+| `just bus-matrix` | regenerate the bus matrix block in `docs/WAREHOUSE.md` from the manifest |
+| `just disclosure-risk` | reprint the re-identification table from the warehouse |
 | `just test` | `pytest` — mocked-payload unit tests, no network |
 | `just coverage` | the same with line + branch coverage; reports, gates nothing |
 | `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
@@ -231,165 +179,94 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just sql` | open the warehouse in the DuckDB CLI with the lakehouse attached, read-only (`just sql write` to write) |
 | `just clean` | delete the gitignored build output (`deep` also drops `reports/node_modules`) |
 
-Always run tools through `uv run` so they use the project venv. dbt commands
-must run from the `dbt/` directory (that's where `profiles.yml` lives).
+Always run tools through `uv run` so they use the project venv, with
+`--group orchestration` for anything that imports Dagster. dbt commands must run
+from the `dbt/` directory (that's where `profiles.yml` lives).
 
 ## Style guide
 
 SQL and model conventions live in [`docs/STYLE_GUIDE.md`](docs/STYLE_GUIDE.md) —
-naming, grain, import CTEs, column ordering, and where this project deliberately
-departs from [dbt Labs' style guide](https://docs.getdbt.com/best-practices/how-we-style/0-how-we-style-our-dbt-projects).
-It carries **two** deviation tables now: the formatting one, and a structural one
-against [how dbt Labs structure a staging layer](https://docs.getdbt.com/best-practices/how-we-structure/2-staging),
-whose five rules this project breaks on all five counts — joins, aggregations,
-one model per source table, one source per system, and the
-`stg_[source]__[entity]s` name. Each departure was already reasoned about
-somewhere in the tree (the `protected` overrides on `stg_country` are the same
-decision seen from the access side) and none of them was written down as a
-departure, which is what makes a deliberate choice read as an oversight. Writing
-the table also found the formatting one had gone stale: it asserted staging
-models "take no alias at all", and four of the nine do.
-The formatting half of it is enforced by [`.sqlfluff`](.sqlfluff); run
-`just lint` (pre-commit runs the same check — literally: the hook is a `local`
-one whose entry is `just lint`).
+naming, grain, import CTEs, column ordering — with two tables of deliberate
+departures: from [dbt Labs' style guide](https://docs.getdbt.com/best-practices/how-we-style/0-how-we-style-our-dbt-projects),
+and from [how dbt Labs structure a staging layer](https://docs.getdbt.com/best-practices/how-we-structure/2-staging),
+whose five rules this project breaks on all five counts. A deliberate choice not
+written down as a departure reads as an oversight. The formatting half is
+enforced by [`.sqlfluff`](.sqlfluff) through `just lint`, which is also the
+pre-commit hook's entry.
 
-- **sqlfluff is pinned exactly** (`sqlfluff==4.3.0` in `pyproject.toml`) and lives
-  in exactly one place. Don't restore the upstream `sqlfluff/sqlfluff` pre-commit
-  hook: it installs its own copy, which is how the repo ended up with 3.3.0
-  rejecting an `order by` inside a window clause that the venv's 4.2.2 accepted —
-  `just lint` passed and the commit hook failed on the same file. It also can't
-  run from `dbt/`, so the dbt templater resolves `profiles.yml`'s
-  `../data/warehouse.duckdb` one directory too high and dies before linting.
-- **Bump the two sqlfluff lines together, or the resolution fails loudly.**
-  `sqlfluff-templater-dbt` requires `sqlfluff==<its own version>` — a stable
-  upstream property, checked across 3.3.0, 4.0.0, 4.1.0, 4.2.0, 4.2.2 and
-  4.3.0 — so the `sqlfluff==` line cannot independently decide anything. Keep it
-  anyway: `just lint` invokes `sqlfluff` directly, so it is an honest *direct*
-  dependency. This is the one failure mode here that is loud rather than green.
-- CI lints via the same venv, so it agrees on rules, and over the same paths
-  (`models snapshots`) — a narrower set there would mean CI passing SQL a
-  contributor's commit hook rejects. **`ci.yml` runs `just lint` rather than
-  `sqlfluff` directly**, so those paths are stated once instead of in the
-  workflow and the recipe both.
-- **The `just lint` hook means CI has to install `just`.** `ci.yml` runs
-  `pre-commit run --all-files`, and a `local` hook whose entry is a recipe fails
-  with "Executable `just` not found" on a runner that hasn't got it — which is how
-  the hook shipped green locally and red on the first push (`uv tool install
-  rust-just` + `$GITHUB_PATH` is the fix). Anything else moved into a `local` hook
-  inherits the same requirement. **`.github/actions/setup` does that install for
-  all four workflows now**, which is also what made routing the pipeline itself
-  through recipes free — the requirement this bullet describes had already paid
-  for the tool.
+- **sqlfluff is pinned exactly, in one place** (`sqlfluff==4.3.0` in
+  `pyproject.toml`). Don't restore the upstream `sqlfluff/sqlfluff` hook: it
+  installs its own copy, which drifted (3.3.0 there rejected a window-clause
+  `order by` the venv's 4.2.2 accepted, so `just lint` passed and the commit
+  failed), and it runs from the repo root, where the dbt templater resolves
+  `profiles.yml`'s `../data/warehouse.duckdb` one directory too high.
+- **Bump the two sqlfluff lines together.** `sqlfluff-templater-dbt` requires
+  `sqlfluff==<its own version>`, so a mismatch fails resolution — loudly, for
+  once. The `sqlfluff==` line stays because `just lint` calls `sqlfluff`
+  directly.
+- **CI lints through `just lint`**, so the linted paths are stated once, and
+  `.github/actions/setup` installs `just` for every workflow: a `local` hook whose
+  entry is a recipe fails with "Executable `just` not found" without it.
 
 The Python half is ruff, configured in `pyproject.toml` and run only through
 pre-commit (`ruff-check` with `--fix`, then `ruff-format`).
 
-- **ruff runs its own default rule set, and that set is not stable across
-  versions.** 0.9 enabled 59 rules; 0.16 enables 413 across 40 families. There is
-  deliberately no `select` — what holds the rules still is the exact `rev` in
-  `.pre-commit-config.yaml`, so `pre-commit autoupdate` is the only thing that can
-  change what is enforced. This is the mirror image of sqlfluff: ruff is *not* in
-  the `dev` group, so pre-commit's copy is the only one and can't drift.
-- **`extend-select` re-adds the 18 rules 0.16 dropped** from the defaults
-  (`E401`, `E402`, the `E7xx` comparison rules, `F403`/`F405`/`F406`, `F722`).
-  They were enforced before the widening and the tree still passes them; without
-  the list, a version bump silently stops checking star imports and `== None`.
-- **`combine-as-imports = true`, or the import blocks get shredded.** ruff's
-  default splits `from x import a, run as b` onto two statements. Four layers here
-  each export a `run()`, so `orchestration/assets.py` aliases every one of them —
-  the default turns its eight-line import block into twelve and separates
-  `run as write_lake` from its module.
-- **A comment that starts `# noqa` gets deleted, even in prose.** Explaining a
-  suppression on the line above it with `# noqa TRY004: RuntimeError, not
-  TypeError, because …` reads as an unused blanket `# noqa` to ruff, and
-  `--fix` removes the whole line without a word — the explanation vanished and
-  the remaining comment began mid-sentence. Put the rule *after* the prose
-  (`# TRY004 asks for TypeError, but …`) and keep the real directive on the code
-  line, where `# noqa: TRY004` with the colon is what actually suppresses.
-- **The hook id is `ruff-check`.** Plain `ruff` still works but is the legacy
-  alias as of 0.12.
-- **0.16 formats Python code blocks inside Markdown by default.** The hook is
-  scoped to `types_or: [python, pyi, jupyter]` so it never sees `.md` and CI is
-  unaffected — but a manual `ruff format .` will rewrite python blocks in `docs/`
-  and `README.md`. Evidence pages use `` ```sql `` blocks and are untouched.
+- **No `select`: ruff runs its own defaults**, and the exact `rev` in
+  `.pre-commit-config.yaml` is what holds them still (0.9 enabled 59 rules; 0.16
+  enables 413). ruff is not in the `dev` group, so pre-commit's copy is the only
+  one — the mirror image of sqlfluff. `extend-select` re-adds the 18 rules 0.16
+  dropped, so a bump cannot silently stop checking star imports and `== None`.
+- **`combine-as-imports = true`**, or ruff splits `from x import a, run as b` and
+  shreds `orchestration/assets.py`'s imports: four layers each export a `run()`,
+  and it aliases every one.
+- **`--fix` deletes a comment that starts `# noqa`, even when it is prose.** Put
+  the rule after the explanation (`# TRY004 asks for TypeError, but …`) and keep
+  the real directive, with its colon, on the code line.
+- **0.16 formats Python blocks inside Markdown.** The hook is scoped to
+  `types_or: [python, pyi, jupyter]`; a manual `ruff format .` is not, and will
+  rewrite blocks in `docs/` and `README.md`.
 
-Types are ty (`just typecheck`), added 2026-08-24. It is **not** in pre-commit and
-**not** in any workflow, which is the whole shape of the decision.
+Types are ty (`just typecheck`). It is **not** in pre-commit or any workflow,
+which is the whole shape of the decision.
 
-- **It was chosen over pyright on the install line, not the feature list.**
-  Measured head to head at introduction: ty 38 diagnostics in 0.32s against
-  pyright's 45 errors in 4.83s — close enough that neither wins on output. What
-  decided it is that ty installs with `uv add --group dev` and lands in
-  `uv.lock`, while pyright wants `npm install -g pyright`, an unpinned global
-  Node binary no lockfile here can see. That is the sqlfluff 3.3.0/4.2.2 shape
-  exactly, and this repo has already paid for it once.
-- **pyright could not find `.venv` unaided and did not say so.** It reported 54
-  `reportMissingImports` until pointed at `--pythonpath .venv/bin/python`. A type
-  checker that cannot see the environment doesn't fail — it buries the real
-  diagnostics under phantom ones. `[tool.ty.environment].python` is set
-  explicitly for that reason even though ty found it on its own.
-- **It is pre-1.0 (0.0.74) and that governs where it may run.** Diagnostics move
-  between patch releases, so a `>=` bound is right *because* nothing gates on it.
-  Putting it in pre-commit or a workflow means pinning it exactly first — the
-  sqlfluff treatment, for the sqlfluff reason.
-- **Suppressions are inline `# ty: ignore[rule]`, never a rules list.**
-  `[tool.ty]` deliberately overrides nothing. The one suppression in the tree is
-  `scripts/build_cbam_seeds.py`'s `openpyxl` import, which is genuinely optional
-  and already carries a `ModuleNotFoundError` branch saying so — the ignore sits
-  on that line, next to the reason.
-- **The first run found no bug, and the breakdown was the useful part.** 23 of
-  the 38 it opened with were one idiom: DuckDB types `fetchone()` as
-  `Optional[tuple]`, and this repo wrote `.fetchone()[0]` in 40 places against
-  ungrouped aggregates that return exactly one row by construction. That ratio
-  was the actual problem — 23 false alarms in a 36-line report is how a checker
-  stops being read, and the thirteenth real one then lands in noise nobody
-  scans. `modern_data_stack.db` states the invariant once instead; the count is
-  **38 → 11**.
-- **Stating it bought a real check and found a real annotation defect.**
-  `.fetchone()[0]` against a query that unexpectedly returns nothing raises
-  `TypeError: 'NoneType' object is not subscriptable` from whichever line
-  touched it; `db.scalar` raises naming the query. And
-  `observability._period_span` was declared `-> tuple[int, int]` while the
-  docstring directly below said "or (None, None) if it has none" — ty pointed at
-  the line between them. A checker's value here is regressions and navigation,
-  not a backlog.
-- **The tree is clean, and getting there took two helpers and two
-  suppressions.** The second helper is `_get_json_object` in
-  `ingest/pipeline.py`: `_get_json` returns `dict | list` and that union is
-  *honest*, because the World Bank really does send `[metadata, [records…]]` and
-  both World Bank callers already narrow it by hand — an error object served
-  with a 200 is a thing those APIs do. Eurostat's JSON-stat and the ECB's
-  `{"rates": …}` are objects, so they say so once instead of at every key. The
-  three `columns=` constants are annotated `dict[str, TColumnSchema]`, which is
-  dlt's own type for what they already were. The suppressions are
-  `SupportsPipeline.deactivate` (declared on `Pipeline`, not on the protocol
-  `PipelineContext.pipeline()` is typed to return) and the `openpyxl` import.
-- **Zero is the point, not a vanity metric.** A checker nobody runs is worth
-  nothing, and one that always prints the same 11 lines is a checker nobody
-  runs. It only earns its place in the inner loop if a non-empty report means
-  something changed.
+- **It was chosen over pyright on the install line.** Output was comparable at
+  introduction (ty 38 diagnostics in 0.32s, pyright 45 in 4.83s); ty lands in
+  `uv.lock` through the `dev` group, while pyright is an unpinned global npm
+  binary — the sqlfluff drift again. pyright also could not find `.venv` unaided
+  and said nothing, burying real diagnostics under phantom missing imports, which
+  is why `[tool.ty.environment].python` is explicit.
+- **It is pre-1.0, so `>=` and nothing gates on it.** Diagnostics move between
+  patch releases; pin it exactly before putting it in pre-commit or a workflow.
+- **Suppressions are inline `# ty: ignore[rule]` beside their reason**, never a
+  rules list. There are three: the optional `openpyxl` import in each seed script,
+  and `SupportsPipeline.deactivate` in `tests/conftest.py` (declared on
+  `Pipeline`, not on the protocol `PipelineContext.pipeline()` returns).
+- **The tree is clean, and zero is the point**: a checker that always prints the
+  same lines is a checker nobody reads. Getting there showed what noise costs —
+  23 of the first 38 diagnostics were `.fetchone()[0]` against aggregates that
+  return one row by construction. `modern_data_stack.db` states that invariant
+  once (`db.scalar` raises naming the query), and `ingest/http.py`'s
+  `get_json_object` narrows `dict | list` once for the sources that only ever
+  receive objects.
 
 ## Dependency and action versions
 
-`.github/dependabot.yml` watches three ecosystems — `github-actions` (`/`), `uv`
-(`/`) and `npm` (`/reports`) — monthly, each grouped to a single PR. **What pins
-what, and why, is the `dependency-versions` skill**: it exists because green CI
-proves nothing about versions, and every bullet in it is a way that has already
-cost this repo something.
+`.github/dependabot.yml` watches three ecosystems — `github-actions` (the
+workflows and the composite actions), `uv` and `npm` (`/reports`) — monthly, each
+grouped to one PR. **What pins what, and why, is the `dependency-versions`
+skill.** Four things not to need it for:
 
-Four things a session should not have to load a skill to know:
-
-- **Python is 3.13, set in one place: `.python-version`.** No workflow passes a
-  `python-version` to `setup-uv`, so that file is what CI, the release job and a
-  contributor's venv all read.
-- **`dagster<3.15` is the only hard upper bound in the tree.** dbt 1.12 and
-  Python 3.14 are both blocked upstream rather than here.
+- **Python is 3.13, set in `.python-version` alone.** No workflow passes a
+  `python-version`, so that file is what CI, the release and a venv all read.
+- **No upper bound is written on a dependency in `pyproject.toml`**; the ceilings
+  come from upstream. dagster-dbt caps `dbt-core<1.12` and Python `<3.14`, and
+  dagster caps Python `<3.15`.
 - **Three versions can only age deliberately** — `.python-version`, the sqlfluff
-  pair and ruff — because no watched ecosystem covers any of them. Somebody has
-  to remember instead, and the skill is that somebody.
-- **The `uv` entry is `versioning-strategy: lockfile-only`**, so the bounds in
-  `pyproject.toml` stay minimum-supported versions rather than pins. `npm` is
-  deliberately left on the default, because there the major *is* the pin.
+  pair and ruff — because no watched ecosystem covers them.
+- **The `uv` entry is `versioning-strategy: lockfile-only`**, so `pyproject.toml`'s
+  bounds stay minimum-supported versions. `npm` stays on the default, because
+  there the major *is* the pin.
+
 ## Agent skills
 
 Vendor skills for each layer are declared in [`.claude/settings.json`](.claude/settings.json),
@@ -400,114 +277,57 @@ knowledge.
 | Plugin | Covers |
 |--------|--------|
 | `dbt@dbt-agent-marketplace` | [dbt Labs' skills](https://github.com/dbt-labs/dbt-agent-skills) — models, tests, docs, debugging |
-| `skill-creator@claude-plugins-official` | authoring and evaluating the project skills below — the one entry here that is about the repo's own tooling rather than a layer of the stack |
-
-**Two rows left that table on 2026-09-02 and the measurement is again the whole
-reason.** `dagster-expert@dagster` and `polars@polars` had **zero Skill
-invocations across 211 transcripts** spanning 2026-08-09 to 2026-09-02 — and the
-window is not the excuse, because 9 commits touched `orchestration/` and 9
-touched `transform/` inside it. The work happened and neither was reached for.
-Both are skill-only (one `SKILL.md` each, no LSP, MCP, command, hook or agent),
-which is what makes a zero count admissible at all — the caveat that protects
-`ty-lsp`, whose surface never appears as a `Skill` call.
-
-- **`dagster-expert` is the clear one, and it is the `duckdb-skills` argument
-  again.** Its own description sells the **`dg` CLI**, which this project
-  deliberately does not install — `dg` is in neither `pyproject.toml` nor
-  `uv.lock` — and `dagster-graph-and-jobs` covers Dagster *in this repo*, three
-  jobs and two partitioned assets and all. A vendor skill about tooling the
-  project has costed and refused is ~140 tokens of description arguing for a
-  different project.
-- **`polars` is the weaker call and is recorded as weak.** Nothing replaces it:
-  there is no project skill for the two Polars transforms, so this is the first
-  entry to reconsider if `transform/` ever grows into a layer. What decided it
-  is that the two transforms *were* edited in the window, nine times, without it.
-- **Both marketplaces stay registered**, for the reason `astral-sh` does:
-  removing a `github` marketplace *uninstalls* its plugins and the project
-  declaration does not silently bring it back. Re-enabling either is one line.
-- **`false` is not how a plugin is retired here.** The working tree carried
-  `dagster-expert@dagster: false` for a while and nothing noticed, because
-  `tests/test_plugin_settings.py` read `list(enabledPlugins)` — the *keys* — so a
-  disabled plugin was indistinguishable from an enabled one while this table
-  still described both as live. The guard reads values now and a `false` entry is
-  its own failure.
+| `skill-creator@claude-plugins-official` | authoring and evaluating the project skills below — the one entry about the repo's own tooling rather than a layer of the stack |
 
 Not enabled, but worth knowing about: `dbt-migration@dbt-agent-marketplace`
 (one-off dbt Core → Fusion work), `dignified-python@dagster`, and dltHub's
 [AI Workbench](https://github.com/dlt-hub/dlthub-ai-workbench)
 (`/plugin marketplace add dlt-hub/dlthub-ai-workbench`) — the workbench assumes
-its own scaffolding, so prefer the `adding-a-data-source` skill below for the
-pipeline that already exists here.
+its own scaffolding, so prefer the `adding-a-data-source` skill for the pipeline
+that already exists here.
 
-`.claude/marketplace/` is a repo-local marketplace, declared in `settings.json`
-beside the six vendor ones. It holds `ty-lsp`, which runs the dev group's ty as
-a language server — there is no published ty plugin, and an LSP server is a
-ten-line `.lsp.json`. Its command is `uv run ty server` rather than a bare `ty`
-for the pinning reason above, which means it has to be launched with the project
-root as its working directory. A directory marketplace resolves from a
-**relative** path (`./.claude/marketplace`) and is read live out of the repo
-rather than copied into the plugin cache, so editing the plugin needs no
-reinstall. `claude plugin marketplace add` writes an *absolute* path into user
-settings, so declare it in `.claude/settings.json` by hand instead.
+**A plugin keeps its place by being used, and use is measured** — by counting
+`Skill` invocations across the session transcripts, and checking in `git log`
+that the plugin's layer was actually being worked on in the window. Four were
+retired on a count of zero: `duckdb-skills` and `astral` (187 transcripts, to
+2026-08-27), `dagster-expert` and `polars` (211 transcripts, to 2026-09-02). A
+zero count is only evidence for a skill-only plugin; an LSP's use never appears as
+a `Skill` call.
 
-**The two marketplace kinds behave differently on removal, and the github one
-bites.** Removing a `directory` marketplace from user settings is safe — the
-project declaration re-registers it on the next session, because the source is
-right there in the tree. Removing a `github` one (`astral-sh`) *uninstalls its
-plugins*, and the project declaration does **not** silently bring it back: a
-re-register needs a clone, which a non-interactive session will not do. The
-cache directory survives, so the only symptom was `Total LSP servers loaded: 1`
-in the debug log and three skills quietly missing. The user-level entry for a
-github marketplace is therefore not duplication of the project one — leave it.
+- **`dagster-expert` sells the `dg` CLI**, which this project deliberately does
+  not install, and `dagster-graph-and-jobs` covers Dagster *in this repo*.
+  `duckdb-skills` was the same shape — ad-hoc file querying, S3, spatial joins —
+  against `querying-the-warehouse`. **`polars` is the weak call**: nothing
+  replaces it, so it is the first to reconsider if `transform/` grows.
+- **`astral` could not be reached at all.** It and `ty-lsp` both declare a ty
+  language server for `.py`/`.pyi`, the first loaded wins, and `ty-lsp` has to:
+  Astral's runs `uvx ty@latest`, the newest ty on every launch, against a
+  `just typecheck` that runs `uv.lock`'s — the editor would show findings the
+  recipe cannot reproduce. With its server shadowed and its skills unused,
+  `astral` was two `[WARN]` lines in the debug log.
+  `tests/test_plugin_settings.py` asserts it stays off, with the ordering rule in
+  the failure message for whoever re-enables it. Check by hand with
+  `claude --debug -p ok` then `grep 'already handled by' ~/.claude/debug/latest`
+  — no output is the passing state.
+- **Retire a plugin by deleting its entry, never with `false`.** A `false` entry
+  reads as a declaration and does nothing; the plugin test fails on one.
+- **A retired plugin's `github` marketplace stays registered** (`astral-sh`,
+  `dagster`, `polars`) unless the decision is final (`duckdb-skills`). Removing a
+  github marketplace *uninstalls* its plugins, and the project declaration does
+  not bring them back, because re-registering needs a clone that a
+  non-interactive session will not make; the cache survives, so the only symptom
+  is plugins quietly missing. A user-level entry for a github marketplace is not a
+  duplicate of the project one — leave it.
 
-**That symptom has since inverted, which is worth knowing before reading an old
-debug log.** `Total LSP servers loaded: 1` used to mean the `astral-sh`
-marketplace had gone missing; it is the *correct* state now that `astral` is
-deliberately not enabled, and it is `2` that would mean something changed. The
-line to grep is `already handled by`, not the count — no output is passing.
-
-**`astral@astral-sh` and `duckdb-skills@duckdb-skills` were enabled and are
-not any more, and the measurement is the whole reason.** Across 187 transcripts
-(2026-07-29 to 2026-08-27) neither was invoked once: `duckdb-skills` cost ~670
-tokens of always-loaded descriptions for nine skills about ad-hoc file querying,
-S3 and spatial joins, none of which this project does — `querying-the-warehouse`
-covers DuckDB *in this warehouse*, lock and all. `astral` is the more
-interesting one, because it was doing worse than nothing.
-
-- **It lost the `.py` claim by design, and that made it dead by
-  construction.** `astral` and `ty-lsp` both declare a `ty` language server for
-  `.py`/`.pyi`; the first loaded wins, so `ty-lsp` had to be declared above it,
-  and the loser is two `[WARN]` lines in `~/.claude/debug/latest` that nothing
-  surfaces. The ordering rule worked for as long as it was the invariant. What
-  it also did was leave `astral` with no reachable surface at all: its LSP
-  declares those two extensions and nothing else, and its three skills (ruff,
-  ty, uv) were never once invoked. A plugin whose every surface is unreachable
-  is two warnings.
-- **Which server would have won is still why `ty-lsp` is the survivor.**
-  Astral's runs `uvx ty@latest server`, the newest published ty on every launch,
-  against a `just typecheck` that runs the version in `uv.lock`. ty is 0.0.x and
-  its diagnostics move between patch releases, so letting theirs win means the
-  editor showing findings the recipe cannot reproduce — the sqlfluff 3.3.0/4.2.2
-  split in a new outfit.
-- **The `astral-sh` marketplace stays registered, and `duckdb-skills`' does
-  not.** Removing a `github` marketplace *uninstalls its plugins*, and the
-  project declaration does **not** silently bring it back: a re-register needs a
-  clone, which a non-interactive session will not do. Astral is one line from
-  being re-enabled and is left that way; duckdb-skills is a decision, so its
-  marketplace goes too.
-- **`tests/test_plugin_settings.py` carries the invariant forward as an
-  *absence*.** It used to assert `ty-lsp` sorts before `astral`; it now asserts
-  `astral` is not enabled at all, with the ordering rule in the failure message
-  for whoever re-adds it. JSON has nowhere to put a comment, which is why either
-  version has to be a test. Check by hand with `claude --debug -p ok` then
-  `grep 'already handled by' ~/.claude/debug/latest` — **no output is the
-  passing state now.**
-
-Astral's ty skill said to add an ignore comment only when the user asks for one,
-and this repo carries two with the reason written next to them (see the ty
-bullets under *Style guide*). That was a considered disagreement rather than
-drift while the skill was loaded, and it is worth keeping written down: the
-suppressions outlive the plugin that would have argued about them.
+`.claude/marketplace/` is a repo-local marketplace holding `ty-lsp`, which runs
+the dev group's ty as a language server — there is no published ty plugin, and an
+LSP server is a ten-line `.lsp.json`. Its command is `uv run ty server`, so it
+runs `uv.lock`'s ty and must be launched from the project root. A `directory`
+marketplace resolves from a **relative** path (`./.claude/marketplace`) and is
+read live from the repo, so editing it needs no reinstall, and removing it from
+user settings is safe — the project declaration re-registers it.
+`claude plugin marketplace add` writes an *absolute* path into user settings, so
+declare it in `.claude/settings.json` by hand.
 
 Project skills in `.claude/skills/` cover the seams the vendor skills can't know:
 
@@ -541,246 +361,155 @@ Project skills in `.claude/skills/` cover the seams the vendor skills can't know
 - **`dagster-graph-and-jobs`** — partitions, registration, the three jobs, and
   the `dg`/declarative-automation decisions.
 
-Eleven of the fifteen were split out of this file rather than written fresh:
-domain or task reasoning that only one session in ten needs, against a file
-loaded in full before every one. **A new section here is a question about where
-it belongs, not only about what it says.**
+Eleven of the fifteen were split out of this file: domain or task reasoning that
+one session in ten needs, against a file loaded in full before every one. **A new
+section here is a question about where it belongs, not only about what it
+says.** The file does not drift upward; it accretes in bursts behind feature
+work, so check it at the end of anything large rather than on a schedule, and
+split in a commit of its own so the before and after stay measurable with
+`git show`.
 
-Three splits so far, and the shape of them is the argument for the rule:
+`tests/test_course.py` globs every `SKILL.md`, so each path and `just` recipe a
+skill cites is checked, and it checks cross-file markdown anchors across all
+tracked markdown. **It does not scan this file's paths**, deliberately: `lake/`
+and `reports/` are both directories and Dagster asset-key prefixes, so a correct
+citation of the asset `reports/evidence_site` is indistinguishable from a dead
+path.
 
-| Date | CLAUDE.md, at that commit | Skills after | What forced it |
-|------|---------------------------|--------------|----------------|
-| 2026-08-24 | 1,805 → 1,151 | 8 | the first attempt |
-| 2026-08-27 | 2,309 → 1,460 | 11 | it grew back past its own starting point |
-| 2026-09-01 | 1,961 → 1,441 | 15 | caught before the ceiling rather than at it |
+## Warehouse schemas (`data/lakehouse/` and `data/warehouse.duckdb`)
 
-**The first two rows are working-tree measurements and `git show` does not
-reproduce them** — both splits shipped inside a commit that also added a feature
-(the course, then weather), so the committed endpoints are 1,652 → 1,206 and
-2,159 → 1,675. The third row is git-checkable because that split is its own
-commit, which is the cheap fix and the reason to keep doing it that way.
+dlt lands `raw` in the DuckLake catalog; dbt builds everything else into the one
+DuckDB file.
 
-**Growth is the number that matters, and the third split is the first one that
-did not wait for it.** The file gained 953 lines in the two days after the first
-split (476/day) and 286 in the four days after the second (72/day) — so it grew
-back six times *slower* and was still split sooner, at 1,961 rather than 2,309.
-It does not drift upward, it accretes in bursts behind feature work, which is
-why the check belongs at the end of anything large rather than on a schedule.
-`tests/test_course.py` globs `.claude/skills/*/SKILL.md` rather than listing
-them, so every path and `just` recipe a skill cites is checked whether or not
-anyone remembers the guard exists. **What it does not check is a markdown
-anchor**: `docs/WAREHOUSE.md` linked at `CLAUDE.md#cbam-exposure-…` for three
-days after that heading became a skill, green in review and dead on click. That
-is now a test too.
-
-**It does not scan this file, and the third split is what proved that matters.**
-Moving prose into a skill subjects it to a check the original never had, and two
-of the four blocks moved failed it immediately. Applying the same rule to
-`CLAUDE.md` by hand: of 51 backticked paths it cited, **four pointed at nothing**
-— and none of the four was rot, which is the reason extending the scan is not
-free. Two named things that are *deliberately* gone or absent (the deleted hive
-archive; the `explore.md` that must never exist under `reports/pages/`, because
-Evidence reserves the route), and two were **Dagster asset keys that share a
-path's shape** — `lake/parquet_archive` and `reports/evidence_site`. The second
-pair is the blocker: `reports/evidence_site` is a current, correct citation of a
-live asset, and the guard has no way to tell it from a dead file. Asset keys
-elsewhere collide with nothing (`raw/`, `analytics/`, `marts/` are not directories
-in this tree); it is only `lake/` and `reports/` that are both. The rewording is
-done in the skills; scanning this file would need that ambiguity resolved first.
-
-## Warehouse schemas (one DuckDB file: `data/warehouse.duckdb`)
-
-- `raw` — dlt landing tables: `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`,
-  `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`, `om_weather_daily`.
-  **`om_weather_daily` is the second table a rebuild cannot reproduce** — not in
-  principle, the way a snapshot isn't, but within Open-Meteo's daily allowance,
-  which is a weaker claim with the same consequence. **It is carried forward
-  like the snapshot now**, and the three guards written for the first one were
-  generalised rather than duplicated — see *Publishing* below. The
-  `weather-models` skill has the measurement that a carried raw table works at
-  all
+- `raw` (in the lakehouse) — dlt landing tables: `owid_co2`, `owid_energy`,
+  `wb_country`, `wb_wdi`, `eu_elec_prices`, `ecb_fx_rates`,
+  `retail_invoice_lines`, `om_weather_daily`. **`om_weather_daily` cannot be
+  rebuilt** within Open-Meteo's daily allowance, so each release carries it
+  forward in `lakehouse.tar.gz` (see *Publishing*)
 - `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain —
-  except `stg_fx_rates`, which is `(rate_date, currency_code)`,
-  `stg_retail_lines`, which is `(invoice, line_number)`, and
-  `stg_weather_daily`, which is `(country_iso3, weather_date)`
-- `intermediate` — dbt views, `int_*`, and the layer with the fewest models on
-  purpose: three, each earning its place by removing a specific cost rather than
-  by completing a diagram. `int_country_year_observed` (the country-years the
-  four country-stats sources report — derived twice, in `dim_country_year` and
-  `fct_emissions_energy`, until it wasn't), `int_cbam_default_factors` (Annex I's
-  fallback rule, separately true so separately testable) and
+  except `stg_fx_rates` `(rate_date, currency_code)`, `stg_retail_lines`
+  `(invoice, line_number)` and `stg_weather_daily` `(country_iso3, weather_date)`
+- `intermediate` — dbt views, `int_*`: three, each earning its place by removing
+  a specific cost. `int_country_year_observed` (the country-years the four
+  country-stats sources report, derived once instead of twice),
+  `int_cbam_default_factors` (Annex I's fallback rule, separately testable) and
   `int_retail_return_matches` (the returns-to-purchase inference). `private` and
-  uncontracted, like staging; they do not ship as Parquet
-- `marts` — dbt tables, **one folder per mart**: `country_stats/` (6),
-  `reference/` (7), `retail/` (5), `compliance/` (3). The models are:
-  `dim_country` (**the conformed country dimension** — one row per
-  `country_iso3`, 228 of them, and what every other model's country key joins
-  to), `dim_country_income_history` (**the income classification as it stood in
-  each year**, 1987 onward — published because every other `income_group` in the
-  warehouse is the *current* one stamped on every year, and 51% of the economies
-  classified in 1990 are in a different group today), `dim_country_year` (the country-year spine, that crossed with the years),
-  `fct_emissions_energy` (the wide join, built on the spine, and **the one
-  versioned model** — `fct_emissions_energy_v1` is a compatibility view live
-  until 2026-11-01),
-  `dim_grid_emission_factors` (the Scope 2 reference product),
-  `fct_co2_estimate_versions` (revision history, off the snapshot),
-  `fct_eu_electricity_prices_semiannual` (Eurostat's own half-year grain),
-  `fct_example_scope2_emissions` (the worked example — **the only fabricated
-  data in the warehouse**), `fct_cbam_exposure` (the CBAM border cost, at
-  `(sourcing country, good)` and **no year at all**), and the five with no
-  country in them at all: `dim_date` (the calendar), `dim_currency`,
-  `fct_fx_rates_published` (the ECB's fixings as published, and **the project's
-  only incremental model**), `fct_fx_rates_daily` (gap-filled) and
-  `fct_fx_rates_periods` (month / quarter / half / year) — `dim_country` sits in
-  the same group and is the exception to "no country in them". Plus the five retail
-  models, the only ones at a grain below a country: `fct_retail_order_line`
-  (`(invoice, line_number)` — the warehouse's finest grain), `dim_retail_product`,
-  `dim_retail_customer`, `fct_retail_returns` and `fct_retail_customer_cohorts`
-  (`(cohort_month, months_since_first_order)`)
-- `history` — the dbt snapshots `snap_co2_estimates` (SCD2 versions of OWID's CO2
-  numbers) and `snap_grid_emission_factors` (the same for the Scope 2 factors,
-  2015+). **The two tables here that no rebuild can reproduce** — see below
+  uncontracted, like staging; not shipped as Parquet
+- `marts` — dbt tables, one folder per dbt group:
+  - `country_stats/` — `dim_country_year` (the spine), `fct_emissions_energy`
+    (the wide join on the spine; **the one versioned model**, with
+    `fct_emissions_energy_v1` a compatibility view until 2026-11-01),
+    `fct_co2_estimate_versions` (revision history, off the snapshot),
+    `fct_eu_electricity_prices_semiannual` (Eurostat's half-year grain),
+    `fct_country_weather_year`
+  - `reference/` — `dim_country` (**the conformed country dimension**, one row
+    per `country_iso3`, 228 of them), `dim_country_income_history` (the income
+    classification **as it stood in each year** — every other `income_group` is
+    today's, stamped on every year), and five with no country in them: `dim_date`,
+    `dim_currency`, `fct_fx_rates_published` (the ECB's fixings, and **the only
+    incremental model**), `fct_fx_rates_daily` (gap-filled) and
+    `fct_fx_rates_periods` (month / quarter / half / year)
+  - `compliance/` — `dim_grid_emission_factors` (the Scope 2 reference product),
+    `fct_example_scope2_emissions` (the worked example — **the only fabricated
+    data in the warehouse**, and it ships), `fct_cbam_exposure` (the CBAM border
+    cost, at `(sourcing country, good)` with **no year at all**)
+  - `retail/` — **the only grain below a country**: `fct_retail_order_line`
+    (`(invoice, line_number)`), `dim_retail_product`, `dim_retail_customer`,
+    `fct_retail_returns`, `fct_retail_customer_cohorts`
+    (`(cohort_month, months_since_first_order)`)
+- `history` — the snapshots `snap_co2_estimates` and `snap_grid_emission_factors`:
+  **two of the three tables no rebuild can reproduce**
 - `analytics` — Polars output: `co2_intensity` and `retail_rfm`, plus
-  `pipeline_sources` / `pipeline_tables` / `pipeline_tests` / `pipeline_runs`
-  (see *Pipeline observability* below). **`pipeline_runs` is the third table a
-  rebuild cannot reproduce** and the only one of the four that accumulates —
-  it is appended per dbt invocation, and the artifact it reads holds only the
-  most recent one
+  `pipeline_sources` / `pipeline_tables` / `pipeline_tests` / `pipeline_runs`.
+  **`pipeline_runs` is the third unreproducible table**: it is appended per dbt
+  invocation, and the artifact it reads holds only the latest one
 
-**"Mart" means the subject area, not the file, and this repo used the word both
-ways until 2026-09-01.** In the BI sense a mart is the view a department works
-with — so there are **four** here, and they are `dbt/models/_groups.yml`:
-`country_stats`, `reference`, `retail`, `compliance`. `marts/` is dbt's name for
-the *layer*, and the 21 relations (20 models, one of them versioned) inside it
-are **mart models**. The docs counted models and called them marts, which is how
-a stale count of 17 survived two additions to the layer;
-`tests/test_documented_counts.py` guards the number now and the folders make the
-four visible in the tree. (Quoting the old claim in its original wording here
-failed that guard, which cannot tell a quotation from an assertion and should
-not try — the same trap as the pytest-count phrasing under *Testing*.)
+**"Mart" means the subject area, not the file.** There are four marts — the
+groups in `dbt/models/_groups.yml` — and the 21 relations (20 models, one of them
+versioned) in the `marts/` layer are **mart models**. Counting models and calling
+them marts is how a stale count once survived two additions to the layer.
+`tests/test_documented_counts.py` guards the number, and it cannot tell a
+quotation from an assertion, so never quote an old count in its old words.
 
-- **The folders are one per group, and `+group:` is set on the folder** in
-  `dbt_project.yml` rather than on each model — it was restated 18 times in files
-  whose own names said it. `+schema: marts` is inherited by all four, so the
-  relation names, the release layout and the Dagster asset keys are untouched by
-  the nesting.
-- **Consolidating the models was considered and measured against.** Three pairs
-  share a grain within a group, and every one is sparse against its partner:
-  `fct_retail_returns` is 18,286 rows against `fct_retail_order_line`'s
-  1,067,371 (1.7%), and `fct_country_weather_year` covers 41 countries against
-  `fct_emissions_energy`'s 228. Merging either would mean columns null on 98% of
-  the rows. One fact table per business *process*, not per grain.
-- **Normalising the country attributes out of the facts was considered and
-  measured against, and only half of it was done.** `dim_country` shipped
-  because five models across three groups were reading a *staging* model for
-  want of a published dimension and the release made a consumer deduplicate a
-  62,928-row spine to find 228 countries. Stripping `country_name`, `region` and
-  `income_group` back out of the five facts that carry them did **not**, and the
-  numbers are why: it saves **6.7 kB of a 1,591 kB Parquet — 0.4%** on
-  `fct_emissions_energy`, because zstd dictionary-encodes 228 repeated strings
-  to nearly nothing, and **no copy can drift** — every one is built from the
-  dimension in the same run, and all 71,000-odd rows across the six relations
-  agree with it today, measured. The cost is 8 Evidence pages, 2 source queries
-  and `transform/co2_intensity.py` (which ranks *within* `income_group`) each
-  gaining a join, plus a v3 of the one versioned model. Kimball's rule against
-  dimension attributes in a fact is a row-store storage argument; in a columnar
-  file it buys 0.4%.
-- **The near-miss is `fct_fx_rates_published`**, which `fct_fx_rates_daily` is a
-  strict superset of (`where is_published_rate` recovers it). It stays a mart
-  model because it is the project's only incremental model and the site reads it
-  directly, but it is the one relation here that is arguably an intermediate
-  concern in the presentation layer.
+- **`+group:` is set on the folder** in `dbt_project.yml`, and `+schema: marts` on
+  all four, so relation names, the release layout and the asset keys ignore the
+  nesting.
+- **Consolidating models was measured against.** Pairs that share a grain are
+  sparse against each other — `fct_retail_returns` is 18,286 rows against
+  `fct_retail_order_line`'s 1,067,371, and `fct_country_weather_year` covers 41
+  countries against 228 — so merging means columns null on nearly every row. One
+  fact table per business *process*, not per grain.
+- **Country attributes stay on the facts.** Normalising `country_name`, `region`
+  and `income_group` out to `dim_country` would save 0.4% of
+  `fct_emissions_energy`'s Parquet, because zstd dictionary-encodes 228 repeated
+  strings to nearly nothing, and no copy can drift, since every one is built from
+  the dimension in the same run. It would cost eight pages, two source queries
+  and a transform a join each, plus a v3 of the versioned model. Kimball's rule is
+  a row-store storage argument.
+- **The near-miss is `fct_fx_rates_published`**, a strict subset of
+  `fct_fx_rates_daily` (`where is_published_rate`). It stays a mart model as the
+  only incremental model and a direct site input, but is arguably an
+  intermediate concern.
 
-Grain of every *country* fact/staging model is **`(country_iso3, year)`**; joins
-are on ISO3 country code + year. The country dimension (`marts.dim_country`,
-one row per country) supplies `region` and `income_group`. Two of those models are Eurostat prices at their
-published `(country_iso3, year, half)` grain —
-`stg_eu_electricity_prices_semiannual` and the mart off it — and they are the
-exception on purpose, not a model waiting to be flattened; the `country-stats-models`
-skill has the half-over-half movement that makes the annual average a price nobody
-paid.
-
-**That sentence used to say "every model", and it stopped being true twice.**
-`fct_cbam_exposure` has no year (a regulatory schedule, not a time series) and
-the FX tables have no country. The country-year spine is the *dominant* grain
-here, not a house rule — reaching for `dim_country_year` when the thing being
-modelled isn't a country-year is how you get a fact with a fabricated dimension
-on it.
+**The country-year is the dominant grain, not a house rule.** Country facts and
+staging models are `(country_iso3, year)`, joined on ISO3 + year, with `region`
+and `income_group` from `marts.dim_country`. The exceptions are deliberate:
+Eurostat prices keep their published `(country_iso3, year, half)` grain (the
+annual average is a price nobody paid — see `country-stats-models`),
+`fct_cbam_exposure` has no year, and the FX tables have no country. Reaching for
+`dim_country_year` when the thing modelled isn't a country-year is how a fact
+gets a fabricated dimension.
 
 **The fact hangs off the spine, not off a source.** `dim_country_year` is
-`dim_country` × every year the data covers (bounds read from the sources, so both
-ends move); `fct_emissions_energy` inner-joins it to the union of country-years
-any source reports, then left-joins each source onto that. Consequences worth
-knowing:
+`dim_country` × every year the data covers (bounds read from the sources);
+`fct_emissions_energy` inner-joins it to the union of country-years any source
+reports, then left-joins each source. So:
 
-- A country-year only one source reports still reaches the mart — 11 small
-  territories have World Bank data but no OWID emissions, and Eurostat/WDI run a
-  year ahead of OWID CO2. Expect nulls in the columns the others don't cover;
-  chart queries have to filter for what they need.
-- The dimension is authoritative for *what a country is*. Codes it doesn't carry
-  can't reach the mart, which is how the World Bank's aggregates (`WLD`, `EUU`)
-  and Antarctica stay out.
-- `max(year)` on the mart now reports whichever source is furthest ahead, so the
-  `mart_covers_recent_years` check measures it per source column instead.
-- The spine itself is the full cross join (~63k rows against the mart's ~43k).
-  Left-join a fact onto it to see coverage gaps as rows.
+- A country-year only one source reports still reaches the mart. Expect nulls in
+  the columns the others don't cover, and filter charts for what they need.
+- The dimension decides *what a country is*: codes it doesn't carry — the World
+  Bank's aggregates (`WLD`, `EUU`), Antarctica — cannot reach the mart.
+- `max(year)` reports whichever source is furthest ahead, so
+  `mart_covers_recent_years` measures each source column separately.
+- The spine is the full cross join; left-join a fact onto it to see coverage gaps
+  as rows.
 
 ## Snapshot history (`dbt/snapshots/`)
 
 `snap_co2_estimates` is an SCD2 snapshot of `stg_co2` (`co2_mt`,
-`co2_per_capita`, 1990 onwards, `check` strategy, `hard_deletes='invalidate'`).
-OWID restates published years; every other model overwrites the old number, so
-this is the only place a revision leaves a trace.
-`marts.fct_co2_estimate_versions` summarises it (first vs. current value,
-`is_revised`) and `reports/pages/restatements.md` renders it.
+`co2_per_capita`, 1990 onwards, `check` strategy, `hard_deletes='invalidate'`):
+OWID restates published years, and every other model overwrites the old number.
+`marts.fct_co2_estimate_versions` summarises it and
+`reports/pages/restatements.md` renders it. `snap_grid_emission_factors` keeps the
+Scope 2 factor's versions from 2015, because a *filed* number has to stay
+reconcilable.
 
-- **A snapshot is state, not a build artifact.** `dbt build` appends to it; it
-  can't be recomputed from the sources, and deleting `data/warehouse.duckdb`
-  destroys the history for good. Every other table here is disposable — this one
-  isn't, which is also why it's narrow (two columns, 1990+) rather than the whole
-  fact.
-- **The published history is carried, not rebuilt** (`publish/restore_history.py`,
-  `just restore-history`). Every workflow builds from an empty file, so the
-  release and the site used to hold one version per row forever.
-  `release-data.yml` now downloads the previous `data-*` release and copies its
-  `history` schema in *before* the graph runs, so `dbt snapshot` compares this
-  month's numbers against last month's; `pages.yml` borrows the same file so the
-  Restatements page shows real revisions. Details in *Publishing* below.
-- **CI still starts from an empty file**, so there every row is version 1 and
-  `is_revised` is uniformly false. The restatements page renders an explicit
-  "nothing revised yet" branch for that case; it is the honest state, not a
-  broken build.
-- **There are two snapshots now, and anything that names one must name both.**
-  `snap_grid_emission_factors` (the Scope 2 section below) was the second, and it
-  found the places that had hardcoded the first: `release-data.yml` counted
-  restored rows and asserted "history didn't shrink" against
-  `history.snap_co2_estimates` by name, so a snapshot added later would have been
-  carried forward by `restore_history` but never verified. Both spots now count
-  through `CARRIED` instead. **"It copies the schema, not a table list" was the
-  reason to keep it that way, and carrying a *landing* table is what ended it**:
-  `history` may be copied whole because everything in it is unreproducible by
-  definition, while `raw` holds seven other tables plus dlt's bookkeeping and has
-  to be an allowlist. The rule carries its own guard with it — dbt's SCD2 columns
-  for a snapshot, dlt's `_dlt_load_id`/`_dlt_id` for a landing table.
-- **Verify a snapshot change by simulating a revision**, not by waiting for OWID:
-  build, `update raw.owid_co2 set co2 = co2 * 1.05 where iso_code = 'DEU' and
-  year = 2019` in a throwaway warehouse, build again, and check
-  `fct_co2_estimate_versions`. Don't do it in the real warehouse — the fake
-  version stays in the history even after you re-ingest.
-- **Evidence can't write a zero-row source to parquet** ("too small to be a
-  Parquet file", and the build fails). That's why
-  `sources/warehouse/co2_estimate_versions.sql` selects every country-year and
-  the page filters on `is_revised` itself, rather than the source pre-filtering
-  to the revised ones.
+- **A snapshot is state, not a build artifact.** It cannot be recomputed, and
+  deleting `data/warehouse.duckdb` destroys it — which is why both are narrow.
+- **The published history is carried, not rebuilt.** Every workflow builds from
+  an empty file, so `release-data.yml` restores the previous release's `history`
+  before the graph runs, and `pages.yml` borrows the same file so the Restatements
+  page shows real revisions. CI starts empty, so there every row is version 1; the
+  page's "nothing revised yet" branch is the honest state, not a broken build.
+- **Anything that counts carried rows goes through `restore_history.CARRIED`**,
+  never a table name, so a new snapshot is verified as well as carried. `history`
+  is carried whole because everything in it is unreproducible; any other schema
+  needs a table allowlist.
+- **Verify a snapshot change by simulating a revision**, never in the real
+  warehouse — the fake version stays in the history even after a re-ingest. With
+  `WAREHOUSE_PATH` and `LAKEHOUSE_DIR` pointed at copies: build, `update
+  lakehouse.raw.owid_co2 set co2 = co2 * 1.05 where iso_code = 'DEU' and year =
+  2019` through `just sql write`, build again, and read
+  `fct_co2_estimate_versions`.
+- **Evidence cannot write a zero-row source to Parquet** ("too small to be a
+  Parquet file"), so `reports/sources/warehouse/co2_estimate_versions.sql`
+  selects every country-year and the page filters on `is_revised` itself.
 
 ## Domain models with their own skills
 
-Five domains carry enough hard-won detail to be worth loading on demand rather
-than in every session. The models are listed under *Warehouse schemas* above;
-the reasoning lives in `.claude/skills/`. **The table is one row per dbt group
-plus the two sources that cut across them** — which is what makes a missing row
-visible: `country_stats` was the last group with no skill, and its knowledge sat
-loose in *Conventions & gotchas* until 2026-09-01 for exactly that reason.
+Domains with enough hard-won detail load on demand. The table is one row per dbt
+group plus the two sources that cut across them, so a group with no skill shows
+up as a missing row.
 
 | Domain | Skill | What is in it |
 |--------|-------|---------------|
@@ -790,780 +519,404 @@ loose in *Conventions & gotchas* until 2026-09-01 for exactly that reason.
 | ECB rates and the calendar | `currency-and-calendar` | the 7-day carry-forward cap, spot against average, ISO year against calendar year, and the project's one incremental model |
 | Capital-city weather (`om_weather_daily`) | `weather-models` | the weighted rate budget that bounds the whole source, the positional multi-location response, the three-year cold start, and the two degree-day conventions |
 
-The one-liners that must not depend on a skill loading are already in *Warehouse
-schemas* above and stay there: `fct_example_scope2_emissions` is the only
-fabricated data in the warehouse and it ships in the public release,
-`fct_cbam_exposure` has no year in its grain, and the retail models are the only
-ones at a grain below a country. Weather's is one line up, in the `raw` bullet:
-`om_weather_daily` is the second table a rebuild cannot reproduce, and the three
-places that guard the first one have to name it too. Country stats has four, in
-*Conventions & gotchas*, because they change what a query *means* rather than
-merely how to write it.
+The one-liners that must not wait for a skill are in *Warehouse schemas* above
+(the fabricated example ships, CBAM has no year, retail is below country grain,
+weather cannot be rebuilt) and in *Conventions & gotchas* (four country-stats
+facts that change what a query *means*).
 
 ## Personal data (`meta: {pii: …}`, `publish/export_warehouse.py`)
 
 One column identifies a person — `dim_retail_customer.customer_id`, UCI's own
 pseudonym for a shopper. It is classified in the ymls, pseudonymised at the
-publication boundary and measured rather than asserted. Full reasoning in
+publication boundary, and measured rather than asserted. Full reasoning in
 [`docs/DATA_PROTECTION.md`](docs/DATA_PROTECTION.md); what it cost to learn:
 
-- **Deleting the id does not anonymise a customer-grain extract, and the number
-  is the argument.** 98.6% of the 5,881 customers are unique on
-  `(first_order_gbp, net_revenue_gbp, n_orders)` with no id at all; 97.4% on
-  `net_revenue_gbp` alone. **Shares, never counts** — see the float bullet below. A near-continuous money column at person grain is
-  an identifier whatever it is called, which is why `quasi_identifier` is a label
-  with no action attached: generalising those columns would delete the analysis
-  they exist for, so they ship and the page says so. `just disclosure-risk`
-  reprints the table from the warehouse.
-- **An aggregated float column is not reproducible between builds, which is why
-  every figure above is a share and never a count.** Two consecutive
-  `dbt run --select dim_retail_customer` against byte-identical sources gave
-  5,781 and 5,785 distinct values of `net_revenue_gbp`. It is `sum()` over
-  doubles: floating-point addition is not associative and DuckDB's parallel
-  aggregation fixes no order, so the last bits of a few hundred customers' revenue
-  move per build — and exact equality is what a uniqueness count is made of. The
-  share is stable to a tenth of a point. **The lake is unaffected and the boundary
-  is worth knowing**: it archives `fct_retail_order_line`, whose money is per-row
-  arithmetic rather than an aggregate, so the "byte-identical run to run" property
-  there still holds. It is aggregation over floats that is unstable, not floats.
-- **The policy is applied to the *copy*, not in a model.** The published file
-  holds copies of the identifier no model declares — the `dbt_test__audit` tables,
-  and the `staging` tables `solidify_staging` materialises from views that read
-  `lakehouse.raw` — so a mask in a model would miss them. `export()`'s
-  `prepare_copy` hook solidifies staging *then* pseudonymises; the other order
-  ships clear ids in `staging` beside hashed marts, with matching row counts and
-  no error. `raw` itself is not in the published file (only
-  `raw.om_weather_daily` ships, in `lakehouse.tar.gz`).
-- **`||`, never `concat()`.** DuckDB's `concat` *ignores* NULLs, so
-  `concat(customer_id, salt)` hashes the bare salt on every anonymous row — all
-  243,007 of them landing on one pseudonym indistinguishable from a real
+- **Deleting the id does not anonymise a customer-grain extract.** 98.6% of
+  customers are unique on `(first_order_gbp, net_revenue_gbp, n_orders)` with no
+  id at all; 97.4% on `net_revenue_gbp` alone. A near-continuous money column at
+  person grain is an identifier, which is why `quasi_identifier` is a label with
+  no action attached: generalising it would delete the analysis it exists for.
+  `just disclosure-risk` reprints the table.
+- **Quote shares, never counts, of anything aggregated over floats.** Two
+  consecutive builds of `dim_retail_customer` on identical sources gave 5,781 and
+  5,785 distinct `net_revenue_gbp` values: float addition is not associative, and
+  DuckDB's parallel aggregation fixes no order. Per-row arithmetic, like the
+  order-line fact's, is stable.
+- **The policy is applied to the published copy, not in a model.** The copy holds
+  identifiers no model declares — `dbt_test__audit` tables, and the `staging`
+  tables `solidify_staging` materialises from views over `lakehouse.raw`.
+  `prepare_copy` solidifies staging *then* pseudonymises; the other order ships
+  clear ids in `staging` beside hashed marts, with matching row counts and no
+  error.
+- **The declared set is expanded by column name across every schema**, because
+  copies of the identifier appear where nobody would classify them by hand —
+  `dbt_test__audit` tables, and dlt's `raw_staging` merge scratch, a full copy of
+  the landing table. The export then verifies what it rewrote against
+  `^[0-9a-f]{16}$`, which a five-digit id cannot match.
+- **`||`, never `concat()`.** `concat` ignores NULLs, so all 243,007 anonymous
+  rows would hash the bare salt onto one pseudonym indistinguishable from a real
   customer. `||` propagates. Pinned in `tests/test_privacy.py`.
-- **The salt is required and never defaulted.** The ids run 12346–18287, so the
-  complete unsalted rainbow table takes **5 ms** to build. A missing `PII_SALT`
-  therefore raises — including for `tests/test_export.py`, whose fixture warehouse
-  holds no personal data at all and still has to supply one. The release salt is a
-  stable repository secret: a per-run salt would repseudonymise all 5,881
-  customers every month, so no consumer could tell a restatement from a
-  re-salting. `just export-data` generates a throwaway locally.
-- **51 relations carry a `customer_id` and six are declared**, so the policy
-  expands the declared set *by column name* across every schema before rewriting.
-  Two things live in that gap and neither would ever be classified by hand:
-  `raw_staging.retail_invoice_lines` (dlt's merge scratch — a full copy of the
-  landing table, 824,364 clear ids, in every release published before this), and
-  44 `dbt_test__audit` tables, which are empty only while the tests pass. The
-  export then **verifies** what it rewrote against `^[0-9a-f]{16}$`, which is
-  decisive rather than heuristic because a five-digit id cannot match it.
-- **DuckDB has no access control to enforce any of this** — `create role`,
-  `grant`, `create user` and `create policy` are each a *parser error* in 1.5.5,
-  not an unsupported feature. There is no user to attach a policy to, so the
-  enforcement point cannot be the database and a "restricted" schema would be
-  theatre. The boundary is the export, which is the only moment the data crosses
-  a machine it is on to a machine it is not.
-- **The coverage test is scoped to name collisions, not to every column.**
-  `dim_retail_product.net_revenue_gbp` (per product, identifies nobody) and
-  `dim_retail_customer.net_revenue_gbp` (per customer, identifies 97.4%) are the
-  pair that makes `non_personal` a real label: same name, opposite answer, and
-  only a person can say which is which. Labelling all ninety retail columns would
-  be paperwork; `tests/test_privacy.py` requires a label only where a name
-  collides with a classified one.
-- **The site was shipping what no chart drew.**
-  `reports/sources/warehouse/retail_rfm.sql` was `select *` — 19 columns
-  including the id, the country and three dates, downloaded by every visitor to
-  render four. `retail_customers.sql` had picked its columns and kept
-  `customer_id` anyway, and `retail_returns.sql` was `select *` too — 23 columns
-  to render three, carrying 17,934 clear identifiers. All three are pruned; the
-  scatter stays at customer grain because one mark per person is what that chart
-  *is*. **A `select *` is invisible to the obvious check**: grepping the source
-  queries for `customer_id` cannot find a query that names no columns at all,
-  which is how `retail_returns.sql` survived the first pass of this work.
-- **Changing a source query's column list needs `just report-clean`.** A
-  `just report` after a column was dropped built against a schema that still
-  declared it (`reports/.evidence/template/static/data/…/*.schema.json`). The
-  mechanism is not Evidence's query-hash cache, which `evidence sources` consults
-  only with `--changed` and `package.json` never passes — so clear `.evidence/`
-  rather than reason about what it will reuse.
+- **The salt is required and never defaulted**: the ids run 12346–18287, so the
+  whole unsalted rainbow table takes 5 ms to build. The release salt is a stable
+  repository secret — a per-run salt would repseudonymise every customer monthly,
+  and no consumer could tell a restatement from a re-salting. `just export-data`
+  generates a throwaway locally, and even `tests/test_export.py` supplies one.
+- **DuckDB cannot enforce access**: `create role`, `grant`, `create user` and
+  `create policy` are parser errors in 1.5.5. The boundary is the export, the one
+  moment the data leaves the machine it is on.
+- **The coverage test is scoped to name collisions.**
+  `dim_retail_product.net_revenue_gbp` identifies nobody and
+  `dim_retail_customer.net_revenue_gbp` identifies 97.4% — same name, opposite
+  answer — so `tests/test_privacy.py` requires a label wherever a name collides
+  with a classified one, and nowhere else.
+- **A `select *` source query ships every column to every visitor**, and grepping
+  the queries for `customer_id` cannot find one that names no columns. The site's
+  retail queries select only what their charts draw.
+- **Changing a source query's column list needs `just report-clean`**: `just
+  report` kept building against a schema that still declared a dropped column
+  (`reports/.evidence/template/static/data/…/*.schema.json`). Clear `.evidence/`
+  rather than reason about what it reuses.
 
 ## Data-quality gates (`dbt/models/**/_*.yml`)
 
-`dbt_utils` is the project's only dbt package; it exists for
-`unique_combination_of_columns` (the `(country_iso3, year)` grain contract on
-every fact-shaped staging model and the mart) and `accepted_range` (percentages
-in 0–100, non-negative money/tonnage, per-source year bounds, EU electricity
-under €1/kWh). `dbt source freshness` reads dlt's `_dlt_load_id` as a unix epoch.
+`dbt_utils` is the only dbt package, for four generic tests:
+`unique_combination_of_columns` (the grain contracts), `accepted_range`,
+`expression_is_true` and `equal_rowcount`. `dbt source freshness` reads dlt's
+`_dlt_load_id` as a unix epoch.
 
-- **`dbt deps` is not optional any more.** `dbt/dbt_packages/` is gitignored, so
-  a fresh clone must run it before `dbt build`, `dbt parse` or `sqlfluff`. The
-  justfile recipes depend on `dbt-deps`; the three workflows run it explicitly.
-  `dbt_project.prepare_if_dev()` covers it under `dagster dev` only — outside the
-  UI, `dbt deps && dbt parse` has to happen before the asset graph will load at
-  all, because the manifest lives in the gitignored `dbt/target/`.
-- **One `unit_tests:` key per yml file.** Appending a second block to
-  `_unit_tests.yml` parses and runs — dbt *merges* the two lists rather than
-  letting the last win — but it warns `DuplicateYAMLKeysDeprecation`, and
-  deprecated in 1.10 means gone in Fusion. The tolerant behaviour is the
-  dangerous half: nothing is red and nothing is missing, so it survives review.
+- **`dbt deps` first, always.** `dbt/dbt_packages/` and the manifest in
+  `dbt/target/` are gitignored, so a fresh clone needs `dbt deps` before
+  `dbt build`, `dbt parse` or `sqlfluff`, and `dbt parse` before the asset graph
+  will load. The recipes depend on `dbt-deps` and `dbt-parse`; `prepare_if_dev()`
+  does both, but only under `dagster dev`.
+- **One `unit_tests:` key per yml.** A second block parses and dbt *merges* the
+  lists, warning `DuplicateYAMLKeysDeprecation` — gone in Fusion, and silent until
+  then.
 - **Test args go under `arguments:`, and the key is `data_tests:`.** The flat
-  `tests: [- some_test: {arg: …}]` form is deprecated in dbt 1.10 and gone in
-  Fusion; the whole project uses the new spelling, so match it.
-- **Every test's failures are stored, not just counted.** `dbt_project.yml` sets
-  `data_tests: +store_failures: true` project-wide, into a
-  `dbt_test__audit` schema (one table per test, named after it). A red check in
-  CI or Dagster gives you `select * from dbt_test__audit.<test_name>` for the
-  offending rows instead of just a failure count — verified by breaking
-  `co2_mt`'s `accepted_range` in a throwaway warehouse and reading the row back
-  out of the audit table.
+  `tests:` form is deprecated in 1.10 and gone in Fusion.
+- **Every test's failures are stored**: `+store_failures: true` project-wide, so a
+  red check gives `select * from dbt_test__audit.<test_name>` for the rows.
 - **Tests are calibrated to fail on bugs, not on reality.** `income_group` is
   nullable on purpose (the `country_overrides` territories have no World Bank
-  classification) and `co2_per_capita` has a floor but no ceiling (small
-  petrostates legitimately reach 780 t/person). Before tightening a bound,
-  check the actual distribution — the fixture slice is 17 countries and will
-  happily pass a threshold the full 200+ would break.
-- **There are thirty-six unit tests, over twelve models, and they exist because a data
-  test cannot see a wrong answer that is a legal one.** `dim_date`'s
-  `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
-  `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
-  and every fiscal quarter in the warehouse is wrong while **all 19 data tests on
-  the model pass** — measured, not argued. Its three unit tests fail on it.
-  **Which twelve models, what mutating each one proved, and the fixture shapes
-  strong enough to catch it are the `unit-testing-dbt-models` skill**, together
-  with the mutation method that produced all of it.
-- **A unit test that has to mock five inputs is telling you a model is two
-  models.** `cbam_exposure_takes_the_fallback_row_whole_or_not_at_all` checked
-  one rule — the annex fallback is row-level, not column-level — and posed a
-  markup schedule, a country dimension and an empty `dim_grid_emission_factors`
-  to reach it, then asserted on a `certificates_*` column computed downstream of
-  the rule. Two of those inputs were inert; one carried a comment explaining why
-  an unrelated table was in the fixture at all. Against
-  `int_cbam_default_factors` it mocks one input and asserts four columns. **The
-  fixture size was the signal, and it was visible for months** — `_unit_tests.yml`
-  averaged 45 lines a test. That is the argument for the intermediate layer here,
-  and it is why there are three `int_*` models and not one per mart: the other
-  two removed a duplication and named an inference, and nothing else qualified.
-- **A determinism guard has to be mutated *repeatedly*, and this one was flaky
-  rather than blind.** `return_matches_break_a_tied_purchase_the_same_way_every_build`
-  pins the `qualify` tie-break that made `int_retail_return_matches` reproducible,
-  and it passed with that `qualify` deleted — at HEAD and at the commit before
-  the test moved, so it was its own blind spot. The first diagnosis was that
-  dbt's mocked input arrives in an order that lands the un-tie-broken `asof
-  join` on the same row anyway; **that is wrong**. DuckDB's *parallel* asof join
-  draws a different tied row each run — 300 runs of the compiled SQL returned
-  all three, 135/86/79 — so the old test passed a broken model **28.7% of the
-  time**, and the two spot-checks that called it broken-but-stable were unlucky
-  draws. `threads=1` is deterministic and takes the first-listed row.
-  - **No fixture makes it certain**: the mutated model returns *some* member of
-    the tie group and the tie-break's answer is always a member of it, and the
-    row count is 1 either way. Four independent tie groups take the false pass
-    to **1.1%** (22/2,000) and to 0% single-threaded; the healthy model is stable
-    at 1, 2, 4 and 8 threads, so nothing is flaky in CI. Extra returns into one
-    group buy nothing — the arbitrary pick is made once per group (300/300
-    identical), so it is *groups* that multiply.
-  - The winner is never listed first (first is what the broken join takes) and
-    sits at a different non-first position in each group. Group 1 is unchanged:
-    reordering it would pin today's arbitrary pick, which is the bug wearing the
-    fix's clothes. `dim_retail_customer` had already learned this and the lesson
-    had not been carried across — see the `unit-testing-dbt-models` skill.
-- **Unit tests run inside `dbt build`, and they are deliberately left there.**
-  dbt Labs recommends excluding them from production runs to save compute; that
-  argument is about warehouse spend and this is a local DuckDB build where all
-  thirty-six cost 4.8s. A broken fiscal calendar should stop `release-data.yml`,
-  not ride along in it. `just dbt-unit-test` is the inner loop — 4.8s of dbt's
-  own time, ~10.5s wall once `dbt deps` and startup are counted.
-- **Source freshness measures our load, not the publisher's.** `_dlt_load_id` is
-  stamped at ingest, so a freshness failure means the pipeline stopped running.
-  It is tautologically green in CI (which loads and then checks), which is why
-  it is a `just` recipe rather than a workflow step.
+  classification) and `co2_per_capita` has no ceiling (small petrostates reach
+  780 t/person). Check the full distribution before tightening a bound — the
+  17-country fixture slice passes thresholds the full data breaks.
+- **There are thirty-six unit tests, over twelve models, because a data test
+  cannot see a wrong answer that is a legal one.** Change `dim_date`'s
+  `fiscal_quarter` from `/3 + 1` to `/ 4` and every fiscal quarter is wrong while
+  all 19 data tests on the model pass; its three unit tests fail. Which models,
+  what mutating each proved, and the fixture shapes are `unit-testing-dbt-models`.
+- **A unit test that mocks five inputs is telling you a model is two models.**
+  The CBAM fallback rule needed a markup schedule, a country dimension and an
+  empty grid table to reach through `fct_cbam_exposure`; against
+  `int_cbam_default_factors` it mocks one input. Fixture size is the signal, and
+  the case for each of the three `int_*` models.
+- **Mutate a determinism guard repeatedly.** DuckDB's parallel asof join picks a
+  different tied row per run, so the tie-break test passed a broken model 28.7%
+  of the time, and single spot-checks called it stable. `unit-testing-dbt-models`
+  has the fixture that brings that to 1.1%.
+- **Unit tests stay inside `dbt build`.** dbt Labs' advice to exclude them is
+  about warehouse spend; here they cost seconds (~5s of dbt's own time, ~11s wall
+  for `just dbt-unit-test`, 2026-09-09), and a broken fiscal calendar should stop
+  the release.
+- **Source freshness measures our load, not the publisher's.** It is
+  tautologically green in CI, so it is a recipe, not a workflow step.
 
 ## Contracts, ownership and versions (`_groups.yml`, `_exposures.yml`)
 
-Who owns each model, who may depend on it, what shape it promises, and who is
-reading it. All four are declarative and all four are enforced by something —
-the point of the layer is that none of it is a comment.
+Who owns each model, who may depend on it, what shape it promises, and who reads
+it — all declarative, and all enforced by something.
 
-- **Groups are by domain, not by layer, or the boundary means nothing.** Four
-  groups (`reference`, `country_stats`, `compliance`, `retail`) in
-  `dbt/models/_groups.yml`; a staging/marts split would put every staging model
-  in one group and nothing would ever cross it. One person owns all four and the
-  file says so rather than inventing a team.
-- **Staging is `private`, marts are `public`, and the two exceptions are the
-  whole content.** The defaults are set per folder in `dbt_project.yml`;
-  `stg_country` and `stg_energy` override to `protected` because they are the
-  only two places one domain reads another's cleaning layer, and
-  `dim_grid_emission_factors` deliberately re-models `stg_energy`'s intensity
-  column for a different reader and needs `source_loaded_at` with it. Both
-  reasons are written next to the override. Enforcement is real and was verified
-  by breaking it: flipping `stg_country` to `private` fails `dbt parse` naming
-  its consumer, not `dbt build` an hour later.
-  - **`stg_country`'s override got smaller when `dim_country` shipped, and the
-    difference is the point.** It used to be read by marts in two other groups
-    for want of a published country dimension; they read `marts.dim_country`
-    now. What is left is two *staging* peers in `country_stats` —
-    `stg_weather_daily` needs the capital coordinates and
-    `stg_eu_electricity_prices_semiannual` the ISO2→ISO3 map — so breaking the
-    override names `stg_weather_daily` today where it named `fct_cbam_exposure`
-    before. Pointing those two at a mart would invert the layering to save an
-    override, which is the worse trade.
-- **Marts are `public` because the release makes them so.** Every mart ships as a
-  standalone Parquet file to people who cannot be paged; `access` is a statement
-  about that, not about the repo.
+- **Groups are by domain, not layer** — `reference`, `country_stats`,
+  `compliance`, `retail` — or no boundary is ever crossed.
+- **Staging is `private` and marts are `public`** (set per folder), because every
+  mart ships as Parquet to people who cannot be paged. The exceptions are the
+  content: `stg_country` and `stg_energy` are `protected`, the only places one
+  domain reads another's cleaning layer, with the reasons beside the override.
+  Breaking one fails `dbt parse`, naming the consumer.
 - **Contracts are enforced on every mart model — 21 relations (20 models, one of
-  them versioned) and 407 columns, each with a `data_type`.** The ymls documented 179 of those columns before, so the list was
-  *generated* from the built warehouse's `information_schema` and inserted
-  line-wise, reordering the existing entries into SQL order and keeping every
-  description untouched. A PyYAML round-trip would have reflowed 1,246 lines of
-  prose to add scalars; **don't do that to these files**, and that constraint is
-  what shaped the split below as well.
-- **The marts declarations are one yml per dbt group, not one per layer.**
-  `_country_stats.yml` (5 models, 680 lines), `_reference.yml` (5, 536),
-  `_retail.yml` (5, 526) and `_compliance.yml` (3, 450) replaced a single
-  2,183-line `_marts.yml` on 2026-09-01 — *sizes as at that split*, like the
-  file they replaced, rather than figures to restate every time a model lands.
-  dbt does not care which file declares a model, so the boundary had to come
-  from somewhere — and `_groups.yml` already declares exactly four domains
-  with enforced `access` between them, which makes the split the one dbt
-  itself can check. A layer-shaped split would have put every mart model in
-  one file and changed nothing.
-  - **The move was line-slicing, and the guard was a manifest diff.** Blocks
-    were relocated as bytes and asserted byte-identical afterwards; then a
-    fingerprint of every marts node in `manifest.json` — group, access, alias,
-    version, contract, materialization, description, and each column's
-    `data_type` and description, plus every test node hanging off a marts
-    model — was compared before and after and came back **identical**. `dbt build` stayed at PASS=508 ERROR=0.
-    A green build proves the yml parses; only the diff proves nothing moved.
-  - **The reason it was worth doing is the merge lock, not the line count.**
-    Shared prose "behaves like a lock" (see *Branches and PRs*) — no two commits
-    touching it can be reordered or cherry-picked — and a 2,183-line file every
-    mart change edits is that problem for the model layer.
-  - **`_unit_tests.yml` deliberately stayed whole.** It is one axis of assertion
-    across twelve models; the four group files are four domains. Splitting it
-    too would have cut the same tree twice on different lines.
-  - **A file naming one of these is a list that can go quiet**, which the split
-    proved by breaking one: `tests/test_privacy.py` named `_marts.yml` and would
-    have read a quarter of the marts layer. It globs now and derives the
-    expected set from the `.sql` files, so a fifth group file — or a model whose
-    block goes missing in a move — is a failure rather than a silence.
-  - **The grain contract and the schema contract catch different things.**
-    `unique_combination_of_columns` has been holding the grain since the start;
-    what it never saw was a column changing type under a consumer. Verified by
-    declaring `year` as `VARCHAR`: the build fails with a per-column mismatch
-    table before writing anything.
-  - **A contracted incremental model must set `on_schema_change`.** dbt refuses
-    `ignore` and it is right to — the contract promises a shape and `ignore`
-    would let a column stop being written into the existing table.
-    `fct_fx_rates_published` uses `fail` rather than `append_new_columns`,
-    because a new column there means the *model* changed and 265k rows need a
-    `--full-refresh` decision made by a person.
-  - **CI builds the same types.** The declared types come from the full
-    warehouse; CI builds the 17-country fixture slice, so a column whose type is
-    inferred from data could have differed. `just test-pipeline` was run to check
-    it rather than assumed — every contract holds on the slice.
-- **Exposures are per *page*, not per site, and they are checked.**
-  `dbt/models/_exposures.yml` declares nine Evidence pages and the monthly data
-  release, so `dbt ls --select +exposure:evidence_retail` answers "what breaks if
-  I change this" for one page. `publish/build_report.py` gained `page_tables()`
-  (page → source query → warehouse table) and `tests/test_exposures.py` fails if
-  a declaration and the SQL disagree.
-  - **They do not replace `TABLE_TO_DBT_MODEL` / `TABLE_TO_ASSET_KEY`, and the
-    test says why.** An exposure can only name nodes dbt builds, so nothing in
-    `analytics` (written by Polars, downstream of dbt and invisible to it) can
-    appear in one. `reports/pages/pipeline.md` therefore has **no exposure at
-    all** — every table it reads is a Polars output and `depends_on` cannot be
-    empty. The test asserts that the remainder is *exactly* `TABLE_TO_ASSET_KEY`,
-    so the gap is measured instead of forgotten.
-  - **Two pages have no exposure and the test names both, because the reasons are
-    opposite.** `pipeline.md` reads tables dbt cannot describe; `index.md` reads
-    nothing at all — it is a routing page, prose and links, with no SQL on it, so
-    there is no dependency to declare and no figure that can go stale by hand.
-    Through `page_models()` the two are indistinguishable (both an empty set), so
-    `test_the_pages_with_no_exposure_are_the_two_that_cannot_have_one` asserts the
-    *table* counts as well: `index` must read zero source queries and `pipeline`
-    must still read some. Put a chart on the front page and it fails.
-  - **The release exposure is exactly the marts now, and was not.** It named
-    `stg_country` — a *staging* model in the promise a release makes — because
-    the notes pointed a reader at it as the country dimension and no mart said
-    the same thing. `dim_country` closed that, so `tests/test_exposures.py`
-    asserts the exception's *absence* rather than its shape. The nine staging
-    views still ship as Parquet and nothing promises them.
-- **Every numeric mart column declares `meta: {additivity: …}`**, from a closed
-  four-value vocabulary — `additive`, `semi_additive`, `non_additive`,
-  `not_a_measure` — because a contract states a type and a test states
-  correctness, and neither says whether `sum()` means anything. 118 of the 229
-  are non-additive. **Counted as dbt resolves them, which is the basis every
-  figure in this section uses** — `fct_emissions_energy_v1` inherits 36 labels
-  through `include: all` and declares one, so the ymls carry 193 literal
-  `additivity:` entries where the manifest carries 229 labelled columns (192 +
-  v1's 37). Quoting the yml count while naming the manifest one is how a stale
-  pair survived into a release — described in words rather than digits here,
-  because the guard cannot tell a quotation from an assertion and should not
-  try. `tests/test_additivity.py` holds five properties, each mutation-proven:
-  the layer is covered exhaustively, the vocabulary is closed, only numeric
-  columns are labelled (the vacuity guard), and **no column named
-  like a ratio may be declared summable** — a name rule, because it is the only
-  one of the four that can catch a label that is present and *wrong*. It holds
-  today with no exceptions.
-  - **`semi_additive` is the only label that is useless alone**, so its
-    description must say which direction fails and a test requires one. There
-    are 16 `semi_additive` columns, three of them `fct_emissions_energy_v1`'s
-    inherited copies, and they are where the value is: `population` adds across
-    countries
-    and gives person-years across years, `cumulative_co2` is a stock that
-    recounts every earlier year, `cohort_size` is constant down a cohort's rows,
-    and `original_quantity` belongs to the matched purchase — 16,398 matched
-    returns point at 15,312 distinct purchases, so summing it counts 1,086 of
-    them twice.
-  - **`gdp_usd` is `semi_additive` and `gdp_constant_usd` is `additive`**, which
-    is the current-vs-constant-dollar gotcha under *Conventions & gotchas*
-    expressed as metadata rather than as prose somebody has to have read.
-  - **The labels ship**, in `manifest.json`'s `additivity` map — 285 columns
-    across 26 relations — for the reason `direct_identifier` is real: a label
-    with no consequence is decoration, and a Parquet consumer has the types and
-    nothing else. The five `analytics` tables are invisible to dbt, so their 56
-    are `EXTRA_ADDITIVITY`, beside `EXTRA_CLASSIFICATIONS` and for its reason.
-    `staging` stays outside: its measures are declared one layer up.
-  - **The `analytics` copies are stated, not inherited, and that is the whole
-    of the choice.** `co2_intensity` is `select *` off `fct_emissions_energy`
-    plus two derived columns, so 37 of its labels are the mart's — deriving
-    them at runtime is less typing and fails *open*, because a mart rename would
-    take the copy's label with it silently. Stated, the same rename fails
-    `test_a_copied_column_keeps_the_label_the_mart_gave_it`, which checks the
-    column *set* as well as the values and was mutation-proven from both sides.
-    `retail_rfm` cannot be reached by name at all — `frequency` is
-    `n_orders` and `monetary_gbp` is `net_revenue_gbp` — so its coverage is
-    asserted against the frame `build_retail_rfm` actually emits.
-  - **Inserting the labels line-wise found the duplicate-key trap twice.** A
-    `meta:` block can sit *below* a comment block or a `description:`, so a
-    lookahead that only skipped comments wrote a second `meta:` key — which
-    PyYAML resolves silently by taking the last, dropping a `pii`
-    classification, and which `check-yaml` does not flag. The insertion has to
-    scan the whole column block. Same trap as the `unit_tests:` one above, and
-    just as quiet.
-
-- **`fct_emissions_energy` is versioned, and it is the right model rather than
-  the biggest.** Nothing in the project refs it and the release ships it, so a
-  rename is free in-repo and breaking outside it. v2 renames `co2_per_gdp` to
-  `co2_kg_per_gdp_ppp_2011` — the old name gave neither unit nor basis while a
-  differently-based intensity column sat one schema away.
-  - **v2 is aliased back to the bare relation name.** The Evidence source query,
-    `TABLE_TO_DBT_MODEL` and the release notes all say
-    `marts.fct_emissions_energy`; a migration that renames the table out from
-    under them is not a migration.
-  - **v1 is a view over v2, not a second copy of the model.** `select * exclude
-    (…), … as co2_per_gdp` — one column put back, no duplicated logic and no
-    duplicated 43k rows. It puts the renamed column *last*, and the v1 contract
-    is declared the same way (`include: all`, `exclude:` the new name, then the
-    old one appended) so the two agree on the order dbt enforces.
-  - **`deprecation_date: 2026-11-01`** is carried in the release notes as well as
-    the yml, because the consumers who need it never see a dbt log.
-  - **The date is enforced now, and until 2026-09-09 it was a promise five
-    documents made and nothing kept.** dbt's own behaviour on the day it passes
-    is a `[WARNING]` and **exit 0** — measured, by setting the date to 2020 and
-    running `dbt parse` — so `release-data.yml`'s monthly run would have
-    published a compatibility view past its own advertised removal date with the
-    reason in a log nobody reads. `dbt_project.yml`'s `flags.warn_error_options`
-    promotes `DeprecatedModel` (the deadline, fired at *parse*, on the producer)
-    and `DeprecatedReference` (a `ref` to a model whose date has gone) to
-    errors; the same mutation then exits 2 out of `dbt parse`, which is
-    `ci.yml`'s cheapest step. `UpcomingReferenceDeprecation` is deliberately
-    left a warning — it fires on a ref to a model whose date is still in the
-    future, which is exactly what a migration window is *for*. Not `error: all`,
-    for the reason dbt's own docs give: a warning added in a later dbt version
-    would fail the monthly release for a reason nobody chose.
-  - **Versioning a model changes its Dagster asset key, silently.**
-    `default_asset_key_fn` keys an ordinary model on `[configured_schema, name]`
-    (`marts/fct_emissions_energy`) but a versioned one on `[alias]` alone — so
-    adding `versions:` renamed the asset to `fct_emissions_energy` and gave v1
-    the sibling key `fct_emissions_energy_v1`. Both still run. What breaks is
-    everything that spells the key out: `just materialize-select 'key:"marts/*"'`
-    stops matching either of them, and Dagster's materialisation history is keyed
-    on the asset key, so the model looks like it has never been built.
-    `FolderGroupDbtTranslator.get_asset_key` puts the schema back for versioned
-    nodes, which is what keeps the version invisible to the rest of the graph.
-    Measured against the manifest rather than argued: the default translator
-    keys the two nodes `fct_emissions_energy` and `fct_emissions_energy_v1`,
-    with no `marts/` on the front; the override keys both under `marts/`.
-  - **That selection has to be written `key:"marts/*"`, and it was written
-    `marts/*` here from 2026-08-09, which matches nothing at all.** A bare
-    prefix is not a glob: the parser reads `marts/` as an asset key, finds none,
-    and `*` then takes everything downstream of the empty set — so the recipe
-    materialises zero assets and **exits 0**. `key:`, `group:`, `kind:`,
-    `sinks(…)` and `roots(…)` all work through the plain `dagster` CLI (the
-    selection grammar lives in `dagster` core, not in the `dg` CLI, which this
-    project does not install). `dagster asset list --select '<sel>'` is the
-    read-only way to see what a selection resolves to before materialising it.
-
-- **The bus matrix is derived from the manifest, never written**
-  (`modern_data_stack.bus_matrix`, `publish/bus_matrix.py`, `just bus-matrix`),
-  and it renders into a marked block in `docs/WAREHOUSE.md`. Business processes
-  down, conformed dimensions across — the one thing groups, exposures and
-  contracts do not say, which is why retail sat beside the country domain for
-  months with no joinable key. Three things it cost to get right:
-  - **A uniqueness test carrying a `where` is not a grain.**
-    `dim_grid_emission_factors` asserts one row per `country_iso3` *where
-    `is_latest_available`*. Read as a grain it becomes a conformed country
-    dimension and every country fact appears to conform to it — a column of
-    marks that mean nothing. `declared_grains` skips filtered tests.
-  - **Conformance is exact column-name matching, deliberately, and it has now
-    been paid off once.** An alias list would have hidden the defect the matrix
-    exists to expose: `fct_fx_rates_periods` and `fct_fx_rates_published`
-    carried `quote_currency` where `dim_currency` publishes `currency_code`,
-    while `fct_fx_rates_daily` spelled it the conformed way — and
-    `fct_retail_returns` had no `date_key` beside a sibling at the identical
-    grain that did. All three closed on 2026-09-08; `stg_fx_rates` adopts the
-    conformed name and `raw` keeps the publisher's. A hole is still a question,
-    not a bug in the derivation — but a question that gets an answer, which is
-    the argument for not aliasing it away.
-  - **The rendered block is guarded, not just generated.**
-    `tests/test_bus_matrix.py` regenerates and compares, so a mart added without
-    `just bus-matrix` fails rather than leaving a confidently wrong table. Its
-    orphan set is compared *both ways* against `KNOWN_UNCONFORMED`, so fixing an
-    orphan without deleting its entry fails too. Being manifest-gated, it had to
-    be added to `ci.yml`'s post-parse step — `tests/test_workflows.py` caught
-    that omission, which is the guard working rather than a near miss.
+  them versioned) and 407 columns, each with a `data_type`.** The column list was
+  generated from `information_schema` and inserted line-wise. **Never round-trip
+  these ymls through PyYAML**: it reflows every description to add a scalar.
+  - The schema contract catches what the grain contract cannot — a column
+    changing type under a consumer. Declaring `year` as `VARCHAR` fails the build
+    before it writes anything. CI's 17-country slice builds the same types.
+  - A contracted incremental model must set `on_schema_change`;
+    `fct_fx_rates_published` uses `fail`, because a new column there needs a
+    person to decide on a `--full-refresh` of 265k rows.
+- **The marts ymls are one per dbt group**, the split dbt itself can check,
+  because shared prose behaves like a merge lock (see *Branches and PRs*).
+  `_unit_tests.yml` stays whole: it is one axis of assertion across twelve
+  models. A test that names a yml is a list that can go quiet, so the privacy test
+  globs and derives the expected set from the `.sql` files. When moving yml
+  blocks, compare a manifest fingerprint before and after: a green build proves
+  the yml parses, not that nothing moved.
+- **Exposures are per *page*** — nine Evidence pages and the release — so
+  `dbt ls --select +exposure:evidence_retail` answers "what breaks" for one page.
+  `tests/test_exposures.py` holds them to the SQL through
+  `publish/build_report.py`'s `page_tables()`. An exposure cannot name Polars
+  output, so `pipeline.md` has none (and `index.md` reads nothing); what the pages
+  read that dbt cannot describe is exactly `TABLE_TO_ASSET_KEY`, asserted. The
+  release exposure is exactly the marts.
+- **Every numeric mart column declares `meta: {additivity: …}`** from a closed
+  vocabulary — `additive`, `semi_additive`, `non_additive`, `not_a_measure` —
+  because neither a type nor a test says whether `sum()` means anything: 118 of
+  the 229 are non-additive. Those are manifest counts; `fct_emissions_energy_v1`
+  inherits 36 through `include: all`, so the ymls carry 193 literal
+  `additivity:` entries. `tests/test_additivity.py` holds coverage, the closed
+  vocabulary, numeric-only labels, and a name rule — no ratio-named column may be
+  summable — which is the one check that catches a label present and *wrong*.
+  - `semi_additive` must say which direction fails, and there are 16
+    `semi_additive` columns: `population` gives person-years across years;
+    `original_quantity` belongs to the matched purchase, so summing it counts a
+    purchase once per return matched to it. `gdp_usd` is `semi_additive` and
+    `gdp_constant_usd` `additive` — the constant-dollar gotcha as metadata.
+  - The labels ship in `manifest.json`'s `additivity` map (285 columns across 26
+    relations), with `analytics`' in `EXTRA_ADDITIVITY` because dbt cannot see
+    Polars output. They are stated rather than derived from the mart, because a
+    derived label fails *open* when a mart column is renamed.
+  - A `meta:` block can sit below a comment or a `description:`, so a line-wise
+    insert that only skips comments writes a second `meta:` key — which PyYAML
+    silently resolves to the last, and `check-yaml` does not flag.
+- **`fct_emissions_energy` is versioned** because nothing in the repo refs it and
+  the release ships it: v2 renames `co2_per_gdp` to `co2_kg_per_gdp_ppp_2011`. v2
+  is aliased back to the bare relation name, and v1 is a view over v2 that puts
+  the old column back last, with its contract declared in the same order.
+  - **The `deprecation_date` (2026-11-01) is enforced.** dbt's own behaviour when
+    it passes is a warning and exit 0, so `flags.warn_error_options` promotes
+    `DeprecatedModel` and `DeprecatedReference` to errors, failing `dbt parse`.
+    `UpcomingReferenceDeprecation` stays a warning — it fires during the
+    migration window, which is what the window is for — and so does everything
+    else: `error: all` would fail the release on a warning some later dbt adds.
+  - **Versioning changes the Dagster asset key, silently.** The default
+    translator keys a versioned model on its alias alone, dropping the `marts/`
+    prefix and with it the model's materialisation history.
+    `FolderGroupDbtTranslator.get_asset_key` puts the schema back.
+  - **Select a prefix as `key:"marts/*"`.** A bare `marts/*` reads `marts/` as an
+    asset key, finds none, takes everything downstream of the empty set,
+    materialises nothing and exits 0. `just materialize-preview` shows what a
+    selection resolves to first.
+- **The bus matrix is derived from the manifest** (`just bus-matrix`, rendered
+  into `docs/WAREHOUSE.md`) — business processes down, conformed dimensions
+  across, the one thing groups and contracts do not say.
+  - A uniqueness test with a `where` is not a grain: read as one,
+    `dim_grid_emission_factors` becomes a dimension every country fact
+    "conforms" to.
+  - Conformance is exact column-name matching, deliberately; an alias list would
+    have hidden the `quote_currency`/`currency_code` split it found in the FX
+    models.
+  - `tests/test_bus_matrix.py` regenerates and compares, and holds the orphan set
+    to `KNOWN_UNCONFORMED` both ways.
 
 ## Pipeline observability (`transform/pipeline_status.py`)
 
-`just pipeline-status` writes four flat tables into `analytics` —
-`pipeline_sources` (dlt load time, rows and year span per landing table),
-`pipeline_tables` (rows and year span per modelled table), `pipeline_tests`
-(every dbt test, what it guards, and how many rows are currently failing it) and
-`pipeline_runs` (one row per node per dbt invocation, with its timings).
-`reports/pages/pipeline.md` renders them; the asset is
-`analytics/pipeline_status`, downstream of **both** Polars assets
-(`co2_intensity` and `retail_rfm`). It has to name both: it inventories
-`analytics`, and depending only on the one that sits furthest downstream would
-leave the other free to land after the inventory meant to count it.
+`just pipeline-status` writes four tables into `analytics`: `pipeline_sources`
+(dlt load time, rows and year span per landing table), `pipeline_tables` (the
+same per modelled table), `pipeline_tests` (every dbt test, what it guards, and
+its failing rows) and `pipeline_runs` (one row per node per dbt invocation, with
+timings). `reports/pages/pipeline.md` renders them. The asset
+`analytics/pipeline_status` depends on **both** Polars assets, because it
+inventories `analytics` and must land after everything it counts.
 
-- **None of it is new instrumentation.** dlt already stamps `_dlt_load_id`, dbt
-  already stores failing rows in `dbt_test__audit`, and `information_schema`
-  already knows every table's shape. The module exists because two of the three
-  need dynamic SQL over a table list that isn't known until runtime, which a
-  static Evidence source query can't express.
-- **Test names come from `dbt/target/manifest.json`, not the audit table name.**
-  dbt truncates and hashes a `store_failures` alias longer than 63 characters
-  (`dbt_utils_accepted_range_fct_c_1c6718ee…`), so the table name alone is not a
-  label. The manifest also supplies the model each test guards and the column it
-  tests. It's gitignored, so `build_tests` degrades to bare table names when it's
-  absent rather than failing.
-- **A test's verdict is its `fail_calc`, not `count(*)` over the audit table.**
-  `count(*)` is only dbt's *default*. `dbt_utils.equal_rowcount` overrides it with
-  `sum(coalesce(diff_count, 0))` and returns a one-row summary whether it passed
-  or failed, so counting rows scored both `equal_rowcount` guards (on
-  `fct_fx_rates_published` and `fct_retail_order_line`) as one failing row each
-  against a build that finished ERROR=0 — the health page contradicting the
-  build. `build_tests` reads `fail_calc` from the manifest and applies it, which
-  is what dbt does; 463 of the 482 tests use the default. `severity` comes across
-  the same way, so a `warn` test with failures is `status='warn'`, not `'fail'`.
-- **An audit table the manifest doesn't name is stale and is dropped.** dbt writes
-  that schema every build but never *removes* a table whose test is gone, and the
-  alias hash is over the test's arguments — so renaming a model orphans every
-  audit table on it. Versioning `fct_emissions_energy` to `_v2` left 17
-  `dbt_utils_accepted_range_fct_e_<hash>` tables behind; being empty they scored
-  as passing and inflated the count to 371 against dbt's 354. The filter is keyed
-  on the manifest being *present*, not on the match: with no manifest nothing
-  matches and dropping everything would empty the table rather than degrade to
-  bare names.
-- **It excludes its own output from the inventory.** Otherwise the table count
-  jumps by three on every build after the first, for no change in the warehouse
-  (36 tables today, not 39).
-- **It must run after `dbt build`** — it reads `dbt_test__audit` and the
-  manifest, neither of which exists before one.
-- **`pipeline_runs` is the one table here that is a history, and the split is
-  `db.append_frame` against `db.write_frames`.** The other three are snapshots
-  that `create or replace` is right for, because they can be rebuilt from the
-  warehouse whenever. A run cannot: the invocation is over and
-  `dbt/target/run_results.json` holds only the most recent one. It is appended,
-  idempotent on `invocation_id` — `just pipeline-status` is its own recipe and
-  can be run twice against one build — and carried between releases by a
-  `Carry` rule in `publish/restore_history.CARRIED`.
-  - **It is the first `Carry` rule that has to name its tables**, which is the
-    case `Carry.tables`' docstring predicted. `history` is carried whole because
-    everything in it is unreproducible by definition; `analytics` holds five
-    relations that are rebuilt every run, so carrying the schema would restore a
-    previous release's `co2_intensity` over a fresh one *and* restore the three
-    `pipeline_*` snapshots describing the previous release's warehouse.
-  - **It carries no row counts, and that half of the idea was not buildable.**
-    `adapter_response.rows_affected` is present on **7 of 552** results and every
-    one is a seed — dbt-duckdb returns a bare `OK` for a model. Row counts per
-    table are already in `pipeline_tables`, measured from the warehouse rather
-    than from an artifact that does not know them.
-  - **`compile_time_s + execute_time_s` is not `execution_time_s`** — 57.86s
-    against 65.14s on the build this was written against, with neither phase
-    null on any node. dbt counts work outside the two phases it names, so both
-    are stored rather than one derived from the other.
-  - **The versioned-node trap bit a second time and was caught by reuse.** Both
-    `fct_emissions_energy` nodes appear in `run_results.json` as ids ending
-    `.v1`/`.v2`, and every *test* id ends in a hash — so splitting the id by hand
-    labels the model `v1` and the tests `d3e9382890`. `observability.
-    node_display_name` (renamed from `tested_model_name`, because the trap is a
-    property of unique ids rather than of tests) resolves both through the
-    manifest's `alias`.
-  - **Testing the resolver did not test the wiring, and the mutation proved
-    it.** Deleting `manifest_nodes(...)` from the call site left every
-    pytest case in that file green, because the direct test hands `build_runs` a `nodes` dict. The
-    manifest fixture carries the versioned model now so one assertion runs
-    through `pipeline_status.build_runs` — the same lesson as the asset checks
-    that read the wrong database for a week.
-  - **And the wiring broke anyway, one layer further out, on the first push.**
-    `build_runs` reads `run_results.json` *by path*; dagster-dbt gives every
-    invocation a unique target directory (`target/<op>-<run id>-<uuid>/`) so
-    concurrent invocations cannot overwrite each other's artifacts. Nothing here
-    is ever concurrent, so the uniqueness bought nothing and cost the table:
-    `just run` shells out to plain dbt and filled it, while **every**
-    orchestrated path — `just materialize`, CI, the nightly, the release, the
-    site — wrote `pipeline_runs` with zero rows. `dbt.cli(…)` takes an explicit
-    `target_path` and now gets `paths.dbt_target_path()`, which is also what
-    keeps a fixture run's artifacts isolated.
-    - **The only consumer that objected was the one with the least at stake.**
-      Nothing reads the table back, so an empty one is not an error anywhere;
-      Evidence cannot write a zero-row source to Parquet, so `pages.yml` failed
-      three minutes into an npm build with a message about a file being too
-      small — the same trap `co2_estimate_versions` already carries. The three
-      workflows that matter more were green and wrong, and the release would
-      have published an empty history and then carried the emptiness forward
-      every month.
-    - **The guard is `run_history_records_this_build`, and its assertion is the
-      whole of it.** `count(*) > 0` passes on the exact broken state, because a
-      developer's warehouse still holds the shell-ordered runs — measured, by
-      mutating the check to that form and watching the fixture go green. It
-      asserts that the invocation `run_results.json` *names* is in the table,
-      and it is `blocking=True` on an asset the site depends on, so the failure
-      lands before npm starts rather than after.
+- **None of it is new instrumentation** — `_dlt_load_id`, `dbt_test__audit` and
+  `information_schema` already hold it. The module exists because the SQL is
+  dynamic over a table list known only at runtime.
+- **Test names come from the manifest**, because dbt truncates and hashes an
+  audit-table name longer than 63 characters. The manifest is gitignored, so
+  `build_tests` degrades to bare table names without it.
+- **A test's verdict is its `fail_calc`, not `count(*)`.** `equal_rowcount`
+  returns a one-row summary whether it passed or failed, so counting rows scored
+  both as failing against a build that finished ERROR=0. 480 of the 482 tests use
+  the default. `severity: warn` carries across as `status='warn'`.
+- **An audit table the manifest does not name is stale, and dropped.** dbt never
+  removes one, and renaming a model orphans all its tests' tables, which are empty
+  and would score as passing. The filter applies only when a manifest is present.
+- **It excludes its own output from the inventory**, and must run after
+  `dbt build`, which writes the audit schema and the manifest it reads.
+- **`pipeline_runs` is a history, so it is appended (`db.append_frame`), never
+  replaced**: `run_results.json` holds only the latest invocation. The insert is
+  idempotent on `invocation_id`, and a `Carry` rule in `CARRIED`
+  (`publish/restore_history.py`) carries it between releases — the first rule to
+  name its tables, because the rest of `analytics` is rebuilt every run.
+  - No row counts: dbt-duckdb sets `adapter_response.rows_affected` only for
+    seeds. `pipeline_tables` measures rows from the warehouse instead.
+  - `compile_time_s + execute_time_s` is not `execution_time_s` (57.86s against
+    65.14s, measured once): dbt counts work outside both phases, so all three are
+    stored.
+  - Versioned nodes' ids end `.v1`/`.v2` and test ids end in a hash, so rows are
+    labelled through the manifest's `alias` (`observability.node_display_name`),
+    and one test goes through `pipeline_status.build_runs` so the wiring is
+    covered as well as the resolver.
+  - **The reader has to find the artifact.** dagster-dbt gives each invocation a
+    unique target directory by default, so every orchestrated build wrote
+    `pipeline_runs` with zero rows while `just run` filled it; `dbt.cli(…)` now
+    gets `paths.dbt_target_path()`. The only loud symptom was Evidence refusing a
+    zero-row Parquet in `pages.yml`. The guard is the blocking
+    `run_history_records_this_build` check, which asserts the invocation
+    `run_results.json` names is in the table — `count(*) > 0` passes on a
+    developer's warehouse that still holds older runs.
 
 ## The lakehouse (`lake/lakehouse.py`)
 
 **dlt lands `raw` in a DuckLake catalog under `data/lakehouse/`, and the DuckDB
 file holds only what dbt builds.** dbt attaches the catalog (`profiles.yml`'s
-`attach:`, `_sources.yml`'s `database: lakehouse`) and writes `staging`, `marts`,
-`history` into `data/warehouse.duckdb`, which is the whole of what the release
-publishes. `just lakehouse` *reports* the catalog; `just ingest` is what fills it.
-It replaced a hand-written hive archive (`lake/archive.py`, `data/lake/`), which
-was a second copy of the warehouse maintained by hand.
+`attach:`, `_sources.yml`'s `database: lakehouse`). `just ingest` fills it;
+`just lakehouse` *reports* on it. The mechanics are the `the-lakehouse` skill —
+the change feed dlt makes useless, reading table versions from the catalog, the
+publishing allowlist, the unpinnable extension, migrating an old tree. What bites
+outside that task:
 
-**The mechanics are the `the-lakehouse` skill** — why dlt's merge makes
-DuckLake's change feed useless and what replaces it, reading table versions out
-of the catalog database, the allowlist that decides what
-`lakehouse.tar.gz` publishes, the unpinnable extension and the spec-version
-guard, and how to migrate a tree that predates the move. Four things stay here
-because they bite outside that task:
-
-- **`just sql` attaches the lakehouse, and without it a third of the warehouse
-  does not open.** The nine `staging` models are *views* over `lakehouse.raw`, so
-  a bare `duckdb data/warehouse.duckdb` binds the 26 `marts`/`analytics`/`history`
-  relations and fails every one of the 9 staging views with `Catalog "lakehouse"
-  does not exist!`. The recipe attaches in the same mode as the warehouse, so
-  `just sql write` can repair a landing table and the default cannot touch one by
-  accident.
-- **It is the only copy of every landing table, so `just clean` still does not
-  take it.** Deleting it costs the snapshot lineage *and* the weather archive,
-  which is days of Open-Meteo budget. Both silently.
-- **`just` exports an absolute `LAKEHOUSE_DIR` for every recipe**, which is not a
-  convenience. DuckLake compares the stored `data_path` against the given one **as
-  strings**, so the same directory under two spellings is refused —
-  `profiles.yml`'s relative default made dlt (from the repo root) and dbt (from
-  `dbt/`) disagree, and the error lands in `dbt build`, one layer downstream of
-  the layer that chose the spelling. **No recipe could reproduce it, because every
-  recipe exported the variable that hid it.** `WAREHOUSE_PATH` gets away with a
-  relative default because a plain file keeps no such record.
+- **`just sql` attaches the lakehouse**, because the `staging` views, and the
+  `intermediate` views over them, read `lakehouse.raw`; a bare
+  `duckdb data/warehouse.duckdb` fails each with `Catalog "lakehouse" does not
+  exist!`. It attaches in the warehouse's mode, so only `just sql write` can touch
+  a landing table.
+- **It is the only copy of every landing table**, so `just clean` never takes it:
+  deleting it costs the snapshot lineage and the weather archive, which is days
+  of Open-Meteo budget.
+- **`LAKEHOUSE_DIR` must be absolute, so `just` exports it for every recipe.**
+  DuckLake compares the stored `data_path` with the given one *as strings*, so dlt
+  (running from the repo root) and dbt (from `dbt/`) spelling one directory two
+  ways is refused inside `dbt build`, a layer downstream of the cause — and no
+  recipe reproduces it, because every recipe exports the variable that hides it.
+  `WAREHOUSE_PATH` gets away with a relative default because a plain file keeps
+  no such record.
 - **`.github/actions/setup` is the one definition of that environment** — uv, the
-  venv, `just`, and all three paths absolute — because until 2026-09-01 the four
-  workflows each set the paths themselves, so all four needed the same new line
-  when the landing zone moved and none of them got it. Three tests in
-  `tests/test_workflows.py` hold it: the action must export all three (the vacuity
-  guard — the other two assert an *absence* and would both pass if nothing set
-  them at all), no workflow may define one itself, and every workflow running the
-  pipeline must use the action.
+  venv, `just`, and all three paths absolute. `tests/test_workflows.py` requires
+  the action to export them, no workflow to set them, and every workflow that
+  runs the pipeline to use it.
+
 ## Publishing (`publish/export_warehouse.py`)
 
-`just export-data` packages the built warehouse into `data/export/` (gitignored):
-a `COPY FROM DATABASE` copy of the DuckDB file, a zstd Parquet per table in
-`staging`/`marts`/`analytics`, `manifest.json`, `SHA256SUMS`, `ATTRIBUTION.md`
-and the release body. `.github/workflows/release-data.yml` runs it monthly (and
-on demand) after materializing the graph against live sources, and attaches the
-lot to a dated `data-YYYY-MM-DD` GitHub release.
+`just export-data` packages the built warehouse into `data/export/`: a
+`COPY FROM DATABASE` copy of the DuckDB file, a zstd Parquet per table in
+`staging`/`marts`/`analytics`, `lakehouse.tar.gz`, `manifest.json`,
+`SHA256SUMS`, `ATTRIBUTION.md` and the release body. `release-data.yml` runs it
+monthly (and on demand) against live sources and publishes a dated
+`data-YYYY-MM-DD` release.
 
-- **The published DuckDB file must be named `warehouse.duckdb` and attached as
+- **The published file must be named `warehouse.duckdb` and attached as
   `warehouse`.** DuckDB names a catalog after the file stem, and dbt writes the
-  `staging` views with fully-qualified SQL (`warehouse.raw.owid_co2`). Rename the
-  file or `ATTACH … AS wh` and the views raise `Catalog "warehouse" does not
-  exist` while the `marts`/`analytics` tables keep working — a confusing
-  half-broken artifact. `tests/test_export.py` guards it.
-- **Releases redistribute upstream data**, which the repo itself doesn't. The
-  seven sources are CC BY 4.0 or a Eurostat/ECB reuse policy, and the CBAM
-  seeds are EU law under Decision 2011/833 — every one of which permits
-  redistribution *on condition of attribution*, so that is the obligation: `ATTRIBUTION` in the export script is
-  the single source of truth for both the shipped file and the release notes.
-  It said "all four sources" from the initial commit until 2026-08-26, having
-  never been touched when FX, retail and CBAM arrived.
-  - **It is enforced now** (`tests/test_export.py`), where it used to be an
-    instruction here to keep it in step with the README's licence section by
-    hand. Sources are tied to `ALL_URLS`; licences are compared against
-    README's `## License` in both directions. See *Testing* for what the
-    mapping costs and why it cannot be derived.
-- **`raw` and `history` ship in the DuckDB file but not as Parquet.** The flat
-  files are the modelled layers only (`PUBLISHED_SCHEMAS`); anyone who wants
-  dlt's landing tables or the snapshot downloads the database.
-- **The rest of the boundary is the `publishing-a-release` skill** — the two
-  format ceilings and the moments their tripwires fire, why `data_loaded_at` has
-  to name the catalog rather than the copy, and the rules that carry the
-  unreproducible tables forward. Three of its results are load-bearing outside
-  that task:
-  - **The manifest carries both `duckdb_version` and `storage_version`**, because
-    "who wrote this" and "can I open it" are different questions with different
-    answers: DuckDB 1.x writes format **64** by default, which every client back
-    to v0.10.0 reads. `MAX_PUBLISHED_STORAGE_VERSION` is the ceiling and
-    `test_the_installed_duckdb_still_writes_the_format_the_release_promises`
-    checks the *toolchain*, so it fires on the Dependabot PR that moves DuckDB
-    rather than on the artifact. **Not an upper bound on `duckdb`, deliberately**
-    — `dagster<3.15` remains the only hard upper bound in the tree.
-  - **`lakehouse.tar.gz` has the same shape of ceiling** (`ducklake_metadata.version`,
-    `MAX_PUBLISHED_LAKE_VERSION`) and its tripwire has to work harder, because
-    the DuckLake spec moves when extensions.duckdb.org republishes and **there is
-    no PR to fail** — only the next CI run can say so.
-  - **Each release carries the previous one's unreproducible tables forward**
-    (`publish/restore_history.py`, `just restore-history`), which is what makes
-    the published snapshot accumulate a real revision log instead of holding one
-    version per row forever, keeps the weather archive deepening instead of
-    resetting to a three-year cold start every month, and — since
-    `analytics.pipeline_runs` joined them — makes the published build history
-    span releases rather than describing one run. `CARRIED` is a tuple of
-    `Carry` rules and `irreplaceable_rows()` is the one count all three callers
-    use — `just clean warehouse`'s gate, the restore step and the "did not
-    shrink" verify — so a rule added there reaches all three at once. **Only "no
-    previous release" may skip**; a failed download or restore is fatal in
-    `release-data.yml`, because continuing would publish an empty history that
-    the *next* release then inherits.
+  `intermediate` views fully qualified (`warehouse.staging.stg_co2`); rename the
+  file or `ATTACH … AS wh` and they raise `Catalog "warehouse" does not exist`
+  while the tables keep working. `tests/test_export.py` guards it.
+- **Releases redistribute upstream data** under licences — CC BY 4.0, the
+  Eurostat and ECB reuse policies, Decision 2011/833 for the CBAM annex — that
+  all require attribution. `ATTRIBUTION` is the single source for the shipped file
+  and the notes, and `tests/test_export.py` ties it to `ALL_URLS` and to README's
+  `## License`.
+- **`history` ships in the DuckDB file but not as Parquet**; `raw` is not in the
+  file at all, and of the landing tables only `raw.om_weather_daily` ships, in
+  `lakehouse.tar.gz`.
+- **The rest is the `publishing-a-release` skill.** Three of its results matter
+  outside it:
+  - The manifest carries `duckdb_version` *and* `storage_version`, because "who
+    wrote this" and "can I open it" differ: DuckDB 1.x writes format 64, which
+    every client back to v0.10.0 reads. `MAX_PUBLISHED_STORAGE_VERSION` is
+    checked against the *toolchain*, so it fires on the Dependabot PR that moves
+    DuckDB. Not an upper bound on `duckdb`, deliberately.
+  - `lakehouse.tar.gz` has the same kind of ceiling
+    (`MAX_PUBLISHED_LAKE_VERSION`), but the DuckLake spec moves when
+    extensions.duckdb.org republishes — **there is no PR to fail**, only the next
+    CI run.
+  - **Each release carries the previous one's unreproducible state forward** —
+    the snapshots, `analytics.pipeline_runs`, and the lakehouse with its weather
+    archive — so the revision log and the build history span releases and the
+    archive keeps deepening instead of cold-starting every month.
+    `irreplaceable_rows()` is the one count behind `just clean warehouse`'s gate,
+    the restore and the "did not shrink" verify. **Only "no previous release" may
+    skip**; a failed download or restore is fatal, or the next release inherits
+    an empty history.
 
 ## Conventions & gotchas (learned the hard way)
 
 - **Clean schema names** come from `dbt/macros/generate_schema_name.sql`, which
   overrides dbt's default `<target>_<custom>` (which would give `main_marts`).
   Reference marts as `marts.fct_emissions_energy`, not `main_marts.…`.
-- **One dbt target, and that is a decision rather than an omission.** `dev` is
-  the only output in `dbt/profiles.yml`. A target separates *schemas inside one
-  database*, which is the whole of what `dev`/`ci`/`prod` do on Snowflake or
-  BigQuery; DuckDB is a file, so `WAREHOUSE_PATH` swaps the entire database —
-  a stronger separation — and the macro above deliberately keeps the schema
-  names identical in every context, which is what lets
+- **One dbt target, by decision.** A dbt target separates schemas *inside one
+  database*; here `WAREHOUSE_PATH` swaps the whole database, and the macro above
+  keeps schema names identical everywhere, which is what lets
   `marts.fct_emissions_energy` resolve the same on a laptop, in CI and in the
-  published release. Three outputs would differ in name only, selected by a
-  second environment variable on top of the one that already decides
-  everything. Measured before deciding: `target.` appears **once** in the whole
-  project (`target.schema`, in that macro) and no `--target` is ever passed.
-  The reasoning sits in `profiles.yml` beside the output it explains; a port to
-  a real warehouse should add the targets, and `docs/REUSING_THIS_STACK.md`
-  says so.
-  - **What it costs is that dbt's one "where am I" line is uninformative.**
-    `Concurrency: 4 threads (target='dev')` names the target and never the
-    file, so `just dbt-build` against the real warehouse and against a course
-    sandbox print the same line — which is the trap the course notes and the
-    fixture-run warning both describe, from two directions. `just where` prints
-    the file, and the eleven recipes that write to the warehouse or the landing
-    zone take it as their first dependency, so a run announces its destination
-    before reaching it. `just` runs a shared dependency once, so `just run`
-    says it once. The three recipes that export `WAREHOUSE_PATH` themselves are
-    excluded on purpose: they announce their own, and `where` would print the
-    outer value.
-- **dlt persists its schema and only *widens* types.** If a column lands with the
-  wrong type, re-running won't fix it — the pipeline uses
-  `refresh="drop_resources"` (`REFRESH` in `ingest/pipeline.py`) to force
-  re-inference each run. Don't remove that without a reason. It's
-  `drop_resources` and not `drop_sources` because Dagster can run a subset of the
-  source: `drop_sources` would wipe the four tables that *weren't* selected.
-- **Four resources `replace`, `wb_wdi` `merge`s — and that's two loads, not one.**
-  `refresh` is an argument to `run()`, not a property of a resource, so a single
-  run can't refresh the replace tables while leaving the incremental one alone:
-  `drop_resources` would take `raw.wb_wdi` and its watermark with it. Hence
-  `load_groups()` in `ingest/pipeline.py`, which both `main()` and the Dagster
-  asset iterate — replace resources with `refresh=REFRESH`, then `wb_wdi`
-  without. It takes the selected resource names so materialising one asset still
-  runs exactly one load. Add a resource to `public_indicators()` and it must go
-  in `FULL_REFRESH_RESOURCES` or `INCREMENTAL_RESOURCES` too; a test asserts the
-  two cover the source exactly.
-- **dlt state is keyed on the pipeline *name*, not the destination.** So a
-  fixture run would otherwise hand its WDI watermark to the next real run, which
-  would fetch a five-year window into a warehouse that has no history —
-  `build_pipeline()` appends `_fixtures` to the name under `INGEST_FIXTURES=1`
-  for exactly that reason. (dlt does reset state when the destination is empty,
-  which is why this only bites when the real warehouse already exists.)
-- **A resource that yields Arrow gets no `_dlt_load_id` unless you ask.**
-  `retail_invoice_lines` yields Arrow batches straight out of DuckDB, and dlt's
-  Parquet normalizer leaves the load-id column off by default — so the biggest
-  table in the warehouse landed with no load provenance, `dbt source freshness`
-  had nothing to read, and `pipeline_sources` silently reported six sources for
-  seven. `build_pipeline()` sets
-  `NORMALIZE__PARQUET_NORMALIZER__ADD_DLT_LOAD_ID=true`. Adding the column to an
-  existing table needs a `drop table` plus `refresh="drop_resources"`; dlt will
-  not widen into it.
-- **`.arrow()` is a streaming reader with a 1,000,000-row default batch.** Using
-  it to hand a relation to dlt stored exactly 1,000,000 of 1,067,371 rows, with
-  no error — the round number was the only clue. `to_arrow_reader(BATCH)` and
-  `yield from` is the fix, and `test_retail_yields_every_row_the_workbook_holds`
-  counts.
-- **Declare `timezone: False` on a timestamp column, or dlt makes it
-  `TIMESTAMP WITH TIME ZONE`.** A 07:45 till time then reads `08:45:00+01:00` on
-  a CET machine and differs between a laptop and CI.
-- **The country-year data semantics are the `country-stats-models` skill**, and
-  they are the largest body of "plausible number, wrong basis" in the repo:
-  coverage that thins per column, OWID's territorial-vs-consumption pair, the
-  World Bank's padded region names and missing ISO3s, Eurostat's JSON-stat grid
-  and its two ISO2 exceptions, and the WDI incremental window. Four of them
-  cannot wait for a skill to load, because they change what a query *means*:
-  - **`income_group` and `region` are today's answer applied to every year, and
-  `marts.dim_country_income_history` is the measurement of what that costs.**
-  The World Bank `/country` endpoint publishes only the current classification,
-  so `dim_country` stamps the 2026 answer onto 1990 and every rollup by income
-  group inherits it. Measured against the publisher's own history
-  (`OGHIST.xlsx`, fiscal 1989 onward, transcribed by
-  `scripts/build_income_classification_seed.py` into a seed):
+  release. The reasoning sits in `profiles.yml`; a port to a real warehouse
+  should add targets (`docs/REUSING_THIS_STACK.md`).
+  - The cost: dbt's one "where am I" line, `Concurrency: 4 threads
+    (target='dev')`, names the target and never the file, so a build against the
+    real warehouse and one against a course sandbox look the same. `just where`
+    prints the file, and every recipe that writes to the warehouse or the landing
+    zone takes it as its first dependency — except the three that export
+    `WAREHOUSE_PATH` themselves and announce their own.
+- **dlt persists its schema and only *widens* types**, so a column that lands with
+  the wrong type stays wrong. The pipeline uses `refresh="drop_resources"`
+  (`REFRESH` in `ingest/pipeline.py`) to force re-inference; `drop_resources`
+  rather than `drop_sources`, because Dagster can run a subset of the source and
+  `drop_sources` would wipe the tables that weren't selected.
+- **Four resources `replace` and four `merge`, so a load is two `run()`s.**
+  `refresh` is an argument to `run()`, not a property of a resource, and it would
+  drop a merge table and its watermark. `load_groups()` returns the replace group
+  with `REFRESH` and the merge group without, restricted to the resources
+  selected. A new resource must join `FULL_REFRESH_RESOURCES` or
+  `INCREMENTAL_RESOURCES`; a test asserts the two cover the source.
+- **dlt state is keyed on the pipeline *name*, not the destination**, so a
+  fixture run would hand its watermarks to the next real run. `build_pipeline()`
+  appends `_fixtures` to the name under `INGEST_FIXTURES=1`. (dlt resets state
+  when the destination is empty, so this bites only once a real landing zone
+  exists.)
+- **A resource that yields Arrow gets no `_dlt_load_id` unless you ask** —
+  `build_pipeline()` sets `NORMALIZE__PARQUET_NORMALIZER__ADD_DLT_LOAD_ID=true`,
+  or the retail table lands with no load provenance and freshness and
+  `pipeline_sources` silently skip it. Adding the column to an existing table
+  needs a `drop table` plus `refresh="drop_resources"`.
+- **`.arrow()` is a streaming reader with a 1,000,000-row default batch**; handed
+  to dlt as a table it stored exactly 1,000,000 of 1,067,371 rows, with no error.
+  `to_arrow_reader(BATCH)` and `yield from` is the fix, and
+  `test_retail_yields_every_row_the_workbook_holds` counts.
+- **Declare `timezone: False` on a timestamp column**, or dlt makes it
+  `TIMESTAMP WITH TIME ZONE` and a 07:45 till time reads `08:45:00+01:00` on a CET
+  machine.
+- **The country-year semantics are the `country-stats-models` skill** — the
+  largest body of "plausible number, wrong basis" in the repo. Four facts cannot
+  wait for it, because they change what a query *means*:
+  - **`income_group` and `region` are today's answer applied to every year.** The
+    World Bank `/country` endpoint publishes only the current classification, so
+    every rollup by income group inherits it. `marts.dim_country_income_history`,
+    transcribed from the publisher's own history (`OGHIST.xlsx`, by
+    `scripts/build_income_classification_seed.py`), measures the cost:
 
-  | Year | Economies classified | In a different group today |
-  |------|---------------------|----------------------------|
-  | 1990 | 174 | **89 (51%)** |
-  | 2000 | 203 | 102 (50%) |
-  | 2010 | 211 | 59 (28%) |
-  | 2020 | 212 | 22 (10%) |
-  | 2025 | 213 | 0 |
+    | Year | Economies classified | In a different group today |
+    |------|---------------------|----------------------------|
+    | 1990 | 174 | **89 (51%)** |
+    | 2000 | 203 | 102 (50%) |
+    | 2010 | 211 | 59 (28%) |
+    | 2020 | 212 | 22 (10%) |
+    | 2025 | 213 | 0 |
 
-  The 0 in the current year is not luck and is worth keeping as an invariant: it
-  is the same classification reached two ways, so a singular test warns when the
-  two stop agreeing, which is what a July reclassification looks like before
-  anybody re-runs the script. **Nothing is repointed at the history yet** — that
-  is a contract change on the eight relations carrying `income_group` plus a v3
-  of the versioned model, and is deliberately a separate decision from
-  publishing the fact.
-- **Divide by `gdp_constant_usd`, never `gdp_usd`.** `gdp_usd` is *current* US$,
-    so it moves with inflation and the exchange rate. Of the 193 countries with
-    both series in 2010 and 2024, **30 flip the sign of their decarbonisation
-    trend** on that choice alone.
-  - **"Latest year" is per column, not per table.** `max(year)` on the mart is
-    whichever source runs furthest ahead, and coverage thins unevenly before it —
-    `co2_mt` holds 214 countries where `primary_energy_twh` collapses to **79**.
-    Read `reports/sources/warehouse/latest_years.sql`, never a literal. It is
-    the latest *observed* year because `stg_wdi` cuts WDI at `current_date` —
-    the World Bank served population projections to 2050 on 2026-09-07, and a
-    literal ceiling in a test was both too late and blind below itself
-    (`country-stats-models`).
-  - **Eurostat prices are semi-annual.** Chart prices over time off
-    `marts.fct_eu_electricity_prices_semiannual`; the annual column exists to
-    join prices to emissions or GDP and is a price nobody paid.
-  - **Adding a WDI indicator is two places** — `WB_WDI_INDICATORS` in
-    `ingest/sources/worldbank.py` and a `max(case …)` in `stg_wdi.sql`, held
-    together by `tests/test_ingest.py`.
-
-- **Retail carries `country_iso3` now, and the join that resolves it has to stay
-  a *left* join.** The source names countries in its own words, so the retail
-  models could not be joined to the country domain at all;
-  `retail_country_map` (a seed, 43 rows) resolves every label once in
-  `stg_retail_lines`, and the fact, the returns fact, `dim_retail_customer` and
-  `analytics.retail_rfm` all carry the key. 34 of the 43 labels match
-  `dim_country_year.country_name` exactly, which is what makes a join on name
-  look like it works while losing the other nine — `EIRE` alone is GBP 615,520
-  and the second-largest market. The seed is exhaustive on purpose and
-  `relationships(country → seed)` is what makes a label from a re-ingest loud.
-  **An inner join does not trip that test, it defeats it**: it deletes the
-  unresolved rows, so the test reads a model with nothing left to fail on —
-  measured at 17,866 lines and GBP 615,520 gone, four customers with them, and
-  all 90 nodes green. The nine labels, the six judgements and the `max_by` in
-  the customer dimension are the `retail-models` skill.
+    The current year's 0 is an invariant — the same classification reached two
+    ways — so a `warn` test fires when they stop agreeing, which is what a July
+    reclassification looks like before anyone re-runs the script. Nothing is
+    repointed at the history yet: that is a contract change on every relation
+    carrying `income_group`, and a separate decision.
+  - **Divide by `gdp_constant_usd`, never `gdp_usd`.** `gdp_usd` is *current*
+    US$, moving with inflation and the exchange rate; of the 193 countries with
+    both series in 2010 and 2024, 30 flip the sign of their decarbonisation trend
+    on that choice alone.
+  - **"Latest year" is per column, not per table.** Coverage thins unevenly —
+    `co2_mt` holds 214 countries where `primary_energy_twh` has 79 — so read
+    `reports/sources/warehouse/latest_years.sql`, never a literal. It is the
+    latest *observed* year, because `stg_wdi` cuts WDI at `current_date`: the
+    World Bank also serves projections.
+  - **Eurostat prices are semi-annual.** Chart prices off
+    `marts.fct_eu_electricity_prices_semiannual`; the annual column exists to join
+    prices to emissions or GDP and is a price nobody paid.
+- **Adding a WDI indicator is two places** — `WB_WDI_INDICATORS` in
+  `ingest/sources/worldbank.py` and a `max(case …)` in `stg_wdi.sql`, held
+  together by `tests/test_ingest.py`.
+- **Retail reaches the country domain through a seed, and that join must stay a
+  *left* join.** `retail_country_map` resolves the source's own country labels
+  in `stg_retail_lines`; a join on name would silently lose the nine labels that
+  don't match (`EIRE` is the second-largest market). The
+  `relationships` test makes an unmapped label from a re-ingest loud — and an
+  inner join defeats it, by deleting the unresolved rows before the test reads
+  them. The labels and the judgements are the `retail-models` skill.
 
 ## Orchestration (`orchestration/`)
 
@@ -1573,375 +926,157 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 `transform.co2_intensity.run()`).
 
 - **Asset keys are the join between the layers.** dlt resources are keyed
-  `raw/<resource>` by `RawSchemaDltTranslator` specifically to match the keys
-  dagster-dbt derives from `_sources.yml`. Rename a dbt source table without
-  renaming the dlt resource and the graph silently splits in two — the halves
-  still run, just unconnected. Check with `dagster definitions validate` plus a
-  look at the graph.
+  `raw/<resource>` by `RawSchemaDltTranslator` to match the keys dagster-dbt
+  derives from `_sources.yml`. Rename a dbt source table without renaming the dlt
+  resource and the graph silently splits in two — both halves still run. Check
+  with `dagster definitions validate` and a look at the graph.
 - **`orchestration/assets.py` must not use `from __future__ import annotations`.**
   Dagster inspects the `context` parameter's annotation *object*; a stringified
-  annotation fails its check with a confusing "Cannot annotate `context`" error.
-- **Everything runs in one process** (`in_process_executor`, and the four
-  `replace` dlt resources in a single op). DuckDB takes one writer at a time, so
-  parallel steps would just fight over the file lock.
-- **Two assets are partitioned and three jobs exist because of it.**
-  `raw/wb_wdi` is yearly and `raw/retail_invoice_lines` monthly;
-  `define_asset_job` resolves a selection to a *single* `partitions_def` or
-  raises, and there is no opt-out. So `load_retail` carries the retail ingest
-  alone, `full_refresh` is `AssetSelection.all() - site - retail_ingest`, and
-  **`load_retail` has to run first** because dbt reads the table it lands. The
-  justfile recipes and all four workflows pair them; running `full_refresh` by
-  itself against a fresh warehouse fails inside dbt with `Catalog Error: Table
-  with name retail_invoice_lines does not exist!`.
-- **Every asset and check is listed by hand in `definitions.py`, and nothing
-  tells you when one isn't** — an omission is not an error, it is simply an asset
-  the graph never sees, and `dagster definitions validate` passes.
-  `tests/test_definitions.py` compares what `assets.py` defines against what the
-  graph resolves, and CI runs it in the `dbt parse` step.
-- **The rest of the graph is the `dagster-graph-and-jobs` skill** — what earns a
-  partition and what a partitioned asset needs in order to keep working
-  unpartitioned, the two traps in the registration test, and the costed decision
-  not to be a `dg`-shaped project or to use declarative automation. The three
-  facts about how the *site* meets the graph — the per-table deps map, the
-  size-checking render guard, and Evidence's reserved route names — moved to
-  `building-evidence-reports`.
-- **The Evidence site is an asset, and it's the asset excluded from
-  `full_refresh` for a reason that isn't partitioning.** `reports/evidence_site`
-  shells out to npm via `publish/build_report.py`; `ci.yml`, `nightly.yml` and
-  `release-data.yml` all run `full_refresh` on a bare uv checkout with no Node, so
-  a site in that job would break three workflows to serve one. `pages.yml` runs
-  `publish_site`. Both selections in `definitions.py` name what they leave out; a
-  second npm-shaped *or* differently-partitioned asset would have to be excluded
-  by hand too.
+  one fails with a confusing "Cannot annotate `context`".
+- **Everything runs in one process** (`in_process_executor`, and the `replace`
+  resources in a single op): DuckDB takes one writer at a time, so parallel steps
+  would fight over the lock.
+- **Three resources are partitioned, under two partition definitions**:
+  `raw/wb_wdi` and `raw/om_weather_daily` by year, `raw/retail_invoice_lines` by
+  month. `define_asset_job` resolves a selection to a *single* `partitions_def` or
+  raises, so `load_retail` carries the retail ingest alone, `full_refresh` is
+  everything else but the site, and **`load_retail` runs first**, because dbt
+  reads what it lands. `full_refresh` alone against a fresh warehouse fails in dbt
+  with `Table with name retail_invoice_lines does not exist!`.
+- **Every asset and check is listed by hand in `definitions.py`, and an omission
+  is silent** — the asset is simply not in the graph, and `dagster definitions
+  validate` passes. `tests/test_definitions.py` compares what `assets.py` defines
+  with what the graph resolves.
+- **The Evidence site is an asset, excluded from `full_refresh` because it needs
+  Node.** `reports/evidence_site` shells out to npm; `ci.yml`, `nightly.yml` and
+  `release-data.yml` run `full_refresh` with no Node, and `pages.yml` runs
+  `publish_site`. Both selections name what they leave out, so a second
+  npm-shaped or differently partitioned asset has to be excluded by hand too.
 - **Importing `orchestration.assets` leaves a dlt pipeline active process-wide.**
-  The `@dlt_assets` decorators call `build_pipeline()` at import time and dlt
-  records the result as the ambient pipeline, so a later test calling a resource
-  generator directly reads the real `~/.dlt` state instead of none —
-  `test_wb_wdi_follows_pagination` starts asking for `&date=2021:2026` and fails
-  on pagination it never got wrong. It only bites when the whole suite runs, and
-  only on a machine that has loaded WDI at least once. `tests/test_definitions.py`
-  deactivates the pipeline on teardown; anything else under `tests/` that imports
-  the orchestration layer has to do the same.
-- The `daily_refresh` schedule ships `STOPPED` on purpose — opening the UI
-  shouldn't start hammering public APIs on a timer. It targets `full_refresh`, so
-  it doesn't try to build the site either.
-- Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile).
-  Only `dagster.yaml` is checked in.
+  The `@dlt_assets` decorators call `build_pipeline()` at import time, so a later
+  test calling a resource directly reads the real `~/.dlt` state and fails on
+  pagination it never got wrong — only in a full-suite run, only on a machine
+  that has loaded WDI. `tests/conftest.py` deactivates it on teardown.
+- **The rest is the `dagster-graph-and-jobs` skill** — what earns a partition and
+  what a partitioned asset needs to keep working unpartitioned, the traps in the
+  registration test, and the costed decisions against `dg` and declarative
+  automation. How the site meets the graph is `building-evidence-reports`.
+- The `daily_refresh` schedule ships `STOPPED`, so opening the UI does not start
+  hammering public APIs. It targets `full_refresh`, so it never builds the site.
+- Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile);
+  only `dagster.yaml` is checked in.
 
 ## Testing (`tests/`)
 
 Two tiers, and the split is the point — see [`tests/README.md`](tests/README.md).
 
-- `just test` — mocked-payload unit tests over the ingest/transform logic. No
-  network, no warehouse, **~42s** for the whole suite (measured 2026-09-09,
-  three runs within 0.1s of each other; it is wall clock on one machine, so
-  treat it as an order of magnitude rather than a constant). **It said ~1s from
-  the initial commit to 2026-08-26**, which was true of a much smaller suite and
-  drifted by a factor of fourteen with nothing to notice:
-  `tests/test_documented_counts.py` guards counts in front of test-nouns, and a
-  *timing* claim has no such guard. Re-measure before quoting one.
-  - **That instruction was written on 2026-08-26 and the number it fixed was
-    stale again fourteen days later** — 14s against a measured 42s, a second
-    factor of three, in the bullet that exists to warn about the first. The
-    lesson is not "re-measure harder": a wall-clock figure in prose has no
-    authority to check it against, and unlike a count there is nothing a test
-    could compare it to that would not be flaky on a different machine. What is
-    worth keeping is the *vintage* — a number with a date beside it is one a
-    reader can discount, and one without a date reads as current forever.
-  - **And the 2026-08-26 correction had already lost a site.** The claim lives
-    in four files; that fix updated `README.md`, `CLAUDE.md` and
-    `tests/README.md` and left `.github/CONTRIBUTING.md` on **~1s** — a figure
-    forty-two times out, on the page a first-time contributor reads. Same shape
-    as the four Antarctica claims in the ymls, three corrected and one missed,
-    and as `docs/STYLE_GUIDE.md`'s "staging takes no alias at all". A claim
-    restated in N places loses one every time it is corrected by hand.
-  - `just test-pipeline` drifted the same way and less far: **~42s** against a
-    documented ~30s, across `README.md`, `.github/CONTRIBUTING.md` **and**
-    `tests/README.md` — and correcting it caught the first two and missed the
-    third until a `grep` for the old figure was run afterwards. That grep is the
-    only reliable step here: fix the sites you know about, then search for the
-    *old* number and expect a hit.
-  - **The one timing claim that held is the one measuring dbt rather than
-    pytest.** `just dbt-unit-test` is documented at 4.8s of dbt's own time and
-    ~10.5s wall, and measured 4.95s / 10.85s — because it times a fixed 36 unit
-    tests through dbt's own reporting, not a suite that grows. The coverage
-    *percentages* held for the same reason (67.1% branch / 78.5% statement
-    against a documented 67/78): they move with the code proportionally. It is
-    specifically the pytest wall clock that is a liability.
-  - **Writing that bullet tripped the counts guard, which is worth recording.**
-    The first draft said "over 242 &lt;test-noun&gt;" — a *pytest* figure, in a
-    document where that noun almost always means a dbt test, so the scanner read
-    it as a project-wide dbt claim and failed naming `fct_fx_rates_daily`. The
-    guard was right twice over: the number was not one dbt builds, and the
-    phrase was genuinely ambiguous to a human reader too. Phrase a pytest count
-    as "the whole suite" or "pytest cases", never as a bare number in front of
-    that noun.
-- `just coverage` — line and branch coverage of that tier, **~53s** (2026-09-09;
-  documented as ~18s until then, drifting with `just test` above), at 67% branch
-  / 78% statement today — 67.1% and 78.5% measured, so those two held while the
-  seconds beside them tripled. Reports and gates nothing (no `fail_under`, not in CI,
-  no plugin loaded into `addopts`) for ty's reason. Read it with the two caveats
-  in `[tool.coverage.report]`: it measures the mocked tier only, so the
-  transform and lake layers read low while `just test-pipeline` exercises them
-  end to end, and some of what is uncovered is uncovered deliberately.
-  - **`[tool.coverage.run] source` is a hand-maintained list of directories, and
-    the 2026-09-01 split left it behind.** `publish/` was carved out of
-    `scripts/` and the source list kept naming only `scripts` — so the
-    publication boundary (the personal-data policy, the storage ceiling,
-    `build_report`, `restore_history`: 342 statements) was measured by nothing,
-    while the directory this file calls "genuinely one-off" still was. The same
-    move updated `pages.yml`'s allowlist, which `tests/test_workflows.py` guards;
-    nothing guards this list, so it went quiet instead. **Adding it moved the
-    numbers *up*** — 77.6% → 78.5% statement, 62.9% → 67.1% branch — because
-    `export_warehouse.py` is at 83%: the blind spot was hiding well-covered code,
-    which is why no one noticed a number that looked plausible.
-  - **It is `coverage run -m pytest`, not `pytest --cov`, and that was
-    measured.** `pytest-cov` was added first and dropped the same day: identical
-    total, identical runtime to within 0.02s, one more package. Everything under
-    `[tool.coverage.*]` is coverage.py's own config and is what *both* read, so
-    the wrapper bought the `--cov` flag and nothing else — and a justfile recipe
-    hides the two-step regardless. The harlequin/marimo rule (`dependency-versions`)
-    applied to a package this repo had just added.
-  - **`COVERAGE_CORE=sysmon` is the standard advice for cutting the tax on 3.12+
-    and does nothing here** — 18.53s against 18.57s. The cost is coverage's
-    startup and reporting, not tracing, because this suite is dominated by
-    imports and DuckDB/dlt work rather than by Python line execution. Worth
-    knowing before someone reaches for it a second time.
-  - **`branch = true` because this repo argues about unreachable branches in
-    prose.** Four are documented as deliberately unreachable — `dim_date`'s
-    eleven unbuilt fiscal policies, the retail `<> 'adjustment'` clause,
-    `period_is_complete`'s boundary and the provably-dead term in
-    `co2_intensity_rank_is_dense`. Branch coverage makes them a number.
-  - **The first run confirmed a hand-built survey and corrected one item of
-    it.** `scripts/build_cbam_seeds.py` and `scripts/measure_disclosure_risk.py`
-    are both at 0%; `modern_data_stack/history.py` reads 100%, where a grep for
-    test imports had called it uncovered — it is exercised through the
-    `scripts/` wrapper. Grep finds importers, not coverage.
-  - **`.coverage` needed a `.gitignore` entry.** It is a *required intermediate*
-    between `coverage run` and `coverage report`, not an incidental artifact, so
-    it is always present after the recipe and `git add -A` would have taken it.
+- `just test` — mocked-payload unit tests over the Python layers. No network, no
+  warehouse; ~42s for the whole suite (2026-09-11).
+- `just coverage` — the same under coverage.py: ~53s, 67% branch / 78% statement
+  (2026-09-09). It reports and gates nothing, for ty's reason, and measures the
+  mocked tier only, so the transform and lake layers read low.
 - `just test-pipeline` — the real modules end to end with `INGEST_FIXTURES=1`,
-  serving all five sources from `tests/fixtures/ingest/`. This is what CI runs,
-  so a red PR build means the repo broke, not that OWID was down.
+  every source served from `tests/fixtures/ingest/`, into a throwaway warehouse
+  and landing zone. This is what CI runs, so a red PR build means the repo broke,
+  not that OWID was down.
+
+**A wall-clock figure in prose drifts, and nothing can guard it.** The pytest
+timing was documented at ~1s while the suite grew to ~42s, and its first
+correction missed one of the four files that quoted it. Date a timing when you
+write it, and after correcting any figure restated across files, `grep` for the
+*old* value and expect a hit. Figures that move with the code — coverage
+percentages, dbt timing a fixed set of unit tests — hold; the pytest wall clock
+does not. Phrase a pytest count as "pytest cases": the counts guard reads a
+number in front of a bare test noun as a dbt claim.
+
+- `[tool.coverage.run] source` is a hand-maintained directory list with no
+  guard: `publish/` was missing from it, and adding it moved the totals *up*,
+  because the blind spot hid well-covered code.
+- `coverage run -m pytest`, not `pytest --cov`, which measured identically for
+  one more package. `COVERAGE_CORE=sysmon` saves nothing here: the cost is
+  imports and DuckDB/dlt work, not line tracing.
+- `branch = true`, because the repo argues about deliberately unreachable
+  branches in prose, and branch coverage makes them a number.
 
 Gotchas:
 
-- **No routine command evaluates an asset check body, which is how one can read
-  the wrong database for a week.** `just test-pipeline` runs the four modules in
-  shell order and never calls `dagster job execute`, so it evaluates none of
-  them. `tests/test_asset_checks.py` calls them directly, and now runs in CI —
-  see the next bullet for why that took correcting. What no test replaces is a
-  real materialize: these bodies meet the actual warehouse and catalog only
-  there.
-- **A test file that skips itself in CI's first step and is not named in its
-  second runs *nowhere* in CI, and the skip is the honest-looking half.**
-  `ci.yml` runs a bare `uv run pytest` before `dbt deps && dbt parse`, so the
-  three files gated on `dbt/target/manifest.json` skip; the step after the parse
-  then re-runs them *by name*, and it named only `tests/test_definitions.py`.
-  So `test_asset_checks.py` and `test_documented_counts.py` ran on no pull
-  request at all — the asset-check bodies and every count cited in the docs —
-  and **both files' own headers said CI re-ran them**. The 30 skips were visible
-  in every build log and read as normal, because 30 skips *is* normal there.
-  `tests/test_workflows.py` compares the gated set against what the workflow
-  names, both directions, so a fourth gated file cannot join in silence.
-  - **A guard that reads test source as text has to say where it is looking.**
-    The first detector searched for `pytestmark` and `manifest_path.exists()`
-    anywhere in a file and flagged *itself* — the module writes both strings, in
-    the code doing the searching. It is anchored at column 0 now, which is the
-    difference between a module-level mark and a mention of one.
-  - **Patching the database under a check proves its logic and never its
-    wiring**, which is the half that broke: `wdi_indicators_all_present` went on
-    reading `data/warehouse.duckdb` after the landing zone moved into DuckLake,
-    and both tests kept passing because they handed it a throwaway file that did
-    contain `raw.wb_wdi`. On a tree that predates the move the real warehouse
-    *also* still holds a stale `raw`, so the check passed against a copy of a
-    table that no longer lives there — the `the-lakehouse` skill has the
-    migration.
-  - **A check's verdict is not enough to assert.** Pointed at the lakehouse, the
-    healthy-half test failed loudly and the failing-half test stayed green: it
-    asserts a bogus indicator is missing, and it is missing from the real
-    catalog too. It asserts the *count* now, which is the assertion that
-    notices — the same shape as an export test that passed because the machine
-    happened not to have ingested.
-- **A measurement can inherit the blind spot of the thing it measures, and
-  sizing a cross-model defect by what the two models *share* is the shape to
-  watch for.** `fct_fx_rates_periods` had no staleness policy where
-  `fct_fx_rates_daily` has one; the gap was sized by comparing the period-ends
-  the two hold in common — 19,611 of 19,616 agreeing, so **five** rows — and
-  built as `period_end_is_stale` a year later against **22**, across seven
-  currencies. The daily model stops emitting rows once a currency leaves the ECB
-  panel, so the 17 worst rows had nothing to join to and left the numerator and
-  the denominator together. The same trap is a *design* one: implementing the
-  flag as a left join to the sibling reproduces it exactly, and no data test can
-  see that, because the column is a non-null boolean either way. The worst row
-  is the rouble's 2022 year end — a closing rate 305 days old — where the prose
-  everywhere named the krona's famous 2008 at 22. **A join is not a census**;
-  when the question is "how often do these two disagree", count the rows only
-  one of them has first.
-- **A fix that moves no number needs the half of itself that does, or nothing
-  can hold it.** `fct_cbam_exposure.excess_over_cleanest_source` let the annex's
-  "other countries and territories" row set the baseline every listed country is
-  measured against — a restriction the model's comment asserted and its SQL did
-  not implement. Filtering the window changes **not one cell**: the fallback has
-  never been below the cheapest listed source of a good, and on 48 of the 260
-  goods it *cannot* be, because the resolution rule copies the fallback onto
-  every listed country the annex prints "-" for and so guarantees a tie. No data
-  test can be written that would ever see that half; a fixture pricing the
-  fallback below every listed country is the whole guard. The other half — the
-  fallback carrying an excess of its own, which presupposes it is a source — was
-  made observable by nulling it, 260 cells that one `expression_is_true` holds
-  in both directions. **Where a correctness fix is invisible in the data, look
-  for the part of it that can be made to show.**
-- **The way a test here earns its place is mutation**: break the model in a
-  plausible way against a *copy* of the warehouse, run its full data-test suite,
-  and record the number that moves. "Nothing went red" is the finding, not the
-  all-clear — across the seven models mutated this way, 38 mutations were run and
-  the data tests caught 5. The method's two traps, and every model's findings,
-  are the `unit-testing-dbt-models` skill.
-  - **Counting which tests went red over-counts the guards, and an input mocked
-    `rows: []` is how.** All three `fct_cbam_exposure` unit tests failed when
-    its grid join was made inner — none of them guards that join. Their grid
-    input is empty, so an inner join against nothing deletes their whole
-    fixture; give any of them one real row and they stop noticing. Read a red
-    set as a list of candidates and check each one *poses* the thing it caught,
-    or a fixture accident is filed as coverage.
-- **A correct number reused for a different claim is a wrong number, and
-  "verified" in a review usually means read rather than recomputed.** Issue #13
-  said 70,174 of 802,716 purchase lines were dropped by the tie-break, under a
-  heading promising every figure was checked against the warehouse. 70,174 is
-  real and is exactly what the model's comment says — the lines *in* a tied
-  group. The lines dropped are that minus one per group: **36,656, 4.6%**, which
-  the review's own source never claimed. Nothing was stale and nothing was
-  fabricated; the number changed meaning when it changed sentence, and a scanner
-  that checks totals against the manifest cannot see that at all.
-- **A yml `description:` is prose, and until 2026-09-09 the counts guard did not
-  read any of it.** `tests/test_documented_counts.py`'s `SCANNED` was `*.md`
-  plus two hand-named `_unit_tests.yml` paths, so the four marts group ymls,
-  `_staging.yml`, `_intermediate.yml` and `_sources.yml` — **202 column
-  descriptions** — went unchecked, and so did
-  `dbt/models/intermediate/_unit_tests.yml`, which arrived with the intermediate
-  layer in `b006e1e` and joined a list of two that nobody remembered to extend.
-  The pathspec is `dbt/models/**/_*.yml` now, which is 61 files against 53 and
-  63 claims against 59.
-  - **It found one false claim, and the interesting half is that the claim had
-    *moved* rather than expired.** `stg_country.region` said "the mart has one
-    null region (Antarctica), which arrives from OWID and has no dimension row".
-    Measured: `fct_emissions_energy`, `dim_country_year` and `dim_country` hold
-    **zero** null regions and no `ATA` row at all, because the spine's inner
-    join drops a code the dimension does not carry. But
-    `fct_co2_estimate_versions` still carries all **35** of them — it is built
-    off `snap_co2_estimates` rather than off the spine, and a *history* cannot
-    drop a row to tidy a join key. Three of the four Antarctica claims in the
-    tree were corrected when `dim_country` shipped; this one was missed, and the
-    correct sentence names the model rather than "the mart".
-  - **Writing the replacement reproduced the same defect one draft later.** It
-    said `fct_co2_estimate_versions` was "the only place in the warehouse where
-    region is null", which `fct_cbam_exposure`'s **260** falsify — every one the
-    annex's fallback row, which carries no `country_iso3` either, so the true
-    claim is the only place a row that *names a country* has no region. Both
-    versions read equally confidently.
-  - **What it does not buy is larger than what it does.** The scanners read a
-    *test* or *mart* noun; the other **154** numeric claims in those
-    descriptions (row counts, shares, distinct values) stay unguarded. Nine were
-    spot-checked against the warehouse and all nine held — 11,665 CBAM rows over
-    260 goods and 121 countries, 871 unresolved retail labels, 5,881 customers,
-    265,441 fixings — so this is one stale sentence, not rot. Guarding them
-    needs a warehouse holding the full data, which CI has not got.
-  - **Extending the scan cost a rewrite, and refusing the cheaper fix is the
-    point.** `_staging.yml` and `_country_stats.yml` both recorded the
-    degree-day mutation against one combined figure for the two weather
-    models — 27 + 28 = 55, correct, and a number no single model has. Teaching
-    the scanner to sum over a pair would make every such sum legal, which is
-    exactly the widening `model_counts`' docstring already argues against;
-    naming each model beside its own number costs one clause and leaves both
-    halves checkable. (Quoting the old phrasing here failed the guard on the
-    spot — the same trap the mart-count note above records: it cannot tell a
-    quotation from an assertion and should not try.)
-- **Scoring the warehouse against somebody else's rubric found three stale
-  counts that no guard could see, which is most of the argument for doing it.**
-  `docs/FOR_REVIEWERS.md` §6 reads the repo against the GDAM rubric from
-  arXiv 2606.08266 — five dimensions, four levels, and the paper explicitly
-  refuses an aggregate score because one "would manufacture a precision the
-  instrument does not have". Counting what each dimension asks for meant
-  counting things nothing counted before: the contract covered **407** columns
-  where two files said 397 (stale since `4a457fb`), and **21 relations over 20
-  models** where CLAUDE.md said 20 and 19. `CLAIM` reads a test-noun and
-  `MART_CLAIM` a mart-noun; neither is a column or a relation, so both figures
-  were green the whole time. `tests/test_documented_counts.py` covers them now,
-  anchored on the phrase rather than the bare noun — "columns" is the most
-  common counted thing in this prose and a loose pattern would collide with the
-  additivity checks that already own it.
-  - **The verdicts are the numbers, so the numbers are guarded.** Metadata
-    completeness is *Partial* rather than *Established* because 171 of those 407
-    columns carry a description — 42%. A test recomputes all three parts, since
-    a stale numerator beside a fresh denominator still rounds to something
-    plausible; mutation-proven with 171 → 180, which leaves the percentage
-    reading 42% and fails anyway.
-  - **The most useful line in the table is the worst one.** Access governance is
-    **Absent** and cannot be otherwise: `create role`, `grant`, `create user`
-    and `create policy` are each a *parser error* on the pinned DuckDB 1.5.5,
-    re-verified rather than inherited. dbt's `access` is enforced at parse time
-    over `ref`, which governs who may build on a model and not who may read one.
-    The pseudonymisation boundary is a real control and is a *different* one;
-    scoring the dimension Partial because a mitigation exists would be the
-    flattery the rubric exists to prevent.
-- **Every hand-maintained list here is asserted against the authority it
-  copies** — `SOURCE_TABLES`, `RAW_DESCRIPTIONS`, `WB_WDI_INDICATORS`,
-  `ATTRIBUTION`, `pages.yml`'s path allowlist, the eight `@dg.asset_check`
-  bodies, and every count cited in prose. Not one of those failures is loud: an
-  unlisted source yields no row and the page under-reports while looking
-  complete, a stale count reads as authoritative, an unregistered check simply
-  never runs. What each guard found, and the mutation that proved each one
-  actually looks, are the `repo-guards` skill.
-- **A fixture run leaks through any state it does not override, and
-  `dbt/target/` was the third one.** `just test-pipeline` isolates
-  `WAREHOUSE_PATH` and `LAKEHOUSE_DIR`, and dlt's pipeline name gets `_fixtures`
-  — but dbt writes `run_results.json` into `dbt/target/` wherever the build
-  pointed, so once `analytics.pipeline_runs` started reading it a fixture run
-  left the 17-country slice's timings sitting there and the next
-  `just pipeline-status` filed them in the **real** warehouse's build history.
-  Observed rather than predicted: a 63.4s build over 552 nodes landed beside a
-  real one and nothing distinguished them, because `relation_name` says
-  `"warehouse".…` either way — both files are called `warehouse.duckdb`. The
-  recipe exports `DBT_TARGET_PATH`, `DBT_MANIFEST_PATH` and
-  `DBT_RUN_RESULTS_PATH` and passes `--target-path`; the env var alone would
-  point at a file the build never writes.
-  `tests/test_workflows.py` holds all four, because each is invisible when
-  missing — the fixture run still passes and it is the *next* command against
-  real data that is wrong.
-- **`WAREHOUSE_PATH` overrides the DuckDB file** for `ingest`, `transform`, `lake`
-  *and* dbt's profile. It must be **absolute**: dbt resolves its path from `dbt/`,
-  the Python layers from the repo root. `just test-pipeline` sets it to a temp file
-  — without that, a fixture run overwrites the real warehouse with the 17-country
-  slice. `LAKEHOUSE_DIR` is the same idea for `data/lakehouse/`, and the recipe
-  sets both — but that one is not an optimisation. dlt *lands* in the
-  lakehouse, so without the override a fixture run merges the 17-country slice
-  into the real landing zone, over a weather archive no rebuild can afford.
+- **No routine command evaluates an asset check body.** `just test-pipeline` runs
+  the modules in shell order and never executes a job;
+  `tests/test_asset_checks.py` calls the bodies directly. **Patching the database
+  under a check proves its logic, never its wiring**: a check kept reading the
+  warehouse for `raw` after `raw` moved into DuckLake, and its tests passed
+  against a fixture that had the table. Assert a count as well as the verdict,
+  since the wrong source can get the verdict right by accident.
+- **A test file that skips itself in CI's first step runs nowhere unless the
+  second names it.** `ci.yml` runs pytest before `dbt parse`, so the five
+  manifest-gated files skip there and a later step re-runs them by name;
+  `tests/test_workflows.py` compares the two sets both ways. Its detector is
+  anchored at column 0, because a guard that reads source as text finds its own
+  strings.
+- **A join is not a census.** The FX periods staleness gap was sized by comparing
+  the period-ends two models share — five rows — and was 22: the daily model stops
+  emitting rows for a currency that leaves the ECB panel, which took the worst
+  rows out of both sides of the comparison. To ask how often two models disagree,
+  first count the rows only one of them has.
+- **A fix that moves no number needs the part of it that does.** Restricting
+  `fct_cbam_exposure`'s cleanest-source baseline to listed countries changes no
+  cell, so only a fixture can hold it; the half that could be made visible — the
+  fallback row's own excess, now null — is held by an `expression_is_true`. When a
+  correctness fix is invisible in the data, look for the part that can be made to
+  show.
+- **A test earns its place by mutation**: break the model plausibly against a
+  copy of the warehouse, run its data tests, and record what moves. Across seven
+  models, 38 mutations, the data tests caught 5. Read a red set as candidates — a
+  unit test whose input is mocked `rows: []` goes red on any inner join, guarding
+  nothing. The method is in `unit-testing-dbt-models`.
+- **A correct number reused for a different claim is a wrong number.** A review
+  quoted the 70,174 lines *in* tied groups as the lines the tie-break *dropped*
+  (36,656): a real figure with a new meaning, which no scanner can see.
+- **A yml `description:` is prose**, and `tests/test_documented_counts.py` scans
+  every `dbt/models/**/_*.yml` for test and mart counts. The other numeric claims
+  there — row counts, shares — are unguarded, because checking them needs the
+  full warehouse, which CI lacks. A stale claim can *move* rather than expire —
+  Antarctica's null region left the facts and survives in
+  `fct_co2_estimate_versions` — and a figure covering two models is written as
+  two numbers, never as a total no model has.
+- **Scoring against an external rubric finds counts nothing else counted** —
+  `docs/FOR_REVIEWERS.md` §6. It is also where access governance scores
+  *Absent*: dbt's `access` governs who may build on a model, not who may read it,
+  and DuckDB has no grants.
+- **Every hand-maintained list is asserted against the authority it copies** —
+  `SOURCE_TABLES`, `RAW_DESCRIPTIONS`, `WB_WDI_INDICATORS`, `ATTRIBUTION`,
+  `pages.yml`'s allowlist, the asset-check bodies, the counts in prose. None of
+  their failures is loud. What each guard found is in `repo-guards`.
+- **A fixture run leaks through any state it does not override.**
+  `just test-pipeline` overrides `WAREHOUSE_PATH` (or it overwrites the real
+  warehouse with the 17-country slice), `LAKEHOUSE_DIR` (or it merges the slice
+  into the real landing zone and its weather archive) and dbt's artifact paths —
+  `DBT_TARGET_PATH`, `DBT_MANIFEST_PATH`, `DBT_RUN_RESULTS_PATH` and
+  `--target-path` — or the next `just pipeline-status` files the fixture's
+  timings in the real build history. `tests/test_workflows.py` holds all four,
+  because each is invisible when missing: the fixture run passes and the *next*
+  command is the one that is wrong.
+- **`WAREHOUSE_PATH` must be absolute**: dbt resolves paths from `dbt/`, the
+  Python layers from the repo root.
 - **Fixtures filter rows, never columns**, and `fixtures.path_for()` raises on an
-  unmapped URL rather than falling back to the network — otherwise "offline CI"
-  quietly becomes "CI that's online sometimes". `_ROUTES` is an *ordered*
-  dispatch table, so a route can be shadowed in silence; the four checks that
-  close that loop, the three fixtures that aren't trimmed and the content-keyed
-  retail workbook cache are all in the `repo-guards` skill.
-- `.github/workflows/nightly.yml` runs the same graph against the *live* sources
-  daily and opens (or comments on) a `nightly-failure` issue. That's the signal
-  that the fixtures have drifted from reality.
+  unmapped URL rather than fall back to the network. `_ROUTES` is an ordered
+  dispatch table in which a route can be shadowed silently; the checks that close
+  it are in `repo-guards`.
+- `.github/workflows/nightly.yml` runs the graph against the *live* sources daily
+  and opens a `nightly-failure` issue — the signal that the fixtures have drifted.
 
 ## The course (`docs/course/`)
 
-Ten modules teaching this warehouse as training material for analytics
-engineers, built around the failures that stay green rather than the happy path.
-Modules 00-04 are written and set the format; 05-10 are outlined in
-`docs/course/README.md`, and `tests/test_course.py` stops the material rotting
-against the repo it cites.
+Ten modules teaching this warehouse to analytics engineers, built around the
+failures that stay green rather than the happy path. Modules 00-04 are written;
+05-10 are outlined in `docs/course/README.md`, and `tests/test_course.py` keeps
+the material from rotting against the repo it cites.
 
-**Authoring a module is the `authoring-course-modules` skill.** It carries the
-sandbox recipes, the rule that every number in the material is measured, what
-the structural guard enforces, and the findings the drills produced. Two things
-worth knowing without loading it: the course builds into `data/course/` via
-`just course-sandbox`, and **`just dbt-build` is the trap** — it targets the real
-warehouse, so a drill run through the wrong recipe writes a deliberately broken
-model into `data/warehouse.duckdb`.
+**Authoring a module is the `authoring-course-modules` skill.** Two things to
+know without it: the course builds into `data/course/` via `just course-sandbox`,
+and **`just dbt-build` is the trap** — it targets the real warehouse, so a drill
+run through the wrong recipe writes a deliberately broken model into
+`data/warehouse.duckdb`.
 
 ## Verifying changes
 
@@ -1956,37 +1091,24 @@ uv run python -c "import duckdb; \
 
 ## Branches and PRs
 
-Every PR here is **squash-merged**, so `main` is linear and one commit per PR —
-`git log --merges main` is empty. That is a setting with consequences worth
-knowing before stacking work.
+Every PR here is **squash-merged**, so `main` is linear with one commit per PR.
 
-- **A PR is a commit on `main`, so PR count is a content decision, not a
-  process one.** Eight commits over two PRs squash to two messages; the eight
-  individual messages survive only on the PR pages. Group by what makes one
-  writable summary — "a body of testing plus the defect it uncovered" worked
-  twice — rather than one per branch.
-- **Stacked PRs need a rebase after the one below merges, and the conflicts are
-  predictable.** Squashing rewrites the base's identity, so the child is rebased
-  onto commits it has never seen: `git rebase --onto origin/main <old-base>
-  <branch>`. Every extra level in the stack is one more of those.
-  - What conflicts is whatever both sides touch, which in this repo means the
-    running totals in `CLAUDE.md` and `docs/DATA_QUALITY.md`. **A derived total
-    written into prose behaves like a lock** — no two commits touching it can be
-    reordered or cherry-picked independently. The `_unit_tests.yml` additions
-    barely conflict at all, being appends to different blocks; it is the
-    one-line summary above them that welds a stack into a fixed order.
-- **`git branch --merged` is useless here.** The squashed commit shares no SHA
-  with the branch, so five fully-merged branches reported as unmerged and
-  `git branch -d` refuses them. The check that works is `git diff main..<branch>`
-  being empty. Where it is *not* empty, look before deleting: a stale branch and
-  a branch with unique work look the same to `-D`.
+- **PR count is a content decision, not a process one.** Only the squashed
+  message survives on `main`, so group work by what makes one writable summary
+  ("a body of testing plus the defect it uncovered"), not one PR per branch.
+- **Stacked PRs need a rebase after the one below merges**: squashing rewrites the
+  base's identity, so `git rebase --onto origin/main <old-base> <branch>`. What
+  conflicts is whatever both sides touch — here, the running totals in
+  `CLAUDE.md` and `docs/DATA_QUALITY.md`. **A derived total written into prose
+  behaves like a lock**: no two commits touching it can be reordered or
+  cherry-picked independently.
+- **`git branch --merged` is useless here**: a squashed commit shares no SHA with
+  its branch. `git diff main..<branch>` being empty is the check; where it is not,
+  look before `-D` — a stale branch and one with unique work look the same.
 
 ## Session history
 
 Exported Claude Code session logs go in `docs/sessions/`, which is **gitignored
-in full** — nothing there is in the repo, so a fresh clone has no such directory.
-Transcripts are a local working record, not project history: they're long, they
-duplicate what the commits already say, and while the directory held both tracked
-and untracked files a `git add -A` could commit scratch notes that were never
-meant to ship. **Anything learned in a session that should outlive it belongs in
+in full**: transcripts are a local working record, long and duplicating what the
+commits say. **Anything learned in a session that should outlive it belongs in
 this file**, which is the part of that history meant to survive.

@@ -138,13 +138,14 @@ policy those pins serve is in `CLAUDE.md` under *Style guide*.
   rewrites the linter will make. It reports `3.13` now; it reported `3.12`
   before, which is why nothing 3.13-only could have been written in the gap
   even by accident.
-- **3.14 is blocked on dbt, not on us.** `uv lock --python 3.14` resolves, but
-  that only proves the solver is happy — dbt-core ships no 3.14 classifier,
-  and dbt Labs certifies a Python roughly a year behind. `dagster<3.15` is the
-  only hard upper bound in the tree.
+- **3.14 and dbt 1.12 are blocked upstream, not by us.** No dependency in
+  `pyproject.toml` carries an upper bound of its own; the ceilings are in the
+  packages' metadata. dagster-dbt declares `Requires-Python <3.14` and
+  `dbt-core<1.12`, dagster declares `Requires-Python <3.15`, and dbt-core ships
+  no 3.14 classifier — dbt Labs certifies a Python roughly a year behind.
 - **`pyarrow` is a runtime dependency and was undeclared until 2026-08-25.**
   DuckDB reaches it for `to_arrow_reader()` (the retail ingest,
-  `ingest/pipeline.py`) *and* for `.pl()` — so a tree without it raises
+  `ingest/sources/retail.py`) *and* for `.pl()` — so a tree without it raises
   `ModuleNotFoundError: pyarrow` from the ingest and from **both** Polars
   transforms. `.pl()` is the surprising half: polars itself doesn't need
   pyarrow, DuckDB's bridge to it does.

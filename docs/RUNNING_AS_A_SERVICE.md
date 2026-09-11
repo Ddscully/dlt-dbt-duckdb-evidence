@@ -146,20 +146,19 @@ Four things in that block are load-bearing:
   deployment fine. `dbt/target/` is gitignored, so it bites on every fresh
   deploy; the justfile already records the prerequisite at every headless recipe,
   and §10 makes it a step.
-- **`--group orchestration` on all three, including the file server.** It does
-  not import Dagster; what it needs is to not *change* the venv underneath the
-  other two. `uv run` **syncs before it executes**, and `default-groups` is
-  deliberately unset in `pyproject.toml`, so a bare `uv run` resolves to `dev`
-  alone — `uv sync --dry-run` on this tree would uninstall 46 packages,
-  `dagster`, `dagster-webserver` and `grpcio` among them. The three start
-  milliseconds apart and uv serialises on the venv lock, so which sync lands
-  last is a race. When the strip wins the already-running webserver and daemon
-  survive on imports they hold in memory, and everything they *fork later*
-  dies — the grpc code servers, and the run worker forked per schedule tick. The
-  ports answer, `wait -n` never returns, and nothing materialises: §2's own
-  failure mode, arriving through the dependency resolver rather than through dbt.
-  **It is reachable from outside the recipe**, which §8 records: any recipe
-  without the group strips the venv under a running service.
+- **`--group orchestration` on the Dagster processes; on the file server it is
+  harmless.** `uv run` only ever *adds* what its groups need and never removes a
+  package (measured 2026-09-11 on uv 0.12.12: a bare `uv run` left Dagster
+  installed). What does strip the venv under a running service is a bare
+  `uv sync`: `default-groups` is deliberately unset in `pyproject.toml`, so it
+  syncs to `dev` alone, and `uv sync --dry-run` on this tree would uninstall 46
+  packages, `dagster`, `dagster-webserver` and `grpcio` among them. The
+  already-running webserver and daemon would survive on imports they hold in
+  memory while everything they *fork later* dies — the grpc code servers, and the
+  run worker forked per schedule tick. The ports answer, `wait -n` never returns,
+  and nothing materialises: §2's own failure mode, arriving through the
+  dependency resolver. §8 records it. (An earlier version of this section blamed
+  `uv run`, on the evidence of that `uv sync` dry run.)
 - **The port collision.** `just dagster` uses 3000 and so does `evidence dev`.
   The site here is static, so it is served by anything; give it its own port and
   do not reach for `evidence dev`, which is a hot-reloading dev server.
@@ -480,13 +479,13 @@ keeps, extended with the ones only an always-on deployment meets:
   fails to load, or loads against a stale manifest (§2).
 - **A `STOPPED` schedule survives a `.dagster/` wipe as stopped.** The service
   runs, serves an increasingly old site, and ingests nothing (§5).
-- **`uv run` without `--group orchestration` uninstalls Dagster.** It syncs
-  before it executes and `default-groups` is unset, so `just report`, `just test`
-  or a bare `uv run python …` typed against a *running* service strips 46
-  packages out of the venv under it. The running processes hold their imports
-  and keep answering; the grpc code servers and run workers they fork afterwards
-  do not exist any more. Stop the service before running anything else against
-  the same venv, or give it its own checkout (§2).
+- **A bare `uv sync` uninstalls Dagster.** `default-groups` is unset, so
+  `uv sync` without `--group orchestration`, typed against a *running* service,
+  strips 46 packages out of the venv under it. The running processes hold their
+  imports and keep answering; the grpc code servers and run workers they fork
+  afterwards do not exist any more. `uv run` does not do this — it only adds
+  packages — so the recipes are safe; stop the service before a `uv sync`, or
+  give it its own checkout (§2).
 - **The schedule refreshes the warehouse and never the site.** `daily_refresh`
   targets `full_refresh`, which excludes `reports/evidence_site`; only
   `publish_site` builds it and nothing schedules that. So a host that follows §10
@@ -605,14 +604,10 @@ just report
 systemctl start mds
 ```
 
-**Stopping first is not caution, it is required, for two independent reasons.**
-`just report` is `uv run` *without* `--group orchestration`, so run against the
-same venv it uninstalls Dagster from under the running daemon (§8) — the ports
-keep answering and every process forked afterwards fails. And `evidence sources`
-opens the warehouse to extract its Parquet, which is a reader against a file a
-scheduled build may be writing: one writer XOR many readers, across processes.
-A separate checkout for the build side avoids the first; only §4 avoids the
-second.
+**Stopping first is not caution, it is required.** `evidence sources` opens the
+warehouse to extract its Parquet, which is a reader against a file a scheduled
+build may be writing: one writer XOR many readers, across processes. Only §4
+avoids it.
 
 **7. Verify, and prefer the checks that fail loudly.** `dagster schedule list`
 shows it RUNNING. After the first scheduled run, the useful assertions are the
@@ -625,8 +620,8 @@ real.
 **What can go wrong quietly, in the order it bites:** step 6 is forgotten and
 the dashboard ages against a warehouse that does not, with nothing red anywhere;
 a wiped `DAGSTER_HOME` leaves the schedule stopped and the service serving an
-ageing site for the other reason; a stray `uv run` without the orchestration
-group strips Dagster out of the venv while it is running; a `$HOME` change moves
+ageing site for the other reason; a stray bare `uv sync` strips Dagster out of
+the venv while it is running; a `$HOME` change moves
 dlt's watermark and re-fetches everything; a moved mount point breaks every
 DuckLake attach because `data_path` is compared as a string. All five are §8,
 and none of them raises where you are looking.

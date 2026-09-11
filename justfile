@@ -295,9 +295,9 @@ export SITE_ROOT := env("SITE_ROOT", justfile_directory() / "reports/build")
 #   - webserver + daemon rather than `dagster dev`, so a supervisor can restart them;
 #   - `dbt-parse`, because outside the dev CLI nothing writes the manifest and the
 #     webserver still answers HTTP with a dead code location;
-#   - `--group orchestration` on all three, the file server included: a bare
-#     `uv run` syncs the venv to `dev` alone, uninstalling Dagster under the
-#     running processes;
+#   - `--group orchestration` on the Dagster processes (the file server carries
+#     it too, harmlessly): `uv run` only ever adds packages, and it is a bare
+#     `uv sync` that would strip Dagster from under a running service (§10);
 #   - Dagster binds localhost (no auth); the site binds every interface (§6);
 #   - `wait -n`, so one dead child ends the unit, and `kill` of the recorded
 #     PIDs rather than `kill 0`, which would end this shell by SIGTERM — a clean

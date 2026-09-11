@@ -123,7 +123,8 @@ constraints that must not depend on this skill loading are in `CLAUDE.md`'s
   - **Not an upper bound on `duckdb`, deliberately.** Pinning would block every
     unrelated fix in 2.x to guard one property; the tripwire lets the bump land
     and makes a person decide the format question with a red test naming it.
-    `dagster<3.15` therefore remains the only hard upper bound in the tree.
+    No dependency in `pyproject.toml` carries an upper bound; the ceilings in
+    the tree are upstream ones (`dependency-versions`).
 - **The landing zone has its own format version, and its tripwire has to work
   harder than the file's.** `ducklake_metadata.version` (`1.0`) is what decides
   whether a consumer's `ducklake` can open `lakehouse.tar.gz`, exactly as
