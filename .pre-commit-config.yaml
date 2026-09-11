@@ -1,11 +1,14 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.0
+    rev: v0.16.7
     hooks:
       # `ruff` is a legacy alias for this as of 0.12; both still work.
       - id: ruff-check
         args: [--fix]
+      # Scoped here rather than inherited: upstream's hook added `markdown` to
+      # these types within 0.16.x, which reformats the code blocks in `docs/`.
       - id: ruff-format
+        types_or: [python, pyi, jupyter]
 
   # The recipe, not the upstream sqlfluff hook: that installs its own sqlfluff,
   # which drifts from the one pinned in pyproject.toml, and runs from the repo

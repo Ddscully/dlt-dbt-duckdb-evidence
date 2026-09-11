@@ -178,27 +178,26 @@ policy those pins serve is in `CLAUDE.md` under *Style guide*.
     and `tests/test_documented_counts.py` all read it unchanged. Worth checking
     rather than assuming on any dbt minor: three consumers here parse it.
   - **1.12 is blocked on dagster-dbt, not on us** — it requires `dbt-core<1.12`,
-    and the newest release (0.29.19) still does. Same shape as the 3.14 bullet
-    above, one layer over. Everything else here is already ready for it:
-    resolved without dagster-dbt, `dbt-core 1.12.3`, `dbt-duckdb 1.11.0` and
+    and the newest release (0.29.21, 2026-09-03) still does. Same shape as the
+    3.14 bullet above, one layer over. Everything else here is already ready for
+    it: resolved without dagster-dbt, `dbt-core 1.12.3`, `dbt-duckdb 1.11.0` and
     `sqlfluff-templater-dbt 4.3.0` land together cleanly, so the day the cap
-    lifts this is a re-lock and nothing else.
-    - **Track [dagster#34085](https://github.com/dagster-io/dagster/pull/34085)**
-      ("Allow dbt-core 1.12", open since 2026-08-06; issue
-      [#34014](https://github.com/dagster-io/dagster/issues/34014)). It is a
-      *pure bound relaxation* — `<1.12` to `<1.13`, no code changes — and its
-      author verified the thing the bullet above says to check: **the manifest
-      stays schema v12**, all 23 `dbt.*`/`dbt_common.*` import sites still
-      resolve, and dagster-dbt's own CI reports identical pass/fail on 1.11.12
-      and 1.12.0. A maintainer has acknowledged it with no timeline.
-    - **So the cap is known-conservative, and forcing it is still refused.**
-      `[tool.uv] override-dependencies` would install 1.12 today and upstream's
-      test matrix is the evidence it works. It buys nothing — nothing 1.12
-      removes (`dbt login`, the bundled dbt-state plugin, `--manage-state`) is
-      used here — and it costs a **fourth entry in the three-versions table**:
-      an override is exactly as invisible to `lockfile-only` as a `==`, so when
-      #34085 merges nothing would report that the override had turned from a
-      workaround into the thing holding dbt back.
+    lifts this is a re-lock and the full check, and nothing else.
+    - **The fix has merged upstream and is waiting on a release.**
+      [dagster#34085](https://github.com/dagster-io/dagster/pull/34085) ("Allow
+      dbt-core 1.12") merged 2026-09-10: `master`'s dagster-dbt says
+      `dbt-core>=1.7,<1.13`. It is a *pure bound relaxation*, and its author
+      verified the thing the bullet above says to check — **the manifest stays
+      schema v12**, the `dbt.*`/`dbt_common.*` import sites still resolve, and
+      dagster-dbt's CI passes identically on 1.11 and 1.12. Dagster releases
+      roughly weekly, so it should arrive in 0.29.22. The Python cap is
+      unchanged there (`<3.14`; dagster issue #33903).
+    - **Forcing it early is refused.** `[tool.uv] override-dependencies` would
+      install 1.12 today, and buys nothing — nothing 1.12 removes (`dbt login`,
+      the bundled dbt-state plugin, `--manage-state`) is used here — while
+      costing a **fourth entry in the three-versions table**: an override is as
+      invisible to `lockfile-only` as a `==`, so nothing would report when it
+      turned from a workaround into the thing holding dbt back.
     - **What would change that is adding a semantic layer.** 1.12 reworks the
       Semantic Layer YAML spec and adds `osi_document.json`; this project has
       no semantic model or metric yet, so authoring one against 1.11's spec

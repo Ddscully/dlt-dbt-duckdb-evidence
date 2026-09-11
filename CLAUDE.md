@@ -222,9 +222,12 @@ pre-commit (`ruff-check` with `--fix`, then `ruff-format`).
 - **`--fix` deletes a comment that starts `# noqa`, even when it is prose.** Put
   the rule after the explanation (`# TRY004 asks for TypeError, but …`) and keep
   the real directive, with its colon, on the code line.
-- **0.16 formats Python blocks inside Markdown.** The hook is scoped to
-  `types_or: [python, pyi, jupyter]`; a manual `ruff format .` is not, and will
-  rewrite blocks in `docs/` and `README.md`.
+- **0.16 formats Python blocks inside Markdown, so the hook's scope is pinned
+  here.** Upstream's `ruff-format` hook added `markdown` to its file types
+  between v0.16.0 and v0.16.7 — a patch bump that would have reformatted the
+  deliberately aligned code in `docs/` — so `.pre-commit-config.yaml` sets
+  `types_or: [python, pyi, jupyter]` itself. A manual `ruff format .` is not
+  scoped, and will rewrite blocks in `docs/` and `README.md`.
 
 Types are ty (`just typecheck`). It is **not** in pre-commit or any workflow,
 which is the whole shape of the decision.
