@@ -1,11 +1,10 @@
 version: 2
 
-# Unit tests for `dim_date`'s fiscal arithmetic.
+# The marts' unit tests, kept apart from the per-group ymls (descriptions and
+# contracts): one axis of assertion across the models, where those split by
+# domain.
 #
-# Kept out of the per-group ymls on purpose: those are column descriptions and
-# enforced contracts, and this is a different kind of assertion about one model.
-# They were a single 2,183-line `_marts.yml` until 2026-09-01; this file stayed
-# whole through that split, because it is one axis and they are four domains.
+# Unit tests for `dim_date`'s fiscal arithmetic.
 #
 # Why these exist when the columns already carry data tests: `fiscal_quarter` is
 # guarded by `accepted_range 1-4`, `fiscal_month` by `1-12`, `fiscal_year` by
@@ -99,12 +98,9 @@ unit_tests:
 # value is read off, which goods are priced at all, which mark-up a product group
 # gets, and what a window function partitions by.
 #
-# **Two of those four rules moved out with the model that decides them.** The
-# row-level fallback and the heading filter belong to `int_cbam_default_factors`
-# and are tested there, against the seed alone; what stays here is the mark-up
-# and the excess window — what it partitions by, and which rows are allowed
-# inside it — which is what this model adds. The two tests that stayed used to
-# declare five inputs to reach a rule that touched two of them.
+# The row-level fallback and the heading filter belong to
+# `int_cbam_default_factors` and are tested there; here are the mark-up and the
+# excess window (what it partitions by, and which rows it admits).
 #
 # **Four mutations of that window against a warehouse copy, and the split
 # between them is the argument for the policy the third test pins:**
@@ -125,12 +121,6 @@ unit_tests:
 # than keeping it — one of the 21 data tests fires, the both-directions
 # `expression_is_true` on the column, and it is the only one that can. Choosing
 # to null is what gave half of this rule a data test at all.
-#
-# The tests that moved pose rows the source does not contain, deliberately:
-# `is_country_specific` and the fallback are reachable only through shapes the
-# 2026/1740 annex happens not to publish, since the Chile line pipe that proved
-# the rule was corrected out of the source in July 2026, taking with it the only
-# data that could ever have exercised it.
 #
 # **Every fixture total is chosen to be float-exact under the mark-up**, which is
 # not decoration. `total * (1 + 10/100)` is exact for 2.5, 5, 10, 20, 40 and 80
@@ -381,7 +371,7 @@ unit_tests:
   # ---------------------------------------------------------------------------
   # fct_fx_rates_daily — the carry-forward.
   #
-  # Five mutations against a warehouse copy, every one of them passing all 15 of
+  # Five mutations against a warehouse copy, every one of them passing all 14 of
   # the model's data tests:
   #
   # | mutation                              | 14 data tests | effect                                    |
@@ -718,25 +708,18 @@ unit_tests:
   # | asof `>=` becomes `>`                         | 88 rows re-resolved: 2 unmatched, 86 moved to   |
   # |                                               | an older sale. `matched` *rises* by 2           |
   #
-  # The middle two land on the same 10,416 because they are the same rows seen
-  # twice: both turn on `quantity_returned = original_quantity`, which is 5,616
-  # rows, so their deltas are equal by construction. An earlier version of this
-  # table gave them different numbers, which was the tell that they had been
-  # measured against the pre-tie-break model — see the determinism note below.
+  # The middle two land on the same 10,416 because both turn on
+  # `quantity_returned = original_quantity` (5,616 rows).
   #
   # `accepted_values` on `match_status` is the trap the retail skill already
   # names: it proves the answer is in the list, never that it is the right
   # member, and the first three mutations move tens of thousands of rows between
   # legal buckets without touching a total.
   #
-  # Four of those six mutations are on the matching rule rather than on the
-  # classification, and they are pinned in `int_retail_return_matches` now — the
-  # `item_type` filter, the asof boundary, the tie-break and, since 2026-09-05,
-  # the dead `quantity > 0` (`..._never_point_at_a_stock_write_off`, which is
-  # the only one of the four that needed a row the source has never sent).
-  # The table is kept whole here because it was measured whole:
-  # splitting it would leave each half quoting numbers the other half's model
-  # produced. What is left below is the `case`, mocked on matched rows.
+  # The matching-rule mutations (the `item_type` filter, `quantity > 0`, the
+  # asof boundary) and the tie-break are pinned in `int_retail_return_matches`;
+  # the table stays whole because it was measured whole. Below is the `case`,
+  # mocked on matched rows.
 
   - name: retail_returns_names_each_miss_by_the_reason_it_missed
     model: fct_retail_returns
@@ -827,13 +810,10 @@ unit_tests:
   # claims it is harmless.
   #
   # **One fixture, four tests, each asserting a different column set**, so a
-  # failure names which edge moved. Its shape is doing three jobs at once: the
-  # cohort has a gap month with no activity (a hole that must survive as a zero
-  # row), one customer returning in the last month, and — the part a first
-  # draft of these tests missed — a **postage line that is a purchase but not
-  # revenue**. Without that last row every line is `is_revenue_line: true`, the
-  # two filters select identically, and the asymmetry this whole section is
-  # about cannot be reached by any mutation.
+  # failure names which edge moved. The fixture has a gap month (which must
+  # survive as a zero row), a customer returning in the last month, and a
+  # postage line that is a purchase but not revenue — without which the two
+  # filters select identically and the asymmetry above is unreachable.
 
   - name: cohorts_triangle_stops_at_the_last_month_of_data
     model: fct_retail_customer_cohorts
@@ -949,7 +929,7 @@ unit_tests:
 
   # --- dim_retail_customer --------------------------------------------------
   #
-  # `dim_retail_customer` carries 11 data tests over 21 columns, and every one
+  # `dim_retail_customer` carries 11 data tests over 22 columns, and every one
   # of them lands on a date, a count or an identifier. Not one touches money.
   # The two structural tests are `unique(customer_id)` and
   # `last_order_date >= first_order_date`; neither can see a wrong number.
@@ -969,12 +949,9 @@ unit_tests:
   # | `n_orders` counts every invoice type    | 36,975 -> 44,811 (+21%)                           |
   # | `left join` to `first_purchase`         | nothing — see the caveat                          |
   #
-  # The last one is a **mutation that proved nothing**, recorded because it
-  # looks like a survivor and is not: the join changed, but the inner join to
-  # `first_order_value` is fed from the same `purchases` CTE and still drops the
-  # same 61 customers. It never reached the rule it aimed at. A mutation whose
-  # effect another line cancels is not evidence either way, and the honest score
-  # is seven informative mutations, none caught.
+  # The last proved nothing: the inner join to `first_order_value` still drops
+  # the same 61 customers, cancelling the change. So: seven informative
+  # mutations, none caught.
   #
   # **The tie-break is the one that matters, and it is the `fct_retail_returns`
   # failure again.** Removing `, invoice` from `first_order_line`'s window makes
@@ -987,33 +964,19 @@ unit_tests:
   # is a value or a null at all. `accepted_range` cannot see any of it, because
   # both candidates are legal money.
   #
-  # This is the model CLAUDE.md cites as the *precedent* for the returns fix —
-  # the rule was learned here, applied there, unit tested there, and left
-  # unpinned here.
-  #
   # **Five of the eight are covered below. The repeat-customer boundary and
   # `n_orders`' invoice filter are still unguarded** — they are wrong-but-stable,
   # where the others are the ones that either move a published number or make the
   # model disagree with itself between builds.
   #
-  # **The ninth defect was not found by mutating anything, and no mutation of
-  # this campaign would have reached it.** `max_by(country_iso3, country)` paired
-  # the code to the label — except that DuckDB's `arg_max` skips rows whose value
-  # argument is null, so a customer whose winning label was one of the three
-  # `not_a_country` seed rows got the *other* label's code. Every mutation above
-  # asks "what if this line said something else"; this line said the right thing
-  # and the aggregate underneath it did not. It came out of a code review, it was
-  # latent on all 13 multi-country customers, and it is now the third fixture
-  # below — which is also what finally pins `min(country)`.
+  # **A ninth defect no mutation reaches:** `max_by` skips null values, so a
+  # customer whose winning label maps to no code (a `not_a_country` seed row)
+  # would take the other label's code. Latent on current data; the third
+  # fixture pins it, and with it `min(country)`.
   #
-  # **Two fixtures, not one, and the reason is measured.** The tie-break and the
-  # revenue filter both surface in the *same column* — `first_order_gbp` is the
-  # only thing this model exposes about which invoice won, because there is no
-  # invoice column on it. A first draft shared one fixture across all four
-  # tests, and both mutations then reddened two tests apiece: a failure said
-  # "something about the first order" instead of naming the rule. Separating the
-  # tie into its own fixture is what makes each mutation light exactly one test,
-  # verified by re-running each with the unit tests in scope.
+  # **Separate fixtures**, because the tie-break and the revenue filter surface
+  # in the same column (`first_order_gbp`); with one shared fixture each mutation
+  # fails two tests and a failure cannot name its rule.
   #
   # So the first fixture is nothing but ties, and the second carries the rest:
   # C2 has an earlier non-purchase row, postage inside its first order and a
@@ -1090,13 +1053,9 @@ unit_tests:
           # C3 — a purchase that earns nothing. `sale` with a positive quantity,
           # so it is a real first order, and no revenue line anywhere in it.
           - {invoice: "950", line_number: 1, customer_id: "C3", stock_code: "POST", invoice_type: "sale", item_type: "postage", quantity: 1, unit_price: 18.0, line_amount_gbp: 18.0, invoice_ts: "2024-03-01 11:00:00", invoice_date: "2024-03-01", invoice_month: "2024-03", country: "Germany", is_revenue_line: false}
-          # C4 — the ordinary customer. All product, nothing sent back, and
-          # **two purchases on different dates**, which is the only thing in
-          # either fixture that separates `min(invoice_date)` from `max`. Its
-          # absence was a real hole: an earlier draft asserted
-          # `first_order_date` while every customer bought on exactly one day,
-          # so swapping the aggregate changed nothing and the column was
-          # asserted without being pinned.
+          # C4 — the ordinary customer: all product, nothing sent back, and two
+          # purchases on different dates — the only rows in either fixture that
+          # separate `min(invoice_date)` from `max`.
           - {invoice: "960", line_number: 1, customer_id: "C4", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 2, unit_price: 40.0, line_amount_gbp: 80.0, invoice_ts: "2024-01-20 12:00:00", invoice_date: "2024-01-20", invoice_month: "2024-01", country: "Spain", is_revenue_line: true}
           - {invoice: "961", line_number: 1, customer_id: "C4", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 3, unit_price: 40.0, line_amount_gbp: 120.0, invoice_ts: "2024-02-20 12:00:00", invoice_date: "2024-02-20", invoice_month: "2024-02", country: "Spain", is_revenue_line: true}
     expect:

@@ -10,8 +10,8 @@ name: release-data
 # of the 17-country fixture slice would be worse than none. `nightly.yml` is what
 # alerts when a source moves; a failure here just means the last release stands.
 #
-# Monthly, because OWID and the World Bank publish annually and a nightly
-# release would be 30 identical 29 MB uploads a month. Cut one on demand
+# Monthly, because the sources publish annually and a nightly release would be
+# thirty near-identical uploads a month. Cut one on demand
 # (`gh workflow run release-data.yml`) when a source has actually updated.
 
 on:
@@ -27,19 +27,10 @@ on:
 
 permissions:
   contents: write # creates the tag, the release and its assets
-  # `contents: write` alone was enough until 2026-07-30, when `gh release create`
-  # began returning 403 "Resource not accessible by integration" — on a workflow
-  # file unchanged since the release it cut the day before, with `Contents: write`
-  # still logged in the run's own token permissions, no ruleset, no tag protection
-  # and `default_workflow_permissions: write` on the repo. It failed twice, twelve
-  # minutes apart, and succeeded on the next run with these two added.
-  #
-  # What is verified is the requirement, not the reason: the successful run logs
-  # `Attestations: write` where the failed ones logged only Contents and Metadata,
-  # and the release GitHub produced reports `immutable: false` — so this is *not*
-  # the immutable-releases flow, whatever else it is. `id-token` went in at the
-  # same time and was never isolated; dropping either one costs a ~7-minute run to
-  # retest, so they stay together unless something forces the question.
+  # Required, reason unknown: from 2026-07-30 `gh release create` returned 403
+  # "Resource not accessible by integration" with `contents: write` alone, and
+  # succeeded with these two added (the release is not immutable). The two were
+  # never isolated, so both stay.
   id-token: write
   attestations: write
 
@@ -62,24 +53,17 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      # Two kinds of state cannot be rebuilt, for two different reasons, and they
-      # now live in two different artifacts. The `history` schema is state *in
-      # principle* — no rebuild invents a revision upstream has overwritten — and
-      # it is inside `warehouse.duckdb`. `raw.om_weather_daily` is unreproducible
-      # within a *budget* (Open-Meteo allows 10,000 weighted units a day and the
-      # archive costs more), and it is in the `lakehouse.tar.gz` asset, because
-      # dlt lands `raw` in a DuckLake catalog rather than in the database.
+      # The unreproducible state, in two assets: `warehouse.duckdb` (the
+      # `history` snapshots and `analytics.pipeline_runs`) and `lakehouse.tar.gz`
+      # (the weather archive, which costs more than Open-Meteo's daily budget to
+      # refetch). `publish/restore_history.py` carries both, finding the tarball
+      # beside the database, before the build — so `dbt snapshot` compares
+      # against last month and the weather archive deepens instead of
+      # cold-starting.
       #
-      # `publish/restore_history.py` carries both: it finds the lakehouse beside
-      # the database rather than being told where it is, so the download has to
-      # bring the pair. Copying them in *before* the build is what makes
-      # `dbt snapshot` compare against last month and what keeps the weather
-      # archive deepening instead of resetting to a three-year cold start.
-      #
-      # Only the "no previous release" case is allowed to skip. A download or
-      # restore that fails is fatal: continuing would silently reset the carried
-      # state to empty and the next release would inherit that, which is exactly
-      # the failure this step exists to prevent.
+      # Only "no previous release" may skip. A failed download or restore is
+      # fatal: continuing would publish emptied state that the next release
+      # would inherit.
       - name: Carry unreproducible tables forward from the previous release
         id: history
         run: |
@@ -92,12 +76,9 @@ jobs:
           fi
           echo "Restoring history from $prev"
           gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
-          # The landing zone is one tarball beside the database, and
-          # `restore_history` looks for it there. A release cut before the asset
-          # existed simply has none, which `gh` reports as a failure — hence the
-          # `|| true`. That is the "restoring nothing is normal" rule one level
-          # down, and it is safe here for the same reason it is safe there: the
-          # verify step below asserts what actually got carried.
+          # `|| true`: a release cut before the asset existed has none, which `gh`
+          # reports as a failure. Safe because the verify step asserts what was
+          # carried.
           gh release download "$prev" --pattern lakehouse.tar.gz \
             --dir prev-release || true
           uv run python -m publish.restore_history prev-release/warehouse.duckdb
@@ -109,26 +90,16 @@ jobs:
           from modern_data_stack.history import carried_rows
           from publish.restore_history import CARRIED
 
-          # Counted through the same rules the restore used, rather than a schema
-          # name written out again here: a relation added to `CARRIED` would
-          # otherwise be carried forward but never checked, which is the same
-          # silent-reset failure one step removed. That has already happened once
-          # — `snap_grid_emission_factors` arrived beside a check that named
-          # `snap_co2_estimates` by hand.
-          #
-          # stdout is $GITHUB_OUTPUT here, so the per-relation lines go to stderr.
+          # Counted through `CARRIED`, the rules the restore used, so a relation
+          # added there is checked too. stdout is $GITHUB_OUTPUT, hence stderr.
           con = duckdb.connect("data/warehouse.duckdb", read_only=True)
           counts = carried_rows(con, CARRIED)
           for relation, n in counts.items():
               print(f"carried {relation}: {n:,} rows", file=sys.stderr)
           print(f"restored_rows={sum(counts.values())}")
 
-          # The landing zone is counted separately because it is a separate
-          # artifact — `CARRIED` names relations inside the database and the
-          # weather archive is not in it any more. Two numbers because they can
-          # fail independently: a missing `warehouse.duckdb` loses the revision
-          # log, a missing `lakehouse.tar.gz` loses the weather archive, and
-          # each is silent on its own.
+          # The landing zone separately: it is outside the database, and either
+          # asset can go missing silently on its own.
           from lake import lakehouse
 
           weather = lakehouse.carried_rows()
@@ -137,13 +108,9 @@ jobs:
           PY
           rm -rf prev-release
 
-      # ingest -> dbt build + test -> Polars, in asset-graph order. dbt's 60
-      # tests run inside `dbt build`, so a warehouse that fails its own
-      # data-quality gates never reaches the release.
-      #
-      # The warehouse file already exists at this point when history was
-      # restored. That's fine for dlt: it keys "fresh destination" on its own
-      # bookkeeping inside `raw`, which a history-only file doesn't have.
+      # ingest -> dbt build + test -> Polars, in asset-graph order. dbt's data
+      # and unit tests run inside `dbt build`, so a warehouse that fails them
+      # never reaches the release.
       - name: Build the warehouse from live sources
         run: just materialize
 
@@ -151,21 +118,13 @@ jobs:
       # manifest.json, SHA256SUMS, ATTRIBUTION.md and the release body.
       - name: Package the artifact
         id: export
-        # Through the environment rather than interpolated into the script: it's
-        # a string a human typed into the dispatch form.
+        # The tag goes through the environment, not interpolated into the
+        # script: it is a string a human typed into the dispatch form.
         #
-        # PII_SALT is the repository secret that pseudonymises `customer_id`
-        # everywhere it appears in the published artifact. It is deliberately
-        # **stable across releases**, not generated per run: a fresh salt every
-        # month would repseudonymise all 5,881 customers for no change in the
-        # data, so every retail file would differ in every release and a consumer
-        # diffing two of them could never tell a restatement from a re-salting.
-        # Stable means a consumer can follow a customer between releases, which
-        # is what a surrogate key is for, and still cannot recover who they are.
-        #
-        # If the secret is not set the export **fails** rather than publishing
-        # clear identifiers. That is the intended behaviour and not a bug to
-        # route around — see `docs/DATA_PROTECTION.md`.
+        # PII_SALT pseudonymises `customer_id` in the artifact. Stable across
+        # releases, so a consumer can follow a customer between releases and
+        # tell a restatement from a re-salting. Unset, the export fails rather
+        # than publishing clear identifiers (`docs/DATA_PROTECTION.md`).
         env:
           TAG_INPUT: ${{ inputs.tag }}
           PII_SALT: ${{ secrets.PII_SALT }}
@@ -177,30 +136,20 @@ jobs:
           fi
           echo "tag=$(jq -r .tag data/export/manifest.json)" >> "$GITHUB_OUTPUT"
 
-      # Cheap insurance against publishing something unreadable: check the
-      # sums, then read a `staging` view back out of the copied database. The
-      # views are the part that can break — they store fully-qualified SQL
-      # against a catalog named `warehouse`, so both the file name and the
-      # ATTACH alias have to stay `warehouse`.
+      # Check the sums, then read back out of the copy through the `warehouse`
+      # alias the release notes give (dbt's SQL is qualified with that name).
       #
-      # "Unreadable" has a second meaning that this runner cannot test by
-      # reading the file — it opens everything it wrote. So the storage format
-      # is checked as a *number* against the ceiling the release notes promise,
-      # the way the history is checked against what was carried forward. The
-      # export already refuses to write one above it; this asserts the bytes
-      # that are about to be uploaded agree with the manifest that describes
-      # them, which is the pair a consumer actually receives.
+      # This runner opens any format it wrote, so the storage version is checked
+      # as a number against the promised ceiling, and against the manifest that
+      # describes the file.
       - name: Verify the artifact
         working-directory: data/export
         env:
           RESTORED_ROWS: ${{ steps.history.outputs.restored_rows }}
           RESTORED_LAKEHOUSE_ROWS: ${{ steps.history.outputs.restored_lakehouse_rows }}
-          # `modern_data_stack` is a src-layout package and installs, so it
-          # imports from anywhere; `scripts/` is a plain top-level directory and
-          # does not, and this step runs from `data/export`. Without this the
-          # ceiling import fails with `ModuleNotFoundError: No module named
-          # 'scripts'` — after the release has already been built, and only on
-          # the monthly run.
+          # `publish/` is a plain top-level directory, not an installed package,
+          # and this step runs from `data/export`, so it needs the checkout on
+          # the path (`modern_data_stack` imports from anywhere).
           PYTHONPATH: ${{ github.workspace }}
         run: |
           sha256sum -c SHA256SUMS
@@ -247,11 +196,9 @@ jobs:
               assert rows > 0, f"{relation} is empty"
               print(f"{relation}: {rows:,} rows")
 
-          # The landing zone is the *other* carried artifact and is checked on
-          # its own terms: it has to be in the release at all, and it can only
-          # grow. A release that shipped without it would look completely
-          # healthy — every assertion above passes — and the cost would land on
-          # the *next* run as a weather archive cold-started at three years.
+          # The landing zone must be in the release and can only grow; without
+          # it every check above passes and the next release cold-starts the
+          # weather archive.
           published = manifest["lakehouse"]
           assert published["file"], (
               "no lakehouse asset in this release: the landing zone was not "
@@ -264,11 +211,9 @@ jobs:
           )
           print(f"{published['file']}: {published['rows']:,} rows")
 
-          # What was carried can only grow. Smaller than what went in means the
-          # restore never reached the build, and this release would publish a
-          # history that silently lost its earlier versions. Counted through
-          # `CARRIED`, the same rules that produced `restored_rows`, so the two
-          # sides cannot drift apart.
+          # Carried state can only grow; less than was restored means the
+          # restore never reached the build. Counted through `CARRIED`, as
+          # `restored_rows` was.
           restored = int(os.environ.get("RESTORED_ROWS") or 0)
           counts = carried_rows(con, CARRIED, database="warehouse")
           for relation, n in counts.items():

@@ -1,28 +1,18 @@
 version: 2
 
-# Why this exists: every action in `.github/workflows/` sat on a node20 major
-# until the runners started warning about it, and nothing in the repo would ever
-# have said so — CI was green the whole time. The three ecosystems below are the
-# ones with a pinned version somewhere in the tree.
-#
-# Monthly and grouped, to match the rest of the repo's cadence: the sources
-# publish annually, `release-data.yml` cuts a release on the 1st, and a stream of
-# one-dependency PRs would just train everyone to ignore the tab. Each ecosystem
-# gets at most one open PR carrying every bump it found.
+# Green CI says nothing about outdated versions, so something has to watch them.
+# The three ecosystems below are the ones with a pinned version in the tree.
+# Monthly and grouped — one open PR per ecosystem — to match the release cadence
+# rather than trickle single-dependency PRs.
 
 updates:
   # `astral-sh/setup-uv` is pinned to an exact patch (it stopped publishing
   # moving major tags at v8), so it can only ever be bumped by something like
   # this. The rest track major tags and move on their own within a major.
   #
-  # **`directories`, plural, and the second entry is not decoration.** A bare
-  # `directory: /` scans `.github/workflows/` and nothing else, so when the four
-  # workflows' shared setup moved into a composite action on 2026-09-01 the
-  # `setup-uv` pin went with it — out of Dependabot's view, still pinned exactly,
-  # and therefore frozen forever with nothing to say so. That is this repo's
-  # collected failure shape: the guard stays green because it is no longer
-  # looking. The glob rather than the one path, so a second composite action is
-  # covered by existing configuration instead of by someone remembering.
+  # **`directories`, plural**: `directory: /` scans only `.github/workflows/`,
+  # and the `setup-uv` pin lives in the composite action, where it would freeze
+  # unnoticed. A glob, so a second composite action is covered too.
   # `tests/test_workflows.py` asserts the pair.
   - package-ecosystem: github-actions
     directories:
@@ -39,12 +29,8 @@ updates:
   # something that silently differs between a contributor's machine and CI.
   #
   # `lockfile-only` because the bounds in pyproject.toml are minimum-supported
-  # versions, not pins — `duckdb>=1.1` and `polars>=1.17` sit far below what
-  # actually resolves, on purpose. Dependabot's default for uv raises the lower
-  # bound instead, and its first run did exactly that: PR #2 pushed
-  # `dlt[duckdb]>=1.5` to `>=1.29.1`, dropping support for two dozen releases in
-  # exchange for nothing, since the lock already resolved there. It would have
-  # done the same to the other three on every upstream release.
+  # versions, not pins (`duckdb>=1.1` sits far below what resolves). The default
+  # strategy raises the lower bound on every upstream release instead.
   - package-ecosystem: uv
     directory: /
     versioning-strategy: lockfile-only

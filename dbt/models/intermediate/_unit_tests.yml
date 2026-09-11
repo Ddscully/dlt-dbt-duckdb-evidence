@@ -3,20 +3,14 @@
 # `DuplicateYAMLKeysDeprecation` — nothing red, nothing missing, and gone in
 # Fusion.
 #
-# Six tests. Five moved here from `marts/_unit_tests.yml` rather than being
-# written fresh — that is the layer paying for itself: each was already testing a
-# rule that now has a model of its own, and each had to reach that rule through a
-# mart's inputs and output columns to do it. The sixth
-# (`..._never_point_at_a_stock_write_off`) is new, and covers a filter that no
-# data can reach.
+# Six tests of rules that have a model of their own, so each mocks only the
+# inputs its rule reads. `..._never_point_at_a_stock_write_off` covers a filter
+# no data can reach.
 unit_tests:
   # --- int_cbam_default_factors ---------------------------------------------
   #
-  # Both of these mocked **five** inputs before the split — the two seeds they
-  # need, plus a markup schedule, a country dimension and an empty grid-factor
-  # table, none of which the fallback rule touches. The empty grid input even
-  # carried a comment explaining why an unrelated table was in the fixture. They
-  # mock one input now, and assert the columns the rule actually decides.
+  # Each mocks the seed the fallback rule reads and asserts the columns it
+  # decides.
 
   - name: cbam_defaults_take_the_fallback_row_whole_or_not_at_all
     model: int_cbam_default_factors
@@ -85,14 +79,9 @@ unit_tests:
 
   # --- int_retail_return_matches --------------------------------------------
   #
-  # These asserted through `fct_retail_returns`' presentation columns before the
-  # split — `match_status`, `quantity_is_consistent`, `price_differs_from_original`
-  # — to prove things about an `asof join`. They asserted the join's own output
-  # now. The third one is new *as a test* and not as coverage: it is the half of
-  # `retail_returns_names_each_miss_by_the_reason_it_missed` that stopped being
-  # reachable from the mart once the mart mocked this model. Leaving it behind
-  # would have deleted the only check on the `>=` boundary and on the non-product
-  # filter, which is how a refactor quietly costs you a test.
+  # These assert the `asof join`'s own output. The third holds the only checks on
+  # the `>=` boundary and the non-product filter, which the mart's tests cannot
+  # reach because they mock this model.
 
   - name: return_matches_take_the_latest_purchase_before_the_return_and_no_other
     model: int_retail_return_matches
@@ -157,13 +146,11 @@ unit_tests:
     given:
       - input: ref('stg_retail_lines')
         rows:
-          # Group 1 — unchanged since 2026-08-24 and deliberately *not*
-          # reordered: reordering pins today's arbitrary pick, which is the bug
-          # wearing the fix's clothes. All three at the identical instant, and
-          # the lowest *line number* is deliberately on the highest *invoice*,
-          # so ordering by line first would pick 701/1 — the fixture separates
-          # `(invoice, line_number)` from `(line_number, invoice)` instead of
-          # passing under both. Answer 700/3, listed third.
+          # Group 1 — the winner is deliberately not listed first, since first
+          # is what the un-tie-broken join takes. All three at one instant, the
+          # lowest line number on the highest invoice, so ordering by line first
+          # would pick 701/1: the fixture separates `(invoice, line_number)` from
+          # `(line_number, invoice)`. Answer 700/3, listed third.
           - {invoice: "700", line_number: 5, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 9, unit_price: 1.0, line_amount_gbp: 9.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
           - {invoice: "701", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 7, unit_price: 1.0, line_amount_gbp: 7.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
           - {invoice: "700", line_number: 3, customer_id: "C1", stock_code: "SKU1", invoice_type: "sale", item_type: "product", quantity: 2, unit_price: 1.0, line_amount_gbp: 2.0, invoice_ts: "2024-02-01 09:00:00", invoice_date: "2024-02-01"}
@@ -226,9 +213,8 @@ unit_tests:
           - {invoice: "C601", line_number: 1, customer_id: "C1", stock_code: "SKU1", invoice_type: "cancellation", item_type: "product", quantity: -3, unit_price: 2.0, line_amount_gbp: -6.0, invoice_ts: "2024-01-10 10:00:00", invoice_date: "2024-01-10"}
           # A cancelled postage line. A correction, not a return: must not appear.
           - {invoice: "C605", line_number: 1, customer_id: "C1", stock_code: "POST", invoice_type: "cancellation", item_type: "shipping", quantity: -1, unit_price: 18.0, line_amount_gbp: -18.0, invoice_ts: "2024-01-13 10:00:00", invoice_date: "2024-01-13"}
-          # Bought and sent back in the same instant. The asof condition is `>=`
-          # rather than `>` so this matches — only 2 rows in the warehouse, but
-          # the alternative silently calls a same-batch reversal unmatchable.
+          # Bought and sent back in the same instant: the asof condition is `>=`,
+          # not `>`, so a same-batch reversal still matches.
           - {invoice: "503", line_number: 1, customer_id: "C3", stock_code: "SKU3", invoice_type: "sale", item_type: "product", quantity: 4, unit_price: 3.0, line_amount_gbp: 12.0, invoice_ts: "2024-01-06 12:00:00", invoice_date: "2024-01-06"}
           - {invoice: "C606", line_number: 1, customer_id: "C3", stock_code: "SKU3", invoice_type: "cancellation", item_type: "product", quantity: -2, unit_price: 3.0, line_amount_gbp: -6.0, invoice_ts: "2024-01-06 12:00:00", invoice_date: "2024-01-06"}
     expect:

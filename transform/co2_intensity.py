@@ -1,7 +1,5 @@
-"""Polars heavy-transform layer: read a dbt mart from DuckDB, compute a
-derived metric, and write it back as a table Evidence can query.
-
-Demonstrates using Polars for window/ranking logic that's clumsy in SQL.
+"""Polars transform: read a dbt mart from DuckDB, derive carbon intensity, and
+write it back as a table Evidence can query.
 
 Run:  uv run python -m transform.co2_intensity
 """
@@ -20,22 +18,17 @@ DUCKDB_PATH = warehouse_path()
 def build_co2_intensity(df: pl.DataFrame) -> pl.DataFrame:
     """Rank carbon efficiency within each (income group, year) cohort.
 
-    Intensity is derived here rather than taken from OWID's `co2_per_gdp`,
-    which is carried through the mart but stops in 2022 and only ever covered
-    164 countries. Recomputing from World Bank GDP tracks the mart's own
-    coverage — ~197 countries through 2024.
+    Derived from World Bank GDP rather than taken from OWID's intensity column
+    (`co2_kg_per_gdp_ppp_2011` in the mart), which stops in 2022 at 164
+    countries; the derived one covers ~195 in 2024.
 
-    The denominator is **constant 2015 US$** (`NY.GDP.MKTP.KD`), not current
-    US$. Current-dollar GDP moves with inflation and the exchange rate, so it
-    measures currency as much as carbon: on that basis Japan cut emissions 21%
-    between 2010 and 2024 and still scored 10% *worse*. The yen lost 42% of its
-    dollar value over the same span (87.7 to 151.4 JPY/USD, ECB annual
-    averages), which took Japan's current-dollar GDP down 28% while its real
-    GDP grew 10%.
+    The denominator is constant 2015 US$ (`NY.GDP.MKTP.KD`). Current dollars move
+    with inflation and the exchange rate: from 2010 to 2024 Japan cut emissions
+    21% while its current-dollar GDP fell 28% on a weaker yen, so it would score
+    10% *worse*; its real GDP grew 10%.
 
-    Note the basis differs from OWID's column (kg CO2 per 2011 international-$,
-    PPP), so levels aren't comparable between the two and ranking uses only the
-    derived column.
+    OWID's column is kg per 2011 international-$ (PPP), so levels are not
+    comparable, and ranking uses only the derived column.
     """
     kg_per_mt = 1e9  # co2_mt is million tonnes; 1 Mt = 1e9 kg
     return (

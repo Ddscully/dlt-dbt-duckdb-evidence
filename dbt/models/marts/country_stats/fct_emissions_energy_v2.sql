@@ -20,15 +20,9 @@ eu_prices as (
     select * from {{ ref('stg_eu_electricity_prices') }}
 ),
 
--- The country-years at least one source actually reports. The spine is a full
--- cross join, so without this the fact would carry an all-null row for
--- (Kosovo, 1750) and ~20k of its friends; `dim_country_year` is where you go
--- looking for those gaps.
---
--- Shared with the spine, which sizes its calendar off the same set. It was a
--- union of the four staging models here and a second one in `dim_country_year`
--- until both moved into `int_country_year_observed`; that model's header has
--- what keeping two copies in step was worth.
+-- The country-years at least one source reports. The spine is a full cross
+-- join, so without this the fact would carry all-null rows such as (Kosovo,
+-- 1750); `dim_country_year` is where those gaps are visible.
 observed as (
     select * from {{ ref('int_country_year_observed') }}
 )
@@ -82,10 +76,9 @@ select
     w.forest_area_pct,
     w.renew_elec_pct,
     w.energy_imports_pct,
-    -- EU household electricity price, EUR/kWh (Eurostat; null outside the EU/EEA).
-    -- Averaged over the year's half-years, so it carries the flag saying when that
-    -- average is over one of them — see fct_eu_electricity_prices_semiannual for
-    -- the unaveraged series.
+    -- EU household electricity price, EUR/kWh (Eurostat; null outside the EU/EEA),
+    -- averaged over the year's halves and flagged when only one exists. See
+    -- fct_eu_electricity_prices_semiannual for the unaveraged series.
     p.electricity_price_eur_kwh,
     p.n_half_years < 2 as price_is_partial_year
 from spine as s

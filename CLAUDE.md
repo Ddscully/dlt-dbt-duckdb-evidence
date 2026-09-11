@@ -826,13 +826,14 @@ publication boundary and measured rather than asserted. Full reasoning in
   is worth knowing**: it archives `fct_retail_order_line`, whose money is per-row
   arithmetic rather than an aggregate, so the "byte-identical run to run" property
   there still holds. It is aggregation over floats that is unstable, not floats.
-- **The policy is applied to the *copy*, not in a model, and both halves of that
-  matter.** `raw` ships inside the published DuckDB file, so a mask in staging
-  leaves the original one schema away; and the staging models are **views**, which
-  recompute from `raw` in the published copy — mask both and the shipped views
-  hash an already-hashed value, so views and marts disagree about who a customer
-  is with matching row counts and no error. `export()` grew a `prepare_copy` hook
-  for this: base tables are rewritten, views recompute, the two agree.
+- **The policy is applied to the *copy*, not in a model.** The published file
+  holds copies of the identifier no model declares — the `dbt_test__audit` tables,
+  and the `staging` tables `solidify_staging` materialises from views that read
+  `lakehouse.raw` — so a mask in a model would miss them. `export()`'s
+  `prepare_copy` hook solidifies staging *then* pseudonymises; the other order
+  ships clear ids in `staging` beside hashed marts, with matching row counts and
+  no error. `raw` itself is not in the published file (only
+  `raw.om_weather_daily` ships, in `lakehouse.tar.gz`).
 - **`||`, never `concat()`.** DuckDB's `concat` *ignores* NULLs, so
   `concat(customer_id, salt)` hashes the bare salt on every anonymous row — all
   243,007 of them landing on one pseudonym indistinguishable from a real
@@ -875,12 +876,12 @@ publication boundary and measured rather than asserted. Full reasoning in
   *is*. **A `select *` is invisible to the obvious check**: grepping the source
   queries for `customer_id` cannot find a query that names no columns at all,
   which is how `retail_returns.sql` survived the first pass of this work.
-- **Changing a source query's column list needs `just report-clean`.** Evidence
-  caches a schema per source (`reports/.evidence/template/static/data/…/*.schema.json`)
-  and keys it on the source, not on the query text — so a `just report` after a
-  column is dropped builds against a schema that still declares it. Three source
-  queries changed shape here, which is exactly the case the recipe's own
-  description names.
+- **Changing a source query's column list needs `just report-clean`.** A
+  `just report` after a column was dropped built against a schema that still
+  declared it (`reports/.evidence/template/static/data/…/*.schema.json`). The
+  mechanism is not Evidence's query-hash cache, which `evidence sources` consults
+  only with `--changed` and `package.json` never passes — so clear `.evidence/`
+  rather than reason about what it will reuse.
 
 ## Data-quality gates (`dbt/models/**/_*.yml`)
 

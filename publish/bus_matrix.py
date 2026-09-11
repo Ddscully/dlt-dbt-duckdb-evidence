@@ -4,18 +4,11 @@ The derivation is `modern_data_stack.bus_matrix`, which knows nothing about this
 project. Here live the constants: which schema holds the published layer, and
 which holes in the matrix are already known.
 
-**Why `publish/` and not `scripts/`.** `scripts/` is for the genuinely one-off,
-and this is the opposite — it must run again every time a mart is added or a key
-renamed, or the block it writes becomes another stale list. It sits beside
-`build_report.py`, which already turns the manifest into something outward-facing
-and holds `TABLE_TO_DBT_MODEL` for the same reason this holds `KNOWN_UNCONFORMED`.
+In `publish/`, not `scripts/`, because it must re-run whenever a mart is added
+or a key renamed; `tests/test_bus_matrix.py` fails if the rendered block is stale.
 
-**The declared holes are not an allowlist of things that are fine.** A hole is a
-fact that joins to no conformed dimension, and the reason attached to it says
-whether that is a boundary or a defect. Two were declared when this was written
-and only one of them was a decision; the other — `fct_fx_rates_periods` spelling
-`dim_currency` a second way — was fixed on 2026-09-08, which is what the
-declaration was for. One is left, and it is a boundary.
+The declared holes are not an allowlist of things that are fine: each reason
+says whether the hole is a boundary or a defect to fix.
 """
 
 from __future__ import annotations

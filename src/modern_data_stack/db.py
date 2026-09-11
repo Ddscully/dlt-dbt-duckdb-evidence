@@ -1,33 +1,13 @@
-"""Reads and writes against a DuckDB connection, with the Optional taken off.
+"""Reads and writes against a DuckDB connection.
 
-`DuckDBPyConnection.fetchone()` is typed `tuple[Any, ...] | None`, because in
-general a query need not return a row. Almost none of the reads in this repo are
-that general — they are `select count(*)`, `select max(year)`, `select
-current_database()`, ungrouped aggregates that return exactly one row by
-construction. So the code wrote `.fetchone()[0]` and moved on, in 40 places.
+`fetchone()` is typed `tuple | None`, but nearly every read here is an ungrouped
+aggregate that returns exactly one row. `row` and `scalar` state that invariant
+once, so the type checker stops flagging every call site, and raise naming the
+query when it fails — where `.fetchone()[0]` would raise an anonymous
+`TypeError`.
 
-That was 23 of the 36 diagnostics `just typecheck` opened with, and every one of
-them the same false alarm. The cost of leaving it was never the noise: it is that
-23 false alarms in a 36-line report is how a checker stops being read, and the
-thirteenth real one then arrives into a wall nobody scans any more.
-
-So the invariant is stated once, here, instead of 40 times implicitly — and
-stating it buys a real check as a side effect. `.fetchone()[0]` against a query
-that unexpectedly returns nothing raises `TypeError: 'NoneType' object is not
-subscriptable` from whichever line happened to touch it; `scalar()` raises
-naming the query.
-
-`qualify` is here for the same reason as `write_frames` below, one module
-later: naming a relation across an *attached* catalog stopped being one module's
-business the day this project started keeping two catalogs open at once, and a
-three-line helper copied into the second caller is the shape the rule is about.
-
-`write_frames` is here for a different reason: it is the one write shape this
-project repeats — register a Polars frame, `create or replace`, unregister — and
-it lived in `observability` because that is where it was first needed. Writing a
-carbon metric by importing a module about dbt/dlt metadata reads wrong, so the
-general operation sits in the general module and `observability` is back to
-being about metadata.
+`qualify` names a relation across attached catalogs. `write_frames` (replace)
+and `append_frame` (accumulate) are the two write shapes the project repeats.
 """
 
 from __future__ import annotations
@@ -42,12 +22,8 @@ import polars as pl
 def qualify(database: str | None, schema: str, table: str) -> str:
     """`"db"."schema"."table"`, or `"schema"."table"` when `database` is None.
 
-    The database half is not decoration and not always optional.
-    `information_schema` spans every attached catalog, so a query filtered on the
-    schema alone matches a `raw` in *either* one — and since raw landed in
-    DuckLake this project genuinely runs with two catalogs attached, one of which
-    may still hold a stale `raw` from before the move. Naming the catalog is what
-    makes the read say which one it meant.
+    Pass `database` whenever more than one catalog is attached: a bare schema
+    name can resolve to a same-named schema in the wrong one.
     """
     prefix = "" if database is None else f'"{database}".'
     return f'{prefix}"{schema}"."{table}"'
@@ -60,15 +36,10 @@ def row(
 ) -> tuple[Any, ...]:
     """The single row `sql` returns, as a tuple. Raises if it returned none.
 
-    For the ungrouped aggregates this repo reads, "no row" cannot happen — which
-    is exactly why it is worth raising on. Reaching it means the caller passed a
-    query this helper does not cover (`… limit 1` over an empty table, a `group
-    by` that matched nothing), and that is a bug at the call site rather than a
-    value to propagate.
-
-    A row holding NULL is a *different fact* and comes back normally: `select
-    max(year)` over an empty table returns one row of `None`, and the caller who
-    asked for a max is the one who knows whether that is an error.
+    No row means the caller passed a query this does not cover (`limit 1` over
+    an empty table, a `group by` matching nothing) — a call-site bug. A row of
+    NULLs is returned normally: `max(year)` over an empty table is one such row,
+    and only the caller knows whether that is an error.
     """
     result = con.execute(sql, params) if params is not None else con.execute(sql)
     fetched = result.fetchone()
@@ -84,13 +55,8 @@ def scalar(
 ) -> Any:
     """The first column of the single row `sql` returns.
 
-    Deliberately `Any` rather than a generic narrowed by an `expect=int`
-    argument. What comes out of DuckDB genuinely is dynamic — a `count(*)` is an
-    int, a `max(order_date)` is a date, `current_database()` is a str — and
-    making 23 call sites each name a type would be a second invariant to keep
-    true, in exchange for narrowing that only the few callers who actually do
-    arithmetic on the result need. Those callers narrow locally; see the
-    `as_of_date` guard in `transform/retail_rfm.py`.
+    Typed `Any` because the result genuinely varies (int, date, str); the few
+    callers that do arithmetic narrow locally, as `transform/retail_rfm.py` does.
     """
     return row(con, sql, params)[0]
 
@@ -102,22 +68,16 @@ def write_frames(
 ) -> dict[str, int]:
     """Write each frame to `<schema>.<name>`, replacing it. Returns rows written.
 
-    Takes a connection rather than a path: the frames were read through one, and
-    DuckDB allows a single writer, so re-opening the file here would be a lock to
-    trip over for no benefit.
-
-    `schema` has no default. The three callers all write `analytics` today, which
-    is exactly what would make a default invisible — a fourth caller meaning some
-    other schema would get this one by omission, and `create or replace` does not
-    ask twice.
+    Takes the caller's connection: DuckDB allows one writer, so reopening the
+    file would contend with it. `schema` has no default — every caller writing
+    `analytics` would make a default invisible to one that means otherwise, and
+    `create or replace` does not ask twice.
     """
     con.sql(f"create schema if not exists {schema}")
     for name, frame in frames.items():
         con.register("frame_df", frame)  # DuckDB reads Polars frames directly
         con.sql(f"create or replace table {schema}.{name} as select * from frame_df")
-        # Neither of the two hand-rolled copies this replaced unregistered, so a
-        # long-lived connection kept the last frame alive and a second write
-        # silently rebound the same name.
+        # So a long-lived connection does not keep the last frame alive.
         con.unregister("frame_df")
     return {name: frame.height for name, frame in frames.items()}
 
@@ -131,40 +91,22 @@ def append_frame(
 ) -> int:
     """Append `frame` to `<schema>.<table>`, skipping keys already there.
 
-    The counterpart to `write_frames`, and the difference is the whole reason it
-    exists: everything else this project writes to `analytics` is a *snapshot*
-    that `create or replace` is right for, because it can be rebuilt from the
-    warehouse at any time. A run history cannot — the invocation it describes is
-    over, its artifact will be overwritten by the next one, and a replace would
-    silently reduce the table to whatever the last build did.
-
-    **Idempotent on `key`, not on the whole row**, because the operation being
-    protected is "the same artifact read twice". `just pipeline-status` can be
-    run repeatedly against one `run_results.json` — it is its own recipe, and
-    `just run` calls it after a build that a person may then re-run it against —
-    and every one of those reads yields identical rows. Deduplicating on the
-    full row would also work today and would silently start appending the moment
-    any column became non-deterministic; keying on the invocation says what is
-    actually meant.
-
-    `key` has no default for `write_frames`' reason: the caller knows what
-    identifies a batch and this module cannot.
+    For a history, which a replace would reduce to the last batch. Idempotent on
+    `key` — reading the same artifact twice appends nothing — rather than on the
+    whole row, which would start appending duplicates the moment any column
+    became non-deterministic. `key` has no default: only the caller knows what
+    identifies a batch.
     """
     con.sql(f"create schema if not exists {schema}")
     qualified = qualify(None, schema, table)
     con.register("append_df", frame)
     try:
-        # `if not exists` rather than `or replace`: this is the branch that runs
-        # on a fresh warehouse, and on every later build the table is already
-        # there holding rows a replace would delete. `limit 0` so the create
-        # only fixes the shape — the insert below is what puts rows in, and
-        # having one path do both is how a first run double-counts.
+        # Create the shape only (`limit 0`); the insert below adds every row, so
+        # a first run cannot count its rows twice.
         con.sql(f"create table if not exists {qualified} as select * from append_df limit 0")
         before = scalar(con, f"select count(*) from {qualified}")
-        # `by name` rather than positionally: the two column orders agree today,
-        # and a table restored from a *previous release* was written by an older
-        # version of this code. A positional insert against a reordered table
-        # succeeds and puts values in the wrong columns.
+        # `by name`: a table carried from a previous release may have been
+        # written with a different column order.
         con.sql(f"""
             insert into {qualified} by name
             select * from append_df

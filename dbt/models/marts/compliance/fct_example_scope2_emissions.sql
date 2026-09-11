@@ -1,10 +1,9 @@
 -- The worked example: metered kWh x grid emission factor -> tonnes CO2e, which
 -- is the whole of location-based Scope 2 accounting under the GHG Protocol.
 --
--- **The twelve sites are invented** (`seeds/example_scope2_sites.csv`); the
--- factors they are multiplied by are not. This model is here because a reference
--- table nobody has shown you how to use is a column of numbers, and the arithmetic
--- is the difference between a climate dashboard and an input to a filing.
+-- **The sites are invented** (`seeds/example_scope2_sites.csv`); the factors
+-- they are multiplied by are not. It shows how `dim_grid_emission_factors` is
+-- used.
 --
 -- Grain: one row per site.
 with sites as (
@@ -26,10 +25,8 @@ factors as (
     where is_latest_available
 ),
 
--- Left joined, not inner. A site in a country with no published factor is the
--- interesting failure — the group total quietly under-reports — so it has to
--- arrive as a row with a null factor that the `not_null` test catches, rather
--- than disappear.
+-- Left join: a site in a country with no factor must arrive as a null for the
+-- `not_null` test to catch, not vanish and shrink the group total.
 priced as (
     select
         s.site_id,
@@ -60,11 +57,8 @@ select
     p.low_carbon_share_elec_pct,
     p.scope2_t_co2e,
     100 * p.scope2_t_co2e / sum(p.scope2_t_co2e) over () as share_of_group_pct,
-    -- The same consumption on the cleanest and dirtiest grid the group already
-    -- operates on. Not a hypothetical extreme: every one of these is a country
-    -- this company has a site in, so the spread is the cost of the siting
-    -- decisions it has already made, and the two columns sum to a group total
-    -- that can be read straight off a chart.
+    -- The same consumption on the cleanest and dirtiest grid among the group's
+    -- own sites: the spread is the cost of siting decisions already made.
     p.annual_electricity_mwh * min(p.emission_factor_g_co2_per_kwh) over () / 1000
         as scope2_at_best_grid_t_co2e,
     p.annual_electricity_mwh * max(p.emission_factor_g_co2_per_kwh) over () / 1000

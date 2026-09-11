@@ -149,30 +149,22 @@ models:
           additivity: non_additive
 
   - name: fct_emissions_energy
-    # The project's one versioned model, and the reason it is this one: nothing
-    # inside the project refs it, and the monthly release ships it as a Parquet
-    # file to consumers who cannot be paged. A rename here is free in-repo and
-    # breaking out of it, which is exactly the case `versions:` exists for.
+    # The project's one versioned model: nothing in the project refs it, and the
+    # release ships it to consumers who cannot be paged, so a rename is free
+    # in-repo and breaking outside it.
     #
-    # `ref('fct_emissions_energy')` resolves to the latest version, so every
-    # consumer that doesn't ask for a version gets v2. v2 is aliased back to the
-    # bare relation name for the same reason: the Evidence source query,
-    # `TABLE_TO_DBT_MODEL` and the release notes all name
-    # `marts.fct_emissions_energy`, and a migration that renames the table out
-    # from under them is not a migration. This list named a fourth consumer,
-    # the lake's `ARCHIVED_TABLES`, until 2026-09-08 — that constant went with
-    # the hive archive, so a live decision was carrying a reason that no longer
-    # existed.
+    # `ref('fct_emissions_energy')` resolves to v2, which is aliased back to the
+    # bare relation name because the Evidence source query, `TABLE_TO_DBT_MODEL`
+    # and the release notes all name `marts.fct_emissions_energy`.
     latest_version: 2
     versions:
       - v: 2
         config:
           alias: fct_emissions_energy
       - v: 1
-        # The window. dbt warns on every parse once this date is inside 30 days
-        # and errors for anyone still `ref`-ing v1 after it passes; the release
-        # notes carry the same date, because the consumers who need it are the
-        # ones who never see a dbt log.
+        # The migration window. After it, `dbt parse` fails (see the flags in
+        # `dbt_project.yml`); the release notes carry the same date for
+        # consumers who never see a dbt log.
         deprecation_date: 2026-11-01
         columns:
           - include: all
@@ -512,56 +504,23 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [country_iso3, year]
-      # **`hdd_total` and `hdd_minmax_total` being swapped is not catchable by a
-      # data test here.** A comment in this spot used to claim it was — that the
-      # (max + min)/2 convention "runs warmer than the mean-based one, never
-      # colder", by construction — and it was wrong twice over. The expression
-      # underneath it was `hdd_minmax_total >= 0 and hdd_total >= 0`: pure
-      # non-negativity, already carried by `not_null` and the two
-      # `accepted_range {min_value: 0}` below, and *invariant* under the swap it
-      # claimed to catch. And the ordering does not hold. Over the full archive
-      # (656 rows, 41 capitals x 16 years) `hdd_minmax_total` is the larger in
-      # 253 rows (38.6%) and the smaller in 403, gaps running -153.0 to +96.2 —
-      # whether the midpoint sits above or below the true daily mean depends on
-      # the day's diurnal shape, and both directions occur. So encoding the
-      # claim would redden the build on reality rather than on a bug.
-      #
-      # Two plausible totals, both in a legal range, differing by an amount with
-      # no fixed sign, is a wrong answer that is also a legal one — which is a
-      # unit test's job, not a data test's. Measured against a warehouse copy:
-      # swap the two columns in the model's final SELECT and **all 29 of
-      # `fct_country_weather_year`'s data tests pass**, with DEU 2022 reading
-      # 2170.55 where it should read 2177.70.
-      # `weather_year_keeps_the_two_degree_day_conventions_apart` is what fails
-      # on it.
+      # **Swapping `hdd_total` and `hdd_minmax_total` is not catchable by a data
+      # test.** The two conventions are not ordered — whether the (max + min)/2
+      # midpoint sits above or below the true daily mean depends on the day's
+      # shape, and `hdd_minmax_total` is the larger in 38.6% of rows — so both
+      # totals are legal either way. With the columns swapped (measured on a
+      # warehouse copy) all 28 of `fct_country_weather_year`'s data tests pass;
+      # the unit test `weather_year_keeps_the_two_degree_day_conventions_apart`
+      # fails.
 
-      # **Two tests stood here that could not fail, and they are worth recording
-      # rather than just deleting.**
+      # A base-temperature mix-up is asserted at the daily grain in
+      # `_staging.yml`; at this grain a swap moves both totals the same way.
       #
-      # `cdd_total < hdd_total + 5000` claimed to catch a base-temperature
-      # mix-up. It does not. Rebuilding the model against a warehouse copy with
-      # the two vars swapped raised heating totals 89% and cooling totals 336%,
-      # and `max(cdd_total - hdd_total)` went 637.5 to 975.2 — still five times
-      # under the bound, with **`stg_weather_daily`'s 27 data tests and
-      # `fct_country_weather_year`'s 28 data tests all passing**. A
-      # swap moves both totals the same way, so a ceiling on their difference is
-      # structurally the wrong instrument, and the annual grain has already
-      # summed away the thing that breaks. The base ordering is now asserted at
-      # the daily grain in `_staging.yml`, where it fails on 52,253 rows of that
-      # same mutation.
-      #
-      # `frost_days <= n_days` was true by construction — `count(*) filter (…)`
-      # against `count(*)` in the same `group by` — so no data could break it and
-      # no build ever would. Real slack was 153 days at its tightest.
-      #
-      # What replaces the second is the *biconditional* between two aggregates
-      # this model computes independently: a year has a frost day exactly when
-      # its coldest daily minimum is below zero. Measured over the 656 rows, by
-      # recomputing `frost_days` three plausible wrong ways: the wrong column
-      # (`temp_mean_c`) fails 60 rows, the wrong extreme (`temp_max_c`) fails
-      # 138, and the correct model fails none. The boundary mutation `<=` for `<`
-      # is **not** caught and is stated rather than hidden — it needs a daily
-      # minimum of exactly 0.0, which no double in this archive is.
+      # A biconditional between two independently computed aggregates: a year
+      # has a frost day exactly when its coldest daily minimum is below zero.
+      # Recomputing `frost_days` from the wrong column or the wrong extreme fails
+      # it (measured); the `<=`-for-`<` boundary mutation is not caught, needing
+      # a daily minimum of exactly 0.0.
       - dbt_utils.expression_is_true:
           arguments:
             expression: "(frost_days > 0) = (temp_min_c < 0)"

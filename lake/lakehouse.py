@@ -1,63 +1,26 @@
 """The lakehouse: where dlt lands `raw`, and how to read what changed.
 
-This used to be a *mirror* — dlt wrote `raw` into `data/warehouse.duckdb` and a
-gated `MERGE` copied two weather tables into a DuckLake catalog beside it, so
-the format could demonstrate a row-level change feed. It is now the landing zone
-itself: dlt writes straight into DuckLake, dbt reads `raw` from here, and the
-DuckDB file holds only what dbt builds. The hive archive that used to sit under
-`data/lake/` is gone from the *tree* with it — but the directory it wrote is
-gitignored, so it survives on any machine that predates the move, 60 MB of it,
-read by nothing. `just clean` takes it now; this sentence claimed it was gone
-for a fortnight while it was not.
+dlt writes straight into this DuckLake catalog, dbt reads `raw` from it, and
+`data/warehouse.duckdb` holds only what dbt builds.
 
 Run:  uv run python -m lake.lakehouse       (report the catalog's snapshots)
 
-## What moved, and the one thing it cost
+## Reading what changed
 
-The gated `MERGE` is gone, and with it the clean `ducklake_table_changes()`
-feed. **dlt's own merge cannot produce one**, which is measured rather than
-assumed: loading 500 identical rows through `write_disposition="merge"` a second
-time reports `update_preimage: 500, update_postimage: 500`. dlt regenerates
-`_dlt_id` *and* `_dlt_load_id` on every row it re-merges, so every row genuinely
-differs and DuckLake is right to say so. A feed that reports a no-op reload and
-a one-row restatement identically is not a feed.
-
-What replaces it is `revisions()` below: diff two snapshots with `EXCEPT`,
-projecting away dlt's provenance columns. Measured on the same three loads —
-**0 rows** for the identical reload, **1 row** for the one-row change, naming the
-row. Two properties make this the better trade rather than a consolation:
-
-* it works between **any** two snapshots, not only adjacent ones, so "what
-  changed since last month's release" is one query rather than a fold over
-  every intervening load;
-* it is a query a consumer can re-derive from the published catalog months
-  later, with no bookkeeping this repo has to keep correct.
-
-The cost is two full scans instead of a change-log read. At 219,350 weather rows
-that is milliseconds, and the ratio only improves as the table grows, because
-the scans parallelise and the change log does not.
+`ducklake_table_changes()` is useless behind dlt: dlt regenerates `_dlt_id` and
+`_dlt_load_id` on every row it re-merges, so reloading 500 identical rows reports
+500 updates. `revisions()` diffs two snapshots with `EXCEPT` instead, projecting
+those columns away — measured at 0 rows for an identical reload and 1 for a
+one-row change. It works between any two snapshots and needs no bookkeeping, so
+a consumer can re-derive it from the published catalog. The cost is two scans.
 
 ## Why the working paths are absolute
 
-A DuckLake catalog stores its `data_path` as given: pass a relative one and the
-catalog is relocatable with a bare `ATTACH`, pass an absolute one and a consumer
-needs `OVERRIDE_DATA_PATH`. So the two catalogs make opposite choices, and both
-are right for where they live. The *working* one is absolute because it is read
-by dlt from the repo root and by dbt from `dbt/` — two working directories a
-relative path cannot serve, and getting that wrong is the `DATA_PATH` mismatch
-`just`'s exported `LAKEHOUSE_DIR` exists to prevent. The *published* one is
-relative, written that way by `publish/export_warehouse.py` into
-`lakehouse.tar.gz`, so a consumer unpacks it anywhere and opens it with a bare
-`ATTACH`.
-
-This paragraph said the landing zone "is not published, because the release
-ships the curated DuckDB file alone" until 2026-09-08, and pointed the reader at
-a `PUBLISHING.md` that has never existed in this repo. Both halves were stale in
-the same direction as the comment above `CARRIED` in
-`publish/restore_history.py`: the release does publish it, which is what keeps
-the weather archive deepening instead of cold-starting every month. The
-measurements behind the relative/absolute split are in the `the-lakehouse`
-skill.
+A DuckLake catalog stores its `data_path` as given. The working catalog is read
+by dlt from the repo root and by dbt from `dbt/`, so its path must be absolute
+(`just` exports an absolute `LAKEHOUSE_DIR`). The published one in
+`lakehouse.tar.gz` is relative, so a consumer can unpack it anywhere and open it
+with a bare `ATTACH`. The measurements are in the `the-lakehouse` skill.
 """
 
 from __future__ import annotations
@@ -82,11 +45,8 @@ from modern_data_stack.paths import lakehouse_dir as default_lakehouse_dir
 # a fixture run cannot write over the real catalog.
 LAKEHOUSE_DIR = default_lakehouse_dir()
 
-# The catalog is a DuckDB file beside the data rather than inside it, so `data/`
-# holds nothing but Parquet. That is what lets somebody read the files without
-# the catalog — a weaker guarantee than the hive archive gave (see
-# `modern_data_stack.ducklake` on why `read_parquet` is not the table), but the
-# layout is still the one a reader expects to find.
+# The catalog is a DuckDB file beside `data/`, which holds only Parquet. (Reading
+# that Parquet directly is not reading the table — see `modern_data_stack.ducklake`.)
 CATALOG_NAME = "catalog.duckdb"
 DATA_DIRNAME = "data"
 
@@ -100,29 +60,17 @@ ATTACH_ALIAS = "lakehouse"
 # or not — see the module docstring. Every comparison here projects them away.
 DLT_COLUMNS = ("_dlt_load_id", "_dlt_id")
 
-# The one table in the catalog that restates, and so the only one a revision log
-# says anything about. FX is append-only, retail is frozen at 2011-12, and
-# `raw.owid_co2` has produced zero observed revisions locally — weather's 90-day
-# ERA5T lookback re-merges 41 x 90 = 3,690 rows on a *scheduled* upstream
-# property. Named here rather than in `orchestration/` because it is a fact about
-# the data, and the asset check is only one of its readers.
+# The merge-loaded table with a scheduled upstream restatement (ERA5T is replaced
+# by final ERA5 within the 90-day lookback), so the one a revision log is about.
+# FX is append-only and retail is frozen.
 WEATHER_TABLE = "raw.om_weather_daily"
 
-# What the release publishes out of the landing zone, and it is an allowlist for
-# two independent reasons.
-#
-# **Cost.** `raw.om_weather_daily` is unreproducible within a *budget* — the
-# archive costs more than Open-Meteo's 10,000 units a day — so a release that did
-# not carry it would cold-start the next one at `WEATHER_COLD_START_YEARS`
-# forever. Everything else in `raw` is a free re-fetch.
-#
-# **Disclosure.** `raw.retail_invoice_lines` and dlt's `raw_staging` copy of it
-# hold 824,364 clear customer ids between them. Shipping `raw` whole would undo
-# the single largest privacy gain of moving the landing zone out of the published
-# file — and **it could not be fixed after the fact**: DuckLake keeps dropped
-# tables in earlier snapshots, so `at (version => …)` still returns them. Verified
-# by dropping a table and reading a customer id back out of the version before it.
-# So the published catalog is *built* from this list, never filtered down to it.
+# What the release publishes out of the landing zone — an allowlist for two
+# reasons. Cost: `raw.om_weather_daily` costs more than Open-Meteo's daily budget
+# to refetch; everything else in `raw` is free. Disclosure: `raw.retail_invoice_lines`
+# and dlt's `raw_staging` copy of it hold clear customer ids, and DuckLake keeps
+# dropped tables readable in earlier snapshots (`at (version => …)`), so the
+# published catalog is built from this list, never filtered down to it.
 PUBLISHED_TABLES = ("raw.om_weather_daily",)
 
 __all__ = [
@@ -167,14 +115,9 @@ def dlt_credentials(lakehouse_dir: str | Path = LAKEHOUSE_DIR):
     """
     from dlt.destinations.impl.ducklake.configuration import DuckLakeCredentials
 
-    # **The mkdir is required and it is an import-time side effect**, which is an
-    # unpleasant pair worth naming. dlt will not create the catalog file's parent
-    # (`Cannot open file …/catalog.duckdb: No such file or directory`), and
-    # `build_pipeline()` calls this, and importing `orchestration.assets` calls
-    # `build_pipeline()` at import time — so merely importing the orchestration
-    # layer creates an empty `data/lakehouse/`. It is gitignored and harmless
-    # except in one place: `restore()` below has to tolerate finding it, because
-    # `shutil.copytree` refuses an existing destination.
+    # Required: dlt will not create the catalog's parent directory. Because
+    # importing `orchestration.assets` builds the pipeline, that import creates an
+    # empty `data/lakehouse/` — which `restore()` has to tolerate.
     lake = Path(lakehouse_dir)
     lake.mkdir(parents=True, exist_ok=True)
     data_path(lake).mkdir(parents=True, exist_ok=True)
@@ -214,10 +157,8 @@ def is_catalog(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> bool:
 def read_only_connection(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> duckdb.DuckDBPyConnection:
     """An in-memory DuckDB with the lakehouse attached read-only.
 
-    Read-only because every caller of this is a *reader* — the observability
-    tables, the asset checks, `revisions()` — and DuckLake takes one writer at a
-    time exactly as DuckDB does. A reader that opens it writable is the lock
-    contention this project already documents for the warehouse file.
+    Every caller is a reader. Read-only readers can share the catalog with each
+    other, never with a writer — the same rule as the warehouse file.
     """
     con = duckdb.connect()
     attach(
@@ -308,18 +249,11 @@ def publish(
 def preflight(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> None:
     """Every reason a restore would refuse, asked before anything is written.
 
-    Split out of `restore` so a caller that mutates something *else* first can
-    ask up front. `publish/restore_history.py` is that caller and is the reason
-    this exists: its `run()` replaces the warehouse's `history` schema and *then*
-    carries the landing zone in, so a refusal raised from inside the second step
-    had already let the first one happen — last month's snapshots copied over the
-    local ones, the lakehouse untouched, and both that module's docstring and
-    CLAUDE.md saying `run()` *refuses* in exactly this situation.
-
-    A refusal is a promise about what did not happen, and a check that runs after
-    the first write cannot make it. Both refusals move rather than only the
-    warm-state one: a destination that already holds carried rows is the same
-    shape of half-applied restore, and it costs the same archive.
+    Separate from `restore` so a caller that writes something else first can ask
+    up front: `publish/restore_history.run` replaces `history` before carrying
+    the landing zone, and a refusal raised after that would leave a half-applied
+    restore. Refuses on dlt local state and on a destination already holding
+    carried rows.
     """
     state = _local_pipeline_state()
     if state is not None:
@@ -340,15 +274,10 @@ def preflight(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> None:
 def restore(source_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> dict[str, int]:
     """Copy a published lakehouse into `lakehouse_dir` before the graph runs.
 
-    The landing-zone analogue of `publish/restore_history.py`, and simpler than
-    it: a DuckLake is a directory, so this is a copy rather than a schema-aware
-    `create or replace`. It **refuses a destination that already holds rows**, for
-    the reason that module states — the weather archive is no easier to get back
-    than a revision is, and `--force` is how you say you meant it.
-
-    dlt then merges onto the carried rows. That works for the reason the carried
-    *table* worked before: dlt keys "is this destination fresh?" on its own
-    bookkeeping, and a catalog holding only `raw.om_weather_daily` has none of it.
+    A directory copy. Refuses a destination that already holds carried rows —
+    there is no force; delete it first to replace it. dlt then merges onto the
+    carried rows, because it judges a destination fresh by its own bookkeeping
+    tables, which the published catalog does not carry.
     """
     source = Path(source_dir)
     if not is_catalog(source):
@@ -358,18 +287,14 @@ def restore(source_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -
 
     dest = Path(lakehouse_dir)
     if dest.exists():
-        # An empty directory is the normal state here, not an anomaly: importing
-        # the orchestration layer creates one (see `dlt_credentials`). Only a
-        # catalog with carried rows in it stops the restore, and that is checked
-        # above — this just clears the way for `copytree`.
+        # Usually empty (see `dlt_credentials`); the preflight has already refused
+        # one with carried rows. `copytree` needs the path gone.
         shutil.rmtree(dest)
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, dest)
-    # The published catalog carries a *relative* `data_path` so a consumer can
-    # open it with a bare ATTACH. A working one cannot: dlt reads it from the
-    # repo root and dbt from `dbt/`. DuckLake checks the two agree and refuses
-    # otherwise, so the form is put back here — the exact mirror of `publish`.
+    # The published catalog's `data_path` is relative; a working one must be
+    # absolute (see the module docstring). The mirror of `publish`.
     set_data_path(catalog_path(dest), f"{data_path(dest)}/")
     return {t: rows(t, dest) for t in PUBLISHED_TABLES if _has_table(dest, t)}
 
@@ -391,26 +316,12 @@ def _local_pipeline_state() -> Path | None:
 def _refuse_warm_state(state: Path) -> None:
     """Stop before a restore that dlt's local state would make fail.
 
-    This guard moved here with the landing zone; it used to live in
-    `publish/restore_history.py`, back when a *table* was carried into the
-    warehouse's `raw` schema. The mechanism changed completely — a directory copy
-    rather than a `create or replace` — and the failure did not change at all,
-    which is worth knowing before assuming a new implementation escapes an old
-    trap. Re-measured against the DuckLake restore rather than inherited:
-
-    * **No local state** (a fresh runner — `release-data.yml`, `pages.yml`,
-      `nightly.yml`) — dlt queries the destination, finds no `_dlt_version`,
-      concludes the dataset is new and creates its bookkeeping. The carried rows
-      survive and the merge lands on them. Measured: 44,936 weather rows through
-      a full fixture load.
-    * **Local state** (any machine that has run `just ingest`) — dlt trusts what
-      it already knows and dies with `Table with name _dlt_version does not
-      exist!`. Measured on the restored catalog, same message as before.
-
-    Carrying dlt's own bookkeeping along does not help and is why
-    `PUBLISHED_TABLES` names data tables only: dlt would then believe every table
-    its schema describes is present, and the resources that were never published
-    fail on the ones that are missing.
+    With no local state (a fresh runner) dlt finds no `_dlt_version`, treats the
+    dataset as new, and merges onto the carried rows. With local state (any
+    machine that has run `just ingest`) it trusts what it knows and fails with
+    `Table with name _dlt_version does not exist!`. Publishing dlt's bookkeeping
+    would not help: dlt would then expect every table its schema describes,
+    including the unpublished ones.
     """
     raise RuntimeError(
         f"dlt has local pipeline state at {state}, and this restore replaces the "

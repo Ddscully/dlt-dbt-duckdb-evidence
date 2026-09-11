@@ -1,13 +1,11 @@
 -- What each dbt build cost, by node type, one row per invocation per type.
 --
--- Rolled up rather than shipped per node: `analytics.pipeline_runs` is 552 rows
--- per build and grows forever, and the page draws six series. The per-node
--- detail stays in the warehouse for anyone with a question this chart raises.
+-- Rolled up: `analytics.pipeline_runs` holds hundreds of rows per build and
+-- only grows, while the page draws a few series. The per-node detail stays in
+-- the warehouse.
 --
--- `execution_time_s` is dbt's own per-node total and is deliberately not
--- derived from the two phase columns — it exceeds their sum (65.14s against
--- 57.86s on the build this was written against), because dbt counts work
--- outside the compile and execute phases it names.
+-- `execution_time_s` is dbt's own total, not the sum of the two phase columns,
+-- which it exceeds: dbt counts work outside the phases it names.
 select
     invocation_id,
     invocation_started_at,

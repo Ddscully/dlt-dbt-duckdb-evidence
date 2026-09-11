@@ -346,31 +346,19 @@ models:
           fallback's route and not the sourcing country's. Null where the annex
           prints no route — 4,976 rows, 49% fertilisers and 41% iron and steel.
         data_tests:
-          # The row-level rule, asserted against the annex rather than against
-          # the mart's own other rows: every row carries the route published on
-          # the row its tonnages came from — its own where the country has a
-          # total, the fallback's where it does not.
+          # The row-level rule, asserted against the annex: every row carries the
+          # route of the row its tonnages came from — its own where the country
+          # has a total, the fallback's where not.
           #
-          # The subquery selects that row rather than exempting a branch, and
-          # the difference is not cosmetic. This test first compared only
-          # against the fallback row and carried `or is_country_specific`, which
-          # made it vacuous on all 10,910 country-specific rows: the mirror
-          # -image defect, reading *every* route off the fallback, passed all 20
-          # data tests. Scoping an assertion with `or <the other case>` reads
-          # like narrowing to the rows in question and is an exemption — it
-          # makes the rule unfalsifiable exactly where it was not being thought
-          # about. The seed is unique on (country_iso3, good_key), so the
-          # correlated subquery returns at most one row.
+          # The subquery selects that row for every case rather than exempting
+          # one with `or is_country_specific`, which would make the rule
+          # unfalsifiable on exactly the rows it exempts. The seed is unique on
+          # (country_iso3, good_key), so it returns at most one row.
           #
-          # `is not distinct from` and not `=`, because 553 of the 755 fallen
-          # -back rows correctly resolve to a null route and `=` is unknown on
-          # a null, which a `where not(...)` then discards — the test would
-          # pass by not looking.
-          #
-          # The comparison stays inside the expression rather than a `config:
-          # where:`, which is not a style choice: `where` makes dbt_utils wrap
-          # the model as `dbt_subquery`, and the correlated reference then has
-          # to name that alias instead of the relation.
+          # `is not distinct from`, not `=`: most fallen-back rows correctly have
+          # a null route, and `=` on a null is unknown, which `where not(...)`
+          # discards. Inside the expression rather than `config: where:`, which
+          # would make dbt_utils alias the model and break the correlation.
           - dbt_utils.expression_is_true:
               arguments:
                 expression: >
@@ -423,13 +411,9 @@ models:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
-      # 2027 and 2028 are `not_null` for a reason 2026 is not: they are the two
-      # years whose rate could go missing on its own. The mark-up now arrives by
-      # left join from a hand-maintained seed, one filter per year, so a seed
-      # holding only a 2026 row for some group would null these two and nothing
-      # else — null money in a published Parquet, on a green build, in two of the
-      # three years the table is about. `cbam_markup_schedule`'s own coverage
-      # test is the other half.
+      # `not_null` on 2027 and 2028: the mark-up is read per year from a
+      # hand-maintained seed, so a group seeded only for 2026 would null these
+      # two alone. `cbam_markup_schedule`'s coverage test is the other half.
       - name: certificates_2027_t_co2e_per_t
         data_type: DOUBLE
         meta:

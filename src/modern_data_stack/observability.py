@@ -1,15 +1,9 @@
 """Turn the warehouse's own metadata into queryable tables.
 
-Everything a pipeline like this knows about itself is already in the database —
-dlt stamps `_dlt_load_id` on every raw row, dbt stores each failing test row in
-its audit schema when `store_failures` is on, and `information_schema` knows the
-shape of every layer. None of it is *queryable from a report*, because two of the
-three need either dynamic SQL over a table list that isn't known until runtime or
-a file outside the database. This module resolves both.
-
-None of it is new instrumentation. A pipeline page costs a few dozen lines of SQL
-over metadata three tools were already writing, which is worth knowing before
-anyone proposes emitting metrics for it.
+No new instrumentation: dlt stamps `_dlt_load_id` on every raw row, dbt stores
+failing test rows when `store_failures` is on, and `information_schema` knows
+every layer's shape. What a report cannot do is the dynamic SQL over a runtime
+table list, or read dbt's artifacts outside the database — this module does both.
 
 Landing tables and layer names come from the project; see
 `transform/pipeline_status.py`.
@@ -43,20 +37,15 @@ def _has_column(
 ) -> bool:
     """Whether `column` is on `<database>.<schema>.<table>`.
 
-    `database` is optional because most callers query the connection's own
-    catalog, and required in spirit for the one that does not: a landing schema
-    in an attached DuckLake is `lakehouse.raw`, and `information_schema.columns`
-    without the `table_catalog` filter happily matches a `raw` schema in *any*
-    attached database. Two catalogs each holding a `raw` schema is exactly this
-    project's shape.
+    Pass `database` for a schema in an attached catalog (`lakehouse.raw`):
+    without the `table_catalog` filter, `information_schema.columns` matches a
+    `raw` schema in any attached database.
     """
     params = {"schema": schema, "table": table, "column": column}
     clause = ""
     if database is not None:
-        # Both halves together: DuckDB rejects a named parameter the statement
-        # does not mention (`identifiers of the excess parameters: database`), so
-        # the binding cannot be passed unconditionally alongside an optional
-        # clause.
+        # Clause and binding together: DuckDB rejects a named parameter the
+        # statement does not mention.
         clause = " and table_catalog = $database"
         params["database"] = database
     return bool(
@@ -78,13 +67,8 @@ def _period_span(
     column: str,
     database: str | None = None,
 ) -> tuple[int | None, int | None]:
-    """(min, max) of a table's period column, or (None, None) if it has none.
-
-    The return type says `| None` twice because both branches can produce it —
-    the early return for a table with no period column, and `min()`/`max()` over
-    a table that has one and no rows. It read `tuple[int, int]` until ty pointed
-    at the line directly below the docstring that already said otherwise.
-    """
+    """(min, max) of a table's period column; (None, None) with no such column
+    or no rows."""
     if not _has_column(con, schema, table, column, database):
         return (None, None)
     lo, hi = row(
@@ -142,15 +126,9 @@ def build_tables(
 ) -> pl.DataFrame:
     """Row counts and period spans for every table in the modelled layers.
 
-    `exclude_prefix` keeps this module's own output out of the inventory.
-    Without it the inventory inventories itself, and the table count depends on
-    whether it has run before — 10 on a first build, 13 on every later one, for
-    no change in the warehouse.
-
-    An empty `exclude_prefix` means "exclude nothing", and has to drop the
-    predicate rather than pass it: `not like '' || '%'` is `not like '%'`, which
-    matches no row at all. That returns an empty inventory, which surfaces much
-    later and much less legibly as an empty frame out of `db.write_frames`.
+    `exclude_prefix` keeps this module's own output out of the inventory, which
+    would otherwise count itself from the second run on. An empty prefix drops
+    the predicate: `not like '%'` would match nothing.
     """
     predicate = ""
     params: dict[str, object] = {"layers": list(layers)}
@@ -188,32 +166,17 @@ def build_tables(
 def node_display_name(unique_id: str, nodes: dict[str, dict]) -> str | None:
     """Readable name for a node id.
 
-    A unique id's last segment is only the node name while the model has no
-    versions: a versioned one is `model.<project>.fct_emissions_energy.v1`, so
-    splitting on the final dot labels it **`v1`**. Prefer the node's own
-    `alias`, which is the relation that actually ran
-    (`fct_emissions_energy_v1`, `fct_emissions_energy`) and so matches what
-    every other table on the pipeline page calls it. The split stays as the
-    fallback, because a test can attach to a source, which does not live in
-    `nodes`.
-
-    Named for the *test* it was written for until `build_runs` needed the same
-    answer about models, snapshots and seeds. The trap is a property of unique
-    ids, not of tests: both versioned nodes appear in `run_results.json` too,
-    so a second caller splitting the id by hand would have relabelled them.
+    The node's `alias` — the relation that ran — because a versioned model's id
+    ends `.v1`, and a test's in a hash. The id's last segment is the fallback,
+    for ids (such as sources) that are not in `nodes`.
     """
     node = nodes.get(unique_id) or {}
     return node.get("alias") or unique_id.rsplit(".", 1)[-1] or None
 
 
 def manifest_nodes(manifest_path: str) -> dict[str, dict]:
-    """The manifest's node map, or `{}` when there is no manifest.
-
-    Split out of `manifest_tests` when `build_runs` needed the same map for a
-    different question. Absence is tolerated here rather than raised for the
-    reason stated on `manifest_tests`: `dbt/target/` is gitignored, so every
-    reader of it has to work on a fresh clone.
-    """
+    """The manifest's node map, or `{}` when there is no manifest (`dbt/target/`
+    is gitignored, so a fresh clone has none)."""
     path = Path(manifest_path)
     if not path.exists():
         return {}
@@ -223,15 +186,10 @@ def manifest_nodes(manifest_path: str) -> dict[str, dict]:
 def manifest_tests(manifest_path: str) -> dict[str, dict]:
     """Map audit-table name -> {test type, model it guards, column, fail_calc, severity}.
 
-    The audit table is named after the test's `alias`, and dbt **truncates and
-    hashes** an alias longer than 63 characters
-    (`dbt_utils_accepted_range_fct_c_1c6718ee2bb...`), so the table name on its
-    own is not a readable label. The manifest is where the real name, the
-    attached model and the tested column live — and it's gitignored, so an absent
-    manifest degrades to bare table names rather than failing.
-
-    `fail_calc` and `severity` come from the same node and are what make a
-    *passing* test read as passing — see `build_tests`.
+    The audit table is named after the test's `alias`, which dbt truncates and
+    hashes past 63 characters, so the manifest supplies the readable name, model
+    and column. With no manifest this is empty and callers fall back to table
+    names. `fail_calc` and `severity` are what `build_tests` scores with.
     """
     nodes = manifest_nodes(manifest_path)
     out: dict[str, dict] = {}
@@ -260,21 +218,11 @@ def build_tests(
 ) -> pl.DataFrame:
     """One row per dbt test, with the number of rows currently failing it.
 
-    Requires `+store_failures: true` project-wide, so each test leaves a table in
-    the audit schema holding the rows it rejected. For most tests an empty table
-    is a *passing* test — which is why this counts rather than checks existence,
-    and why a green pipeline produces a table of zeroes.
-
-    **`count(*)` is not the right count, and using it reported passing tests as
-    failures.** A test's verdict is `fail_calc` applied to its result set, which
-    defaults to `count(*)` but does not have to be: `dbt_utils.equal_rowcount`
-    uses `sum(coalesce(diff_count, 0))` and returns a one-row *summary* whether
-    it passed or failed. Counting rows scored both of this project's
-    `equal_rowcount` tests as 1 failing row against a fully green
-    `dbt build` (PASS=387, ERROR=0), so the page reporting pipeline health
-    contradicted the build. Applying `fail_calc` is exactly what dbt does. With
-    no manifest there is nothing to read it from, so it falls back to `count(*)`
-    — right for the 351 of 354 tests here that use the default.
+    Requires `+store_failures: true`, so each test leaves a table of the rows it
+    rejected. The verdict is the test's `fail_calc` over that table, as dbt
+    computes it — not `count(*)`: `dbt_utils.equal_rowcount` stores a one-row
+    summary whether it passes or fails, so counting rows would score it as
+    failing on a green build. With no manifest, `count(*)` (dbt's default).
     """
     audit_tables = [
         row[0]
@@ -289,19 +237,10 @@ def build_tests(
     ]
     catalogue = manifest_tests(manifest_path)
     if catalogue:
-        # A table the manifest does not name is stale: dbt writes the audit
-        # schema on every build, but it never *removes* a table whose test has
-        # gone. Renaming a model orphans every audit table attached to it,
-        # because the alias hash is over the test's arguments — renaming
-        # `fct_emissions_energy` to `_v2` for the versioned model left 17
-        # `dbt_utils_accepted_range_fct_e_<hash>` tables behind, which are empty
-        # and so scored as passing, inflating the test count by 17 and showing
-        # with no model attached.
-        #
-        # Keyed on the manifest being *present*, not on the match itself: with no
-        # manifest nothing matches, and dropping everything would empty the table
-        # instead of degrading to bare names. `pipeline_status` runs after
-        # `dbt build`, so a loaded manifest is current by construction.
+        # Drop audit tables the manifest does not name: dbt never removes one
+        # whose test is gone (renaming a model orphans all of them), and an empty
+        # orphan would score as a passing test. Only when a manifest is present —
+        # without one nothing matches and the table would empty.
         audit_tables = [table for table in audit_tables if table in catalogue]
 
     rows = []
@@ -319,9 +258,8 @@ def build_tests(
                 "tested_column": meta.get("tested_column"),
                 "severity": severity,
                 "failing_rows": int(failing),
-                # A warn-severity test with failures is not a failure: dbt does
-                # not fail the build on one, so calling it `fail` here would
-                # report a red pipeline for something dbt let through.
+                # A warn-severity test with failures is `warn`: dbt does not fail
+                # the build on it.
                 "status": ("fail" if severity == "error" else "warn") if failing else "pass",
                 "audit_table": f"{audit_schema}.{table}",
             }
@@ -329,16 +267,10 @@ def build_tests(
     return pl.DataFrame(rows)
 
 
-# The shape `build_runs` returns when there is nothing to read. Stated rather
-# than inferred, because an empty `pl.DataFrame([])` has *no columns*, and the
-# first append of one would create a table with no columns that every later
-# append then fails against. A schema-only frame creates the right table.
-#
-# `DataTypeClass | pl.DataType` and not the obvious `dict[str, pl.DataType]`:
-# `pl.String` is a *class*, `pl.Datetime("us")` an instance, and this mapping
-# holds both. Polars spells the union `PolarsDataType` in `polars._typing`,
-# which is private — so the two public names are written out. `just typecheck`
-# found it; the annotation was wrong in a way nothing else would have caught.
+# The shape `build_runs` returns, stated so an empty result still has columns:
+# a column-less frame's first append would create a table every later append
+# fails against. `DataTypeClass | pl.DataType` because `pl.String` is a class and
+# `pl.Datetime("us")` an instance; Polars' own union for both is private.
 RUN_COLUMNS: dict[str, DataTypeClass | pl.DataType] = {
     "invocation_id": pl.String,
     "invocation_started_at": pl.Datetime("us"),
@@ -357,10 +289,8 @@ RUN_COLUMNS: dict[str, DataTypeClass | pl.DataType] = {
 def _phase_seconds(timing: list[dict], phase: str) -> float | None:
     """Seconds spent in one of dbt's two timing phases, or None if absent.
 
-    dbt reports `compile` and `execute` separately and `execution_time` as the
-    total. Both are kept because the split is the interesting part: on this
-    project compile is ~10% of node time, which is the number somebody asking
-    "why is dbt slow" is usually looking for, and it is invisible in the total.
+    Kept beside `execution_time` because the total hides the split, and the two
+    phases do not sum to it — dbt counts work outside both.
     """
     for entry in timing or []:
         if entry.get("name") != phase:
@@ -373,39 +303,21 @@ def _phase_seconds(timing: list[dict], phase: str) -> float | None:
 
 
 def _parse_ts(value: str) -> datetime:
-    """dbt writes RFC 3339 with a trailing `Z`, which `fromisoformat` reads.
-
-    It did not always: parsing `Z` needs 3.11, and the `.replace("Z", "+00:00")`
-    every example on the internet still carries is for older interpreters.
-    `.python-version` pins 3.13, so ruff's FURB162 is right to call it dead.
-    """
+    """dbt writes RFC 3339 with a trailing `Z`, which `fromisoformat` reads on
+    Python 3.11+ (no `.replace("Z", "+00:00")` needed)."""
     return datetime.fromisoformat(value)
 
 
 def build_runs(run_results_path: str, nodes: dict[str, dict] | None = None) -> pl.DataFrame:
     """One row per node in the dbt invocation `run_results.json` describes.
 
-    This is the *pipeline* measuring itself, where the three tables above
-    measure the data. It is the same "no new instrumentation" argument: dbt has
-    written this artifact on every invocation since long before anything read
-    it.
+    No row counts: dbt-duckdb reports `rows_affected` for seeds only, so the
+    artifact does not know them; `pipeline_tables` measures them instead.
 
-    **What it deliberately does not carry is row counts**, which idea 27 asked
-    for in the same breath as runtime. `adapter_response.rows_affected` is
-    present on **7 of 552** results here and every one is a seed — dbt-duckdb
-    returns a bare `{"_message": "OK"}` for a model, so the artifact simply does
-    not know. Row counts per table already live in `pipeline_tables`, measured
-    from the warehouse where they are actually true.
-
-    `nodes` is the manifest's node map and is optional for the same reason
-    `manifest_tests` tolerates an absent manifest: `dbt/target/` is gitignored.
-    Without it the node name falls back to the id's last segment, which
-    mislabels the two versioned nodes — see `node_display_name`.
-
-    An absent artifact returns the empty frame rather than raising. A warehouse
-    that has never had a dbt build run against it is a real state (a fresh
-    clone, a fixture run), and the caller writes three other tables that do not
-    need it.
+    `nodes` (the manifest's node map) is optional because the manifest may be
+    absent; without it versioned nodes are mislabelled — see
+    `node_display_name`. An absent artifact returns the empty frame: a warehouse
+    no dbt build has run against is a real state.
     """
     path = Path(run_results_path)
     if not path.exists():
@@ -413,19 +325,14 @@ def build_runs(run_results_path: str, nodes: dict[str, dict] | None = None) -> p
 
     payload = json.loads(path.read_text())
     metadata = payload.get("metadata") or {}
-    # `invocation_started_at` rather than `generated_at`: the artifact is written
-    # when the run *ends*, so ordering runs by `generated_at` orders them by
-    # finish time, which reshuffles two runs that overlapped. It also makes the
-    # duration of a run derivable from its own rows.
+    # Start time, not `generated_at` (written at the end), so runs order by
+    # when they began.
     started = metadata.get("invocation_started_at") or metadata.get("generated_at")
     common = {
         "invocation_id": metadata.get("invocation_id"),
         "invocation_started_at": _parse_ts(started).replace(tzinfo=None) if started else None,
-        # Which dbt command wrote this. `dbt test` overwrites the artifact a
-        # `dbt build` left, so a row set is only meaningful next to the command
-        # that produced it — without this column a 36-row `dbt test --select
-        # test_type:unit` invocation is indistinguishable from a build that
-        # somehow ran 36 nodes.
+        # Any dbt command overwrites the artifact, so a row set means little
+        # without the command that wrote it (a unit-test run vs a build).
         "dbt_command": (payload.get("args") or {}).get("which"),
         "dbt_version": metadata.get("dbt_version"),
     }
@@ -439,8 +346,7 @@ def build_runs(run_results_path: str, nodes: dict[str, dict] | None = None) -> p
             {
                 **common,
                 "unique_id": unique_id,
-                # dbt encodes the type as the id's first segment, which is the
-                # only place it appears — a result carries no `resource_type`.
+                # A result carries no `resource_type`; the id's first segment is it.
                 "resource_type": unique_id.split(".")[0] or None,
                 "node_name": node_display_name(unique_id, nodes),
                 "status": result.get("status"),

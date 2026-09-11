@@ -7,35 +7,22 @@ answer (see `publish/export_warehouse.py`).
 
 ## Why the boundary and not the model
 
-The obvious place to mask a column is in the transformation that reads it — a
-macro on the staging model, so nothing downstream ever sees the clear value.
-That does not work here, and the reason is worth keeping:
-
-* **The published database ships `raw` as well as the modelled layers**, so a
-  mask applied in staging leaves the clear value one schema away in the same
-  file. Whoever downloads it has the original.
-* **The staging models are views**, and a view in the published copy recomputes
-  from `raw` when it is queried. Mask the raw column *as well* and the view
-  hashes an already-hashed value, so the shipped views disagree with the shipped
-  marts about who customer `a3f1…` is — a corruption that no build step and no
-  row count would show.
-
-Applying the policy once, to the finished copy, avoids both: base tables are
-rewritten, views recompute from the rewritten tables, and the two agree because
-the value was hashed exactly once.
+A mask in a model would change the working warehouse too, and would miss every
+relation no model declares — test-failure audit tables, a loader's scratch
+copies — that a published file can still carry. Applied once to the finished
+copy, and expanded by column name, the policy covers what the file actually
+holds; a view over a rewritten table reads the pseudonym, and `verify` checks
+views and tables alike. Applying it twice would hash a hash, so
+`apply_pseudonymisation` refuses a column that already holds pseudonyms.
 
 ## What it does and does not buy
 
-Pseudonymisation is not anonymisation, and the arithmetic is unforgiving. A
-hash over a low-cardinality identifier drawn from a guessable domain — five-digit
-customer numbers, say — is reversed by hashing the domain, which is a few
-thousand operations. The salt is the whole of the protection, which is why it is
-required rather than defaulted: `salt` is a secret, and a caller that has not got
-one gets an exception instead of a plausible-looking hex column.
+Pseudonymisation is not anonymisation. A digest of an identifier from a
+guessable domain (five-digit customer numbers) is reversed by hashing every
+candidate, so the salt is the whole of the protection and is required.
 
-It also does nothing at all about the columns *beside* the identifier. Whether a
-person can be picked out of the published rows is a property of the whole row,
-which is what `k_anonymity` measures.
+Nor does it touch the columns *beside* the identifier: whether a person can be
+picked out is a property of the whole row, which `k_anonymity` measures.
 """
 
 from __future__ import annotations
@@ -46,16 +33,12 @@ import duckdb
 
 from .db import row, scalar
 
-# 64 bits of the digest, hex-encoded. Long enough that a collision over any
-# plausible number of subjects is not a thing that happens (5,881 values give a
-# birthday probability around 1e-12), short enough that it is not 64 characters
-# on every row of a million-row fact.
+# 64 bits of the digest, hex-encoded: collision odds around 1e-12 for 5,881
+# subjects, without 64 characters on every row of a million-row fact.
 PSEUDONYM_LENGTH = 16
 
-# What a pseudonymised value looks like, and the whole basis of `verify`. It is
-# decisive rather than heuristic *because* the identifiers this replaces are not
-# hex: a five-digit customer number cannot match it, so a column that failed to
-# be rewritten cannot pass.
+# The basis of `verify`. Decisive because the identifiers it replaces are not
+# hex: a five-digit customer number cannot match it.
 PSEUDONYM_PATTERN = f"^[0-9a-f]{{{PSEUDONYM_LENGTH}}}$"
 
 # One classified column, as (schema, table, column).
@@ -69,11 +52,9 @@ class PolicyError(RuntimeError):
 def pseudonym_expr(column: str, *, length: int = PSEUDONYM_LENGTH) -> str:
     """SQL rewriting `column` to a salted pseudonym. The salt is a parameter.
 
-    **`||`, never `concat()`.** DuckDB's `concat` ignores NULL arguments, so
-    `concat(customer_id, $salt)` on a row with no customer hashes the bare salt —
-    every anonymous row collapses onto one fabricated subject that looks exactly
-    like a real one. `||` propagates the NULL, which is the truth: a row with no
-    identifier has no pseudonym either.
+    `||`, never `concat()`: `concat` ignores NULLs, so every row with no
+    identifier would hash the bare salt and share one pseudonym indistinguishable
+    from a real subject. `||` keeps them NULL.
     """
     return f"substr(sha256({column} || $salt), 1, {length})"
 
@@ -81,16 +62,10 @@ def pseudonym_expr(column: str, *, length: int = PSEUDONYM_LENGTH) -> str:
 def classifications(manifest: dict, *, key: str = "pii") -> dict[Column, str]:
     """Every classified column dbt knows about, as `{(schema, table, column): label}`.
 
-    Read from a compiled `manifest.json` rather than from the ymls, because the
-    manifest is where a model's *relation* is resolved — a project overriding
-    `generate_schema_name` (as this one does) has ymls that never mention the
-    schema a model actually lands in.
-
-    Sources are included: the landing tables are where an identifier enters, and
-    a classification that starts at staging has already missed it.
-
-    The label vocabulary belongs to the caller. Nothing here reads it except
-    `classified_columns`, which filters on it.
+    From the compiled manifest rather than the ymls, because only the manifest
+    resolves the schema a model lands in (`generate_schema_name` may override
+    it). Sources are included: that is where an identifier enters. The label
+    vocabulary is the caller's.
     """
     found: dict[Column, str] = {}
     nodes = list(manifest.get("nodes", {}).values())
@@ -141,10 +116,8 @@ def _columns(con: duckdb.DuckDBPyConnection) -> list[Column]:
 def expand_by_name(con: duckdb.DuckDBPyConnection, declared: Iterable[Column]) -> list[Column]:
     """Every column in the database sharing a *name* with a declared one.
 
-    Defence in depth, and the failure it exists for is the ordinary one: a model
-    added later that carries `customer_id` and whose author never touched the
-    classification. Declaring the column is still the contract — this only makes
-    forgetting it fail closed rather than ship.
+    Defence in depth: a later model carrying `customer_id` whose author never
+    classified it is still rewritten. Declaring the column remains the contract.
     """
     names = {column for _, _, column in declared}
     return sorted((s, t, c) for s, t, c in _columns(con) if c in names)
@@ -167,11 +140,9 @@ def apply_pseudonymisation(
         if kinds.get((schema, table)) != "BASE TABLE":
             continue
         quoted = f'"{column}"'
-        # Refuse a second pass. Hashing a pseudonym yields another 16 hex
-        # characters, so `verify` cannot tell one application from two after the
-        # fact — the check has to happen before the write. Running this against a
-        # warehouse rather than a copy is the same mistake wearing a different
-        # hat, and it is unrecoverable: the clear values are gone.
+        # Refuse a second pass, before writing: a hashed pseudonym is still 16 hex
+        # characters, so `verify` cannot tell one application from two. (Run
+        # against the warehouse instead of a copy, the clear values are gone.)
         already = scalar(
             con,
             f'select count(*) from "{schema}"."{table}" where {quoted} is not null'
@@ -195,14 +166,11 @@ def apply_pseudonymisation(
 def verify(con: duckdb.DuckDBPyConnection, columns: Iterable[Column]) -> None:
     """Raise unless every value of every named column is a pseudonym or NULL.
 
-    Checks views as well as tables, because a view is how an unrewritten `raw`
-    column reaches a consumer without appearing to.
+    Checks views as well as tables: a view over an unrewritten table exposes it
+    without appearing to.
     """
-    # An empty set verifies clean, and that is correct *here*: a database simply
-    # holding none of the classified columns is a no-op, not a failure. What is
-    # not correct is an empty set arriving because nothing was ever classified —
-    # that belongs to whoever decides the policy, and `publish/export_warehouse.py`
-    # refuses it there rather than letting this function decide for every caller.
+    # An empty set verifies clean. Refusing a policy that classified nothing is
+    # the caller's decision (`publish/export_warehouse.py` makes it).
     offenders = []
     for schema, table, column in sorted(set(columns)):
         bad = scalar(

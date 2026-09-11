@@ -2,14 +2,10 @@ version: 2
 
 # Unit tests for `stg_retail_lines`' classification.
 #
-# The model adds no rows, removes none and computes one product. What it does is
-# assign labels — `invoice_type`, `item_type`, `is_stock_write_off` and
-# `is_revenue_line`: two `case` expressions and two boolean flags built off
-# them — and that is
-# the shape a data test is worst at. `accepted_values` proves the answer is a
-# member of the list; it cannot prove it is the *right* member, and a
-# misclassification here moves money between buckets without changing any total,
-# so no row-level constraint can see it.
+# The model assigns labels — `invoice_type`, `item_type`, `is_stock_write_off`,
+# `is_revenue_line` — which is what a data test is worst at: `accepted_values`
+# proves an answer is in the list, not that it is the right one, and a
+# misclassification moves money between buckets without changing any total.
 #
 # Measured rather than argued, by mutating the model against a copy of the
 # warehouse and running its 20 data tests each time:
@@ -21,22 +17,14 @@ version: 2
 #   | `is_revenue_line` loses its adjustment term | 19 pass    | unchanged    |
 #   | `is_stock_write_off` loses `invoice_type`   | **1 fails**| unchanged    |
 #
-# Three of the four are invisible to everything the project had. The fourth is
-# not, and is kept because the overlap is the useful half of the result: it is
-# `stg_retail_write_offs_are_never_priced` that catches it, and only because
-# cancellations carry a price — a data test can see that mutation solely as a
-# side effect of a different assertion, one branch away from missing it too.
+# Three of the four are invisible to the data tests. The fourth is caught only
+# as a side effect of `stg_retail_write_offs_are_never_priced`. The third moves
+# nothing at all — no `A` invoice has ever carried a product code — so, like
+# `dim_date`'s unbuilt fiscal policies, only a unit test can reach it.
 #
-# The third row is the sharpest: dropping `invoice_type <> 'adjustment'` changes
-# nothing at all. Not one number in the warehouse moves, because no `A` invoice
-# has ever carried a product code, so the clause has never once been the deciding
-# one. It is the same situation as `dim_date`'s eleven unbuilt fiscal policies —
-# logic no data can reach, and a unit test is the only thing that can reach it.
-#
-# `format: dict`, inline, because this model is 1:1 on its input. `dim_date`
-# needed 366-row CSV fixtures because it generates its own rows; here the fixture
-# is the size of the truth table. `line_number` is in every `expect` so two rows
-# that classify identically stay distinguishable in the diff.
+# `format: dict`, inline: the model is 1:1 on its input, so the fixture is the
+# size of the truth table. `line_number` is in every `expect` so rows that
+# classify identically stay distinguishable in the diff.
 
 unit_tests:
   - name: stg_retail_lines_separates_returns_from_write_offs_and_bad_debt
@@ -79,9 +67,7 @@ unit_tests:
           # A stock code that begins with `C`, on an invoice that does not. The
           # prefix test reads `invoice`, and this is the row that says so.
           - {invoice: "536367", line_number: 1, stock_code: "C2", quantity: 1, unit_price: 50.0}
-      # The country map is an input now, and these rows carry no country, so
-      # the mock is empty on purpose: every code resolves to null and nothing
-      # here depends on one.
+      # These rows carry no country, so the country map is mocked empty.
       - input: ref('retail_country_map')
         rows: []
     expect:
@@ -133,9 +119,7 @@ unit_tests:
           - {invoice: "536365", line_number: 17, stock_code: "gift_0001_20"}
           - {invoice: "536365", line_number: 18, stock_code: "GIFT"}
           - {invoice: "536365", line_number: 19, stock_code: "TEST001"}
-      # The country map is an input now, and these rows carry no country, so
-      # the mock is empty on purpose: every code resolves to null and nothing
-      # here depends on one.
+      # These rows carry no country, so the country map is mocked empty.
       - input: ref('retail_country_map')
         rows: []
     expect:
@@ -188,12 +172,10 @@ unit_tests:
           - {invoice: "536365", line_number: 5, customer_id: " 17850 ", description: "  WHITE HANGING HEART  ", country: "  United Kingdom  "}
           - {invoice: "536365", line_number: 6, customer_id: "17850",   description: "",                        country: "United Kingdom"}
           - {invoice: "536365", line_number: 7, customer_id: "17850",   description: "   ",                     country: "United Kingdom"}
-          # The third column, added 2026-09-05. `country` was `trim(country)`
-          # alone while its two neighbours were `nullif(trim(...), '')` — so a
-          # blank country survived as `''` and joined to the seed as a country
-          # in its own right, while a blank customer and a blank description
-          # were both absences. Rows 8 and 9 are the shapes that separate the
-          # two treatments; the source has sent neither.
+          # `country` gets the same `nullif(trim(...), '')` as its neighbours;
+          # without it a blank survives as `''` and joins to the seed as a
+          # country of its own. Rows 8 and 9 separate the two treatments; the
+          # source has sent neither.
           - {invoice: "536365", line_number: 8, customer_id: "17850",   description: "WHITE HANGING HEART",     country: ""}
           - {invoice: "536365", line_number: 9, customer_id: "17850",   description: "WHITE HANGING HEART",     country: "   "}
       # Every row here is the same country, so one mapping row is the whole
@@ -212,10 +194,8 @@ unit_tests:
         - {line_number: 5, customer_id: "17850", description: "WHITE HANGING HEART", country: "United Kingdom", country_iso3: "GBR"}
         - {line_number: 6, customer_id: "17850", description: null,                  country: "United Kingdom", country_iso3: "GBR"}
         - {line_number: 7, customer_id: "17850", description: null,                  country: "United Kingdom", country_iso3: "GBR"}
-        # Null, not `''`. Under the old expression both of these carried a
-        # distinct 44th "country" that resolved to no code — and a null code is
-        # what the `relationships` test in `_staging.yml` ignores, so nothing
-        # would have named them.
+        # Null, not `''`: an empty string would be a 44th "country" resolving to
+        # no code, which the `relationships` test in `_staging.yml` ignores.
         - {line_number: 8, customer_id: "17850", description: "WHITE HANGING HEART", country: null,             country_iso3: null}
         - {line_number: 9, customer_id: "17850", description: "WHITE HANGING HEART", country: null,             country_iso3: null}
 

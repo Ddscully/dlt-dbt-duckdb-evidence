@@ -9,41 +9,27 @@ Produces `data/export/`:
   ATTRIBUTION.md                    who owns the data (it isn't us)
   RELEASE_NOTES.md                  the GitHub release body
 
-Run:  uv run python -m publish.export_warehouse            (or `just export`)
+Run:  uv run python -m publish.export_warehouse            (or `just export-data`)
 
 `.github/workflows/release-data.yml` runs this after materializing the asset graph
-against the live sources and uploads the directory as a dated GitHub release, so
-the data is consumable without re-running the pipeline. Nothing here touches the
-network: it reads a warehouse that already exists.
+against the live sources and uploads the directory as a dated GitHub release.
+Nothing here touches the network: it reads a warehouse that already exists.
 
-## Two things worth knowing
+The DuckDB file holds what dbt builds — `staging`, `marts`, `analytics`,
+`history` — and never `raw`, which lives in the DuckLake catalog. The one landing
+table a rebuild cannot afford to refetch ships separately as `lakehouse.tar.gz`
+(see `publish_lakehouse`); the rest of `raw`, including dlt's merge scratch full
+of clear customer ids, is never written to a published file.
 
-**The release ships what dbt builds, and nothing dlt landed.** `raw` lives in
-the DuckLake catalog under `data/lakehouse/`, which is not published — so the
-artifact is `staging`, `marts`, `analytics` and `history`, as Parquet for the
-three modelled layers and as one DuckDB file for all of it. Two consequences:
+The `staging` views are materialised on the way out (`solidify_staging`): dbt
+writes them against the attached catalog, so in a file without it they raise
+`Catalog "lakehouse" does not exist!`. And the copy keeps the file name
+`warehouse.duckdb`, because DuckDB names the catalog after the stem and the
+views' SQL is qualified with it.
 
-* the file is materially smaller, and everything it lost is bookkeeping no
-  consumer asked for — measured at **191 MB → 127 MB**, dropping 1.84M rows of
-  landing tables and 1.30M of dlt's merge scratch;
-* the largest privacy exposure this export was written to close is now
-  impossible rather than handled. `raw_staging.retail_invoice_lines` carried
-  824,364 clear customer ids into every release made before the policy existed;
-  it cannot be in a file it is never written to.
-
-**The `staging` views have to be materialised on the way out** — see
-`solidify_staging`. dbt writes them against the attached catalog
-(`lakehouse.raw.owid_co2`), so in a published file with no catalog they raise
-`Catalog "lakehouse" does not exist!` while the marts beside them answer fine.
-
-**The DuckDB copy must still keep the file name `warehouse.duckdb`.** DuckDB
-names the catalog after the file's stem and the release notes tell consumers to
-`ATTACH … AS warehouse`; the marts are self-contained, but a rename is exactly
-the kind of half-broken artifact this module already guards against.
-
-The packaging itself is `modern_data_stack.export`. What's here is the part that
-is about *this* dataset: which schemas ship, who owns the data, the snapshot
-summary in the manifest, and the release notes.
+The packaging itself is `modern_data_stack.export`; this module is what is
+specific to this dataset — which schemas ship, attribution, the personal-data
+policy, the manifest's extras and the release notes.
 """
 
 from __future__ import annotations
@@ -92,64 +78,30 @@ __all__ = [
 
 EXPORT_DIR = "data/export"
 
-# The published landing zone, beside `warehouse.duckdb`. It exists so the *next*
-# release can carry the capital-city weather archive forward instead of
-# cold-starting it: `weather_watermark()` reads the destination, and a fresh
-# runner's catalog is empty unless something puts rows in it. What may go in it
-# is `lake.lakehouse.PUBLISHED_TABLES`, and that is an allowlist for a disclosure
-# reason as well as a cost one — see there.
-#
-# **A tarball rather than a directory, because a GitHub release asset is a
-# file.** A DuckLake is a catalog plus a tree of Parquet, and the alternatives
-# are both worse: uploading the files individually needs a naming scheme and a
-# reassembly step on the way back in, and the tree's shape is dlt's to choose,
-# not ours. One asset also means one line in `SHA256SUMS`, so `sha256sum -c`
-# still verifies the whole release.
+# The published landing zone, beside `warehouse.duckdb`, so the next release can
+# carry the weather archive forward instead of cold-starting it. What may go in
+# it is `lake.lakehouse.PUBLISHED_TABLES`, an allowlist for disclosure as well as
+# cost. A tarball because a release asset is one file: one download to restore,
+# one line in `SHA256SUMS`.
 LAKEHOUSE_ASSET = "lakehouse.tar.gz"
 
-# The consumable layers. `raw` and dbt's `main` (the seed) are deliberately not
-# here — see the module docstring.
+# The layers published as Parquet. `raw` is not in the file at all, and dbt's
+# `main` (the seeds) and `history` ship only inside `warehouse.duckdb`.
 PUBLISHED_SCHEMAS = ("staging", "marts", "analytics")
 
-# The storage format the published `warehouse.duckdb` may not exceed, and the
-# oldest client that can therefore open it. 64 is what every DuckDB from 0.10.0
-# to 1.5.5 writes by default and the oldest format 1.5.5 still offers, so this
-# ceiling costs nothing today — it is a tripwire, not a constraint.
-#
-# What it is a tripwire for: DuckDB 2.0 ships "a new default storage format",
-# nothing in `pyproject.toml` caps `duckdb>=1.1`, and Dependabot's
-# `versioning-strategy: lockfile-only` means the bump arrives as one line of a
-# grouped monthly PR. Every test in this repo would pass it — they all write and
-# read with the same binary — and the first symptom would be a consumer on 1.x
-# unable to open next month's release. This is the repo's "green CI proves
-# nothing about versions" one turn further round: the thing that moves is the
-# *format of the artifact*, not the code.
-#
-# Raising it is a real decision with a date attached, not a lockfile edit: it
-# strands every reader older than the new floor. The Parquet half of the release
-# carries no such constraint, which is the argument for it having been there all
-# along.
+# The storage format the published `warehouse.duckdb` may not exceed, and so the
+# oldest DuckDB that can open it. 64 is DuckDB 1.x's default, so this costs
+# nothing today; it is a tripwire for a DuckDB bump (2.0 changes the default
+# format) that every test would pass, because they write and read with one
+# binary. Raising it strands every reader below the new floor, so it is a
+# decision, not a lockfile edit. The Parquet files carry no such constraint.
 MAX_PUBLISHED_STORAGE_VERSION = 64
 MIN_READER_VERSION = "0.10.0"
 
-# The same promise for the *other* published artifact, and the reason it needs
-# its own is that the two versions move for different reasons and are noticed at
-# different moments.
-#
-# `warehouse.duckdb`'s format is decided by the `duckdb` in `uv.lock`, so its
-# tripwire fires on a Dependabot PR — before the bump merges, with a person
-# already reading the diff. The DuckLake spec is decided by a 36 MB binary from
-# extensions.duckdb.org that no lockfile can name (`duckdb_extensions()` reports
-# its version as a git hash), so **there is no PR to fail**: the extension can
-# start writing a newer catalog schema with nothing in this repo changing at
-# all. What notices is `just test` on the next CI run, which is why the
-# toolchain half of this guard matters more here than it does for the file.
-#
-# 1.0 is what the installed extension writes today, so like the storage ceiling
-# this costs nothing now and is a tripwire rather than a constraint. dlt's own
-# `automatic_migration` defaults to False, so a catalog *we* write is safe by
-# refusal; this covers the half dlt cannot see — a consumer meeting a tarball
-# written against a spec their ducklake does not know.
+# The same ceiling for `lakehouse.tar.gz`'s DuckLake spec. It moves differently:
+# the extension comes from extensions.duckdb.org, unpinned, so a newer spec can
+# arrive with no change in this repo and no PR to fail — the next CI run is what
+# notices. 1.0 is what the installed extension writes today.
 MAX_PUBLISHED_LAKE_VERSION = "1.0"
 
 ATTRIBUTION = """\
@@ -185,26 +137,19 @@ The pipeline code is MIT licensed.
 
 
 # Which classification gets rewritten on the way out. `quasi_identifier` columns
-# are deliberately *not* in here: a country, a first-order date and a revenue
-# figure identify a customer between them, but generalising any of them would
-# destroy the analysis they exist for, and the honest answer is to publish them
-# knowing that and to say so. `docs/DATA_PROTECTION.md` measures exactly how much
-# they give away.
+# identify a customer between them but are published anyway: generalising them
+# would destroy the analysis they exist for. `docs/DATA_PROTECTION.md` measures
+# what they give away.
 MASKED_LABELS = ("direct_identifier",)
 
-# The salt is required, never defaulted, and this is the whole of the protection.
-# `customer_id` is five digits: an unsalted digest of it is reversed by hashing
-# the ten thousand possibilities, which is a few milliseconds. A missing salt
-# therefore has to be an error rather than a fallback — a plausible-looking hex
-# column that anyone can invert is worse than no column at all, because it
-# reads as though something was done.
+# Required, never defaulted: an unsalted digest of a five-digit id is reversed by
+# hashing every candidate, in milliseconds, and an invertible hex column reads as
+# though something was done.
 SALT_ENV = "PII_SALT"
 
-# The classifications dbt cannot hold. `analytics` is written by Polars,
-# downstream of dbt and invisible to it — the same boundary `tests/test_exposures.py`
-# already proves for lineage, arriving here for the same reason. Named rather
-# than inferred; the name-based sweep below would catch `customer_id` anyway, but
-# a column renamed on the way into Polars would slip straight past it.
+# Classifications dbt cannot hold, because Polars writes `analytics` downstream
+# of it. Named rather than inferred: the name-based sweep would catch
+# `customer_id`, but not a column renamed on the way into Polars.
 EXTRA_CLASSIFICATIONS: dict[tuple[str, str, str], str] = {
     ("analytics", "retail_rfm", "customer_id"): "direct_identifier",
     ("analytics", "retail_rfm", "country"): "quasi_identifier",
@@ -216,18 +161,10 @@ EXTRA_CLASSIFICATIONS: dict[tuple[str, str, str], str] = {
 }
 
 
-# The additivity labels dbt cannot see, in exactly the shape and for exactly the
-# reason `EXTRA_CLASSIFICATIONS` above has: the `analytics` tables are written by
-# Polars, downstream of dbt and invisible to it, and they ship in the release
-# beside the marts. Without these the map would stop at the layer boundary and a
-# consumer would find five published tables with no labels at all.
-#
-# **Copied, not inherited at runtime, and that is the point.** Deriving
-# `co2_intensity`'s 37 shared labels from `marts.fct_emissions_energy` would be
-# less typing and would fail *open*: rename a column in the mart and the copy
-# quietly loses its label with nothing to say so. Stated here, the same rename
-# fails `test_a_copied_column_keeps_the_label_the_mart_gave_it`. Asserting rather
-# than deriving is what every other hand-maintained list here does.
+# Additivity labels for the `analytics` tables, which dbt cannot see for the same
+# reason. Stated rather than copied from the mart at runtime: a derived copy
+# would silently lose a label when a mart column is renamed, where a stated one
+# fails `test_a_copied_column_keeps_the_label_the_mart_gave_it`.
 EXTRA_ADDITIVITY: dict[tuple[str, str, str], str] = {
     # `co2_intensity` is `select * from marts.fct_emissions_energy` plus two
     # derived columns, so its labels are the mart's plus two.
@@ -268,15 +205,12 @@ EXTRA_ADDITIVITY: dict[tuple[str, str, str], str] = {
     ("analytics", "co2_intensity", "renew_elec_pct"): "non_additive",
     ("analytics", "co2_intensity", "energy_imports_pct"): "non_additive",
     ("analytics", "co2_intensity", "electricity_price_eur_kwh"): "non_additive",
-    # The two the Polars step adds. A dense rank is ordinal — summing ranks is
-    # the classic way to turn an ordering into a number that means nothing.
+    # The two the Polars step adds. A rank is ordinal, so it does not sum.
     ("analytics", "co2_intensity", "co2_per_gdp_const_usd"): "non_additive",
     ("analytics", "co2_intensity", "co2_intensity_rank"): "non_additive",
-    # `retail_rfm` renames on the way in, which is why these are stated by hand
-    # rather than found by name: `frequency` is `dim_retail_customer.n_orders`
-    # and `monetary_gbp` is its `net_revenue_gbp` — both additive, and neither
-    # reachable from the mart by name. The three scores are quintiles: ordinal,
-    # so `rfm_total` is a sum of ordinals and is still ordinal.
+    # `retail_rfm` renames on the way in (`frequency` is `n_orders`,
+    # `monetary_gbp` is `net_revenue_gbp`), so none of these can be found by
+    # name. The scores are quintiles — ordinal — and so is their sum.
     ("analytics", "retail_rfm", "frequency"): "additive",
     ("analytics", "retail_rfm", "monetary_gbp"): "additive",
     ("analytics", "retail_rfm", "recency_days"): "non_additive",
@@ -287,8 +221,7 @@ EXTRA_ADDITIVITY: dict[tuple[str, str, str], str] = {
     ("analytics", "retail_rfm", "avg_order_value_gbp"): "non_additive",
     ("analytics", "retail_rfm", "n_distinct_products"): "non_additive",
     ("analytics", "retail_rfm", "return_rate_pct"): "non_additive",
-    # The observability tables. `year_min`/`year_max` are calendar bounds and not
-    # measures, the same answer `year` gets everywhere else.
+    # The observability tables. `year_min`/`year_max` are bounds, not measures.
     ("analytics", "pipeline_sources", "rows"): "additive",
     ("analytics", "pipeline_sources", "year_min"): "not_a_measure",
     ("analytics", "pipeline_sources", "year_max"): "not_a_measure",
@@ -302,18 +235,11 @@ EXTRA_ADDITIVITY: dict[tuple[str, str, str], str] = {
 def classifications(manifest_path: str = MANIFEST_PATH) -> dict[tuple[str, str, str], str]:
     """Every classified column in the warehouse: dbt's, plus `analytics`.
 
-    **Degrades when the manifest is absent rather than raising**, the same way
-    `observability.manifest_tests` does and for the same reason: `dbt/target/` is
-    gitignored, so a fresh clone has no manifest until something runs `dbt parse`
-    — and `just test` runs before that step in CI.
-
-    Degrading is only safe because of what the caller does next. `pseudonymise`
-    expands whatever it gets *by column name* across every relation in the
-    database, and `EXTRA_CLASSIFICATIONS` names `customer_id`, so every copy of
-    the identifier is still found and still rewritten. What is lost is a *future*
-    identifier that only dbt knows about and that shares no name with these —
-    which is why the fallback is recorded in the published manifest rather than
-    being silent.
+    Without a manifest (`dbt/target/` is gitignored) it degrades to
+    `EXTRA_CLASSIFICATIONS` rather than raising. That is safe only because
+    `pseudonymise` expands by column name across every relation, and
+    `customer_id` is named there; what is lost is a future identifier known only
+    to dbt, which is why the manifest records the fallback.
     """
     path = Path(manifest_path)
     if not path.exists():
@@ -324,28 +250,16 @@ def classifications(manifest_path: str = MANIFEST_PATH) -> dict[tuple[str, str, 
 def additivity(manifest_path: str = MANIFEST_PATH) -> dict[str, dict[str, str]] | None:
     """Which published columns may be summed, keyed by published relation.
 
-    A consumer of a Parquet file has the column names and the types and nothing
-    that says `renewables_share_pct` must not be summed while `co2_mt` may be —
-    and 118 of the 229 numeric mart columns are non-additive. The labels
-    are declared once, as `meta: {additivity: …}` on the column in the same ymls
-    that carry the contract, and this is what carries them out of the repo.
+    A Parquet file carries names and types, nothing that says `co2_mt` sums and
+    `renewables_share_pct` does not. The labels are declared as
+    `meta: {additivity: …}` in the marts ymls; this carries them into the release.
+    Keyed by `schema.alias`, the name each Parquet file ships under — so the
+    versioned model appears as both `fct_emissions_energy` and `_v1`.
 
-    Keyed by `schema.alias`, so it names the relations the release actually
-    ships: the versioned model appears as both `marts.fct_emissions_energy` and
-    `marts.fct_emissions_energy_v1`, which is what the Parquet files are called.
-
-    **Degrades to `None` when the manifest is absent** — `dbt/target/` is
-    gitignored, so a fresh clone has none. `None` and `{}` are different answers
-    here: the first says nobody asked dbt, the second would say dbt was asked and
-    knows of no labelled column. Only the first can be true by accident.
-
-    It drops `EXTRA_ADDITIVITY` on that path rather than publishing it alone,
-    which is where this parts company with `classifications` — that one degrades
-    to the extras *because* a partial answer still masks every identifier it
-    names. Here a partial map is the more dangerous artifact: a consumer seeing
-    `analytics` labelled and `marts` missing has no way to read the gap as
-    "nobody asked" rather than as "nothing to say", and the default reading of a
-    missing label is the wrong one.
+    Without a manifest it returns `None` ("dbt was not asked"), not `{}` ("no
+    labelled columns"), and drops `EXTRA_ADDITIVITY` too. Unlike
+    `classifications`, a partial answer here is worse than none: a consumer could
+    not tell unlabelled marts from marts with nothing to label.
     """
     path = Path(manifest_path)
     if not path.exists():
@@ -369,23 +283,14 @@ def additivity(manifest_path: str = MANIFEST_PATH) -> dict[str, dict[str, str]] 
 
 
 def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -> dict:
-    """Write the publishable landing tables to `<dest_dir>/lakehouse/`.
+    """Write the publishable landing tables into `dest_dir` as `LAKEHOUSE_ASSET`.
 
-    `lakehouse_dir` is a parameter rather than the module constant because
-    reading the ambient one made this function's *output shape* depend on the
-    developer's machine, and the test that covered it passed for that reason.
-    See `tests/test_export.py`.
-
-    A second release asset rather than a schema inside the first, because they
-    are different kinds of thing: `warehouse.duckdb` is what dbt built and is
-    reproducible from the sources, while this is the part that is not — the
-    weather archive costs more than a day of Open-Meteo's allowance to refetch.
-    Shipping it separately is also what lets it stay small: 44,936 rows in one
-    Parquet file, against a database of marts.
-
-    It is relocatable — relative `data_path`, so a consumer opens it with a bare
-    `ATTACH` from wherever they unpacked it. `lake.lakehouse.restore` puts the
-    absolute form back on the way in.
+    A second asset because it is the unreproducible part: `warehouse.duckdb` can
+    be rebuilt from the sources, the weather archive cannot within a day's API
+    budget. Relocatable (relative `data_path`), so a consumer opens it with a
+    bare `ATTACH` wherever they unpack it; `lake.lakehouse.restore` puts the
+    absolute form back. `lakehouse_dir` is explicit so the output cannot depend
+    on whichever landing zone the machine has.
     """
     import tarfile
     import tempfile
@@ -394,14 +299,9 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
 
     lake_dir = lakehouse.LAKEHOUSE_DIR if lakehouse_dir is None else Path(lakehouse_dir)
 
-    # **Absent is recorded, never skipped silently.** A warehouse with no
-    # lakehouse beside it is a legitimate thing to export — `tests/test_export.py`
-    # builds one, and so would anyone packaging a database from elsewhere — but in
-    # a *release* it means the landing zone did not get published, and the cost of
-    # that lands a month later as a cold-started weather archive. So the manifest
-    # carries `"rows": 0` and an empty table map rather than omitting the key,
-    # which gives `release-data.yml` something to assert on. An absent key can
-    # only be checked by code that remembers to look for it.
+    # No landing zone is a legitimate export, but in a release it means next
+    # month's weather archive cold-starts. So record it — `"rows": 0`, never an
+    # omitted key — for `release-data.yml` to assert on.
     if not lakehouse.is_catalog(lake_dir):
         return {
             "lakehouse": {
@@ -416,12 +316,9 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
     with tempfile.TemporaryDirectory() as staging:
         built = Path(staging) / "lakehouse"
         copied = lakehouse.publish(built, lake_dir, MAX_PUBLISHED_LAKE_VERSION)
-        # **A catalog holding none of the published tables is absent, not empty.**
-        # dbt's `ATTACH IF NOT EXISTS` creates a real DuckLake — metadata table
-        # and all — on any build that runs before the first ingest, so
-        # `is_catalog()` is true and the copy is legitimately zero tables.
-        # Shipping that would put a tarball of nothing in the release and let the
-        # workflow's "was the landing zone published" assertion pass on it.
+        # A catalog holding none of the published tables counts as absent: dbt's
+        # `ATTACH IF NOT EXISTS` creates a real, empty DuckLake on a build before
+        # the first ingest, and a tarball of nothing must not pass as published.
         if not copied:
             return {
                 "lakehouse": {
@@ -433,18 +330,15 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
                 }
             }
 
-        # Off the built catalog, before it is tarred: the manifest should
-        # describe the artifact that shipped, not the lakehouse it came from.
-        # `created_by` is a DuckDB git hash and answers "who wrote this";
-        # `spec_version` is the one a consumer is actually asking about — the
-        # same split as `duckdb_version` against `storage_version` above.
+        # Read off the built catalog, so the manifest describes what shipped.
+        # `spec_version` is what decides whether a consumer can open it;
+        # `created_by` (a DuckDB git hash) only says who wrote it.
         catalog = catalog_metadata(built / lakehouse.CATALOG_NAME)
 
         archive = dest_dir / LAKEHOUSE_ASSET
         with tarfile.open(archive, "w:gz") as tar:
-            # `arcname=""` would put the members at the archive root; naming the
-            # directory keeps the tarball self-describing when someone opens it
-            # by hand, and the restore strips it.
+            # Under a `lakehouse/` directory rather than the archive root, so it
+            # unpacks self-describing; the restore expects that directory.
             tar.add(built, arcname="lakehouse")
 
     return {
@@ -465,16 +359,10 @@ def prepare_published_copy(
 ) -> dict:
     """Everything the copy needs before it is read: stand alone, then anonymise.
 
-    One hook because `export()` takes one, and the order is not interchangeable.
-    `solidify_staging` writes eight new tables holding whatever their views
-    selected — including, for the retail models, clear customer ids. Running the
-    rewrite first would leave those eight untouched, and the copy would ship a
-    `staging` layer that disagrees with the `marts` beside it about who a
-    customer is, with matching row counts and no error anywhere.
-
-    `lakehouse_dir` is threaded through for the reason `landed_at` already
-    documents: the hook is bound in `run()`, where the caller's choice of landing
-    zone is known, rather than defaulted three frames down where it is not.
+    The order matters. `solidify_staging` writes tables holding whatever their
+    views selected, clear customer ids included; pseudonymising first would leave
+    them untouched, and the published `staging` would disagree with `marts` about
+    who a customer is, with matching row counts and no error.
     """
     return {**solidify_staging(con, lakehouse_dir), **pseudonymise(con)}
 
@@ -484,41 +372,20 @@ def solidify_staging(
 ) -> dict:
     """Turn the `staging` views into tables so the published file stands alone.
 
-    `raw` lives in the DuckLake catalog, not in the DuckDB file, so dbt writes
-    the staging views with the catalog spelled out —
-    `select * from lakehouse.raw.owid_co2`. That is fine locally and fatal in a
-    release: a consumer who opens the published file alone gets
+    dbt writes the staging views against the attached catalog
+    (`select * from lakehouse.raw.owid_co2`), so in the published file alone
+    every one raises `Catalog "lakehouse" does not exist!` while the marts work.
+    Materialised here rather than in `dbt_project.yml`, so the local build keeps
+    its free views and only the copy pays.
 
-        Binder Error: Catalog "lakehouse" does not exist!
-
-    on every staging view, while the marts beside them answer normally. Measured
-    by building exactly that and opening it — the marts returned 41 rows and the
-    view raised.
-
-    Materialising is the fix rather than dropping them, because the alternative
-    is a smaller promise: the release ships all nine staging views as Parquet
-    and a half-broken database is worse than a bigger one. Doing it *here*
-    rather than making staging tables in `dbt_project.yml` keeps the local build
-    cheap — nine views that cost nothing to rebuild — and pays for the copy only
-    when a copy is made.
-
-    Runs before `pseudonymise`, and that ordering is load-bearing in the opposite
-    direction to the one this project used to document. When staging shipped as
-    views they *recomputed* from a rewritten `raw`, so masking them too would
-    have double-hashed. Now they are tables written from a `raw` that is not in
-    the file at all, so they hold the original ids and the rewrite has to reach
-    them — which it does, because it expands by column name across every schema.
+    The resulting tables hold the original customer ids, which is why this runs
+    before `pseudonymise` — see `prepare_published_copy`.
     """
     from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, catalog_path, data_path
     from modern_data_stack.ducklake import attach
 
-    # The caller's landing zone, not the module constant. Reading `LAKEHOUSE_DIR`
-    # here made the catalog this attaches independent of the database being
-    # packaged: `export(duckdb_path=other, lakehouse_dir=other_lake)` solidified
-    # `other`'s staging views against whichever lakehouse happened to be at
-    # `./data/lakehouse` — the wrong rows where one existed, and an `IOException`
-    # naming a path the caller never mentioned where it did not. The same defect
-    # `landed_at` was fixed for, in the one call site that was missed.
+    # The caller's landing zone, so the views are solidified against the catalog
+    # that belongs to the database being packaged.
     lake_dir = LAKEHOUSE_DIR if lakehouse_dir is None else Path(lakehouse_dir)
 
     defined = con.execute(
@@ -528,14 +395,8 @@ def solidify_staging(
     if not views:
         return {"staging_views_materialised": []}
 
-    # **Attach only if a view actually names the catalog.** Whether the lakehouse
-    # is needed is a property of the view bodies, not of this project's layout,
-    # and reading it off the SQL is what keeps the export working on a database
-    # built some other way — `tests/test_export.py` writes `staging` views over a
-    # `raw` schema in the same file, which is a perfectly exportable warehouse
-    # that has no catalog anywhere near it. Requiring one would have made the
-    # export refuse it, and the failure is an `IOException` about a path the
-    # caller never mentioned.
+    # Attach only if a view names the catalog: a warehouse with its own `raw`
+    # (as `tests/test_export.py` builds) is exportable with no catalog at all.
     needs_catalog = any(f"{ATTACH_ALIAS}." in (sql or "") for _, sql in defined)
     if needs_catalog:
         attach(con, catalog_path(lake_dir), data_path(lake_dir), ATTACH_ALIAS, read_only=True)
@@ -560,20 +421,12 @@ def landed_at(
 ) -> str | None:
     """`data_loaded_at` for the manifest, read from wherever `raw` actually is.
 
-    dlt lands in the DuckLake catalog, so `raw._dlt_loads` is not in the file
-    being packaged and the unqualified read that used to answer this now cannot.
-    It did not start failing, which is the whole reason this exists: it raised
-    `Catalog Error`, `loaded_at`'s `except` returned `None`, and every release
-    body said "Data last landed: unknown." A tree migrated in place did worse and
-    said something believable — see `loaded_at`.
-
-    Attached read-only and only when there is a catalog to attach, which mirrors
-    `solidify_staging` above and for the same reason: whether a lakehouse is
-    involved is a property of the artifact, not an assumption this exporter gets
-    to make. A warehouse that carries its own `raw` — `tests/test_export.py`
-    builds one, and it is a perfectly legitimate thing to publish — still reads
-    the in-file table. Where both exist the catalog wins, because on a migrated
-    tree the in-file copy is the stale one.
+    dlt's `_dlt_loads` lives in the DuckLake catalog, not the file being
+    packaged. An unqualified read fails, `loaded_at` swallows the error, and the
+    release says "Data last landed: unknown" — so the catalog is attached
+    (read-only) when there is one. A warehouse carrying its own `raw` reads that;
+    where both exist the catalog wins, since an in-file `raw` left by an older
+    layout is the stale copy.
     """
     from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, catalog_path, data_path, is_catalog
     from modern_data_stack.ducklake import attach
@@ -594,31 +447,12 @@ def pseudonymise(
 ) -> dict:
     """Rewrite every direct identifier in the published copy. Returns provenance.
 
-    Runs against the copy, not the warehouse, and against every schema in it. It
-    no longer has to reach `raw`, because `raw` is not in the file — the landing
-    tables live in the DuckLake catalog and the release does not ship it. That
-    removes the single largest exposure this policy was written for by
-    construction rather than by rule: `raw_staging.retail_invoice_lines`, dlt's
-    merge scratch, cannot be in a file it was never written to.
-
-    **The expansion by column name stays, and the reason it stays is the half of
-    the gap that did not move.** It was written for two kinds of undeclared
-    relation and only one of them was in `raw`:
-
-    * **`raw_staging.retail_invoice_lines`** — dlt's merge scratch, a full copy of
-      the landing table that no yml describes and nothing downstream reads. It
-      shipped 1,067,371 rows, 824,364 of them with a clear id, inside every
-      release made before the policy existed. It is now out of reach entirely.
-    * **44 `dbt_test__audit` tables.** `store_failures` is on project-wide, so
-      every failing row of every retail test is written to a table that the
-      published database then carries. They are empty today because the tests
-      pass — which means the leak only opens on the day something goes wrong,
-      and closes again before anyone looks. **These are still in the file**, so
-      the expansion is doing the same work it always did, over a smaller set.
-
-    The `staging` tables that `solidify_staging` just wrote are the newest member
-    of that set: they carry whatever their views carried, they are not declared,
-    and they exist only in the copy.
+    Runs against the copy, across every schema in it. The declared columns are
+    expanded by name because the file holds undeclared copies of the identifier:
+    the `dbt_test__audit` tables (`store_failures` is project-wide, so a failing
+    retail test writes customer rows there) and the `staging` tables
+    `solidify_staging` just wrote. `privacy.verify` then checks every rewritten
+    column.
     """
     salt = salt if salt is not None else os.environ.get(SALT_ENV, "")
     if not salt:
@@ -633,12 +467,9 @@ def pseudonymise(
     known = classifications(manifest_path)
     declared = sorted(c for c, label in known.items() if label in MASKED_LABELS)
     if not declared:
-        # The one path that would otherwise be fail-*open*. A declared set of
-        # nothing is what a typo in a `meta: {pii: …}` key looks like, and what a
-        # dbt version that stopped surfacing column meta would look like, and what
-        # an emptied `EXTRA_CLASSIFICATIONS` would look like. Each publishes every
-        # identifier in the clear while `manifest.json` records that a policy was
-        # applied, which is worse than having no policy at all.
+        # Otherwise fail-open: a typo in a `meta: {pii: …}` key, a dbt that stops
+        # surfacing column meta, or an emptied EXTRA_CLASSIFICATIONS would all
+        # publish every identifier in the clear under a manifest claiming a policy.
         raise privacy.PolicyError(
             "no columns are classified as "
             f"{'/'.join(MASKED_LABELS)} — refusing to publish. Either the classification "
@@ -712,9 +543,8 @@ def release_notes(manifest: dict, repo: str, tag: str) -> str:
     def size(n: int) -> str:
         return f"{n / 1e6:.1f} MB" if n >= 1e6 else f"{n / 1e3:.0f} kB"
 
-    # Conditional for `history_note`'s reason: a release without a landing zone
-    # is legitimate (the exporter records `file: None` rather than omitting the
-    # key), and a bullet reading "spec None" is worse than no bullet.
+    # Conditional: an export without a landing zone records `file: None`, and a
+    # bullet reading "spec None" is worse than no bullet.
     lake = manifest["lakehouse"]
     lake_version_note = (
         f"- **The landing zone has its own version, and it is not that one.** "
@@ -749,6 +579,8 @@ def release_notes(manifest: dict, repo: str, tag: str) -> str:
         f"{'–'.join(str(y) for y in t['years']) if t.get('years') else '—'} | {size(t['bytes'])} |"
         for t in manifest["tables"]
     ]
+
+    labelled = sum(len(columns) for columns in (manifest.get("additivity") or {}).values())
 
     published_lake = manifest.get("lakehouse") or {}
     lakehouse_row = (
@@ -809,7 +641,7 @@ it for `{base}/download/{tag}/…`.
 
 **`manifest.json` also says which columns may be summed.** Its `additivity` map
 labels every numeric column of every `marts` and `analytics` table published
-here — 280 of them: `additive` (sum it in any direction),
+here — {labelled:,} of them: `additive` (sum it in any direction),
 `semi_additive` (summable some ways and not others — the column's own
 description says which), `non_additive` (a ratio, rate, price, average or
 extremum: recompute it from its components rather than aggregating it) and
@@ -860,7 +692,7 @@ select count(*) from lakehouse.raw.om_weather_daily;
   those two halves on a country *name* silently drops them.
 - **`customer_id` is pseudonymised in this release and is stable across
   releases.** It is a salted digest of the publisher's own id, applied to every
-  copy of the column in the file (`raw`, `staging`, `marts`, `analytics`), so it
+  copy of the column in the file (`staging`, `marts`, `analytics`), so it
   joins the retail tables to each other and to the previous release, and it does
   not join them back to the source workbook. The columns *beside* it are not
   masked and are not anonymous: 98.6% of the 5,881 customers are unique on
@@ -959,17 +791,10 @@ def run(
 ) -> dict:
     """Build `out_dir` from `duckdb_path`. Returns the manifest.
 
-    `lakehouse_dir` defaults to the project's, and exists so a caller packaging a
-    database from somewhere else — or a test — can say which landing zone goes
-    with it instead of picking up whichever one happens to be on the machine. It
-    now decides three things rather than one: which catalog ships as the second
-    asset, which one `data_loaded_at` is read from, and which one the `staging`
-    views are materialised against. All three used to reach for the module
-    constant, and the first one's test passed for the wrong reason because of it
-    (see the module docstring) — so each is bound *here*, where the caller's
-    choice is known, rather than defaulted inside the function that uses it.
-    `solidify_staging` was the last one still reading the constant, and it is the
-    one that decides what the published `staging` layer actually contains.
+    `lakehouse_dir` (default: the project's) decides which catalog ships as the
+    second asset, which one `data_loaded_at` is read from, and which one the
+    `staging` views are materialised against. It is bound here, once, so the
+    three cannot disagree.
     """
     if not Path(duckdb_path).exists():
         raise FileNotFoundError(f"no warehouse at {duckdb_path} — run `just run` first")
@@ -1003,10 +828,7 @@ def main() -> None:
     args = parser.parse_args()
 
     manifest = run(args.warehouse, args.out, args.tag, args.repo)
-    # Parquet, plus the database, plus the landing zone when there is one — the
-    # count is printed to a person deciding whether the release looks right, so
-    # a hardcoded `+ 1` that silently ignored the second asset would understate
-    # exactly the artifact most likely to be missing.
+    # Parquet files, the database, and the landing zone when it shipped.
     assets = len(manifest["tables"]) + 1 + (1 if manifest["lakehouse"]["file"] else 0)
     total = manifest["warehouse"]["bytes"] + sum(t["bytes"] for t in manifest["tables"])
     print(f"{manifest['tag']}: {assets} assets, {total / 1e6:.1f} MB in {args.out}")

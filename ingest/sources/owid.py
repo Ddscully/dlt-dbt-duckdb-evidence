@@ -11,11 +11,6 @@ import polars as pl
 
 from ingest import fixtures
 
-# Where this layer writes is now `LAKEHOUSE_DIR`, not `WAREHOUSE_PATH` — see
-# `lake.lakehouse`. The env var that a fixture run overrides changed with it, and
-# `just test-pipeline` sets both, because dbt still needs a throwaway warehouse
-# to build into even though nothing here writes to one.
-
 OWID_CO2 = "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv"
 OWID_ENERGY = "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv"
 

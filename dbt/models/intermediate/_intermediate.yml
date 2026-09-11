@@ -2,26 +2,18 @@ version: 2
 
 # The layer between a source's cleaning model and a consumer's fact table.
 #
-# Three models, and each one is here because leaving it inside a mart cost
-# something specific rather than because a three-layer diagram says so:
+# Three models, each here because leaving it inside a mart cost something:
 #
-#   * `int_country_year_observed` — two marts were deriving the same set from
-#     the same four staging models, so adding a country-stats source meant the
-#     identical edit twice and missing either was a green build with fewer rows.
-#   * `int_cbam_default_factors` — the annex's fallback rule is separately true,
-#     so it should be separately testable. Its two unit tests had to pose a
-#     markup schedule, a country dimension and an empty grid-factor table to
-#     reach a rule that touches none of them.
-#   * `int_retail_return_matches` — the returns-to-purchase inference is the
-#     hard part of the retail domain and had no name; its unit tests could only
-#     assert on it through the mart's presentation columns.
+#   * `int_country_year_observed` — two marts derived the same set, so a new
+#     source meant the same edit twice and missing either lost rows silently.
+#   * `int_cbam_default_factors` — the annex's fallback rule, testable against
+#     the seed alone rather than through the mart's other inputs.
+#   * `int_retail_return_matches` — the returns-to-purchase inference, named and
+#     unit-tested on its own rather than through the mart's presentation columns.
 #
-# **No contracts here, deliberately**, matching `staging` and unlike `marts`. A
-# contract is a promise to a consumer the project cannot see, and these have no
-# such consumer — `access: private` in `dbt_project.yml` is the whole promise,
-# and dbt enforces it at parse time. What they do carry is the grain, for the
-# same reason every fact-shaped staging model does: a duplicate row here fans
-# out a join downstream and nothing else would notice.
+# **No contracts**, as in `staging`: a contract is a promise to an unseen
+# consumer, and `access: private` means there is none. The grain is still
+# tested, because a duplicate row here would fan out a join downstream.
 models:
   - name: int_country_year_observed
     config:

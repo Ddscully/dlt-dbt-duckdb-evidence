@@ -7,31 +7,20 @@ a fact that cannot be joined to a dimension every other fact shares is either a
 deliberate boundary or a defect, and the matrix is what forces someone to say
 which.
 
-This project already declares ownership (`_groups.yml`), consumers
-(`_exposures.yml`) and shape (contracts). None of the three states which
-dimensions a fact conforms to, which is why two structural findings — retail
-keyed on its own country labels rather than ISO3, and no published country
-dimension at all — took a survey to notice rather than a glance.
+Groups, exposures and contracts declare ownership, consumers and shape; none
+says which dimensions a fact conforms to. This derives that from the manifest
+rather than keeping a hand-written list: grains from each model's uniqueness
+tests, columns from the enforced contracts.
 
-**It is derived, never written.** A hand-maintained matrix is one more list that
-goes quiet, which this repo has been bitten by often enough to have a name for
-(see the `repo-guards` skill). Everything needed is already in the manifest: the
-grain comes from each model's own uniqueness tests, and the columns from the
-enforced contracts.
-
-Two rules decide what the derivation trusts, and both were learned from this
-warehouse:
+Two rules decide what the derivation trusts:
 
 - **A uniqueness test carrying a `where` is not a grain.**
-  `dim_grid_emission_factors` asserts one row per `country_iso3` *where
-  `is_latest_available`* — a conditional statement about a slice. Read as a
-  grain it makes a country-year reference table look like a conformed country
-  dimension, and every fact in the warehouse would appear to conform to it.
-- **Conformance is exact column-name matching, deliberately.** Allowing declared
-  aliases would hide the one defect the matrix exists to expose: the three FX
-  facts reach `dim_currency` under two different names, and an alias list would
-  render that as a tidy row of marks. A hole here is a question, not a bug in
-  the derivation.
+  `dim_grid_emission_factors` asserts one row per `country_iso3` only where
+  `is_latest_available`; read as a grain, it would look like a conformed country
+  dimension every fact conforms to.
+- **Conformance is exact column-name matching.** An alias list would render a
+  key spelled differently as a mark, hiding the defect the matrix exists to
+  expose. A hole is a question, not a bug in the derivation.
 
 Nothing in this module knows what a country is. The schema and the naming
 prefixes arrive as arguments; see the project entry point for this warehouse's.
@@ -70,18 +59,12 @@ class Fact:
 class BusMatrix:
     dimensions: tuple[Dimension, ...]
     facts: tuple[Fact, ...]
-    # Dimension-named models with no single-column grain. They are not conformed
-    # dimensions and are reported rather than dropped: `dim_country_year` is a
-    # coverage table at `(country_iso3, year)` and `dim_grid_emission_factors` a
-    # reference product at the same grain. Silently omitting them would make the
-    # matrix look complete while two `dim_*` models were missing from it.
+    # Dimension-named models with no single-column grain (`dim_country_year` is
+    # at `(country_iso3, year)`). Reported rather than dropped, so the matrix
+    # cannot look complete while a `dim_*` model is missing from it.
     unconformed: tuple[Dimension, ...]
-    # Models in the schema whose name matches neither prefix. Classification is
-    # by name because the naming convention here is real, but a name outside it
-    # must not resolve to *nothing*: such a model would appear in no row and no
-    # column, and every assertion about the matrix would still pass. Carried out
-    # so a caller can fail on it rather than trusting the convention it cannot
-    # see. Empty in this warehouse today, which is the point of measuring it.
+    # Models matching neither prefix. They would otherwise appear in no row or
+    # column, so they are carried out for a caller to fail on.
     unclassified: tuple[str, ...]
 
     def conforms(self, fact: Fact, dimension: Dimension) -> str | None:
@@ -99,12 +82,9 @@ class BusMatrix:
 def declared_grains(nodes: dict) -> dict[str, set[tuple[str, ...]]]:
     """Node id -> every unfiltered uniqueness assertion on it, as column tuples.
 
-    Both spellings count. `unique_combination_of_columns` states a compound grain
-    and a bare `unique` on a column states a single-column one; a model may carry
-    each, and `dim_retail_customer` carries both for the same column.
-
-    Tests narrowed by `where` are skipped — see the module docstring for the one
-    that makes this load-bearing rather than tidy.
+    Both spellings count: `unique_combination_of_columns` (a compound grain) and
+    a column's `unique` (a single-column one). Tests narrowed by `where` are
+    skipped — see the module docstring.
     """
     grains: dict[str, set[tuple[str, ...]]] = {}
     for node in nodes.values():
@@ -131,11 +111,8 @@ def declared_grains(nodes: dict) -> dict[str, set[tuple[str, ...]]]:
 def _relation_name(node: dict) -> str:
     """What the relation is called in the warehouse.
 
-    `alias` rather than `name`, because a versioned model's name is shared by
-    every version while the alias is what the release, the Evidence sources and
-    the asset keys all spell — `fct_emissions_energy` for v2 and
-    `fct_emissions_energy_v1` for v1. Keying on `name` would collapse the two
-    into one row of a matrix that is about published relations.
+    `alias`, not `name`: every version of a model shares its name, so keying on
+    it would collapse `fct_emissions_energy` and `fct_emissions_energy_v1`.
     """
     return node.get("alias") or node["name"]
 
@@ -149,11 +126,9 @@ def build(
 ) -> BusMatrix:
     """Read `manifest.json` and derive the matrix for one schema.
 
-    Columns come from the manifest's own `columns` block, which on a contracted
-    layer is the enforced list rather than whatever the ymls happened to
-    document. On an uncontracted one it is only what someone wrote down, so a
-    missing mark there means a missing description — worth knowing before
-    pointing this at `staging`.
+    Columns come from the manifest's `columns` block: the enforced list on a
+    contracted layer, but only what the ymls document on an uncontracted one
+    (such as `staging`), where a missing mark may be a missing description.
     """
     manifest = json.loads(Path(manifest_path).read_text())
     nodes = manifest.get("nodes", {})
@@ -207,10 +182,9 @@ def build(
 def to_markdown(matrix: BusMatrix, *, matched: str = "✅", missing: str = "·") -> str:
     """Render the matrix as a GitHub-flavoured markdown table.
 
-    The cell is the marker, not the key that matched, because a column showing
-    two different key names reads as a defect when it is `dim_date` doing exactly
-    what a surrogate key is for. `key_notes` reports the multi-key dimensions
-    underneath instead, where there is room to say why.
+    Cells show a marker, not the matched key: a column showing two key names
+    would read as a defect when it is `dim_date`'s natural and surrogate keys.
+    `key_notes` lists the multi-key dimensions.
     """
     header = ["Business process (fact)", "Grain", *(d.model for d in matrix.dimensions)]
     rows = [
@@ -243,8 +217,7 @@ def key_notes(matrix: BusMatrix) -> list[str]:
         f"`{d.model}` is not a conformed dimension: it declares no single-column grain"
         for d in matrix.unconformed
     ]
-    # Loud rather than omitted: a model the matrix could not classify is one it
-    # is silently not describing, which is worse than a hole.
+    # Loud: an unclassified model is one the matrix silently does not describe.
     notes += [
         f"**`{model}` is in this schema and is neither a dimension nor a fact by name**, "
         "so no row or column above describes it"

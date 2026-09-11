@@ -1,31 +1,18 @@
 -- The calendar. One row per day, dense, no gaps by construction.
 -- Grain: one row per date_day.
 --
--- The warehouse ran for its whole life without one, because until the FX rates
--- landed nothing here had a grain finer than a year. A date dimension is the
--- most standard object in commercial warehousing and it exists for one reason:
--- so that "which quarter is this", "is this a business day" and "which fiscal
--- year does this fall in" are a *join*, answered identically everywhere, rather
--- than an expression re-derived in each query with slightly different edges.
+-- So that "which quarter", "is this a weekday" and "which fiscal year" are a
+-- join answered identically everywhere, not an expression re-derived per query.
 --
--- Three things worth knowing about it:
---
--- 1. **The span is taken from the data, not hardcoded** — whole calendar years
---    around the FX series, so it currently runs 1999-01-01 to 2026-12-31 and
---    both ends move on their own. It covers the days the warehouse actually has
---    daily data for; the annual models predate the euro by two centuries and
---    join on `year`, not on a date.
--- 2. **ISO year is not calendar year.** 2021-01-01 is a Friday in ISO week 53 of
---    ISO year *2020*, and 2019-12-30 is already in ISO week 1 of 2020. Grouping
---    weekly by `year, iso_week` therefore splits one week across two rows and
---    puts week 53 next to week 1 in the same bucket. That is why `iso_year` is a
---    column: pair it with `iso_week`, or use `iso_week_start_date`.
--- 3. **The fiscal columns are a policy, not a fact.** They are derived from the
---    `fiscal_year_start_month` var and the value used is carried on every row,
---    because the same Tuesday belongs to different fiscal years depending on
---    whose books you keep. `fiscal_year` is the calendar year the fiscal year
---    *ends* in, which is the convention that makes it collapse onto `year` when
---    the var is 1.
+-- 1. **The span comes from the data**: whole calendar years around the FX
+--    series, the daily data the warehouse has. The annual models join on
+--    `year`, not a date.
+-- 2. **ISO year is not calendar year.** 2021-01-01 is in ISO week 53 of 2020 and
+--    2019-12-30 in ISO week 1 of 2020, so pair `iso_week` with `iso_year` (or use
+--    `iso_week_start_date`), never with `year`.
+-- 3. **The fiscal columns are a policy** from the `fiscal_year_start_month` var,
+--    carried on every row. `fiscal_year` is the calendar year the fiscal year
+--    ends in, so it equals `year` when the var is 1.
 with bounds as (
     select
         date_trunc('year', min(rate_date)) as first_day,
@@ -71,8 +58,7 @@ fiscal as (
 
 select
     date_day,
-    -- The classic integer surrogate. Cheaper to join and to partition on than a
-    -- date, and it sorts and reads the same way.
+    -- The integer surrogate (yyyymmdd): sorts and reads like the date.
     cast(strftime(date_day, '%Y%m%d') as integer) as date_key,
 
     -- Calendar
@@ -101,9 +87,8 @@ select
     iso_year || '-w' || lpad(cast(iso_week as varchar), 2, '0') as iso_week_label,
     cast(date_day - (day_of_week - 1) as date) as iso_week_start_date,
 
-    -- Weekday flags. Generic ones: a *market* calendar is a different object,
-    -- and the ECB's TARGET closures are not derivable from a rule — they are
-    -- observed as absences in `fct_fx_rates_daily` instead of asserted here.
+    -- Generic weekday flags, not a market calendar: TARGET closures show up as
+    -- absences in `fct_fx_rates_daily` rather than being asserted here.
     day_of_week,
     dayname(date_day) as day_name,
     day_of_week <= 5 as is_weekday,
@@ -115,9 +100,8 @@ select
     (fiscal_year_start_date + interval 1 year) - interval 1 day as fiscal_year_end_date,
     cast(date_part('year', (fiscal_year_start_date + interval 1 year) - interval 1 day) as integer)
         as fiscal_year,
-    -- `floor`, not a bare `/`: DuckDB's `/` is float division, so 11/3 + 1 is
-    -- 4.67 and casting that to an integer *rounds* — which silently produced a
-    -- fiscal quarter 5 for every March under an April year start.
+    -- `floor`: DuckDB's `/` is float division and the integer cast rounds, so
+    -- 11/3 + 1 would give March a fiscal quarter 5 under an April start.
     cast(floor(((month - fiscal_year_start_month + 12) % 12) / 3) + 1 as integer) as fiscal_quarter,
     cast(((month - fiscal_year_start_month + 12) % 12) + 1 as integer) as fiscal_month
 from fiscal

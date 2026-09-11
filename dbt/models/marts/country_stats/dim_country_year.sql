@@ -7,13 +7,8 @@ with country as (
     select * from {{ ref('dim_country') }}
 ),
 
--- The span is taken from the data rather than hardcoded: OWID CO2 reaches back
--- to 1750 and the World Bank publishes the current year, and both ends move.
---
--- Which sources "the data" means is `int_country_year_observed`, and it is a
--- ref rather than a union here because `fct_emissions_energy` needs the same
--- answer. The two used to list the four staging models separately; see that
--- model's header for what drifting apart cost.
+-- The span comes from the data (OWID CO2 reaches back to 1750, the World Bank
+-- to the current year), via the source list `fct_emissions_energy` shares.
 bounds as (
     select
         min(year) as first_year,

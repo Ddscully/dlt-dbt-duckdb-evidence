@@ -8,29 +8,19 @@ sits, is `lake/lakehouse.py`.
 
 ## Why the diff is here rather than `ducklake_table_changes()`
 
-DuckLake ships a change feed that returns `insert` / `delete` /
-`update_preimage` / `update_postimage` at row grain, and it is the obvious
-answer. It is the wrong one whenever the writer rewrites rows it did not change
-— which dlt does on every merge, regenerating `_dlt_id` and `_dlt_load_id` per
-row. Measured: 500 identical rows loaded a second time report 500 preimages and
-500 postimages. The feed is faithful; the *writer* is what makes it useless.
+DuckLake's change feed is faithful to the writer, and useless when the writer
+rewrites unchanged rows — dlt regenerates `_dlt_id` and `_dlt_load_id` on every
+merge, so 500 identical rows reloaded report 500 updates. `revisions()` compares
+two versions with `EXCEPT` instead, projecting away the columns the caller names
+as provenance. `ignore` names columns the writer owns, so the caller supplies it.
 
-So `revisions()` compares the table at two versions with `EXCEPT`, projecting
-away whichever columns the caller says are provenance. `ignore` has **no
-default**, matching `db.write_frames`'s `schema` and `export`'s
-`max_storage_version`: which columns are bookkeeping is a fact about the writer,
-this module knows nothing about it, and a wrong default is invisible — it
-returns a plausible answer rather than an error.
+## `read_parquet` over the data directory is not the table
 
-## What `read_parquet` over the data directory is not
-
-It is not the table, in either configuration, and this is worth stating because
-the directory looks like a hive archive and invites the shortcut. At DuckLake's
-default `data_inlining_row_limit` of 10 a small change is written into the
-catalog *database*, so the files silently return the superseded value. At 0 it
-reaches Parquet, but so does a `…-delete.parquet` of `(file_path, pos)`, which
-makes a glob fail on the schema mismatch and — if excluded by name — returns
-**both** versions of the row. The catalog is not optional.
+At the default `data_inlining_row_limit` of 10 a small change is written into
+the catalog database, so the files return the superseded value. At 0 it reaches
+Parquet, but with a `…-delete.parquet` of `(file_path, pos)` that breaks a glob's
+schema — or, excluded by name, returns both versions of the row. Read through
+the catalog.
 """
 
 from __future__ import annotations
@@ -54,13 +44,10 @@ __all__ = [
 
 
 def meta_alias(alias: str) -> str:
-    """The name DuckLake attaches the catalog database under, alongside the lake.
+    """The (undocumented) name DuckLake attaches the catalog database under.
 
-    Attaching the catalog file a second time by hand is what this replaced, and
-    DuckDB refuses it outright: `Unique file handle conflict: Cannot attach
-    "lakehouse_meta" - the database file … is already attached by database
-    "__ducklake_metadata_lakehouse"`. The catalog is already there; the name is
-    just undocumented enough to be worth writing down once.
+    Attaching the catalog file again under another name is refused as a
+    `Unique file handle conflict`; it is already attached under this one.
     """
     return f"__ducklake_metadata_{alias}"
 
@@ -75,20 +62,13 @@ def attach(
 ) -> None:
     """Attach the DuckLake at `catalog_path` as `alias`, and its catalog beside it.
 
-    `data_path` is passed on every attach even though the catalog already
-    records it, because DuckLake *checks* the two agree and refuses otherwise —
-    a mismatch is a moved lakehouse, which is a thing worth being told about
-    rather than silently reading someone else's files.
+    `data_path` is passed although the catalog records it, because DuckLake
+    checks the two agree and refuses a mismatch (a moved lakehouse).
 
-    **The catalog database comes along for free**, attached by DuckLake itself
-    as `__ducklake_metadata_<alias>` — see `meta_alias`. It is needed because
-    DuckLake's *query* surface cannot answer "which snapshots
-    changed *this table*": `snapshots()` returns a `changes` map keyed on table
-    *ids*, and `table_changes(name, from, to)` needs the answer as its argument
-    — it raises `Table … does not exist at version N` for a range that starts
-    before the table did. The catalog schema is part of the DuckLake 1.0 spec
-    rather than an internal, so `ducklake_data_file` is a supported place to
-    read it from, and `table_versions` below is the only thing that does.
+    DuckLake also attaches the catalog database, as `meta_alias(alias)`.
+    `table_versions` reads it, because the query surface cannot say which
+    snapshots changed one table; the catalog schema is part of the DuckLake 1.0
+    spec, not an internal.
     """
     con.execute("install ducklake")
     con.execute("load ducklake")
@@ -114,11 +94,9 @@ def snapshots(con: duckdb.DuckDBPyConnection, alias: str) -> list[int]:
 def table_versions(con: duckdb.DuckDBPyConnection, alias: str, table: str) -> list[int]:
     """Snapshots in which `table` actually changed, oldest first.
 
-    The catalog records a snapshot per *write*, and a dlt load performs several
-    — staging tables, the merge, cleanup — so most snapshot ids say nothing
-    about any given table. Asking which ones touched it is what makes "compare
-    against the previous version" mean the previous version *of this table*
-    rather than of whatever else happened to be written in between.
+    A dlt load writes several snapshots (staging, merge, cleanup), so most say
+    nothing about a given table; this is what makes "the previous version" mean
+    the previous version of *this* table.
     """
     schema, name = _split(table)
     meta = meta_alias(alias)
@@ -138,13 +116,9 @@ def table_versions(con: duckdb.DuckDBPyConnection, alias: str, table: str) -> li
         return []
     id_list = ", ".join(str(int(i)) for i in ids)
 
-    # **Both halves are required, and the missing one fails silently.** DuckLake
-    # writes a change of `data_inlining_row_limit` rows or fewer (default 10)
-    # into the catalog instead of out to Parquet, so a small load leaves no
-    # `ducklake_data_file` row at all — and a version list built from files
-    # alone simply does not see it. That is not a test-only case: an FX day is
-    # ~29 rows but a quiet one is fewer, and the symptom is a revision log that
-    # skips a load rather than one that errors.
+    # Files *and* inlined data: a change of `data_inlining_row_limit` rows or
+    # fewer (default 10) is written into the catalog, leaving no
+    # `ducklake_data_file` row, and a file-only list silently skips that load.
     sources = [
         f"select begin_snapshot from {meta}.ducklake_data_file where table_id in ({id_list})"
     ]
@@ -169,10 +143,8 @@ def revisions(
 ) -> list[tuple]:
     """Rows of `table` at `until` that are not present, identically, at `since`.
 
-    An insert and an update are both "a row here that was not there before", and
-    the caller almost always wants both — this is "what does the table say now
-    that it did not say then", which is the question a restatement log answers.
-    Deletions are the mirror image and are not returned; swap the arguments.
+    Inserts and updates alike — what the table says now that it did not then.
+    Deletions are not returned; swap the arguments for those.
     """
     columns = [c for c in _columns(con, alias, table) if c not in ignore]
     if not columns:
@@ -226,28 +198,17 @@ def publish(
 ) -> dict[str, int]:
     """Build a **relocatable** DuckLake at `dest_dir` holding only `tables`.
 
-    Two properties, and both are the point.
+    **Built, never filtered**: DuckLake keeps dropped tables readable in earlier
+    snapshots (`at (version => …)`), so a copied-then-pruned catalog still ships
+    what was dropped. The cost is that snapshot lineage does not survive.
 
-    **It is built, never filtered.** Copying the catalog and dropping what should
-    not ship does not work: DuckLake keeps dropped tables in earlier snapshots,
-    so `select * from lh.raw.secret at (version => 2)` returns the rows after the
-    drop — verified, and it returned a customer id. A published catalog therefore
-    contains what it was *created* with, and an allowlist is the only safe shape.
-    The cost is that snapshot lineage does not survive: the published catalog has
-    one version per table, and the accumulation happens in the rows.
+    **Its `data_path` is relative**, so a consumer can open it with a bare
+    `ATTACH` rather than `OVERRIDE_DATA_PATH`. DuckDB resolves a relative path
+    against the process's cwd at creation, so the catalog is created absolute
+    and the `ducklake_metadata` row rewritten after; per-file paths are already
+    relative.
 
-    **Its `data_path` is relative**, which is what makes it openable by someone
-    who is not us. DuckLake stores the path as given and checks it on every
-    attach, so an absolute one forces `OVERRIDE_DATA_PATH` on every consumer. The
-    catalog cannot simply be *created* relative here — DuckDB resolves it against
-    the process's working directory, not the file's — so it is created absolute
-    and the single `ducklake_metadata` row is rewritten afterwards. The per-file
-    paths were relative all along.
-
-    `max_spec_version` is the DuckLake spec the published catalog may not exceed.
-    It has **no default**, for `export`'s reason: a ceiling is a promise to
-    consumers this module knows nothing about, and it only means anything beside
-    the reader floor a project states.
+    `max_spec_version` is the spec ceiling; no default, for `export`'s reason.
     """
     dest = Path(dest_dir)
     (dest / data_dirname).mkdir(parents=True, exist_ok=True)
@@ -260,11 +221,9 @@ def publish(
     try:
         for table in tables:
             schema, name = _split(table)
-            # A table the source has not got is skipped, not an error. Two ways
-            # that happens and both are normal: the first release after a table
-            # is added has a source that predates it, and dbt's
-            # `ATTACH IF NOT EXISTS` creates an empty catalog on any build that
-            # runs before the first ingest.
+            # Skipped, not an error: a source can predate a newly listed table,
+            # and dbt's `ATTACH IF NOT EXISTS` creates an empty catalog before
+            # the first ingest.
             if not _exists(con, source_alias, schema, name):
                 continue
             con.execute(f"create schema if not exists _publish.{schema}")
@@ -278,14 +237,9 @@ def publish(
 
     set_data_path(catalog, f"{data_dirname}/")
 
-    # Measured on the catalog that was just *built*, which is the point: this is
-    # the artifact that ships, written by whatever DuckLake the machine has, and
-    # it is not the same question as what the source lakehouse was written
-    # against. `>`, not `>=` — publishing at the ceiling is the ordinary case.
-    #
-    # Raised after the build rather than before it, matching `export`: the
-    # directory is deliberately left for inspection, and what a refusal
-    # guarantees is that nothing was assembled around it.
+    # Measured on the catalog just built — what ships, written by this machine's
+    # DuckLake, whatever the source was written with. `>`: publishing at the
+    # ceiling is ordinary. As in `export`, the directory is left for inspection.
     published = spec_version(catalog)
     if max_spec_version is not None and version_key(published) > version_key(max_spec_version):
         raise ValueError(
@@ -302,15 +256,9 @@ def publish(
 def catalog_metadata(catalog_path: str | Path) -> dict[str, str]:
     """Everything `ducklake_metadata` records about a catalog, as a map.
 
-    The whole table rather than one key, because the two rows a release cares
-    about are read together and answer different questions — `version` is the
-    spec a consumer needs to open it, `created_by` is the DuckDB build that wrote
-    it. That is `storage_version` against `duckdb_version` exactly, and returning
-    one of them here would leave the second caller opening the file again.
-
-    Read read-only and by connecting to the catalog *file*, not through an
-    attached lake: the point is to describe an artifact, which may be a tarball
-    somebody just unpacked rather than a lakehouse this process can attach.
+    `version` is the spec a consumer needs; `created_by` the DuckDB build that
+    wrote it. Read from the catalog file directly, read-only, so it can
+    describe an unpacked artifact that nothing has attached.
     """
     path = Path(catalog_path)
     try:
@@ -329,15 +277,8 @@ def catalog_metadata(catalog_path: str | Path) -> dict[str, str]:
 def spec_version(catalog_path: str | Path) -> str:
     """The DuckLake spec version a catalog was written against.
 
-    The landing zone's answer to `export.storage_version`, and the same question
-    in an easier place to ask it: not *who wrote this* but *can a consumer open
-    it*, which is the whole promise a published catalog makes. DuckLake records
-    it in a table rather than a file header, so this is a query where the DuckDB
-    half needed a struct unpack.
-
-    Returned as the string the catalog holds (`1.0`) rather than parsed, because
-    that is what a manifest should carry and what a person reads. `version_key`
-    is what orders two of them.
+    The catalog counterpart of `export.storage_version`: whether a consumer can
+    open it. Returned as the string recorded (`1.0`); `version_key` orders two.
     """
     meta = catalog_metadata(catalog_path)
     if "version" not in meta:
@@ -346,34 +287,17 @@ def spec_version(catalog_path: str | Path) -> str:
 
 
 def version_key(version: str) -> tuple[int, ...]:
-    """`1.10` sorts above `1.9`, which string comparison gets backwards.
-
-    Trivial, and it exists because the DuckDB side of this pair needs no such
-    thing: a storage version is an integer and callers compare it directly. A
-    spec version is dotted, so *something* has to say what ordering means, and
-    leaving each caller to decide is how one of them ends up comparing strings.
-    """
+    """A sort key for a dotted version: `1.10` above `1.9`, unlike a string."""
     return tuple(int(part) for part in version.split("."))
 
 
 def set_data_path(catalog_path: str | Path, data_path: str) -> None:
-    """Rewrite the one absolute-or-relative row that decides who can open a catalog.
+    """Rewrite the catalog's `data_path`, which DuckLake checks on every attach.
 
-    DuckLake stores `data_path` exactly as it was given and **checks it on every
-    attach**, refusing a mismatch rather than trusting the caller. That check is
-    the right behaviour — a mismatch means someone moved the lakehouse — but it
-    means a published catalog and a working one want *opposite* forms of the same
-    path, and there is no form that serves both:
-
-    * **relative** (`data/`) opens with a bare `ATTACH` from the directory it was
-      unpacked into, which is the only thing a consumer can be asked to do;
-    * **absolute** is what a working copy needs, because dlt reads it from the
-      repo root and dbt from `dbt/`, and one relative path cannot mean the same
-      thing in both.
-
-    So the form is rewritten at each boundary — `publish` on the way out, and the
-    restoring caller on the way in. The per-file paths are relative in both, so
-    this single row is the whole of it.
+    A published catalog wants it relative (a bare `ATTACH` wherever unpacked); a
+    working one absolute (dlt and dbt run from different directories). So it is
+    rewritten at each boundary — by `publish` on the way out, by the restoring
+    caller on the way in. Per-file paths are relative in both.
     """
     meta = duckdb.connect(str(Path(catalog_path)))
     try:

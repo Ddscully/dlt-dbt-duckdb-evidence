@@ -32,16 +32,11 @@ jobs:
       # Parses the dbt manifest and resolves the whole asset graph, so a broken
       # ref, a renamed source or a dangling asset key fails before any I/O.
       #
-      # Three test files run here rather than in the step above: each needs the
-      # manifest that `dbt parse` writes, so in the unit-test tier they skip
-      # themselves. This list is held to the tree by `tests/test_workflows.py` —
-      # it named only `test_definitions.py` for months while the other two
-      # skipped in the first step and were never re-run, so they ran nowhere in
-      # CI at all and both said in their own headers that they did.
-      #
-      # What `validate` cannot see is an asset that was never registered — the
-      # graph it checks is only the one `Definitions` was handed — so this is the
-      # step that catches it.
+      # The test files that need the manifest `dbt parse` writes; they skip in
+      # the step above. `tests/test_workflows.py` holds this list to the files
+      # that skip, since a gated file missing here would run nowhere in CI.
+      # `validate` cannot see an asset that was never registered;
+      # `test_definitions.py` can.
       - name: Validate Dagster definitions
         run: |
           just dbt-parse
@@ -62,23 +57,16 @@ jobs:
       # renamed schema or a copy whose views don't survive fails here, on a pull
       # request, rather than on the first of the month.
       - name: Package the release artifact
-        # The exporter refuses to run without a salt, including against a fixture
-        # warehouse — see `docs/DATA_PROTECTION.md`. A fixed literal here on
-        # purpose: this artifact is thrown away at the end of the job and is
-        # never published, so a value in the clear is the honest signal that it
-        # is not a release. `release-data.yml` passes the repository secret.
+        # The exporter requires a salt even here. A literal, because this
+        # artifact is never published; `release-data.yml` passes the secret.
         env:
           PII_SALT: ci-not-a-release-salt
         run: |
           uv run python -m publish.export_warehouse
           cd data/export && sha256sum -c SHA256SUMS
 
-      # The recipe, not a bare sqlfluff call: the paths (`models snapshots`) and
-      # the chdir into `dbt/` used to be written here *and* in the justfile, and
-      # a narrower set in one of them means CI passing SQL a contributor's commit
-      # hook rejects. `just` is on PATH from the setup action — the pre-commit
-      # step below needs it too, since `sqlfluff-lint` is a `local` hook whose
-      # entry is this same recipe.
+      # The recipe, so the linted paths are defined once and CI agrees with the
+      # commit hook (the `sqlfluff-lint` hook runs the same recipe).
       - name: Lint SQL
         run: just lint
 
