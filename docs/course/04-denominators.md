@@ -117,18 +117,26 @@ row for every country-year **any** source covers, with nulls where a given
 source does not reach. `max(year)` on it is therefore whichever publisher runs
 furthest ahead, and it is nobody's latest year:
 
+Run this one against the **real** warehouse, not the sandbox: coverage is the
+whole subject here, and 17 countries cannot show a coverage cliff.
+
 ```bash
-just course-query "
+uv run python -c "
+import duckdb
+print(duckdb.connect('data/warehouse.duckdb', read_only=True).sql('''
 select year,
        count(co2_mt)                      as co2,
        count(primary_energy_twh)          as energy,
        count(carbon_intensity_elec_g_kwh) as grid,
        count(gdp_constant_usd)            as gdp,
        count(consumption_co2)             as consumption
-from marts.fct_emissions_energy where year >= 2022 group by 1 order by 1"
+from marts.fct_emissions_energy where year >= 2022 group by 1 order by 1'''))"
 ```
 
-Against the real warehouse (`max(year)` = **2025**):
+(No lakehouse attach needed: `marts` is in the DuckDB file. A `staging` model
+would need one — see [00](./00-setup.md).)
+
+With `max(year)` = **2025**:
 
 | year | co2_mt | primary_energy | grid intensity | gdp_constant | consumption_co2 |
 |---|---|---|---|---|---|
@@ -380,7 +388,7 @@ sed -i 's/\* f\.avg_units_per_eur as electricity_price_usd_kwh/* f.period_end_un
 just course-rebuild
 ```
 
-**Observe.** `PASS=402 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy, and
+**Observe.** `PASS=561 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy, and
 every price is still a plausible price. Across all 1,373 rows the mean *signed*
 change is **+0.14%** — the errors very nearly cancel, because the closing rate is
 above the average about as often as below — while the mean *absolute* change is
@@ -729,7 +737,7 @@ choice was ever made. Averaging is not the problem; averaging silently is.
 - An error that is common to a period cancels out of a level and doubles in a
   difference, which is the opposite of where people look.
 - Units errors are invisible to one-sided bounds and to every ratio downstream.
-  Twelve invented offices can out-emit Spain with `PASS=402 ERROR=0`.
+  Twelve invented offices can out-emit Spain with `PASS=561 ERROR=0`.
 - "Never compare floats for equality" is really "floats are order-dependent under
   aggregation". A reproduced scalar expression is bit-exact; a re-summed column
   is not.

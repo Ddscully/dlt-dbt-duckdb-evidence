@@ -26,17 +26,24 @@ There are three answers, and this repo uses two of them:
 | `replace` | drops the table, reloads it | yes, but you must fetch everything |
 | `merge` | rows matching the key replace their old versions | yes, and you may fetch a window |
 
-`ingest/pipeline.py` splits seven resources across the last two:
+`ingest/pipeline.py` splits eight resources across the last two:
 
 ```python
 FULL_REFRESH_RESOURCES = ("owid_co2", "owid_energy", "wb_country", "eu_elec_prices")
-INCREMENTAL_RESOURCES  = ("wb_wdi", "ecb_fx_rates", "retail_invoice_lines")
+INCREMENTAL_RESOURCES = ("wb_wdi", "ecb_fx_rates", "retail_invoice_lines", "om_weather_daily")
 ```
 
-The four on the left are whole-file downloads: there is no window to ask for, so
-`replace` costs nothing and buys the strongest guarantee available: **the table is
-exactly what the publisher just served.** A country-year the source withdraws
-disappears, which is correct and which `merge` cannot do.
+The four in the first tuple are whole-file downloads: there is no window to ask
+for, so `replace` costs nothing and buys the strongest guarantee available:
+**the table is exactly what the publisher just served.** A country-year the
+source withdraws disappears, which is correct and which `merge` cannot do.
+
+The four in the second have a window to ask for, and each has a different reason
+for wanting one — WDI restates, the ECB appends a fixing a day, the retail
+workbook is static but loads a month at a time, and `om_weather_daily` is bounded
+by an API budget that makes a full re-fetch cost days. **The two tuples must
+between them name every resource**, and `tests/test_ingest.py` asserts it: a new
+resource in neither is simply never loaded, with no error anywhere.
 
 ## 2. Why that is two loads and not one
 
@@ -65,6 +72,13 @@ four tables that were not selected.
 WDI_PRIMARY_KEY = ("indicator", "country_code", "year")
 FX_PRIMARY_KEY  = ("rate_date", "quote_currency")
 ```
+
+Those two constants are not in `ingest/pipeline.py`, and it is worth knowing why
+before you go looking: `ingest/` is one module per **publisher** —
+`ingest/sources/worldbank.py`, `ingest/sources/ecb.py`, and four more — with
+`pipeline.py` holding only the coordination. A key belongs to the source that
+serves it; the two tuples above are comparative, so they belong to the file that
+can state the comparison.
 
 A merge key says *these columns identify a row*. Get it too wide and re-runs
 duplicate; get it too narrow and **rows silently eat each other**, which is
@@ -128,11 +142,11 @@ yesterday.
 
 ```bash
 sed -i 's|^WDI_PRIMARY_KEY = ("indicator", "country_code", "year")|WDI_PRIMARY_KEY = ("country_code", "year")|' \
-  ingest/pipeline.py
+  ingest/sources/worldbank.py
 just course-sandbox     # a merge key change needs a re-ingest, not just a rebuild
 ```
 
-**Observe.** `PASS=402 WARN=0 ERROR=0 SKIP=0`: again identical to healthy. Then:
+**Observe.** `PASS=561 WARN=0 ERROR=0 SKIP=0`: again identical to healthy. Then:
 
 ```bash
 just course-query 'select count(*) from staging.stg_wdi'
@@ -150,10 +164,11 @@ just course-query 'select count(*) from staging.stg_wdi'
 **Verification.**
 
 ```bash
-git checkout ingest/pipeline.py
+git checkout ingest/sources/worldbank.py
 just course-sandbox
 just course-query "
-select count(*) as rows, count(distinct indicator) as indicators from raw.wb_wdi"
+select count(*) as rows, count(distinct indicator) as indicators
+from lakehouse.raw.wb_wdi"
 ```
 
 Healthy: `6336`, `11`.
@@ -165,18 +180,35 @@ Healthy: `6336`, `11`.
 
 | | healthy | bugged |
 |---|---|---|
-| `raw.wb_wdi` rows | 6,336 | **576** (−91%) |
-| distinct indicators landed | **11** | **1** |
+| `lakehouse.raw.wb_wdi` rows | 6,336 | **576** (−91%) |
+| distinct indicators landed | **11** | **2** |
 | `staging.stg_wdi` rows | 576 | **576** (unchanged) |
-| `stg_wdi.gdp_per_capita_usd` non-null | 576 | 576 |
+| `stg_wdi.gdp_per_capita_usd` non-null | 576 | **0** |
 | `stg_wdi.gdp_usd` non-null | 576 | **0** |
 | `stg_wdi.life_expectancy` non-null | 560 | **0** |
 | `stg_wdi.population` non-null | 576 | **0** |
-| `dbt build` | `PASS=402 ERROR=0` | `PASS=402 ERROR=0` |
+| `stg_wdi.forest_area_pct` non-null | 541 | **174** |
+| `stg_wdi.renew_elec_pct` non-null | 502 | **338** |
+| `dbt build` | `PASS=561 ERROR=0` | `PASS=561 ERROR=0` |
 
-Ten of the eleven indicators were destroyed at the landing table. The only
-survivor is `NY.GDP.PCAP.CD`: the first key in `WB_WDI_INDICATORS`, which won
-the collision by arriving first.
+Nine of the eleven indicators were destroyed outright at the landing table, and
+the two that survived are shredded — 392 rows of `EG.ELC.RNEW.ZS` and 184 of
+`AG.LND.FRST.ZS`, adding to exactly the 576 keys the merge left standing.
+
+**Sit with that split, because it is worse than losing ten of eleven.** Every
+indicator covers the identical grid here — 576 rows, 16 countries, 1990-2025 —
+so all eleven collide on every single key, and *something* has to win each one.
+Which one wins is dlt's merge internals: not the first code in
+`WB_WDI_INDICATORS`, not the last, and nothing you could predict by reading the
+repo. It is reproducible (three rebuilds gave 392/184 exactly) and it is
+arbitrary, which is the worst pair of properties a number can have — stable
+enough to look designed, meaningless enough to be wrong.
+
+The result is a landing table whose rows come from **different measures under
+one set of keys**, with no column recording which. `indicator` is still there,
+still populated, still honest — the row that says `AG.LND.FRST.ZS` really is
+forest area. It is the *set* of rows that is now incoherent, and no per-row check
+can see that.
 
 **Why the row count could not move.** `stg_wdi` pivots the long table to wide
 with `max(case when indicator = … then value end)`, one `case` per column. A
@@ -185,15 +217,16 @@ rows feed it**, so destroying 91% of the input changes no row count anywhere
 downstream. It empties columns instead.
 
 This is the most dangerous shape in the module: the sanity check everyone
-actually runs (*did the row count change?*) is structurally blind to it. Ten
-columns went to 100% null and the table is exactly the same height.
+actually runs (*did the row count change?*) is structurally blind to it. Nine
+columns went to 100% null, two lost a third to two thirds of their values, and
+the table is exactly the same height.
 
 **Finding it.** Compare what landed against what was *asked for*, which is the
 one thing the warehouse cannot infer for itself:
 
 ```sql
-select count(distinct indicator) as indicators_landed from raw.wb_wdi;
--- healthy: 11      bugged: 1
+select count(distinct indicator) as indicators_landed from lakehouse.raw.wb_wdi;
+-- healthy: 11      bugged: 2
 ```
 
 Or from the shape of the damage: whole columns at zero, which is never how real
@@ -219,7 +252,7 @@ missing rows: a pivot is the transformation that hands you a second chance.
 
 ## 🔧 Drill 2 — the truncated read, at two scales
 
-**Symptom.** `raw.retail_invoice_lines` lands `1000000` rows. The workbook has
+**Symptom.** `lakehouse.raw.retail_invoice_lines` lands `1000000` rows. The workbook has
 1,067,371. Nothing errored.
 
 This one really happened here, and what caught it was **a human noticing a round
@@ -230,7 +263,7 @@ can watch the difference.
 
 ```bash
 sed -i 's|    yield from con.sql(retail_sql(months)).to_arrow_reader(RETAIL_BATCH_ROWS)|    yield next(con.sql(retail_sql(months)).arrow(10_000))|' \
-  ingest/pipeline.py
+  ingest/sources/retail.py
 just course-sandbox
 ```
 
@@ -249,7 +282,7 @@ A caller who treats it as one gets **the first batch and no warning**.
 **Verification.**
 
 ```bash
-git checkout ingest/pipeline.py
+git checkout ingest/sources/retail.py
 just course-sandbox
 just course-query 'select count(*) from marts.fct_retail_order_line'
 ```
@@ -282,10 +315,10 @@ sits in file order:
 
 ```sql
 select
-  (select count(*) from raw.retail_invoice_lines
+  (select count(*) from lakehouse.raw.retail_invoice_lines
      where sheet_name = 'Year 2009-2010' and invoice_ts <= timestamp '2010-02-01 08:24:00')
     as rows_before_it,
-  (select count(*) from raw.retail_invoice_lines) as total_rows;
+  (select count(*) from lakehouse.raw.retail_invoice_lines) as total_rows;
 -- 76800, 1067371
 ```
 
@@ -321,7 +354,7 @@ Every model in this warehouse joins on `country_iso3`. `WDI_PRIMARY_KEY` uses
 
 **Questions.**
 
-1. How many `raw.wb_wdi` rows have a blank or null `country_iso3`? How many
+1. How many `lakehouse.raw.wb_wdi` rows have a blank or null `country_iso3`? How many
    distinct `country_code`s do they represent?
 2. If the merge key were `(indicator, country_iso3, year)`, how many rows would
    survive out of those, and how many would be lost?
@@ -329,11 +362,19 @@ Every model in this warehouse joins on `country_iso3`. `WDI_PRIMARY_KEY` uses
 4. A full WDI reload is how many rows? What fraction does the 5-year window
    actually fetch? Is that ratio an argument for or against a *longer* window?
 
+These are landing tables, so they are in the lakehouse and not in the warehouse
+file. `lake.lakehouse.read_only_connection()` opens the catalog alone, which is
+all these questions need — and is the one read that still works while a build
+holds the warehouse:
+
 ```bash
 uv run python -c "
-import duckdb; c = duckdb.connect('data/warehouse.duckdb', read_only=True)
-print(c.sql('select * from raw.wb_wdi limit 5'))"
+from lake.lakehouse import read_only_connection
+c = read_only_connection()
+print(c.sql('select * from lakehouse.raw.wb_wdi limit 5'))"
 ```
+
+`just sql` gets you the same thing interactively, with the marts attached too.
 
 <details>
 <summary>Reveal</summary>
@@ -359,7 +400,7 @@ it is a statement about what the API considers a distinct row. Re-keying it to
 your join column silently imposes your model's worldview on the landing table,
 which is exactly the layer that is supposed to be free of it.
 
-**4.** `raw.wb_wdi` is **192,390 rows**. Years 2021 onward (the 5-year window)
+**4.** `lakehouse.raw.wb_wdi` is **192,390 rows**. Years 2021 onward (the 5-year window)
 are **14,575**, or **7.6%**. So the window turns a ~190k-row pull into a ~15k-row
 one, a 13× saving on every scheduled run.
 
@@ -418,7 +459,7 @@ rather than appending a second copy, so a run that asks for five years leaves
 1960 onward intact.
 
 What you give up is deletion. **A country-year the World Bank withdraws stays in
-`raw.wb_wdi` until a full reload**, because merge has no way to express "this key
+`lakehouse.raw.wb_wdi` until a full reload**, because merge has no way to express "this key
 is gone": nothing arrives to overwrite it. `replace` expresses it for free by
 dropping the table.
 

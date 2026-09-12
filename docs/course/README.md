@@ -16,11 +16,11 @@ lessons are about syntax. Everything expensive in this trade is somewhere else:
 | `.arrow()` handed straight to dlt | stored exactly **1,000,000** of 1,067,371 rows; the round number was the only clue |
 | `cast(… / 3 + 1 as integer)` for a fiscal quarter | March under an April year start is 4.67, which casts to **quarter 5** |
 | a per-column `coalesce` for a fallback row | paired one country's tonnage with another row's mark-up and produced a 100% implied tax rate that exists nowhere in the regulation |
-| `where year = (select max(year) …)` | a cross-section of grid carbon intensity that drops **115 of 205 countries** |
+| `where year = (select max(year) …)` | a cross-section of grid carbon intensity that drops **117 of 207 countries** |
 
 None of those raised. Every one produced a number a reviewer would accept. That
 is the subject of the course, and this repo is the material because it has
-**482 dbt tests, 17 enforced contracts and an offline fixture harness** you can
+**482 dbt tests, 21 enforced contracts and an offline fixture harness** you can
 break in a sandbox and rebuild in under a minute.
 
 ## How a module works
@@ -36,9 +36,10 @@ answer → exercises. Three kinds, and they are marked:
   ("did European electricity rise 35% or 13.5%?"). Run against the **real**
   warehouse, not the sandbox: coverage is usually the point, and the sandbox
   has 17 countries.
-- 💬 **Design defence.** No code. "Why is the snapshot the only table here that
-  a rebuild cannot reproduce?" Answer it out loud or in writing before opening
-  the reveal; these are the questions an interview and a design review both ask.
+- 💬 **Design defence.** No code. "Which three relations here can a rebuild not
+  reproduce, and what does that cost?" Answer it out loud or in writing before
+  opening the reveal; these are the questions an interview and a design review
+  both ask.
 
 Answers sit in collapsed `<details>` blocks. Opening one before you have written
 something down is the only way to waste this material.
