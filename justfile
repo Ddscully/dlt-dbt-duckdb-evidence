@@ -385,10 +385,22 @@ course-transform:
 # One query and exit, so no open session holds the file when the next
 # `course-rebuild` needs it:
 #   just course-query 'select count(*) from marts.dim_country_year'
+#
+# It attaches the sandbox lakehouse for the reason `just sql` attaches the real
+# one: `staging` is views over `lakehouse.raw`, so without it every
+# `select … from staging.…` fails with `Catalog "lakehouse" does not exist!`.
+# The landing tables are then `lakehouse.raw.<table>`; a bare `raw.<table>` has
+# not resolved since the landing zone moved out of the DuckDB file.
 # Run one read-only query against the course sandbox
 course-query sql:
-    @uv run python -c "import duckdb,sys; \
-        print(duckdb.connect('{{ justfile_directory() }}/data/course/warehouse.duckdb', read_only=True).sql(sys.argv[1]))" \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export LAKEHOUSE_DIR="{{ justfile_directory() }}/data/course/lakehouse"
+    uv run python -c "import duckdb, sys; \
+        from lake.lakehouse import LAKEHOUSE_DIR, attach, catalog_path, data_path; \
+        con = duckdb.connect('{{ justfile_directory() }}/data/course/warehouse.duckdb', read_only=True); \
+        attach(con, catalog_path(LAKEHOUSE_DIR), data_path(LAKEHOUSE_DIR), alias='lakehouse', read_only=True); \
+        print(con.sql(sys.argv[1]))" \
         {{ quote(sql) }}
 
 # Everything this deletes is regenerable except data/warehouse.duckdb, whose

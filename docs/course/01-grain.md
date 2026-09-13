@@ -16,17 +16,26 @@ The grain of a table is the answer to "what does one row mean", and it is a
 *contract*: everything downstream — every join, every average, every count — is
 correct only if that sentence is true.
 
-The dominant grain in this warehouse is **`(country_iso3, year)`**. Every
-country-shaped staging model and the wide fact carry it, and `dbt_utils`'
+The dominant grain in this warehouse is **`(country_iso3, year)`**. The wide
+fact and most country-shaped staging models carry it, and `dbt_utils`'
 `unique_combination_of_columns` asserts it rather than trusting it.
 
-Three tables break it, and the three exceptions are the whole lesson:
+Three marts break it, and the three exceptions are the whole lesson:
 
 | Table | Grain | Why |
 |---|---|---|
 | `fct_eu_electricity_prices_semiannual` | `(country_iso3, year, half)` | Eurostat *publishes* half-years. Averaging to a year is a real loss — the Netherlands went €0.034/kWh in 2022-S1 to €0.142 in S2, and the annual €0.088 is a price nobody paid |
 | `fct_cbam_exposure` | `(sourcing country, good)` — **no year** | a regulatory schedule is not a time series. It changes when an implementing regulation says so, not annually |
 | `fct_retail_order_line` | `(invoice, line_number)` | the warehouse's finest grain, and the first below a country |
+
+Staging has its own three — `stg_fx_rates` `(rate_date, currency_code)`,
+`stg_retail_lines` `(invoice, line_number)` and `stg_weather_daily`
+`(country_iso3, weather_date)` — and they are less interesting for the same
+reason they are unarguable: **a staging model's grain is the publisher's, not
+yours.** Open-Meteo serves a day per location, so `stg_weather_daily` is a day
+per location, and rolling it up to a country-year is `fct_country_weather_year`'s
+job one layer down. Choosing a grain is a decision you only get to make where
+you are the one doing the aggregating.
 
 > The convention is that `(country_iso3, year)` is the **dominant** grain, not a
 > house rule. Reaching for `dim_country_year` when the thing you are modelling
@@ -64,8 +73,14 @@ left  join wdi      as w on …
 left  join eu_prices as p on …
 ```
 
-`observed` is the union of country-years *any* source reports. Read the shape
-carefully, because both halves are load-bearing:
+`observed` is the union of country-years *any* source reports. It is not a CTE
+in this file: it is `ref('int_country_year_observed')`, one of three models in
+the `intermediate` layer, because `dim_country_year` needs the same union to
+read its year bounds and deriving it twice is how the spine and the fact come to
+disagree about what "observed" means. An intermediate model earns its place by
+removing a specific cost, and that is this one's.
+
+Read the shape carefully, because both halves are load-bearing:
 
 - The **inner join to `observed`** is what stops the fact carrying an all-null
   row for (Kosovo, 1750) and ~20,000 of its friends. The spine is a full cross
@@ -98,7 +113,7 @@ sed -i 's|^left join co2 as c on|inner join co2 as c on|' \
 just course-rebuild
 ```
 
-**Observe.** The build finishes on `PASS=402 WARN=0 ERROR=0 SKIP=0`: the same
+**Observe.** The build finishes on `PASS=561 WARN=0 ERROR=0 SKIP=0`: the same
 verdict, to the row, as the healthy build. All 482 data tests pass. Both grain
 contracts still hold, because the grain *is* still unique; the model simply has
 fewer rows in it.
@@ -136,7 +151,7 @@ Healthy: `4096`, `52`, `701`.
 | mart rows | 4,096 | 3,487 (−15%) |
 | distinct countries | **52** | **17** (−67%) |
 | rows carrying an EU price | 701 | 104 (−85%) |
-| `dbt build` | `PASS=402 ERROR=0` | `PASS=402 ERROR=0` |
+| `dbt build` | `PASS=561 ERROR=0` | `PASS=561 ERROR=0` |
 
 Row count fell 15% and country count fell 67%, which is the tell: the loss is not
 spread evenly, it is *whole countries*. The 17 survivors are exactly the CO2

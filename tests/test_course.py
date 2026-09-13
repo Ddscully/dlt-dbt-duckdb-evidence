@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import pathlib
 import re
+import shlex
 import subprocess
+import tempfile
 
 import pytest
 
@@ -414,3 +416,91 @@ def test_every_module_is_structurally_complete(module):
     """A module that renders is not the same as a module that teaches."""
     missing = missing_sections(module.read_text(), module.name)
     assert not missing, f"{module.name} is structurally incomplete, missing: {missing}"
+
+
+# A drill's `sed -i '<script>' <file>`, after line continuations are joined.
+# Everything after a shell operator is a separate command (`… && just
+# course-rebuild`), so the invocation stops there.
+_CONTINUATION = re.compile(r"\\\n\s*")
+_SHELL_OPERATOR = ("&&", "||", ";", "|")
+
+# `git checkout <path>` — how every drill undoes itself.
+_CHECKOUT = re.compile(r"^git checkout ([A-Za-z0-9_./-]+)$", re.MULTILINE)
+
+
+def sed_commands(text: str) -> list[tuple[str, str]]:
+    """Every `(script, file)` a drill in `text` tells the learner to run.
+
+    Parsed with `shlex` rather than a regex over the quoted script: the scripts
+    contain `|`, `/` and spaces, and a regex that tries to find the closing
+    quote gets the `s|a|b|` form wrong.
+    """
+    out = []
+    for block in _FENCED.findall(text):
+        for line in _CONTINUATION.sub(" ", block).splitlines():
+            if not line.strip().startswith("sed "):
+                continue
+            tokens = shlex.split(line)
+            for stop, token in enumerate(tokens):
+                if token in _SHELL_OPERATOR:
+                    tokens = tokens[:stop]
+                    break
+            args = [t for t in tokens[1:] if not t.startswith("-")]
+            if len(args) == 2:
+                out.append((args[0], args[1]))
+    return out
+
+
+@pytest.mark.parametrize("module", modules(), ids=_ids(modules()))
+def test_every_drill_sed_still_changes_the_file_it_targets(module):
+    """A drill that seeds no bug is worse than a drill that fails.
+
+    `sed -i` exits 0 when its pattern matches nothing, so a drill whose target
+    moved leaves the learner rebuilding a *healthy* sandbox and hunting a bug
+    that was never seeded. Both of `02-loading-twice.md`'s drills sat in that
+    state after `ingest/pipeline.py` was split into `ingest/sources/`: the paths
+    they cite still exist, so `test_every_path_a_module_cites_exists` was green
+    the whole time.
+
+    Run rather than pattern-matched. sed scripts are POSIX BRE, where `(`, `{`
+    and `+` mean something different than they do to `re`, and the drills use
+    all three; reimplementing that dialect to check it is how the checker
+    acquires its own bugs. A copy of the file and the real `sed` cannot be wrong
+    about what the learner's `sed` will do.
+    """
+    inert = []
+    for script, target in sed_commands(module.read_text()):
+        source = project_root() / target
+        if not source.exists():  # test_every_path_a_module_cites_exists owns this
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = pathlib.Path(tmp) / source.name
+            copy.write_bytes(source.read_bytes())
+            done = subprocess.run(
+                ["sed", "-i", script, str(copy)], capture_output=True, text=True, check=False
+            )
+            if done.returncode != 0:
+                inert.append(f"{target}: sed rejected {script!r} — {done.stderr.strip()}")
+            elif copy.read_bytes() == source.read_bytes():
+                inert.append(f"{target}: {script!r} matches nothing, so the drill seeds no bug")
+    assert not inert, f"{module.name} has drills that no longer bite:\n  " + "\n  ".join(inert)
+
+
+@pytest.mark.parametrize("module", modules(), ids=_ids(modules()))
+def test_every_drill_checks_out_the_file_it_edited(module):
+    """The fix must undo the seed, in the same section.
+
+    A drill that edits `ingest/sources/worldbank.py` and restores
+    `ingest/pipeline.py` leaves the bug in the tree and reports success. One
+    direction only: `git checkout` of a file no `sed` touched is how
+    `00-setup.md` and `01-grain.md` demonstrate the loop over a hand edit.
+    """
+    unrestored = []
+    for heading, body in sections(module.read_text()):
+        edited = {target for _, target in sed_commands(body)}
+        restored = set(_CHECKOUT.findall(body))
+        if missing := sorted(edited - restored):
+            unrestored.append(f"{heading.removeprefix('## ').strip()!r}: {missing}")
+    assert not unrestored, (
+        f"{module.name} seeds edits it never checks out again:\n  " + "\n  ".join(unrestored)
+    )

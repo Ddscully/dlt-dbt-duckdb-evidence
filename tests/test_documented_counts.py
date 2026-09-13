@@ -487,3 +487,70 @@ def test_the_documented_description_coverage_is_what_the_ymls_carry():
                 f"{path.relative_to(REPO_ROOT)} claims {got}, the ymls carry {expected}"
             )
     assert seen == 1, f"expected the coverage claim in exactly one place, found {seen}"
+
+
+# `dbt build`'s verdict as the course quotes it back: `PASS=561 WARN=0 …`.
+_PASS = re.compile(r"\bPASS=(\d+)")
+
+# Which documents mean a *whole* build by it. A `PASS=` is only comparable to a
+# project total when the build it describes was a project build, and plenty here
+# are not: `unit-testing-dbt-models` and the `_unit_tests.yml` files quote
+# `PASS=83`, `PASS=22` and `PASS=16` from `dbt build --select <model>`, which are
+# right.
+#
+# Derived from the text rather than listed: a document that cites a `course-*`
+# recipe is describing the sandbox build, which is every node. That happens to
+# select the course and its authoring skill today, and it will keep selecting the
+# right documents without anyone maintaining a list — which a hand-written scope
+# would not, since the whole failure mode here is prose nobody revisits.
+_WHOLE_BUILD = re.compile(r"just course-(sandbox|rebuild)")
+
+# Resource types `dbt build` executes and reports in PASS. Exposures are
+# resolved, not built, and land in dbt's NO-OP bucket instead.
+BUILT_RESOURCE_TYPES = ("model", "seed", "snapshot", "test")
+
+
+def built_nodes(man: dict) -> int:
+    """What a green `dbt build` prints as `PASS=`.
+
+    Unit tests live under their own manifest key rather than in `nodes`, so they
+    are counted separately; miss them and this reads 36 low, which is exactly
+    the size of a plausible-looking wrong answer.
+    """
+    return sum(
+        1 for v in man["nodes"].values() if v.get("resource_type") in BUILT_RESOURCE_TYPES
+    ) + len(man.get("unit_tests", {}))
+
+
+def test_every_quoted_build_verdict_is_the_one_dbt_would_print():
+    """`PASS=n` in prose must be the number of nodes `dbt build` runs.
+
+    The course quotes this literal twelve times, and load-bearingly: each drill
+    shows the *same* verdict before and after seeding a bug, so the whole claim
+    of the module is that this number does not move. It sat at 402 while the
+    suite grew to 561 — invisible to `CLAIM` above, which needs a test noun
+    after the number and finds `WARN=0` instead.
+
+    Derived rather than measured, so it needs no warehouse: a build's PASS count
+    is a property of the manifest, and it is the same 561 in CI's 17-country
+    slice as on a full warehouse, because a fixture changes rows and never nodes.
+    """
+    expected = built_nodes(manifest())
+    stale: list[str] = []
+    seen = 0
+    for path in tracked_prose():
+        text = path.read_text()
+        if not _WHOLE_BUILD.search(text):
+            continue
+        for line, row in enumerate(text.splitlines(), start=1):
+            for match in _PASS.finditer(row):
+                seen += 1
+                if int(match.group(1)) != expected:
+                    rel = path.relative_to(REPO_ROOT)
+                    stale.append(f"  {rel}:{line}: PASS={match.group(1)}, dbt builds {expected}")
+    assert not stale, "quoted build verdicts disagree with the manifest:\n" + "\n".join(stale)
+    assert seen, (
+        "no `PASS=n` found in prose about a whole build — the course quotes it in "
+        "every drill, so one of `_PASS` and `_WHOLE_BUILD` has stopped matching "
+        "and this check is now looking at nothing"
+    )

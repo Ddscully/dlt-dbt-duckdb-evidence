@@ -26,7 +26,24 @@ loop) and `course-query` (one read-only query).
 **`just dbt-build` is the trap**: it targets the real warehouse, so a drill run
 through the wrong recipe writes a deliberately broken model into
 `data/warehouse.duckdb`. The course says so in 00 and the recipes set
-`WAREHOUSE_PATH` themselves.
+`WAREHOUSE_PATH` *and* `LAKEHOUSE_DIR` themselves — the second keeps a drill's
+re-ingest from merging the 17-country slice into the real landing zone, which is
+where the weather archive lives.
+
+**`course-query` attaches the sandbox lakehouse, and had to be taught to.** When
+`raw` moved into DuckLake the recipe kept opening the warehouse file alone, and
+two whole classes of exercise died in silence for anyone who did not run them:
+`select … from lakehouse.raw.wb_wdi` fails with `schema "raw" does not exist`,
+and — the one nobody predicts — `select … from staging.stg_co2` fails too, with
+`Catalog "lakehouse" does not exist!`, because every staging model is a *view
+over* `lakehouse.raw`. It attaches through `lake.lakehouse`'s own
+`catalog_path`/`data_path`/`attach` rather than re-spelling the ATTACH SQL the
+way `just sql` does, so the recipe cannot drift from the catalog layout.
+
+**Write landing tables as `lakehouse.raw.<table>` everywhere, including in
+prose.** A bare `raw.<table>` has not resolved anywhere since the move, and a
+learner who copies the name out of a sentence hits the same error as one who
+copies it out of a code block.
 
 **Module 04 needed a fourth course recipe, and the reason is a real seam in the
 stack rather than a convenience.** `just course-rebuild` runs `dbt build` and
@@ -54,9 +71,29 @@ countries on a 17-country slice. Three different numbers, none of them 17.
 01's drill (`left join co2` -> `inner join co2` in
 `dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`) was run: the mart goes 4,096 ->
 3,487 rows and **52 -> 17 countries**, EU price rows 701 -> 104, and `dbt build`
-reports `PASS=402 WARN=0 ERROR=0` either way. Don't quote a drill's numbers
+reports `PASS=561 WARN=0 ERROR=0` either way. Don't quote a drill's numbers
 without seeding it — the whole claim of the course is that the verdict doesn't
 move.
+
+**A drill's `sed` is a citation, and `sed -i` exits 0 when it matches nothing.**
+This is the sharpest failure mode in the material and nothing used to catch it:
+`ingest/pipeline.py` was split into `ingest/sources/`, both of module 02's
+drills went on naming the old file, and the paths they cite still exist — so
+`test_every_path_a_module_cites_exists` stayed green while the drills seeded no
+bug at all and sent the learner hunting one. `test_every_drill_sed_still_changes_the_file_it_targets`
+now copies the target and runs the real `sed` against it, because sed scripts are
+POSIX BRE and reimplementing that dialect to check it is how the checker acquires
+its own bugs. Its partner, `test_every_drill_checks_out_the_file_it_edited`,
+holds the seed and the fix to the same file within one `##` section: restoring a
+file you did not edit reports success and leaves the bug in the tree.
+
+**Numbers that count the reader's own history are not answers.** `dbt_test__audit`
+holds one table per test *ever run* against that warehouse, so its count measures
+how many models the reader has renamed — 518 tables and 36 orphans here on
+2026-09-12, zero orphans on a fresh build. A reveal that states one as *the*
+answer contradicts what the learner sees. Give it as a dated example and name the
+invariant instead (audit tables drift above the test count; the excess is
+orphans).
 
 **A drill whose fix is `git checkout <file>` silently reverts uncommitted work
 in that file.** Module 04's denominator drill restores
@@ -129,20 +166,32 @@ project, not just the drill.
 ### Module 02 — ingestion
 
 **Its drills are measured too, and one of them changed the repo's understanding
-of an old bug.** The merge-key drill (drop `indicator` from `WDI_PRIMARY_KEY`)
-takes `raw.wb_wdi` from 6,336 rows to **576** and 11 indicators to **1**, while
+of an old bug — twice.** The merge-key drill (drop `indicator` from
+`WDI_PRIMARY_KEY`) takes `lakehouse.raw.wb_wdi` from 6,336 rows to **576** while
 `staging.stg_wdi` stays at **576 rows** — unchanged, because a pivot's output
-grain does not depend on how many input rows feed it. Ten of eleven columns go to
-100% null at a constant row count, so the obvious sanity check is structurally
-blind to it. `dbt build` reports `PASS=402 ERROR=0` either way.
+grain does not depend on how many input rows feed it. Nine of eleven columns go
+to 100% null at a constant row count, so the obvious sanity check is structurally
+blind to it. `dbt build` reports `PASS=561 ERROR=0` either way.
+
+The second correction is the one worth carrying: the reveal used to say a single
+indicator survived, `NY.GDP.PCAP.CD`, "which won the collision by arriving
+first". Re-running the drill (2026-09-12) lands **two** — 392 rows of
+`EG.ELC.RNEW.ZS` and 184 of `AG.LND.FRST.ZS`, reproducibly across three
+rebuilds, and neither is the first or the last code in `WB_WDI_INDICATORS`. All
+eleven indicators cover the identical 16 x 36 grid in the fixture, so every key
+collides and dlt's merge picks a winner per key on grounds nothing in this repo
+determines. **Do not explain a mechanism the drill only demonstrates**: a stable
+number invites a causal story, and the story was wrong for as long as nobody
+re-ran it.
 
 **`.arrow()` no longer reproduces the 1,000,000-row truncation as written.** In
 DuckDB 1.5.5 `.arrow(n)` returns a `RecordBatchReader` (the same object as
 `to_arrow_reader(n)`) and dlt *drains* it, so `yield con.sql(...).arrow(n)` lands
 every row. The drill stages the original mistake explicitly with
 `yield next(...)` — a caller taking the first batch and treating it as the table.
-The guidance in `ingest/pipeline.py` is still right; what changed is that the
-failure now needs writing on purpose rather than falling out of the obvious call.
+The guidance in `ingest/sources/retail.py` is still right; what changed is that
+the failure now needs writing on purpose rather than falling out of the obvious
+call.
 
 **A shape test protects the shape, not the quantity — and the boundary decides
 whether it fires.** Truncating the retail read to 10,000 rows *does* fail
@@ -161,14 +210,16 @@ answer is the module.** `dbt_utils.accepted_range` compiles to
 silently skips its nulls. On `fct_emissions_energy` that means each of the
 fourteen range tests examines between **1.6%** (`electricity_price_eur_kwh`, 701
 of 43,138) and **54%** (`co2_mt`) of the fact — except `year`, the one column
-that is never null, at 100%. 162 of the 367 `marts` columns carry any test at
+that is never null, at 100%. 198 of the 407 `marts` columns carry any test at
 all, against every mart model under a type contract: two different guarantees, and
-worth being able to say which one you have. The audit schema is measurable too —
-**391 tables against 482 tests**, i.e. 22 orphans, which is the stale-audit-table
-bullet in `CLAUDE.md` showing up as a number.
+worth being able to say which one you have. The audit schema is measurable too,
+but **it counts the reader's own rename history, not the project** — 518 tables
+against 482 tests, i.e. 36 orphans, on the warehouse last measured (2026-09-12),
+and zero on a freshly built one. Write that kind of figure as an example with its
+date, never as the answer, or the reveal contradicts what the learner sees.
 
 **Drill 1 is the calibration trap with a second axis nobody expects.** Adding
-`max_value: 50` to `stg_co2.co2_per_capita` builds `PASS=402 WARN=0 ERROR=0` on
+`max_value: 50` to `stg_co2.co2_per_capita` builds `PASS=561 WARN=0 ERROR=0` on
 the sandbox, whose maximum is **22.22 — the USA in 1973**, a real and satisfying
 peak that is 35x too small. On the real warehouse it rejects **124 rows across 6
 countries** (Sint Maarten 782.7, Kuwait 364.8, Brunei 245.1, Qatar, Curaçao, UAE
@@ -197,7 +248,7 @@ one of three tables wrong, which has no signature.
 `share_of_group_pct` is a ratio of two numbers that both moved — so using
 `emission_factor_g_co2_per_kwh` where `emission_factor_t_co2_per_mwh` belongs
 turns 232,456 tCO2e into 232.5 **Mt** (more than Spain's 215.5 Mt in 2023) with
-`PASS=402 ERROR=0`. **A scaling error is invisible to one-sided bounds and to
+`PASS=561 ERROR=0`. **A scaling error is invisible to one-sided bounds and to
 every ratio downstream of it**, which is module 03's ceiling argument arriving as
 a live gap rather than a hypothetical.
 

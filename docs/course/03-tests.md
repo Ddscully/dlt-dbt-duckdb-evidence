@@ -17,18 +17,19 @@ for the pivot that turns row loss into column emptiness.
 ## 1. The census
 
 A dbt test is a `select` that must return no rows. That is the whole mechanism,
-and everything below is a consequence of it. This project has 425 of them:
+and everything below is a consequence of it. This project has 482 of them:
 
 | test | n | what it asserts |
 |---|---|---|
-| `not_null` | 194 | this column is populated on every row |
-| `dbt_utils.accepted_range` | 143 | this column's values lie in a band |
-| `dbt_utils.expression_is_true` | 30 | an arbitrary row-level claim |
-| `dbt_utils.unique_combination_of_columns` | 28 | this is the grain |
-| `accepted_values` | 12 | this column is an enum |
-| `unique` | 11 | this key does not repeat |
-| `relationships` | 5 | every value here exists over there |
+| `not_null` | 224 | this column is populated on every row |
+| `dbt_utils.accepted_range` | 152 | this column's values lie in a band |
+| `dbt_utils.expression_is_true` | 33 | an arbitrary row-level claim |
+| `dbt_utils.unique_combination_of_columns` | 32 | this is the grain |
+| `accepted_values` | 17 | this column is an enum |
+| `unique` | 14 | this key does not repeat |
+| `relationships` | 7 | every value here exists over there |
 | `dbt_utils.equal_rowcount` | 2 | these two relations are the same height |
+| a singular test | 1 | hand-written SQL, answerable no other way |
 
 ```bash
 just course-query "
@@ -36,14 +37,21 @@ select test_type, count(*) as n from analytics.pipeline_tests
 group by 1 order by 2 desc"
 ```
 
-Read the shape of that table rather than the total. **337 of the 425 (79%) are
+Read the shape of that table rather than the total. **376 of the 482 (78%) are
 `not_null` and `accepted_range`**, both of which are per-column statements about
 rows that are *present*. That is module 01's punchline restated as a census: the
 test suite is overwhelmingly made of assertions that a deletion makes *more*
 likely to pass.
 
-The three at the bottom are the interesting ones, and they are rare because they
-are the only ones that compare a relation against something outside itself.
+Three of the 482 are the interesting ones, and they are rare because they are the
+only ones that compare a relation against something **outside itself**: the seven
+`relationships`, the two `equal_rowcount`, and the single hand-written test,
+`income_history_latest_vintage_matches_the_country_dimension`. That last one is
+worth opening now, because it is the shape you reach for when no generic fits:
+`dim_country_income_history` and `dim_country` arrive at the current year's
+income classification by two different routes, so in the current year they must
+agree. It ships `severity: warn`, since what makes them disagree is the World
+Bank reclassifying an economy — real news, not a broken build.
 
 ## 2. A bound is a claim about a distribution
 
@@ -135,7 +143,7 @@ total with nothing whatsoever checking them.** The test is right, and "the annex
 is checked against itself" is a sentence that would badly overstate it.
 
 **(c) The rows are not there.** Covered in module 01 and unfixable by any test in
-the table above. Worth one line here: of the eight test types, exactly one
+the table above. Worth one line here: of the nine test types, exactly one
 (`equal_rowcount`) can fail because rows are *missing*, and it works only because
 it compares against another relation.
 
@@ -167,16 +175,20 @@ Two consequences that are not obvious:
   A test's real verdict is its `fail_calc`, which defaults to `count(*)` but does
   not have to be. `dbt_utils.equal_rowcount` overrides it with
   `sum(coalesce(diff_count, 0))` and writes a one-row *summary* whether it passed
-  or failed: `(1, 1, 265035, 265035, 0)`. Counting rows scores that as one
+  or failed: `(1, 1, 265702, 265702, 0)`. Counting rows scores that as one
   failure against a build that finished `ERROR=0`, which is how the pipeline
   health page came to contradict the build it was reporting on.
   `src/modern_data_stack/observability.py` reads `fail_calc` out of the manifest
-  and applies it; 462 of the 482 tests here use the default.
+  and applies it; 480 of the 482 tests here use the default.
 - **dbt writes that schema every build and never cleans it.** An audit table
   whose test has been renamed or deleted stays, is empty, and therefore scores as
-  passing. A real warehouse here held **391 audit tables, 22 of them orphans**
-  whose tests no longer existed. `transform/pipeline_status.py` filters them
-  against the manifest for that reason.
+  passing. So `count(dbt_test__audit)` drifts *above* the test count over a
+  warehouse's life, and the excess is orphans: 518 tables against 482 tests on
+  the warehouse this was last measured on (2026-09-12), i.e. **36 orphans**.
+  Your own number will differ, and that is the point — it is a function of how
+  many models you have renamed, not of what the project tests.
+  `transform/pipeline_status.py` filters them against the manifest for that
+  reason.
 
 ---
 
@@ -195,7 +207,7 @@ sed -i '/name: co2_per_capita/,+3 s/{min_value: 0}/{min_value: 0, max_value: 50}
 just course-rebuild
 ```
 
-**Observe.** `PASS=402 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
+**Observe.** `PASS=561 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
 the reviewer's evidence checks out:
 
 ```bash
@@ -208,7 +220,13 @@ from staging.stg_co2"
 warehouse.
 
 1. Query `data/warehouse.duckdb` for the rows this test would have rejected. How
-   many are there, and how many countries?
+   many are there, and how many countries? These are `staging` models, so open
+   the real warehouse the way `just sql` does — with the lakehouse attached, or
+   the views over `lakehouse.raw` cannot resolve ([00](./00-setup.md)):
+
+   ```bash
+   just sql        # read-only, both catalogs, exit with .quit
+   ```
 2. Look at those rows. Is any one of them bad data? Say what each country was
    doing.
 3. **The question the drill is for:** the reviewer could have caught this by
@@ -463,7 +481,7 @@ just pipeline-status   # only if analytics.pipeline_tests is stale
 <details>
 <summary>Reveal</summary>
 
-**1. 367 columns in `marts`, of which 162 carry a test**: 44%.
+**1. 407 columns in `marts`, of which 198 carry a test**: 49%.
 
 ```sql
 with mart_cols as (
@@ -481,7 +499,7 @@ left join tested t on t.tested_model = m.model and t.tested_column = m.column_na
 ```
 
 Set that beside the *contract* coverage: every mart model is contract-enforced, so
-**every one of those columns has its type pinned** and 44% have their values
+**every one of those columns has its type pinned** and 49% have their values
 checked. Those are two different guarantees and it is worth being able to say
 which one you have.
 
@@ -510,10 +528,13 @@ column is the one place a cents/euros mix-up could enter — is being asked abou
 for knowing the number before you quote "43,138 rows, fully range-checked" to
 anybody.
 
-**3. 391 audit tables against 482 tests: 22 orphans.** dbt writes the audit
-schema on every build and never removes a table whose test has gone, and the
-alias hash is computed over the test's arguments, so renaming a model orphans
-every audit table attached to it. Being empty, an orphan scores as *passing*, so
+**3. More audit tables than tests, and the excess is orphans.** On the warehouse
+this was written against, 518 tables against 482 tests: **36 orphans**. Expect a
+different number — it counts your rename history, not the project's tests, and
+a freshly built warehouse has none at all. dbt writes the audit schema on every
+build and never removes a table whose test has gone, and the alias hash is
+computed over the test's arguments, so renaming a model orphans every audit
+table attached to it. Being empty, an orphan scores as *passing*, so
 counting audit tables inflates the suite with tests that no longer exist and
 cannot fail. `transform/pipeline_status.py` filters against the manifest, keyed
 on the manifest being present rather than on the match, so a missing manifest
@@ -521,7 +542,7 @@ degrades to bare names instead of emptying the table.
 
 **4. Both sides, honestly.**
 
-*Under-built:* 44% column coverage and a median range test seeing a third of the
+*Under-built:* 49% column coverage and a median range test seeing a third of the
 rows means most of this warehouse is unasserted. The columns with the *worst*
 coverage are the sparse ones, which is backwards: sparse columns are where a
 join went wrong.
@@ -536,7 +557,7 @@ The synthesis, and the actual answer: **coverage is the wrong metric.** The righ
 question is per column, "what is the wrong value I could plausibly get here, and
 would anything notice?" That produces very few tests on pass-through columns,
 several on anything this repo *derives* (a ratio, a conversion, a gap-fill), and
-one on every join that could drop rows, which is the assertion the 369 are
+one on every join that could drop rows, which is the assertion the 482 are
 thinnest on and which no `accepted_range` can ever be.
 </details>
 
@@ -587,13 +608,13 @@ failed:
 
 | id_a | id_b | count_a | count_b | diff_count |
 |---|---|---|---|---|
-| 1 | 1 | 265,035 | 265,035 | **0** |
+| 1 | 1 | 265,702 | 265,702 | **0** |
 
 One row, zero difference, passing. `count(*)` reads it as one failure.
 
 The principle: **do not reimplement the verdict of a tool you are reporting on.**
 The health page's whole value is agreeing with the build; a second, simpler
-definition of "failing" that agrees 367 times out of 369 is worse than no page,
+definition of "failing" that agrees 480 times out of 482 is worse than no page,
 because the two disagreements are exactly where someone will trust the wrong one.
 The manifest already carries `fail_calc` and `severity` per node, so reading them
 is both correct and less code than the shortcut.
