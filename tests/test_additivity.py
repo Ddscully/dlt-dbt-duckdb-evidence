@@ -2,16 +2,16 @@
 
 A Parquet file carries column names and types and nothing else. Nothing in it
 says that `co2_mt` may be summed while `renewables_share_pct` may not, or that
-`population` adds across countries and not across years — and 118 of the 229
-numeric mart columns are non-additive, with 16 more semi_additive. So
+`population` adds across countries and not across years — and 94 of the 192
+numeric mart columns are non-additive, with 13 more semi_additive. So
 the warehouse states it: `meta: {additivity: …}` on the column, in the same ymls
 that carry the contract, and `publish/export_warehouse.py` carries the labels
 into the release manifest so a consumer who cannot be paged has them too.
 
 **Every count in this docstring is a manifest count**, the basis `numeric()`
-below returns. The ymls carry 193 literal `additivity:` lines; the manifest
-carries 229 labelled columns, because `fct_emissions_energy_v1` inherits 36
-through `include: all` and declares one.
+below returns. The ymls carry 192 literal `additivity:` lines and the manifest
+the same number of labelled columns; the two differ only while a model version
+inherits labels through `include: all`, as `fct_emissions_energy_v1` did.
 `test_every_documented_additivity_count_is_one_the_labels_actually_carry`
 reads these figures out of this docstring and checks them.
 
@@ -92,9 +92,9 @@ def mart_columns() -> dict[tuple[str, str], dict]:
     """Every column of every marts model, keyed by (relation, column).
 
     Keyed on the *published* relation (`schema.alias`) rather than the model
-    name, because the versioned model is two relations and they are labelled
-    independently — v1 inherits its 36 through `include: all` and declares
-    `co2_per_gdp` itself.
+    name, because every version of a model is its own relation, labelled
+    independently — as `fct_emissions_energy_v1` was, through `include: all`,
+    while it shipped.
     """
     manifest = json.loads(Path(manifest_path).read_text())
     out = {}

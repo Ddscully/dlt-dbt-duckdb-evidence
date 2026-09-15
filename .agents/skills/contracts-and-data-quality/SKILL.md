@@ -64,8 +64,8 @@ account of the same ground is `docs/DATA_QUALITY.md`.
   content: `stg_country` and `stg_energy` are `protected`, the only places one
   domain reads another's cleaning layer, with the reasons beside the override.
   Breaking one fails `dbt parse`, naming the consumer.
-- **Contracts are enforced on every mart model — 21 relations (20 models, one of
-  them versioned) and 407 columns, each with a `data_type`.** The column list was
+- **Contracts are enforced on every mart model — 20 relations (20 models, one of
+  them versioned) and 365 columns, each with a `data_type`.** The column list was
   generated from `information_schema` and inserted line-wise. **Never round-trip
   these ymls through PyYAML**: it reflows every description to add a scalar.
   - The schema contract catches what the grain contract cannot — a column
@@ -90,18 +90,18 @@ account of the same ground is `docs/DATA_QUALITY.md`.
   release exposure is exactly the marts.
 - **Every numeric mart column declares `meta: {additivity: …}`** from a closed
   vocabulary — `additive`, `semi_additive`, `non_additive`, `not_a_measure` —
-  because neither a type nor a test says whether `sum()` means anything: 118 of
-  the 229 are non-additive. Those are manifest counts; `fct_emissions_energy_v1`
-  inherits 36 through `include: all`, so the ymls carry 193 literal
-  `additivity:` entries. `tests/test_additivity.py` holds coverage, the closed
+  because neither a type nor a test says whether `sum()` means anything: 94 of
+  the 192 are non-additive. Those are manifest counts, and the ymls carry 192
+  literal `additivity:` entries — the two agree only while no model version
+  inherits labels through `include: all`, as `fct_emissions_energy_v1` did. `tests/test_additivity.py` holds coverage, the closed
   vocabulary, numeric-only labels, and a name rule — no ratio-named column may be
   summable — which is the one check that catches a label present and *wrong*.
-  - `semi_additive` must say which direction fails, and there are 16
+  - `semi_additive` must say which direction fails, and there are 13
     `semi_additive` columns: `population` gives person-years across years;
     `original_quantity` belongs to the matched purchase, so summing it counts a
     purchase once per return matched to it. `gdp_usd` is `semi_additive` and
     `gdp_constant_usd` `additive` — the constant-dollar gotcha as metadata.
-  - The labels ship in `manifest.json`'s `additivity` map (285 columns across 26
+  - The labels ship in `manifest.json`'s `additivity` map (248 columns across 25
     relations), with `analytics`' in `EXTRA_ADDITIVITY` because dbt cannot see
     Polars output. They are stated rather than derived from the mart, because a
     derived label fails *open* when a mart column is renamed.
@@ -109,10 +109,16 @@ account of the same ground is `docs/DATA_QUALITY.md`.
     insert that only skips comments writes a second `meta:` key — which PyYAML
     silently resolves to the last, and `check-yaml` does not flag.
 - **`fct_emissions_energy` is versioned** because nothing in the repo refs it and
-  the release ships it: v2 renames `co2_per_gdp` to `co2_kg_per_gdp_ppp_2011`. v2
-  is aliased back to the bare relation name, and v1 is a view over v2 that puts
-  the old column back last, with its contract declared in the same order.
-  - **The `deprecation_date` (2026-11-01) is enforced.** dbt's own behaviour when
+  the release ships it: v2 renamed `co2_per_gdp` to `co2_kg_per_gdp_ppp_2011`. v2
+  is aliased back to the bare relation name. v1, a view over v2 that put the old
+  column back last with its contract declared in the same order, was removed at
+  the end of its window (2026-11-01), so v2 is the only version.
+  - **dbt never drops a removed version's relation.** A warehouse file kept
+    across builds still holds `marts.fct_emissions_energy_v1` as a view, and
+    `publish/export_warehouse.py` exports whole schemas, so a local export ships
+    it; every workflow builds from an empty file, so no release does. Drop it with
+    `just sql write`.
+  - **A `deprecation_date` is enforced.** dbt's own behaviour when
     it passes is a warning and exit 0, so `flags.warn_error_options` promotes
     `DeprecatedModel` and `DeprecatedReference` to errors, failing `dbt parse`.
     `UpcomingReferenceDeprecation` stays a warning — it fires during the

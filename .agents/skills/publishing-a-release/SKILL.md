@@ -88,7 +88,7 @@ it cost to learn:
 ## What the manifest tells a consumer they cannot see
 
 - **`manifest.json` carries an `additivity` map, and it exists because a Parquet
-  file has types and nothing else.** 285 published columns are labelled
+  file has types and nothing else.** 248 published columns are labelled
   `additive` / `semi_additive` / `non_additive` / `not_a_measure`, and about half
   are non-additive — `sum(renewables_share_pct)` is nonsense that returns a
   number, with no error anywhere for a consumer who cannot be paged.
@@ -121,9 +121,9 @@ it cost to learn:
     hand — so its coverage is asserted against the frame `build_retail_rfm`
     emits rather than against a list.
   - **Keyed by `schema.alias`**, so it names the relations the release actually
-    ships. The versioned model appears twice — `marts.fct_emissions_energy` and
-    `marts.fct_emissions_energy_v1` — which is what the Parquet files are called,
-    and v1 inherits its 36 labels through `include: all`.
+    ships: a versioned model appears once per live version, under the alias its
+    Parquet file is called. While `fct_emissions_energy_v1` shipped it sat beside
+    `marts.fct_emissions_energy`, with labels inherited through `include: all`.
 
 ## Reading the load time
 

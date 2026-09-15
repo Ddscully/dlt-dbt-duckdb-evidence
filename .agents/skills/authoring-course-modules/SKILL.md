@@ -71,7 +71,7 @@ countries on a 17-country slice. Three different numbers, none of them 17.
 01's drill (`left join co2` -> `inner join co2` in
 `dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`) was run: the mart goes 4,096 ->
 3,487 rows and **52 -> 17 countries**, EU price rows 701 -> 104, and `dbt build`
-reports `PASS=561 WARN=0 ERROR=0` either way. Don't quote a drill's numbers
+reports `PASS=543 WARN=0 ERROR=0` either way. Don't quote a drill's numbers
 without seeding it — the whole claim of the course is that the verdict doesn't
 move.
 
@@ -165,8 +165,8 @@ lesson generalises: **when prose quotes a mechanism rather than a name, the
 guard has to run the mechanism.**
 
 **Every stale figure in that audit was one no scanner could see.** The counts
-guard needs a test noun after the number, so "425 of them", "462 of the 482
-tests" and "agrees 367 times out of 369" all passed it, and a whole stale test
+guard needs a test noun after the number, so "425 of them", a "462 of the …"
+pair and "agrees 367 times out of 369" all passed it, and a whole stale test
 census survived inside the module about counting tests. Widening `CLAIM` is one
 answer; the cheaper one is to write a count in the shape the guard reads.
 
@@ -187,7 +187,7 @@ of an old bug — twice.** The merge-key drill (drop `indicator` from
 `staging.stg_wdi` stays at **576 rows** — unchanged, because a pivot's output
 grain does not depend on how many input rows feed it. Nine of eleven columns go
 to 100% null at a constant row count, so the obvious sanity check is structurally
-blind to it. `dbt build` reports `PASS=561 ERROR=0` either way.
+blind to it. `dbt build` reports `PASS=543 ERROR=0` either way.
 
 The second correction is the one worth carrying: the reveal used to say a single
 indicator survived, `NY.GDP.PCAP.CD`, "which won the collision by arriving
@@ -220,22 +220,22 @@ workbook's own count instead.
 
 ### Module 03 — tests
 
-**It measured how much of the warehouse the 482 tests actually look at, and the
+**It measured how much of the warehouse the 465 tests actually look at, and the
 answer is the module.** `dbt_utils.accepted_range` compiles to
 `where not (col >= min)`, and `not (null >= 0)` is *null*, so every range test
 silently skips its nulls. On `fct_emissions_energy` that means each of the
 fourteen range tests examines between **1.6%** (`electricity_price_eur_kwh`, 701
 of 43,138) and **54%** (`co2_mt`) of the fact — except `year`, the one column
-that is never null, at 100%. 198 of the 407 `marts` columns carry any test at
+that is never null, at 100%. 183 of the 365 `marts` columns carry any test at
 all, against every mart model under a type contract: two different guarantees, and
 worth being able to say which one you have. The audit schema is measurable too,
 but **it counts the reader's own rename history, not the project** — 518 tables
-against 482 tests, i.e. 36 orphans, on the warehouse last measured (2026-09-12),
+against a test count 36 smaller, on the warehouse last measured (2026-09-12),
 and zero on a freshly built one. Write that kind of figure as an example with its
 date, never as the answer, or the reveal contradicts what the learner sees.
 
 **Drill 1 is the calibration trap with a second axis nobody expects.** Adding
-`max_value: 50` to `stg_co2.co2_per_capita` builds `PASS=561 WARN=0 ERROR=0` on
+`max_value: 50` to `stg_co2.co2_per_capita` builds `PASS=543 WARN=0 ERROR=0` on
 the sandbox, whose maximum is **22.22 — the USA in 1973**, a real and satisfying
 peak that is 35x too small. On the real warehouse it rejects **124 rows across 6
 countries** (Sint Maarten 782.7, Kuwait 364.8, Brunei 245.1, Qatar, Curaçao, UAE
@@ -264,7 +264,7 @@ one of three tables wrong, which has no signature.
 `share_of_group_pct` is a ratio of two numbers that both moved — so using
 `emission_factor_g_co2_per_kwh` where `emission_factor_t_co2_per_mwh` belongs
 turns 232,456 tCO2e into 232.5 **Mt** (more than Spain's 215.5 Mt in 2023) with
-`PASS=561 ERROR=0`. **A scaling error is invisible to one-sided bounds and to
+`PASS=543 ERROR=0`. **A scaling error is invisible to one-sided bounds and to
 every ratio downstream of it**, which is module 03's ceiling argument arriving as
 a live gap rather than a hypothetical.
 

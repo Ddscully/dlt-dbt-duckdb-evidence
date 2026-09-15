@@ -101,7 +101,7 @@ that an upstream publisher moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
 that OWID was down.
 
-**What blocks.** 482 dbt tests run inside `dbt build`, every one with
+**What blocks.** 465 dbt tests run inside `dbt build`, every one with
 `store_failures`, so a red test hands you `select * from
 dbt_test__audit.<test_name>` rather than a count. Eight Dagster asset checks sit
 alongside them, and `site_pages_all_rendered` is blocking and checks page
@@ -121,7 +121,7 @@ Measured on this machine against the live APIs, per stage, on 2026-09-09:
 | Stage | Time | Notes |
 |-------|------|-------|
 | `just ingest` | **29.6 s** | seven sources, with the 45 MB retail workbook already cached — its download and parse add ~12 s to a cold run |
-| `just dbt-build` | **31.4 s** wall, **24.5 s** of dbt's own | 561 built nodes: 33 models, 2 snapshots, 8 seeds, 482 data tests and 36 unit tests (dbt's own total of 571 adds the 10 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
+| `just dbt-build` | **31.4 s** wall, **24.5 s** of dbt's own | 561 built nodes when measured (dbt's own total of 571 adds the 10 exposures, which it counts but never builds); removing `fct_emissions_energy`'s v1 has since taken the build to 543; contracts are enforced, which is a `describe` per mart |
 | `just transform` | **1.8 s** | two Polars models |
 | `just pipeline-status` | **2.5 s** | observability tables |
 | **total** (`just run`) | **≈ 65 s** | ingest is 45% of it, and most of *that* is still network |
@@ -241,8 +241,8 @@ number before.
    is a few thousand a second and a few terabytes, there's no distributed query
    processing, and it's beta until 2.0 this autumn. And I haven't put dbt's
    build graph through it. That's the run that would settle it.
-3. **Full-refresh materialisation, for 32 of the 33 models.** Every mart is
-   `+materialized: table` and rebuilt whole (19 tables, 13 views, one
+3. **Full-refresh materialisation, for 31 of the 32 models.** Every mart is
+   `+materialized: table` and rebuilt whole (19 tables, 12 views, one
    incremental). That is deliberate rather than
    pending: each one re-derives a source that gets fully re-fetched, so
    rebuilding is *how* an upstream restatement is picked up, and the whole
@@ -324,11 +324,11 @@ below, and the profile is the point.
 
 | Dimension | Level | Why, with the number that decides it |
 |---|---|---|
-| Metadata completeness | **Partial** | Every model carries a description and an owner (33/33 each) and 21 relations enforce a contract over 407 typed columns — but only **171 of those 407 columns (42%) carry a description**. |
-| Quality observability | **Established** | 482 data tests and 36 unit tests with failing rows stored per test, 8 asset checks, freshness thresholds on 7 of 8 sources, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
+| Metadata completeness | **Partial** | Every model carries a description and an owner (32/32 each) and 20 relations enforce a contract over 365 typed columns — but only **150 of those 365 columns (41%) carry a description**. |
+| Quality observability | **Established** | 465 data tests and 36 unit tests with failing rows stored per test, 8 asset checks, freshness thresholds on 7 of 8 sources, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
 | Access governance | **Absent** | Structurally, not by neglect — see below. |
 | Lineage traceability | **Established** | One graph from dlt through dbt and Polars to the site; 10 exposures answer "what breaks if I change this" per page; the bus matrix is derived from the manifest rather than drawn. |
-| Organizational ownership | **Ad hoc** | Ownership is declared and enforced for all 33 models. There is one owner, who is also the only contributor. |
+| Organizational ownership | **Ad hoc** | Ownership is declared and enforced for all 32 models. There is one owner, who is also the only contributor. |
 
 **Access governance is Absent and cannot be otherwise here, which is the most
 useful line in the table.** DuckDB has no access control at all: on the pinned

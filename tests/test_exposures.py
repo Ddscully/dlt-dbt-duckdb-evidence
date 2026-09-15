@@ -121,10 +121,9 @@ def test_the_release_exposure_names_every_mart():
     discover by reading the site, which is why it is asserted rather than described.
     """
     declared = declared_models("published_data_release")
-    # `fct_emissions_energy_v1.sql` / `_v2.sql` are two files and one model: an
-    # exposure names the model, and `ref()` without a `v=` resolves to the latest
-    # version. Both relations ship in the release, and both are covered by the one
-    # declaration.
+    # A versioned model's files carry a `_vN` suffix (`fct_emissions_energy_v2.sql`)
+    # while the exposure names the model, and `ref()` without a `v=` resolves to
+    # the latest version, so every live version is covered by the one declaration.
     # `rglob`, because the marts layer is one folder per dbt group. Compared in
     # both directions, so a glob that matches nothing fails rather than passing
     # "nothing undeclared".

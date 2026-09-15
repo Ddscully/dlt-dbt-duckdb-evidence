@@ -318,8 +318,8 @@ the one people reach for.
 the modelled layers in a 282 MB DuckDB file, plus a 111 MiB DuckLake landing
 zone — that one grows about 39 MiB per full ingest and nothing expires the
 snapshots, which is its own answer to what a run costs. The largest relation is
-`fct_retail_order_line` at 1,067,371 rows. A full `dbt build` — 571 nodes, 33
-models, 482 data tests, 36 unit tests — takes **24.5 s** of dbt's own time on
+`fct_retail_order_line` at 1,067,371 rows. A full `dbt build` — 571 nodes when measured on 2026-09-09, before
+`fct_emissions_energy`'s v1 was removed — took **24.5 s** of dbt's own time on
 four threads.
 `analytics.pipeline_runs` records that per build, so the trend is a query rather
 than a memory.

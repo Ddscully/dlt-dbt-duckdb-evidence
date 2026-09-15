@@ -105,7 +105,7 @@ the credibility of the other 424 with it.
 ## 3. Three ways a row escapes a test
 
 This is the part that is not in the dbt documentation, and it is the whole reason
-482 tests is not the reassuring number it looks like.
+465 tests is not the reassuring number it looks like.
 
 **(a) The value is null.** `dbt_utils.accepted_range` compiles to:
 
@@ -179,12 +179,12 @@ Two consequences that are not obvious:
   failure against a build that finished `ERROR=0`, which is how the pipeline
   health page came to contradict the build it was reporting on.
   `src/modern_data_stack/observability.py` reads `fail_calc` out of the manifest
-  and applies it; 480 of the 482 tests here use the default.
+  and applies it; all but two of the 465 tests here use the default.
 - **dbt writes that schema every build and never cleans it.** An audit table
   whose test has been renamed or deleted stays, is empty, and therefore scores as
   passing. So `count(dbt_test__audit)` drifts *above* the test count over a
-  warehouse's life, and the excess is orphans: 518 tables against 482 tests on
-  the warehouse this was last measured on (2026-09-12), i.e. **36 orphans**.
+  warehouse's life, and the excess is orphans: 518 tables against a test count 36
+  smaller on the warehouse this was last measured on (2026-09-12), i.e. **36 orphans**.
   Your own number will differ, and that is the point — it is a function of how
   many models you have renamed, not of what the project tests.
   `transform/pipeline_status.py` filters them against the manifest for that
@@ -207,7 +207,7 @@ sed -i '/name: co2_per_capita/,+3 s/{min_value: 0}/{min_value: 0, max_value: 50}
 just course-rebuild
 ```
 
-**Observe.** `PASS=561 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
+**Observe.** `PASS=543 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
 the reviewer's evidence checks out:
 
 ```bash
@@ -454,7 +454,7 @@ each get a self-consistent answer, and the two only meet in a meeting.
 
 ---
 
-## 🔍 Investigate 1 — how much of the warehouse do 482 tests actually look at?
+## 🔍 Investigate 1 — how much of the warehouse do 465 tests actually look at?
 
 > Real warehouse (`data/warehouse.duckdb`), not the sandbox.
 
@@ -529,7 +529,8 @@ for knowing the number before you quote "43,138 rows, fully range-checked" to
 anybody.
 
 **3. More audit tables than tests, and the excess is orphans.** On the warehouse
-this was written against, 518 tables against 482 tests: **36 orphans**. Expect a
+this was written against, 518 tables against a test count 36 smaller: **36
+orphans**. Expect a
 different number — it counts your rename history, not the project's tests, and
 a freshly built warehouse has none at all. dbt writes the audit schema on every
 build and never removes a table whose test has gone, and the alias hash is
@@ -548,7 +549,7 @@ coverage are the sparse ones, which is backwards: sparse columns are where a
 join went wrong.
 
 *Correctly built:* tests are not free, and their cost is not runtime: it is that
-every test which can fail on reality trains people to ignore failures. 482 tests
+every test which can fail on reality trains people to ignore failures. 465 tests
 that have never had a false positive are worth more than 900 with a standing
 amber. The uncovered columns are largely OWID pass-throughs whose values this
 project does not compute; a bound on them tests the publisher, not the pipeline.

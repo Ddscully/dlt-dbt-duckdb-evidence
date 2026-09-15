@@ -67,17 +67,6 @@ def test_a_filtered_uniqueness_test_is_not_read_as_a_grain(matrix):
     assert filtered, "the where-filtered grain test this guard is about has gone"
 
 
-def test_a_versioned_model_is_one_row_per_published_relation(matrix):
-    """`fct_emissions_energy` is two relations: v2 aliased bare, and the v1 view.
-
-    Keying the matrix on `name` collapses them, which would under-report the
-    published layer by exactly the relation a consumer is most likely to still be
-    reading — the compatibility view inside its deprecation window.
-    """
-    facts = {f.model for f in matrix.facts}
-    assert {"fct_emissions_energy", "fct_emissions_energy_v1"} <= facts
-
-
 def test_the_facts_that_join_to_nothing_are_exactly_the_declared_ones(matrix):
     """Both directions, so the declaration cannot go quiet in either.
 

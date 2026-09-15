@@ -146,7 +146,7 @@ sed -i 's|^WDI_PRIMARY_KEY = ("indicator", "country_code", "year")|WDI_PRIMARY_K
 just course-sandbox     # a merge key change needs a re-ingest, not just a rebuild
 ```
 
-**Observe.** `PASS=561 WARN=0 ERROR=0 SKIP=0`: again identical to healthy. Then:
+**Observe.** `PASS=543 WARN=0 ERROR=0 SKIP=0`: again identical to healthy. Then:
 
 ```bash
 just course-query 'select count(*) from staging.stg_wdi'
@@ -189,7 +189,7 @@ Healthy: `6336`, `11`.
 | `stg_wdi.population` non-null | 576 | **0** |
 | `stg_wdi.forest_area_pct` non-null | 541 | **174** |
 | `stg_wdi.renew_elec_pct` non-null | 502 | **338** |
-| `dbt build` | `PASS=561 ERROR=0` | `PASS=561 ERROR=0` |
+| `dbt build` | `PASS=543 ERROR=0` | `PASS=543 ERROR=0` |
 
 Nine of the eleven indicators were destroyed outright at the landing table, and
 the two that survived are shredded — 392 rows of `EG.ELC.RNEW.ZS` and 184 of

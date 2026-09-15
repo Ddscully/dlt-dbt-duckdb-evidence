@@ -4,10 +4,11 @@ config-version: 2
 
 profile: "modern_data_stack"
 
-# Keep the deprecation date the release notes promise. When
-# `fct_emissions_energy_v1`'s `deprecation_date` (2026-11-01) passes, dbt by
-# default logs a warning and exits 0 (measured); promoted, it fails `dbt parse`,
-# CI's cheapest step.
+# Keep the deprecation date the release notes promise. When a model version's
+# `deprecation_date` passes, dbt by default logs a warning and exits 0 (measured
+# on `fct_emissions_energy`'s v1, whose window ran to 2026-11-01); promoted, it
+# fails `dbt parse`, CI's cheapest step. No version carries a date since v1 went,
+# so this waits for the next one.
 #
 # * `DeprecatedModel` — the date has passed (fires at parse, on the producer).
 # * `DeprecatedReference` — a `ref` to a model past its date.

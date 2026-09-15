@@ -98,7 +98,7 @@ holds 214 countries into the latest year where `primary_energy_twh` collapses to
 **First, a word this repo uses precisely.** In the BI sense a *mart* is the
 subject area a reader works with, and there are **four**: `country_stats`,
 `reference`, `retail` and `compliance`. `marts/` is dbt's name for the
-presentation *layer*, one folder per mart, and the 21 relations (20 models, one
+presentation *layer*, one folder per mart, and the 20 relations (20 models, one
 of them versioned) inside it are **mart models**. Getting that backwards is easy and this repo did it: it counted
 models and called them marts, so a stale figure sat in five files through two
 additions to the layer.
@@ -126,10 +126,10 @@ so the boundary is the one dbt itself can check rather than a filing convention
 
 **Say what a measure means under `sum()`.** A contract states a column's type
 and a test states that it is correct; neither says whether adding it up is
-meaningful. 118 of the 229 numeric mart columns are non-additive: ratios, rates,
+meaningful. 94 of the 192 numeric mart columns are non-additive: ratios, rates,
 prices, averages or extrema, where a sum is nonsense that comes back as a number.
 Every one carries `meta: {additivity: …}` from a closed four-value vocabulary,
-the 16 `semi_additive` ones have to say in prose *which* direction fails
+the 13 `semi_additive` ones have to say in prose *which* direction fails
 (`population` gives person-years across years; `cumulative_co2` recounts every
 earlier year), and the labels ship in the release manifest so a Parquet consumer
 who cannot be paged has them too. Guarded three ways: exhaustive over the layer,
@@ -165,11 +165,13 @@ this" for one dashboard page.
 → [`dbt/models/_exposures.yml`](../dbt/models/_exposures.yml)
 
 **Version a model instead of renaming a column under its consumers.** The one
-versioned model renames a column whose old name gave neither unit nor basis. v1
-is a *view* over v2 with the one column put back (not a second copy of the logic
-or of the 43k rows), and it carries a deprecation date that also appears in the
-release notes, because the consumers who need it never read a dbt log.
-→ [`fct_emissions_energy_v1.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v1.sql)
+versioned model renamed a column whose old name gave neither unit nor basis. v1
+was a *view* over v2 with the one column put back (not a second copy of the logic
+or of the 43k rows), and it carried a deprecation date that also appeared in the
+release notes, because the consumers who needed it never read a dbt log. It was
+removed on that schedule, which nobody had to remember: past the date, `dbt
+parse` fails.
+→ [`_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
 
 ## 3. Write tests that can see a wrong answer
 

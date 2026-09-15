@@ -273,8 +273,8 @@ def test_every_documented_mart_count_is_one_dbt_actually_builds():
 #
 # Its own scanner rather than a wider `CLAIM` because there are two bases: the
 # marts ymls' literal `additivity:` entries and the manifest's labelled columns
-# differ, since `fct_emissions_energy_v1` inherits its labels through
-# `include: all`. A set holding both would make either legal anywhere, so each
+# differ whenever a model version inherits its labels through `include: all`, as
+# `fct_emissions_energy_v1` did. A set holding both would make either legal anywhere, so each
 # figure is bound to the noun it is written in front of.
 #
 # Not scanned: a bare "N labels", which docs/PRACTICES.md also uses for the
