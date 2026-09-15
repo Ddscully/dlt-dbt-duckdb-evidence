@@ -253,8 +253,9 @@ def additivity(manifest_path: str = MANIFEST_PATH) -> dict[str, dict[str, str]] 
     A Parquet file carries names and types, nothing that says `co2_mt` sums and
     `renewables_share_pct` does not. The labels are declared as
     `meta: {additivity: …}` in the marts ymls; this carries them into the release.
-    Keyed by `schema.alias`, the name each Parquet file ships under — so the
-    versioned model appears as both `fct_emissions_energy` and `_v1`.
+    Keyed by `schema.alias`, the name each Parquet file ships under — so a
+    versioned model appears once per live version (`fct_emissions_energy`, v2
+    aliased bare, since v1 was removed).
 
     Without a manifest it returns `None` ("dbt was not asked"), not `{}` ("no
     labelled columns"), and drops `EXTRA_ADDITIVITY` too. Unlike
@@ -760,21 +761,17 @@ select count(*) from lakehouse.raw.om_weather_daily;
   has always used — the two renamed tables were the only ones spelling the
   currency key a second way, so nothing joined them to the dimension without an
   alias. There is no compatibility view for this one, unlike the emissions
-  rename below: `sed -i 's/quote_currency/currency_code/g'` over your queries is
+  rename below, which had one until 2026-11-01: `sed -i 's/quote_currency/currency_code/g'` over your queries is
   the whole migration, and carrying a v1 of two tables to say so would cost more
   than it tells you.
 - **`marts.fct_retail_returns` gained a column.** `date_key`, the same
   `yyyymmdd` surrogate `marts.fct_retail_order_line` carries at the identical
   grain, so returns can now be joined to `marts.dim_date` the same way. Purely
   additive; nothing was removed or reordered ahead of it.
-- **One column was renamed, and the old shape still ships.**
-  `marts.fct_emissions_energy.co2_per_gdp` is `co2_kg_per_gdp_ppp_2011` from this
-  release on — same numbers, a name that states the unit and the basis, because
-  the column beside it in `analytics.co2_intensity` is a *different* basis and the
-  old name said neither. `marts.fct_emissions_energy_v1` ships alongside with the
-  old column name, and is removed on **2026-11-01**. If you read the mart, move to
-  the new name before then; if you read nothing else in this artifact, nothing
-  else moved.
+- **`marts.fct_emissions_energy_v1` no longer ships.** It was a compatibility
+  view serving `co2_kg_per_gdp_ppp_2011` under its old name, `co2_per_gdp`, and
+  the releases before 2026-11-01 carried it with that date as its removal. The
+  numbers are unchanged under the new name in `marts.fct_emissions_energy`.
 
 ## Licence
 

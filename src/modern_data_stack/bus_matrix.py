@@ -112,7 +112,8 @@ def _relation_name(node: dict) -> str:
     """What the relation is called in the warehouse.
 
     `alias`, not `name`: every version of a model shares its name, so keying on
-    it would collapse `fct_emissions_energy` and `fct_emissions_energy_v1`.
+    it would collapse a model's versions into one row, as it would have
+    `fct_emissions_energy` and its v1 while both shipped.
     """
     return node.get("alias") or node["name"]
 

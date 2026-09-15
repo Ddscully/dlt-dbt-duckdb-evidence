@@ -113,7 +113,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state, which lives in `~/.dlt`, not the warehouse |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (33 models, 2 snapshots, 8 seeds + 482 data tests + 36 unit tests) |
+| `just dbt-build` | `dbt deps` then `dbt build` (32 models, 2 snapshots, 8 seeds + 465 data tests + 36 unit tests) |
 | `just dbt-unit-test` | the dbt unit tests alone — the inner loop for model logic |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
 | `just dbt-docs` / `just dbt-docs-serve` | `dbt docs generate` to `dbt/target/`, and serve it on :8080 |
@@ -230,8 +230,7 @@ DuckDB file. The full account is [`docs/WAREHOUSE.md`](docs/WAREHOUSE.md).
   Parquet
 - `marts` — dbt tables, one folder per dbt group:
   - `country_stats/` — `dim_country_year` (the spine), `fct_emissions_energy`
-    (**the one versioned model**; `fct_emissions_energy_v1` is a compatibility
-    view until 2026-11-01), `fct_co2_estimate_versions`,
+    (**the one versioned model**), `fct_co2_estimate_versions`,
     `fct_eu_electricity_prices_semiannual`, `fct_country_weather_year`
   - `reference/` — `dim_country` (**the conformed country dimension**),
     `dim_country_income_history`, `dim_date`, `dim_currency` and the
@@ -312,8 +311,6 @@ unit tests are `unit-testing-dbt-models`. What bites outside those tasks:
 - **Contracts are enforced on every mart model**, so a column changing type
   fails the build before it writes. **Never round-trip these ymls through
   PyYAML**: it reflows every description to add a scalar.
-- **`fct_emissions_energy_v1`'s deprecation date, 2026-11-01, fails `dbt parse`**
-  once it passes — dbt's own default would only warn.
 - **Select an asset prefix as `key:"marts/*"`.** A bare `marts/*` materialises
   nothing and exits 0; `just materialize-preview` shows what a selection
   resolves to.

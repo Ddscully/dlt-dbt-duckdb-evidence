@@ -287,8 +287,9 @@ def test_the_yml_scan_finds_every_mart_it_should():
     silence — and only this test would notice, because dbt does not care which
     file declares a model.
 
-    `fct_emissions_energy` is the one collapse: `_v1.sql` and `_v2.sql` are two
-    files under one `versions:` entry, so the suffix comes off before comparing.
+    `fct_emissions_energy` is the one collapse: its files are `_vN`-suffixed
+    under one `versions:` entry (`_v2.sql` today), so the suffix comes off before
+    comparing.
     """
     declared_models = set(merged(yml_columns))
     on_disk = {re.sub(r"_v\d+$", "", p.stem) for p in MARTS_DIR.rglob("*.sql")}

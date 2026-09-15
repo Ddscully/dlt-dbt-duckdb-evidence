@@ -5,13 +5,14 @@ carries. Nothing in dbt can check that: a fact keyed on a column no dimension
 publishes builds green, passes its contract and passes its grain test, because
 every other guard in this repo is scoped to a single relation.
 
-So the derivation has to be right about two things that are easy to get wrong,
-and both are pinned below with the real model that would break them:
+So the derivation has to be right about a thing that is easy to get wrong, and
+it is pinned below with the real model that would break it: a uniqueness test
+carrying a `where` is a conditional assertion, not a grain. (A versioned model
+keyed on its alias rather than its name was the second, pinned while
+`fct_emissions_energy` published a v1 beside v2; with one version it could not
+fail, so it went with v1.)
 
-- a uniqueness test carrying a `where` is a conditional assertion, not a grain
-- a versioned model is two published relations, not one
-
-The third test is the matrix itself: the facts that join to nothing are declared
+The next test is the matrix itself: the facts that join to nothing are declared
 in `publish/bus_matrix.py` with a reason each, and compared both ways — so a new
 orphan fails, and so does fixing one without deleting its entry.
 """
@@ -65,17 +66,6 @@ def test_a_filtered_uniqueness_test_is_not_read_as_a_grain(matrix):
         and "grid_emission_factors" in (node.get("attached_node") or "")
     ]
     assert filtered, "the where-filtered grain test this guard is about has gone"
-
-
-def test_a_versioned_model_is_one_row_per_published_relation(matrix):
-    """`fct_emissions_energy` is two relations: v2 aliased bare, and the v1 view.
-
-    Keying the matrix on `name` collapses them, which would under-report the
-    published layer by exactly the relation a consumer is most likely to still be
-    reading — the compatibility view inside its deprecation window.
-    """
-    facts = {f.model for f in matrix.facts}
-    assert {"fct_emissions_energy", "fct_emissions_energy_v1"} <= facts
 
 
 def test_the_facts_that_join_to_nothing_are_exactly_the_declared_ones(matrix):

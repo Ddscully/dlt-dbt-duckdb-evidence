@@ -164,7 +164,6 @@ Regenerate with `just bus-matrix`.
 | `fct_co2_estimate_versions` | `country_iso3, year` | ✅ | · | · | · | · |
 | `fct_country_weather_year` | `country_iso3, year` | ✅ | · | · | · | · |
 | `fct_emissions_energy` | `country_iso3, year` | ✅ | · | · | · | · |
-| `fct_emissions_energy_v1` | `country_iso3, year` | ✅ | · | · | · | · |
 | `fct_eu_electricity_prices_semiannual` | `country_iso3, year, half` | ✅ | · | · | · | · |
 | `fct_example_scope2_emissions` | `site_id` | ✅ | · | · | · | · |
 | `fct_fx_rates_daily` | `date_day, currency_code` | · | ✅ | ✅ | · | · |

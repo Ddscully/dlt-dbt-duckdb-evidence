@@ -1,6 +1,6 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 518 tests alongside the models — 482 data tests and 36 unit
+`just dbt-build` runs 501 tests alongside the models — 465 data tests and 36 unit
 tests. Dagster surfaces the data tests as asset checks on the models they guard.
 For the pytest side, see [`tests/README.md`](../tests/README.md).
 
@@ -11,7 +11,7 @@ For the pytest side, see [`tests/README.md`](../tests/README.md).
 | `dbt_utils.unique_combination_of_columns` on `(country_iso3, year)` | The grain contract, on every fact-shaped staging model, the spine and the mart. `fct_emissions_energy` is four left joins off `dim_country_year`, so one duplicated upstream row would fan the mart out silently. |
 | `dbt_utils.accepted_range` | Percentages inside 0–100, non-negative money and tonnage, years inside each source's real span (WDI starts in 1960, Eurostat in 2007), EU electricity under €1/kWh. Unit and index-arithmetic bugs land outside these long before anyone notices a wrong chart. |
 | `not_null` / `unique` / `accepted_values` | The country dimension: one row per ISO3, a region for every row, income groups from the World Bank's four. |
-| `contract: {enforced: true}` on every mart model | The *schema* contract, which the grain contract never saw: 407 columns with a declared type, checked at build time. A column changing type or disappearing under the published Parquet files fails the build instead of arriving in someone's download. |
+| `contract: {enforced: true}` on every mart model | The *schema* contract, which the grain contract never saw: 365 columns with a declared type, checked at build time. A column changing type or disappearing under the published Parquet files fails the build instead of arriving in someone's download. |
 | `dbt source freshness` (`just dbt-freshness`) | Whether the warehouse is stale. dlt stamps every row with `_dlt_load_id`, a unix epoch, so this measures when the *pipeline* last ran (warn at 7 days, error at 30) and not when the publishers last updated. |
 
 Every test runs with `store_failures`, into a `dbt_test__audit` schema. A red
@@ -179,16 +179,17 @@ Each dashboard page and the monthly data release are declared as `exposures`, so
 this". A test fails if a page starts reading a model its exposure doesn't name.
 
 `fct_emissions_energy` is versioned. v2 renamed one column to state its unit and
-basis (`co2_per_gdp` → `co2_kg_per_gdp_ppp_2011`), and v1 stays live as a
+basis (`co2_per_gdp` → `co2_kg_per_gdp_ppp_2011`), and v1 stayed live as a
 compatibility view until **2026-11-01**, because the people reading the published
 Parquet files can't be paged. Nothing in the repo refs that model and the release
-ships it, which is what makes it the right one to version: a rename is free
+ships it, which is what made it the right one to version: a rename is free
 in-repo and breaking outside it.
 
-That date is enforced rather than announced. dbt's own behaviour when a
+That date was enforced rather than announced. dbt's own behaviour when a
 deprecation date passes is a warning and a zero exit, so the monthly release
 would have gone on publishing v1 with the reason in a log nobody reads;
 `dbt_project.yml` promotes `DeprecatedModel` and `DeprecatedReference` to errors
-through `flags.warn_error_options`, which from 2026-11-01 fails `dbt parse` —
-run in CI's Dagster-definitions step, before anything is built or published.
-Removing v1 is then a change somebody makes on purpose.
+through `flags.warn_error_options`, so a passed date fails `dbt parse` — run in
+CI's Dagster-definitions step, before anything is built or published. v1 was
+removed in October 2026, after the last release that promised it; the promotion
+stays for the next version that carries a date.

@@ -243,10 +243,12 @@ section here. The mutation method these guards were written with is in the
     A list extended by hand every time a total crosses a decade is a guard with
     a scheduled expiry.
   - **An additivity figure is bound to its own label, not to a global set.**
-    There are two honest bases — 193 literal `additivity:` entries in the ymls
-    against 226 labelled columns in the manifest, the gap being
-    `fct_emissions_energy_v1`'s inherited labels — so a set holding both makes
-    either legal anywhere. A bare "N labels" is deliberately not scanned at
+    There are two honest bases — the marts' labels in the manifest and the
+    release map, which adds `analytics`' `EXTRA_ADDITIVITY` — so a set holding
+    both makes either legal anywhere. It still does within one label: once
+    `fct_emissions_energy_v1` went, the release map's semi-additive count equalled
+    the manifest's old one, and three sentences stating the manifest figure passed
+    the guard unchanged. A bare "N labels" is deliberately not scanned at
     all: `docs/PRACTICES.md` writes "34 of the 43 labels" about the retail
     country map, which is a different kind of label entirely.
 
@@ -276,7 +278,7 @@ section here. The mutation method these guards were written with is in the
     words. Both are handled; words only from ten up, because below that they are
     always local ("Two unit tests catch all five") and admitting them produced
     nine false positives against zero finds. Anything longer than that filler is
-    deliberately out — "463 of the 482 tests" has to capture 464, not 462. What
+    deliberately out — "N of the M tests" has to capture M, not N. What
     still escapes is a number with no test-noun after it at all ("pass all 14:"),
     so phrase a count with its noun.
     - **The uncaptured partner then goes stale, and it did — in two files, by 23
@@ -290,7 +292,7 @@ section here. The mutation method these guards were written with is in the
       `fail_calc` at all. The example sentence in this very bullet had drifted
       the same way, quoting a total that had moved four times against a partner
       that had not. Prefer a phrasing the guard can hold — "all but two of the
-      482 tests" — over an arithmetic pair it can only half-see.
+      465 tests" — over an arithmetic pair it can only half-see.
   - `seen > 35` is the vacuity guard. A scanner whose patterns stop matching
     passes by not looking — the same failure `_ROUTES` reachability exists for.
 

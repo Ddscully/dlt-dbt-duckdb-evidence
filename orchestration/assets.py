@@ -341,7 +341,7 @@ class FolderGroupDbtTranslator(DagsterDbtTranslator):
 
     def get_asset_key(self, dbt_resource_props: Mapping[str, Any]) -> dg.AssetKey:
         # The default keys an unversioned model `[schema, name]` but a versioned
-        # one `[alias]` alone (`fct_emissions_energy`, `fct_emissions_energy_v1`).
+        # one `[alias]` alone (`fct_emissions_energy` for v2).
         # Prefixing the schema keeps `marts/...` keys, the `key:"marts/*"`
         # selection and the materialisation history unchanged by versioning.
         key = super().get_asset_key(dbt_resource_props)
