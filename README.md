@@ -181,12 +181,13 @@ just report     # build the Evidence dashboard (needs Node ≥ 18)
 No credentials at any point; every source is a public endpoint. uv reads
 `.python-version` and fetches CPython 3.13 itself if you haven't got it. The
 whole asset graph *including* the site took **3 minutes** here from a cold cache
-and `just run` alone is ~95 s; budget **~2.5 GB** on disk once built, all of it
-gitignored and regenerable (`just clean`, or `just clean deep` to drop
-`node_modules` too).
+(2026-08-25), and `just run` alone ≈ 65 s (2026-09-09, per stage in
+[`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) §3). Budget **~2.6 GB** on disk
+once built, venv and `node_modules` included (2026-09-15), all of it gitignored
+and regenerable (`just clean`, or `just clean deep` to drop `node_modules` too).
 
 Offline, or would rather not hit the public endpoints? `just test-pipeline` runs
-the whole pipeline in ~30 s against recorded fixtures, into a throwaway
+the whole pipeline in ~46 s against recorded fixtures, into a throwaway
 warehouse. `just course-sandbox` does the same into a warehouse that persists,
 which is what the course exercises are built to break.
 
@@ -195,10 +196,13 @@ No `just`? The recipes map to plain commands; see the [`justfile`](./justfile).
 ## Tests
 
 ```bash
-just test           # pytest: mocked payloads, no network, ~42s
-just coverage       # the same, with line + branch coverage; gates nothing
-just test-pipeline  # the whole pipeline against recorded fixtures, ~42s
+just test           # pytest: mocked payloads, no network, ~47 s
+just coverage       # the same, with line + branch coverage; gates nothing, ~58 s
+just test-pipeline  # the whole pipeline against recorded fixtures, ~46 s
 ```
+
+(Timed here on 2026-09-15. Nothing checks a timing, so the date is how to tell
+whether it still holds.)
 
 CI on a pull request runs both, plus the Dagster asset graph and the asset
 checks, entirely offline — so a red build means *this repo* broke, not that a

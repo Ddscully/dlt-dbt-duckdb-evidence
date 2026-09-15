@@ -143,8 +143,8 @@ holds across the whole tree with no exceptions — and the labels reach
 `manifest.json` in the release, because a label with no consequence is
 decoration.
 
-The five `analytics` tables are written by Polars and invisible to dbt, so their
-56 labels are declared in `EXTRA_ADDITIVITY` beside `EXTRA_CLASSIFICATIONS` —
+The six `analytics` tables are written by Polars and invisible to dbt, so their
+59 labels are declared in `EXTRA_ADDITIVITY` beside `EXTRA_CLASSIFICATIONS` —
 the same split personal data already makes, for the same reason. Two tests hold
 them to their authorities rather than to a list: `co2_intensity` is
 `select * from marts.fct_emissions_energy` plus two derived columns, so every

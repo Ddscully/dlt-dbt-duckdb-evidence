@@ -95,11 +95,16 @@ be read against the other half.
 Run `just ingest` and look at the real column names before writing any SQL:
 
 ```bash
-uv run python -c "import duckdb; \
-  print(duckdb.connect('data/warehouse.duckdb', read_only=True).sql(\
-  \"select column_name, data_type from information_schema.columns \
-    where table_schema='raw' and table_name='<resource>'\"))"
+uv run python -c "
+from lake.lakehouse import read_only_connection
+print(read_only_connection().sql(\"select column_name, data_type from information_schema.columns \
+  where table_schema='raw' and table_name='<resource>'\"))"
 ```
+
+**Ask the catalog, not `data/warehouse.duckdb`.** dlt lands `raw` in the DuckLake
+catalog, so the same query against the warehouse file returns zero rows with no
+error — an empty answer that reads as "no such columns". `just sql` attaches the
+catalog, so `lakehouse.raw.<resource>` works there too.
 
 dlt snake_cases and flattens nested JSON: `iso2Code` → `iso2_code`,
 `incomeLevel.value` → `income_level__value`. Never guess these.

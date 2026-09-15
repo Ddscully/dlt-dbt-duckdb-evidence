@@ -322,10 +322,14 @@ identifier — but it looks like a bug until you know.
 ## Chart colors
 
 `evidence.config.yaml` sets a `theme.colorPalettes.default` and brand colors
-(`primary`/`accent`/`base-100`/etc.) validated for both light and dark mode.
-Every pair clears the colorblind (protanopia/deuteranopia) and normal-vision
-separation floors, unlike Evidence's stock palette, whose first few slots are
-all near-indistinguishable blues.
+(`primary`/`accent`/`base-100`/etc.) chosen for both light and dark mode against
+the colorblind (protanopia/deuteranopia) and normal-vision separation floors —
+unlike Evidence's stock palette, whose first few slots are all
+near-indistinguishable blues. **That is not every pair clearing every floor.**
+Series that sit next to each other in palette order need only the cheaper
+*adjacent* check; a scatter or bubble chart, where any two points can be
+neighbours, needs *all-pairs*, and only a few subsets of the eight clear it. The
+bullets below name them.
 
 Charts with a fixed, small set of categories pass an explicit `seriesColors`
 map instead of relying on the global palette's implicit ordering, so a series

@@ -72,16 +72,19 @@ re-fetches that year and merges it in.
 
 ## Schemas
 
-One DuckDB file, `data/warehouse.duckdb`:
+Two files. dlt lands `raw` in the DuckLake catalog under `data/lakehouse/`, and
+everything built from it is in the DuckDB file, `data/warehouse.duckdb` — so the
+file alone holds no `raw`, and its `staging` views need the catalog attached as
+`lakehouse` (which `just sql` does):
 
 | Schema | Written by | Contents |
 |--------|-----------|----------|
-| `raw` | dlt | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`, `om_weather_daily`) |
-| `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain, except `stg_eu_electricity_prices_semiannual` (Eurostat's half-years), `stg_fx_rates` (`(rate_date, currency_code)`) and `stg_retail_lines` (`(invoice, line_number)`) |
+| `raw` | dlt, into the lakehouse | landed source tables (`owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`, `om_weather_daily`). `om_weather_daily` is carried between releases rather than refetched, because a rebuild would cost days of Open-Meteo's daily budget |
+| `staging` | dbt (views) | cleaned 1:1 models (`stg_*`) at `(country_iso3, year)` grain, except `stg_eu_electricity_prices_semiannual` (Eurostat's half-years), `stg_fx_rates` (`(rate_date, currency_code)`), `stg_retail_lines` (`(invoice, line_number)`) and `stg_weather_daily` (`(country_iso3, weather_date)`) |
 | `intermediate` | dbt (views) | `int_*`, the derivations two models share or one model should be tested apart from: `int_country_year_observed` (the country-years the four country-stats sources report, read by both the spine and the wide fact), `int_cbam_default_factors` (Annex I's row-level fallback rule) and `int_retail_return_matches` (the returns-to-purchase inference). `private`, uncontracted, and not published as Parquet |
 | `marts` | dbt (tables) | `dim_country`, the conformed country dimension — one row per `country_iso3`, and what every country key in the warehouse joins to; `dim_country_year`, that crossed with the years to make the country-year spine; `fct_emissions_energy`, the wide joined fact; `dim_grid_emission_factors`, grid factors packaged as a Scope 2 reference table; `fct_co2_estimate_versions`, revision history; `dim_country_income_history`, the World Bank income classification as it stood in each year rather than today's stamped onto every year; `fct_country_weather_year`, capital-city weather aggregated to `(country_iso3, year)` for the 41 countries Eurostat prices; `fct_eu_electricity_prices_semiannual`, EU prices at their published half-year grain; `fct_example_scope2_emissions`, the worked example over twelve invented sites; `fct_cbam_exposure`, the CBAM border cost per tonne by sourcing country; the FX and calendar tables (`dim_date`, `dim_currency`, `fct_fx_rates_*`); and the five retail models (`fct_retail_order_line`, `dim_retail_product`, `dim_retail_customer`, `fct_retail_returns`, `fct_retail_customer_cohorts`) |
-| `history` | dbt (snapshots) | `snap_co2_estimates` and `snap_grid_emission_factors`, SCD2 versions of OWID's CO₂ numbers and of the Scope 2 factors. The two tables a rebuild can't reproduce |
-| `analytics` | Polars | derived metrics (`co2_intensity`, `retail_rfm`) and the `pipeline_*` observability tables |
+| `history` | dbt (snapshots) | `snap_co2_estimates` and `snap_grid_emission_factors`, SCD2 versions of OWID's CO₂ numbers and of the Scope 2 factors. Two of the three tables no rebuild can reproduce |
+| `analytics` | Polars | derived metrics (`co2_intensity`, `retail_rfm`) and the `pipeline_*` observability tables, of which `pipeline_runs` is appended rather than replaced and is the third unreproducible table |
 
 The country-year spine is the dominant grain but not a house rule.
 `fct_cbam_exposure` has no year in it (a regulatory schedule, not a time series),

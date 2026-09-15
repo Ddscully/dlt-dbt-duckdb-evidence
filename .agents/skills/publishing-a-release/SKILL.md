@@ -88,7 +88,7 @@ it cost to learn:
 ## What the manifest tells a consumer they cannot see
 
 - **`manifest.json` carries an `additivity` map, and it exists because a Parquet
-  file has types and nothing else.** 285 published columns are labelled
+  file has types and nothing else.** 288 published columns are labelled
   `additive` / `semi_additive` / `non_additive` / `not_a_measure`, and about half
   are non-additive — `sum(renewables_share_pct)` is nonsense that returns a
   number, with no error anywhere for a consumer who cannot be paged.
@@ -107,7 +107,7 @@ it cost to learn:
       "nobody asked" rather than "nothing to say", and the default reading of a
       missing label is the wrong one. So `EXTRA_ADDITIVITY` is dropped on that
       path too.
-  - **The 56 `analytics` labels are `EXTRA_ADDITIVITY`, and 37 of them are
+  - **The 59 `analytics` labels are `EXTRA_ADDITIVITY`, and 37 of them are
     copies of the mart's.** `analytics.co2_intensity` is
     `select * from marts.fct_emissions_energy` plus `co2_per_gdp_const_usd` and
     `co2_intensity_rank`, so its labels *are* the mart's — and they are stated
