@@ -150,11 +150,12 @@ Modules 00–04 are written; 05–10 are outlined in the course index.
 Plus [`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) for SQL conventions,
 [`tests/README.md`](./tests/README.md) for the two test tiers,
 [`reports/README.md`](./reports/README.md) for the Evidence layer, and
-[`CLAUDE.md`](./CLAUDE.md) for every gotcha that cost more than an hour,
+[`AGENTS.md`](./AGENTS.md) for every gotcha that cost more than an hour,
 including the directory-by-directory map of what each layer is for. Working on
-this with an AI agent: `.claude/settings.json` declares the official skill
-plugins for the stack and `.claude/skills/` adds project-specific ones for the
-seams the vendor skills can't know about ([CLAUDE.md](./CLAUDE.md#agent-skills)).
+this with an AI agent: `AGENTS.md` is the instructions file any agent reads, and
+`.agents/skills/` holds project skills for the seams the vendor skills can't
+know about ([AGENTS.md](./AGENTS.md#agent-skills)). Claude Code reads both
+through `CLAUDE.md`, which also declares its plugins.
 
 ## Quickstart
 

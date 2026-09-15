@@ -12,7 +12,7 @@ an unlisted resource materialises with no description, a stale count reads as
 authoritative. Each one below is now asserted against the authority it copies.
 
 The two-tier test split, `WAREHOUSE_PATH`, coverage and `nightly.yml` stay in
-`CLAUDE.md` under *Testing*. The mutation method these guards were written with
+`AGENTS.md` under *Testing*. The mutation method these guards were written with
 is in the `unit-testing-dbt-models` skill.
 
 ## The lists and what holds them
@@ -38,7 +38,7 @@ is in the `unit-testing-dbt-models` skill.
   both fail green.** `SOURCE_TABLES` (`transform/pipeline_status.py`) is
   iterated by `observability.build_sources`, so an unlisted source yields no
   row and the pipeline page under-reports while looking complete — the exact
-  symptom CLAUDE.md already records from a *different* cause (the Arrow path's
+  symptom AGENTS.md already records from a *different* cause (the Arrow path's
   missing `_dlt_load_id`, "six sources for seven"). `RAW_DESCRIPTIONS`
   (`orchestration/assets.py`) is read with `.get(name)`, so an unlisted
   resource materialises with no description at all. Both are now held to
@@ -79,14 +79,14 @@ is in the `unit-testing-dbt-models` skill.
   - **`WB_WDI_INDICATORS` against `stg_wdi.sql`.** The dict maps eleven
     indicator codes to column names and the model says it again as
     `max(case when indicator = 'X' then value end) as Y`. Written twice,
-    nothing tying them, while the bullet under *Conventions* in `CLAUDE.md`
+    nothing tying them, while the bullet under *Conventions* in `AGENTS.md`
     invites the edit.
     **The dangerous drift is the one where both sides agree on the keys**: swap
     `NY.GDP.MKTP.CD` for `.KD` and current-dollar GDP lands in
     `gdp_constant_usd`, which every intensity figure divides by. `stg_wdi`
     carries fourteen data tests, every one an `accepted_range`, and both series
     are non-negative USD, so nothing goes red — and per the GDP bullets in
-    `CLAUDE.md` that substitution flips the decarbonisation *sign* for 30 countries. A guard
+    `AGENTS.md` that substitution flips the decarbonisation *sign* for 30 countries. A guard
     written as `set(a) == set(b)`, the obvious form, passes it.
   - **It parses the SQL, not the manifest**, which is why it has no skipif.
     `just test` runs *before* `dbt deps && dbt parse` in `ci.yml`, so a
@@ -234,7 +234,7 @@ is in the `unit-testing-dbt-models` skill.
       bug has to spell the old figure in words, or as `N`, or not at all.
   - **The word-number list is generated to 99 rather than written out, and the
     hand-written one stopped exactly where a real claim went.** It ended at
-    "twenty", the unit-test total moved to 30, and CLAUDE.md and a skill said
+    "twenty", the unit-test total moved to 30, and AGENTS.md and a skill said
     the total in hyphenated words in three places through a whole review:
     `twenty` cannot match a compound like twenty-something (the hyphen is not
     `\s`) and the unit word is below the ten-and-above floor, so the scanner
@@ -271,7 +271,7 @@ is in the `unit-testing-dbt-models` skill.
     rather than wrong, which is the failure mode to watch.
   - **The number is not always adjacent to the noun.** `of those` / `of the` may
     sit between them (a spelled-out number, then "of those tests"), and
-    CLAUDE.md writes counts as
+    AGENTS.md writes counts as
     words. Both are handled; words only from ten up, because below that they are
     always local ("Two unit tests catch all five") and admitting them produced
     nine false positives against zero finds. Anything longer than that filler is
@@ -281,7 +281,7 @@ is in the `unit-testing-dbt-models` skill.
     - **The uncaptured partner then goes stale, and it did — in two files, by 23
       and by 39.** A sentence of the form "N of the M tests use the default
       `fail_calc`" is one guarded number beside one unguarded one, so every
-      ripple bumped the total and left the partner behind: `CLAUDE.md` read "438 of the 463" and
+      ripple bumped the total and left the partner behind: `AGENTS.md` read "438 of the 463" and
       `docs/course/03-tests.md` "422 of the 463" when the true figure at 463 was
       461. Both were right when written — 438 at a total of 440, 422 at 424 —
       which is the tell, because the partner is always total-minus-two here, the
@@ -295,8 +295,8 @@ is in the `unit-testing-dbt-models` skill.
 
 
 - **A markdown anchor is a citation nothing was checking, and the split of
-  CLAUDE.md is what breaks them.** `docs/WAREHOUSE.md` linked at
-  `CLAUDE.md#cbam-exposure-…` for three days after that heading became the
+  AGENTS.md (then `CLAUDE.md`) is what breaks them.** `docs/WAREHOUSE.md`
+  linked at `CLAUDE.md#cbam-exposure-…` for three days after that heading became the
   `compliance-models` skill. The two citation tests could not see it: they check
   backticked *paths* and `just` recipes, and the path in the `](…)` link was
   still correct — it was the `#fragment` after it that named a heading no longer

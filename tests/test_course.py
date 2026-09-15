@@ -1,6 +1,6 @@
 """The course material and the project skills, checked against the repo they cite.
 
-`docs/course/` and `.claude/skills/*/SKILL.md` quote file paths, `just` recipes
+`docs/course/` and `.agents/skills/*/SKILL.md` quote file paths, `just` recipes
 and module links out of the rest of the tree. None of that is executable, so it
 rots the way an exposure does: the module still renders and reads correctly, and
 the path it tells a learner to open was renamed six commits ago. A course that
@@ -31,13 +31,13 @@ INDEX = COURSE_DIR / "README.md"
 JUSTFILE = project_root() / "justfile"
 
 # The project skills quote the repo exactly as the course does — several were
-# split out of CLAUDE.md so they load only for the task that needs them — so they
+# split out of AGENTS.md so they load only for the task that needs them — so they
 # rot the same way and are checked by the same two citation tests below. Not by
 # the structural ones: those are about a module's exercises.
 #
 # Globbed, not listed: from a hand-maintained list a skill could be omitted
 # without any error, and nothing would check it.
-SKILLS_DIR = project_root() / ".claude" / "skills"
+SKILLS_DIR = project_root() / ".agents" / "skills"
 
 # Top-level directories a module may cite. `data/` is deliberately absent: it is
 # gitignored and built, so a path under it is correct even on a fresh clone where
@@ -217,7 +217,7 @@ def test_the_index_lists_every_module_that_exists():
     )
 
 
-# A cross-file markdown anchor, e.g. [CLAUDE.md](../CLAUDE.md#agent-skills). Only
+# A cross-file markdown anchor, e.g. [AGENTS.md](../AGENTS.md#agent-skills). Only
 # links carrying a `#fragment` — a bare link to a file is already covered by the
 # citation test above, and a same-file `#anchor` cannot survive a rename anyway.
 _ANCHOR_LINK = re.compile(r"\]\((\.{0,2}[/A-Za-z0-9_.-]*\.md)#([A-Za-z0-9_-]+)\)")
@@ -257,7 +257,7 @@ def test_every_cross_file_anchor_resolves():
 
     The citation tests above check backticked paths and `just` recipes; a
     `](file#fragment)` link can keep a correct path while its fragment names a
-    heading that has gone — which every split of CLAUDE.md into a skill risks.
+    heading that has gone — which every split of AGENTS.md into a skill risks.
     """
     dead = []
     for doc, target, fragment in anchor_links():

@@ -301,7 +301,7 @@ This is the one layer that isn't Python. It needs Node; `npm install` runs from
 
 ## Where the site meets the asset graph
 
-Three facts that lived in `CLAUDE.md`'s *Orchestration* section until they were
+Three facts that lived in `AGENTS.md`'s *Orchestration* section until they were
 filed here, because all three are about the site rather than about Dagster.
 
 - **The site's deps are one per table it reads, not the single ordering edge.**

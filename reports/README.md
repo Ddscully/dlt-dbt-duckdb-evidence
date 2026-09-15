@@ -253,7 +253,7 @@ points into one band.
 
 Threshold on a real unit, `>= 0.01` for money, not on zero. The same arithmetic
 is why a `first_order_gbp <= net_revenue_gbp` dbt test fails on 272 rows that are
-equal; see the retail section of `CLAUDE.md`.
+equal; see the retail section of `AGENTS.md`.
 
 ## Years render as `2025.0` unless you cast twice
 

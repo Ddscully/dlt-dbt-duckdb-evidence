@@ -8,7 +8,7 @@ description: This repo's Dagster graph — the two partitioned assets and the gu
 Dagster wraps the existing layers; it doesn't replace them. The facts that must
 not depend on this skill loading — asset keys as the join between layers, the
 `from __future__ import annotations` ban, and the single-process executor — are
-in `CLAUDE.md`'s *Orchestration* section. This file is the rest.
+in `AGENTS.md`'s *Orchestration* section. This file is the rest.
 
 The vendor `dagster-expert` skill overlapped this barely at all and **is no
 longer enabled** (2026-09-02, zero invocations across 211 transcripts covering 9

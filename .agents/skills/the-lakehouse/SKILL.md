@@ -8,7 +8,7 @@ description: The DuckLake landing zone under data/lakehouse/ — why the change 
 dlt lands `raw` in a DuckLake catalog under `data/lakehouse/`; the DuckDB file
 holds only what dbt builds. `just lakehouse` reports the catalog, `just ingest`
 fills it, and `just sql` attaches it. The one-liners that must not depend on this
-skill loading are in `CLAUDE.md`'s *The lakehouse* section — this file is the
+skill loading are in `AGENTS.md`'s *The lakehouse* section — this file is the
 rest.
 
 **The hive archive is gone with it** — `archive.py` under `lake/`, `data/lake/`,

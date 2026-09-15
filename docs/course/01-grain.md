@@ -40,7 +40,7 @@ you are the one doing the aggregating.
 > The convention is that `(country_iso3, year)` is the **dominant** grain, not a
 > house rule. Reaching for `dim_country_year` when the thing you are modelling
 > is not a country-year is how you get a fact with a fabricated dimension bolted
-> onto it. CLAUDE.md's sentence used to say "every model" and stopped being true
+> onto it. AGENTS.md's sentence used to say "every model" and stopped being true
 > twice.
 
 ## 2. The spine

@@ -223,7 +223,7 @@ For {inputs.ccy.label}, the year where the two answers diverge most is <Value da
 
 <!-- The first paragraph below wraps and carries <Value> components, so its
 markdown stops processing at the first line break (see the one-source-line
-rule in .claude/skills/building-evidence-reports). Emphasis and code marks
+rule in .agents/skills/building-evidence-reports). Emphasis and code marks
 past line one render as literal characters, silently. The flag name is in a
 second, component-free paragraph for that reason, where marks do work. -->
 {#if stale_years.length > 0}

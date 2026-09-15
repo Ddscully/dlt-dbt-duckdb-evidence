@@ -5,7 +5,7 @@ Evidence, orchestrated by Dagster), using this repo as the reference
 implementation.
 
 This is not a checklist for adding a source to *this* warehouse; that's
-[`.claude/skills/adding-a-data-source`](../.claude/skills/adding-a-data-source/SKILL.md).
+[`.agents/skills/adding-a-data-source`](../.agents/skills/adding-a-data-source/SKILL.md).
 It's the layer above: what carries over to a different dataset, what has to be
 rewritten, and the handful of decisions that are expensive to change later.
 
@@ -105,7 +105,7 @@ this example's domain. Keep `ingest/http.py` and, in
 list you are replacing. Then all of `dbt/models`,
 `dbt/seeds` and `dbt/snapshots`, `transform/co2_intensity.py`, all of
 `reports/pages` and `reports/sources/warehouse/*.sql`, `tests/fixtures/`,
-and roughly half of `CLAUDE.md`.
+and roughly half of `AGENTS.md`.
 
 ## 2. The names that join the layers
 
@@ -193,7 +193,7 @@ one era, because it's the table `rm data/warehouse.duckdb` destroys for good.
 
 ## 4. Invariants that fail silently
 
-`CLAUDE.md` has the full list for this project. These are the ones that recur in
+`AGENTS.md` has the full list for this project. These are the ones that recur in
 anything built this way:
 
 - **`WAREHOUSE_PATH` must be absolute.** dbt resolves it from `dbt/`, the Python
@@ -342,10 +342,12 @@ the argument for the shape rather than for the file.
   honest range would make the test pass everything. Copying a threshold is copying
   someone else's data.
 - **The Evidence pages.** Layout ideas travel; queries don't.
-- **`CLAUDE.md`.** The structure travels (schemas, conventions, gotchas, the
+- **`AGENTS.md`.** The structure travels (schemas, conventions, gotchas, the
   per-layer sections) and about half the content is specific enough to delete.
   Keep the sections about tooling (the sqlfluff pin, the ruff defaults, dependabot,
   the `dbt deps` prerequisite); those are the same on any project using them.
+  `CLAUDE.md` is an `@AGENTS.md` import plus this repo's Claude Code plugins:
+  keep the import and the `.claude/skills` symlink, rewrite the rest.
 
 To *share* `src/modern_data_stack/` between projects rather than copying it, add
 this repo as a git dependency and delete the copy. Nothing in the package imports

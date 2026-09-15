@@ -71,8 +71,8 @@ def test_the_two_measured_removals_stay_removed():
     """`dagster-expert@dagster` and `polars@polars`, retired 2026-09-02.
 
     Retired on a measured zero `Skill` invocations across the window in which
-    both layers were being edited; CLAUDE.md's *Agent skills* section has the
-    measurement and the reasoning. `polars` is the weaker call: nothing replaces
+    both layers were being edited; CLAUDE.md's *Claude Code plugins* section has
+    the measurement and the reasoning. `polars` is the weaker call: nothing replaces
     it, so it is the first to reconsider if `transform/` grows into a layer.
 
     Both marketplaces stay registered: removing a github marketplace
@@ -127,7 +127,7 @@ def test_claude_mds_plugin_table_lists_exactly_what_is_enabled():
     enabled — the `dg` bullet in `dagster-graph-and-jobs` does, and the "Not
     enabled, but worth knowing about" paragraph directly under this table exists
     to — so a repo-wide scan for plugin names would have to tell an assertion
-    from a mention, which is the ambiguity that keeps `CLAUDE.md`'s backticked
+    from a mention, which is the ambiguity that keeps `AGENTS.md`'s backticked
     paths out of the course guard as well. A row in the table is unambiguous.
 
     **`ty-lsp` is the one enabled plugin with no row, and that is deliberate.**
