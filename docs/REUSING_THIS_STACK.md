@@ -19,11 +19,20 @@ That third is already separated out, so you don't have to go looking for it:
 it's `src/modern_data_stack/`, it takes its configuration as arguments, and the
 project modules that call it hold the constants.
 
+**This document was executed on 2026-09-15**, against `c054e53`: a clone
+followed it literally, with one unrelated source (monthly gold prices, a month
+grain and no country), until CI's `build` job passed. The "a third" held up for
+the code. The lists below did not, and they are corrected from that run: the
+package rename touched 63 files rather than six, `orchestration/assets.py` was
+56% example, and three defects passed every local check and would have failed
+only in CI or at the first release (the `*.csv` fixture in §4, the export's
+personal-data refusal in §7, the lakehouse release check in §7).
+
 ## 1. What you're actually reusing
 
 ### The package — `src/modern_data_stack/`
 
-Ten modules, no mention of emissions in any of them. Copy the directory, or
+Eleven modules, no mention of emissions in any of them. Copy the directory, or
 depend on it and write only the layers below.
 
 | Module | What it does | Configured by |
@@ -38,6 +47,7 @@ depend on it and write only the layers below.
 | `ratelimit` | a sliding-window budget for an API that charges by volume | `(seconds, units)` limits |
 | `workbook` | read a spreadsheet source without loading it whole | a URL and a batch size |
 | `db` | single-row and scalar reads, without the `Optional` | nothing |
+| `bus_matrix` | derive the bus matrix from the manifest's uniqueness tests | a schema and the `dim_`/`fct_` prefixes |
 
 Each project module keeps the entry point, so `python -m lake.lakehouse`, the
 justfile recipes and the asset graph all still call the same names. Four rules
@@ -69,8 +79,6 @@ keep the split a split:
 - `lake/lakehouse.py` — where the DuckLake landing zone lives, `PUBLISHED_TABLES`
   and the merge keys.
 - `transform/pipeline_status.py` — `SOURCE_TABLES` and `LAYERS`.
-- `publish/export_warehouse.py` — `PUBLISHED_SCHEMAS`, `ATTRIBUTION`, the release
-  notes and whatever your manifest wants that the generic one can't know.
 - `publish/restore_history.py` — the schema name and the CLI.
 
 ### Copy verbatim — the tooling
@@ -90,9 +98,7 @@ keep the split a split:
   Snowflake, BigQuery or Postgres the *schema* is the environment, which is
   exactly what a target separates, so the reasoning written beside that output
   inverts and `generate_schema_name.sql` below has to be reconsidered with it.
-- `orchestration/resources.py` and `orchestration/definitions.py` — the dbt/dlt
-  resource handles and the two-job split (`full_refresh` without the site,
-  `publish_site` with it). Both are about Node, not about your data.
+- `orchestration/resources.py` — the dbt/dlt resource handles.
 - `.github/workflows/ci.yml` and `nightly.yml` — the offline-fixtures /
   live-sources split holds whatever you're ingesting.
 - `docs/STYLE_GUIDE.md`.
@@ -100,33 +106,111 @@ keep the split a split:
 ### Adapt — the structure holds, the specifics don't
 
 - `publish/build_report.py` — `TABLE_TO_DBT_MODEL` and `TABLE_TO_ASSET_KEY`, the
-  two maps that give the Evidence site one dependency per table it reads.
-- `scripts/record_fixtures.py`.
-- `orchestration/assets.py` — the asset shapes carry over almost unchanged, and
-  `RawSchemaDltTranslator` is the piece worth copying by hand (§2 says why it
-  matters; it stays here rather than in the package because it's twenty lines
-  wrapped around two of that module's constants). Every asset *check* is yours.
+  two maps that give the Evidence site one dependency per table it reads. **Empty
+  the first before anything else loads**: `orchestration/assets.py` resolves each
+  mapped model at import time, so a stale entry stops the whole graph with
+  `RuntimeError: generator raised StopIteration`, naming no model. The four
+  `pipeline_*` entries in the second are generic.
+- `scripts/record_fixtures.py` — 333 lines, almost all per-source trimming; one
+  untrimmed CSV needs about thirty.
+- `orchestration/assets.py` — **more than half of it is the example**: on the
+  dry run it went from 801 lines to 352. What carries over is
+  `RawSchemaDltTranslator` (§2 says why it matters; it stays here rather than in
+  the package because it's twenty lines wrapped around two of that module's
+  constants), `FolderGroupDbtTranslator`, the freshness policies, the unpartitioned
+  `raw_assets`, `dbt_models`, `pipeline_status`, `evidence_site`, and the two wiring
+  checks `run_history_records_this_build` and `site_pages_all_rendered`.
+  - **Every other asset check is yours**, and so are the year- and
+    month-partitioned blocks and `RAW_DESCRIPTIONS`' entries.
+  - **Two generic pieces reach through the example.** `_scalar` takes the
+    warehouse path from `transform.co2_intensity`; use `paths.warehouse_path()`.
+    `pipeline_status` depends on the two Polars assets; with none, depend on
+    `list(dbt_models.keys)`, because `deps=[dbt_models]` is refused.
+- `orchestration/definitions.py` — **three jobs, not two.** `full_refresh` (without
+  the site) and `publish_site` (with it) are about Node and carry over.
+  `load_retail` and its selection exist only because retail is month-partitioned
+  where WDI is yearly, and `just materialize` / `just materialize-site` run it by
+  name. The `assets=` and `asset_checks=` lists name every example asset.
+- `publish/export_warehouse.py` — not only constants. `PUBLISHED_SCHEMAS` and
+  `ATTRIBUTION` are config. **`release_notes()` is the example's release body
+  written inside the function**: its grain exceptions, retail, FX and CBAM
+  notes, and `marts.fct_emissions_energy` as the sample table. Keep its
+  scaffolding (the query snippets, the asset table, the additivity and
+  reader-version notes) and replace the prose. `_history()` queries
+  `marts.fct_co2_estimate_versions` and returns `None` without it.
 - `.github/workflows/pages.yml` and `release-data.yml` — paths and the basePath
   step are generic; the snapshot carry-forward only matters if you have a
-  snapshot. The one part to re-derive rather than copy is `pages.yml`'s `paths:`
+  snapshot. `release-data.yml`'s verify step checks rows in three of the example's
+  relations and one Parquet file by name, and requires a lakehouse asset in every
+  release (§7). The one part to re-derive rather than copy is `pages.yml`'s `paths:`
   allowlist, which names this repo's directories, and `tests/test_workflows.py`
   with it, since that is what stops the allowlist drifting from your tree.
 - `reports/sources/warehouse/connection.yaml` — the relative path to the DuckDB
   file, nothing else.
-- `tests/test_lakehouse.py`, `test_export.py`, `test_report.py` — structural tests over
-  the plumbing, not over the numbers. `test_ingest.py` and `test_transform.py` are
-  yours.
+- **The tests are mostly plumbing tests wired to the example's content.**
+  `test_ingest.py` and `test_transform.py` are yours to delete. Nearly every other
+  file mixes the two:
+  - `test_report.py` asserts `marts.fct_emissions_energy` is among the tables the
+    pages read;
+  - `test_lakehouse.py` names the weather table;
+  - `test_export.py` imports its URL list from `test_fixtures.py`, which imports
+    every source module, and five of its lakehouse cases assert against the
+    project's `PUBLISHED_TABLES` instead of their own fixture;
+  - `test_asset_checks.py` is three quarters the six domain checks;
+  - `test_privacy.py`, `test_additivity.py`, `test_definitions.py`,
+    `test_bus_matrix.py` and `test_exposures.py` each hold a few pytest cases
+    that pin the example's models, pages or retail identifier.
+
+  On a new project, delete those cases and keep the rest. A mechanism test that
+  reads a project allowlist should patch it to its own fixture, or it goes
+  vacuous when the allowlist is empty.
+- **The prose guards are calibrated to this repo's volume of prose.**
+  - `test_documented_counts.py` floors its scans: the count-claim scanner must
+    find more than 35 claims, the additivity one at least 8. Two of its cases require a specific
+    claim (the description coverage, and a `PASS=` line from the course).
+    `CITED_MODELS` names the example's models.
+  - `test_course.py` always includes the course index, so its skill-citation
+    cases crash with no course.
+  - Remove the floors and the claim-must-exist cases; the stale-claim checks
+    themselves carry over and are worth keeping.
 
 ### Delete — this is the example, not the framework
 
 All of `ingest/sources/`: one module per publisher, and every one of them is
-this example's domain. Keep `ingest/http.py` and, in
-`ingest/pipeline.py`, `load_groups`, `build_pipeline`, `pipeline_name` and the
-`REFRESH` constant: that file is coordination, and what it coordinates is the
-list you are replacing. Then all of `dbt/models`,
-`dbt/seeds` and `dbt/snapshots`, `transform/co2_intensity.py`, all of
-`reports/pages` and `reports/sources/warehouse/*.sql`, `tests/fixtures/`,
-and roughly half of `AGENTS.md`.
+this example's domain.
+
+Keep `ingest/http.py`, and keep `ingest/pipeline.py` as coordination:
+- **Keep** `load_groups`, `build_pipeline`, `pipeline_name`, `REFRESH` and
+  `PIPELINE_DATASET` (which `publish/restore_history.py` reads).
+- **Keep, emptied:** the `FULL_REFRESH_RESOURCES`, `INCREMENTAL_RESOURCES` and
+  `PARTITIONED_RESOURCES` tuples, which `orchestration/assets.py` imports.
+- **Keep, with its resource list emptied:** the `@dlt.source` function and
+  `main()`, which `python -m ingest.pipeline` needs.
+
+Then delete:
+- everything under `dbt/models`, `dbt/seeds`, `dbt/snapshots` and `dbt/tests`.
+  Leave a `.gitkeep` in the first three: git tracks no empty directory, and
+  `just lint` fails on `models` or `snapshots` missing
+  (`Specified path does not exist`);
+- both `transform/co2_intensity.py` and `transform/retail_rfm.py`;
+- three of the four `scripts/`, everything but `record_fixtures.py`;
+- `tests/fixtures/`;
+- all of `reports/pages` and `reports/sources/warehouse/*.sql` **except
+  `pipeline.md` and the four `pipeline_*.sql` queries**, which render the
+  observability tables and name nothing in the example;
+- the eight justfile recipes that exist only for the example (`ingest-wdi-full`,
+  `backfill-*`, `disclosure-risk`, `course-*`), and the two transform lines in
+  `transform` and `test-pipeline`;
+- `docs/course/`, and seven of the eighteen skills: country stats, compliance,
+  retail, currency and calendar, weather, unit-tested models, course authoring;
+- the docs about this warehouse's data. What stays is `STYLE_GUIDE.md`,
+  `ORCHESTRATION.md`, `RUNNING_AS_A_SERVICE.md`, and `WAREHOUSE.md` for its bus
+  matrix block;
+- about a quarter of `AGENTS.md` (§9).
+
+Several of the files that survive unchanged still name the example in comments
+and prose: `reports/README.md`, `docs/STYLE_GUIDE.md`, `querying-the-warehouse`.
+Passing the guards is not the same as being generic.
 
 ## 2. The names that join the layers
 
@@ -142,7 +226,8 @@ or stale.
 | mart table name | `dbt/models/marts/*.sql` | the `<schema>.<table>` in the Evidence source queries |
 | `<schema>.<table>` in a source query | `reports/sources/**/*.sql` | a key in `TABLE_TO_DBT_MODEL` or `TABLE_TO_ASSET_KEY` |
 | Evidence connection `name:` | `reports/sources/*/connection.yaml` | the source directory name, and `${name.query}` in pages |
-| the DuckDB **file stem** | wherever the file is written | the catalog dbt bakes into view SQL (`warehouse.raw.x`) |
+| the DuckDB **file stem** | wherever the file is written | the catalog dbt bakes into view SQL for its own refs (`warehouse.staging.x`) |
+| the DuckLake **attach alias** | `profiles.yml`, `lake.lakehouse.ATTACH_ALIAS` | `_sources.yml`'s `database:`, which dbt bakes into every staging view (`lakehouse.raw.x`) |
 
 **The asset key is the only join between EL and T.** `raw/<resource>` from the dlt
 side, `raw/<source table>` from the dbt side. Get it wrong and both halves still
@@ -150,9 +235,11 @@ materialize, side by side, unconnected, with no error anywhere, and
 `dagster definitions validate` passes too. Only the graph shows it, so look at
 the graph every time you add or rename a resource.
 
-**The DuckDB file stem becomes a catalog name.** dbt writes staging views with
-fully-qualified SQL, so `warehouse.duckdb` produces views that say
-`warehouse.raw.owid_co2`. Rename the file, or `ATTACH … AS wh`, and the views
+**Two names become catalog names in stored SQL.** dbt writes views with
+fully-qualified SQL: a staging view reads its source as `lakehouse.raw.owid_co2`
+and a view over a model as `warehouse.staging.stg_co2`, so both the attach alias
+and the file stem are fixed the day the first view is built. A template can vary
+the project name; it cannot make either of these a variable. Rename the file, or `ATTACH … AS wh`, and the views
 raise `Catalog "warehouse" does not exist` while the tables keep working, a
 half-broken artifact that looks fine until someone queries staging. Pick the file
 name once, and pin it with a test if you publish the file.
@@ -182,6 +269,13 @@ to start from.
 Without an explicit dimension your mart's population is set by whichever source
 you left-joined from, and coverage gaps become silently dropped rows instead of
 rows with nulls. Build the dimension first, even if it's a seed file.
+
+It holds for a grain with no country in it. On the dry run a `dim_month` spine
+under monthly gold prices gave the fact one more row than its source: the current
+month, which the publisher had not priced yet, as a null. **Name the fact's key
+after the dimension's**: `modern_data_stack.bus_matrix` marks a fact as conforming
+when it carries a column with the dimension's single-column unique key *name*, so
+a fact keyed `price_month` does not conform to `dim_month.month_start`.
 
 ### Which resource is incremental
 
@@ -230,9 +324,13 @@ anything built this way:
   `dagster dev`. Every workflow has to run it explicitly.
 - **dlt state is keyed on the pipeline *name*, not the destination.** A fixture run
   hands its watermarks to the next real run unless the name differs.
-- **DuckDB's `COPY … (overwrite true)` only replaces the partitions it writes.** A
-  partition whose last row disappeared upstream keeps answering from a stale file.
-  Delete the directory first.
+- **A recorded fixture can be ignored by git and pass everywhere but CI.**
+  `.gitignore` carries `*.csv` with exceptions for the seeds and dbt's unit-test
+  fixtures, and this repo's ingest fixtures are gzipped, so it has never needed
+  one for `tests/fixtures/ingest/`. A new source with a plain CSV fixture
+  records it, passes `just test-pipeline` in the working tree, and `git add -A`
+  silently leaves the file out; a clean checkout then fails with `No such file
+  or directory`. Add `!tests/fixtures/ingest/*.csv` before the first CSV source.
 - **Evidence's build state can go stale after a column change.** `just report`
   has validated a page against a dropped column's old schema; clearing
   `reports/.evidence/` (`just report-clean`) after any mart change fixes it.
@@ -246,33 +344,60 @@ anything built this way:
 
 ## 5. Renaming the project
 
-Six files, and the dbt profile name has to match in two of them:
+**The name is three names in one string**, and "rename the project" touches all of
+them: the Python package (`src/modern_data_stack/`, imported by 36 files), the dbt
+project and profile, and the dlt pipeline name (which also names dlt's state
+directory). The dry run renamed all three to `gold_warehouse`; on the tree left
+after §1's deletes that was **63 files**, 12 moves and 51 edits.
 
-- `pyproject.toml` — `[project] name`, `[project.scripts]`, `[tool.dagster]
-  code_location_name`
-- `src/<package>/` — the directory and its `__init__.py`
-- `dbt/dbt_project.yml` — `name:`, `profile:`, and the two `models:`/`snapshots:`
-  keys, all four of which are the project name
-- `dbt/profiles.yml` — the top-level key, which must equal `dbt_project.yml`'s
-  `profile:`
-- `ingest/pipeline.py` — the dlt `pipeline_name` (renaming this resets dlt's state,
-  which is what you want on a fresh project and not what you want later)
-- `reports/package.json` — cosmetic
+- **The distribution name and the package are coupled by the build backend.**
+  Change `[project] name` alone and `uv sync` fails: `Expected a Python module at:
+  src/<new_name>/__init__.py`, because uv_build derives the module from the
+  project name. To rename the project and keep the package, add
+  `[tool.uv.build-backend] module-name = "modern_data_stack"`.
+- **Renaming the project** (keeping the package) touches:
+  - `pyproject.toml`: `[project] name` and `[tool.dagster] code_location_name`;
+  - `uv.lock`, rewritten by `uv sync`;
+  - `dbt/dbt_project.yml`: `name:`, `profile:` and the `models:`, `seeds:` and
+    `snapshots:` keys, all five of them the project name;
+  - `dbt/profiles.yml`'s top-level key;
+  - `ingest/pipeline.py`'s `pipeline_name`. Renaming it resets dlt's state,
+    which is what you want on a fresh project and not what you want later;
+  - the `just dlt-state` default;
+  - `tests/test_lakehouse.py`, which reads the profile by that key;
+  - `tests/test_restore_history.py`'s state directory names;
+  - `reports/package.json` and its lockfile (cosmetic).
+- **Renaming the package** as well moves `src/` and rewrites every import. Expect
+  the first pre-commit run afterwards to re-sort imports in files the rename did
+  not otherwise touch: ruff orders first-party imports alphabetically, so the
+  package's position among `ingest`, `lake` and `publish` moves with its name.
+
+`.claude/`'s plugin marketplace is also named `modern-data-stack`. That is
+tooling identity, not project identity, and nothing breaks if it keeps the name.
 
 ## 6. Build order
 
 Each step leaves the repo runnable, so a failure has one plausible cause.
 
 1. **Skeleton.** Copy the tree, delete the example files listed in §1, rename per
-   §5. `just setup` should succeed with an empty pipeline.
+   §5. `just setup` succeeding says only that the dependencies resolve: it
+   imports nothing from the project, and it passed on the dry run while seven of
+   CI's eight steps failed. The useful gate is `just dbt-parse && dagster
+   definitions validate -m orchestration.definitions`. **An empty skeleton
+   cannot pass the test suite**: with no resource dlt never creates the
+   catalog, and `transform.pipeline_status` fails to open it. So take step 1
+   straight into step 2.
 2. **One source, end to end.** One dlt resource → `raw` → one staging model → a
    trivial mart → one Evidence chart. Resist adding the second source until the
    first has reached a page; the seams in §2 are all exercised by that path and
    nothing else finds them.
 3. **The dimension and the spine**, before the second fact source. Retrofitting a
    spine means rewriting every join you already wrote.
-4. **Fixtures and CI.** As soon as the first source lands, before there are five.
-   Recording fixtures for one endpoint is a morning; for five it's a project.
+4. **Fixtures and CI.** The *first* fixture belongs to step 2: CI runs with
+   `INGEST_FIXTURES=1`, so the first source cannot pass `just test-pipeline`
+   without one. What waits for this step is the rest of CI (the workflows, the
+   nightly), before there are five sources. Recording fixtures for one endpoint is
+   a morning; for five it's a project.
 5. **Tests as grain contracts.** `unique_combination_of_columns` on every
    fact-shaped model, the day it's created. It's how the grain from §3 stops
    being a convention.
@@ -296,7 +421,15 @@ compares two snapshots instead.
 - **Publishing** (`publish/export_warehouse.py`, `release-data.yml`) — only if
   someone consumes the data without running the pipeline. Note that it turns
   "we use public data" into "we redistribute public data", which is an attribution
-  obligation.
+  obligation. Two things in it assume this repo's data:
+  - **The export refuses to run with nothing classified as personal data**
+    (`PolicyError: no columns are classified as direct_identifier — refusing to
+    publish`). The refusal is deliberate: "nothing classified" and "nothing to
+    classify" look the same to it. A project with no personal data has to make
+    `prepare_published_copy` skip `pseudonymise` explicitly.
+  - **`release-data.yml` requires a lakehouse asset in every release.** A project
+    whose `PUBLISHED_TABLES` is empty writes none, so the check has to depend on
+    that allowlist.
 - **Pipeline observability** (`transform/pipeline_status.py`) — earns its place
   once there are enough tables that "is anything stale?" isn't answerable by eye.
 - **Fixtures and the nightly job** (`tests/fixtures/`, `nightly.yml`) — the one I'd
@@ -347,7 +480,7 @@ the porting decision the ordering implies, which is shorter than the mechanism:
   horizontally, or be restored by anything but a copy.
 
 **What to do about it, in order.** Nothing, until a second writer exists — then
-a real warehouse, and `dbt/profiles.yml` grows the targets §3 says it should.
+a real warehouse, and `dbt/profiles.yml` grows the targets §1 says it should.
 The layer that changes is the profile and the two Polars files; the models, the
 tests, the contracts, the exposures and the release all port unchanged, which is
 the argument for the shape rather than for the file.
@@ -365,7 +498,9 @@ the argument for the shape rather than for the file.
   someone else's data.
 - **The Evidence pages.** Layout ideas travel; queries don't.
 - **`AGENTS.md`.** The structure travels (schemas, conventions, gotchas, the
-  per-layer sections) and about half the content is specific enough to delete.
+  per-layer sections), and about a quarter of the content is specific enough to
+  delete: cutting the warehouse schemas, snapshot history, personal data, the
+  course and the country-year conventions took it from about 30 KB to 22 KB.
   Keep the sections about tooling (the sqlfluff pin, the ruff defaults, dependabot,
   the `dbt deps` prerequisite); those are the same on any project using them.
   `CLAUDE.md` is an `@AGENTS.md` import plus this repo's Claude Code plugins:
