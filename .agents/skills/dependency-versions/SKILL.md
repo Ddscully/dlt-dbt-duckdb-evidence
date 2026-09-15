@@ -242,14 +242,21 @@ linter, formatter and type checker those pins serve behave is
     the Semantic Layer YAML and adds `osi_document.json`. Authoring one against
     1.11's would have meant migrating it almost at once.
 - **dbt 1.12 reads a `.env` from its working directory, which here is `dbt/`,
-  so `just where` refuses while one exists.** Measured against a copy: a `.env`
-  there naming `WAREHOUSE_PATH` sent `dbt debug` to that file — and DuckDB
-  created it — while the shell left the variable unset, as most recipes do; a
-  shell value still wins. `just where` reads only the shell, so it would have
-  named the default file while dbt wrote to another. The repo-root `.env` is the
-  place for such values: `dotenv-load` exports it to every recipe, and `where`
-  prints it. The recipes that export their own `WAREHOUSE_PATH` skip `where`,
-  so the guard does not cover them.
+  so every recipe that writes refuses while one exists.** Measured against a
+  copy: a `.env` there naming `WAREHOUSE_PATH` sent `dbt debug` to that file —
+  and DuckDB created it — while the shell left the variable unset, as most
+  recipes do; a shell value still wins. `just where` reads only the shell, so it
+  would have named the default file while dbt wrote to another. The repo-root
+  `.env` is the place for such values: `dotenv-load` exports it to every recipe,
+  and `where` prints it.
+  - **The refusal is the private recipe `_no-dbt-dotenv`**, which `where`
+    depends on. `test-pipeline` and the course recipes export their own
+    `WAREHOUSE_PATH` and skip `where`, so each depends on it directly — the one
+    place a writing recipe repeats it by hand, and
+    `tests/test_workflows.py` fails a writing recipe that reaches neither.
+  - **Recipes that run dbt without writing are not covered**: `dbt-unit-test`,
+    `dbt-freshness`, `dbt-docs` and `lint` depend only on `dbt-deps`, so a
+    `.env` in `dbt/` still points them at another file, silently.
 - **"Lightweight" is a measured claim, and the dev tooling was most of the
   weight.** Removing harlequin and marimo on 2026-08-25 took the tree from 198
   packages to 153 and the venv from 1.1 GB to 736 MB — a third of it — for two
