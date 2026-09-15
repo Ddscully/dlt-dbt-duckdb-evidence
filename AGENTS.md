@@ -196,65 +196,46 @@ covers them.
 ## Agent skills
 
 Skills follow the [Agent Skills](https://agentskills.io) standard, so one copy
-serves every agent. The project's are in `.agents/skills/`, the directory Codex,
-Gemini CLI, Copilot and Cursor share; `.claude/skills` is a symlink to it, and
-`CLAUDE.md` says what depends on that. Cursor and VS Code read both paths, and
-whether they then list a skill twice is unmeasured.
-
-Vendor skills carry the tool-level knowledge; this file and the project skills
-carry the repo-level knowledge. The one in use is
-[dbt Labs'](https://github.com/dbt-labs/dbt-agent-skills). Claude Code is
-offered it from `.claude/settings.json`; any other agent installs it with
+serves every agent: they live in `.agents/skills/`, which Codex, Gemini CLI,
+Copilot and Cursor read, and `.claude/skills` is a symlink to it (`CLAUDE.md`
+says what depends on that; whether Cursor and VS Code, which read both paths,
+list a skill twice is unmeasured). Vendor skills carry the tool-level knowledge,
+and dbt Labs' is the one in use; any agent but Claude Code installs it with
 `npx skills add dbt-labs/dbt-agent-skills --global`. **Keep `--global`**: a
-project-scope install writes into `.agents/skills/` beside the tracked skills,
-and `tests/test_course.py` globs that directory, so it would hold dbt Labs'
-skills to this repo's paths.
+project-scope install writes into `.agents/skills/`, which `tests/test_course.py`
+globs, holding dbt Labs' skills to this repo's paths.
 
-Project skills in `.agents/skills/` cover the seams the vendor skills can't know:
+| Skill | Load it for |
+|-------|-------------|
+| `adding-a-data-source` | a new source, resource, WDI indicator or raw table, across every layer |
+| `querying-the-warehouse` | SQL against the warehouse: read-only connections, the lock, column names |
+| `country-stats-models` | the `country_stats` group — OWID, World Bank, Eurostat, the spine |
+| `compliance-models` | the `compliance` group — Scope 2 factors and the CBAM annex |
+| `retail-models` | the `retail` group — returns inference, cohorts, RFM |
+| `currency-and-calendar` | the ECB rates, `dim_date`, spot against average |
+| `weather-models` | Open-Meteo's budget, ERA5, the degree-day conventions |
+| `contracts-and-data-quality` | data tests, groups, contracts, exposures, additivity, versions |
+| `unit-testing-dbt-models` | the twelve unit-tested models and the mutation method |
+| `pipeline-observability` | `transform/pipeline_status.py` and the `pipeline_*` tables |
+| `the-lakehouse` | the DuckLake catalog |
+| `publishing-a-release` | the export, personal data at the boundary, what carries forward |
+| `dagster-graph-and-jobs` | partitions, registration, the three jobs |
+| `building-evidence-reports` | the Evidence site |
+| `linting-and-type-checking` | sqlfluff, ruff and ty |
+| `dependency-versions` | what pins what, and the versions nothing watches |
+| `repo-guards` | hand-maintained lists, their guards, the fixtures, the suite's traps |
+| `authoring-course-modules` | writing `docs/course/` |
 
-- **`adding-a-data-source`** — the cross-layer workflow (dlt resource → dbt
-  source → staging → mart → Dagster asset key → Evidence), including the
-  name-matching that silently splits the asset graph if you get it wrong.
-- **`querying-the-warehouse`** — read-only connections, the single-writer lock,
-  clean schema names, checking `raw` column names before writing SQL.
-- **`building-evidence-reports`** — the Evidence layer, which has no vendor skill.
-- **`authoring-course-modules`** — writing `docs/course/`: the sandbox recipes,
-  the measure-every-number rule, and what `tests/test_course.py` enforces.
-- **`compliance-models`** — the Scope 2 factors and the CBAM annex: vintages,
-  the fabricated worked example, and the transcription policy.
-- **`retail-models`** — the transaction grain: returns inference, cohorts, RFM.
-- **`currency-and-calendar`** — the ECB rates, `dim_date`, and spot vs average.
-- **`weather-models`** — Open-Meteo's weighted budget, ERA5, the positional
-  multi-location response, and the two degree-day conventions.
-- **`unit-testing-dbt-models`** — the twelve models that carry unit tests, and
-  what mutating each one proved the data tests could not see.
-- **`repo-guards`** — the hand-maintained lists, the tests that hold them to the
-  tree, and the offline fixture dispatch table.
-- **`dependency-versions`** — what pins what, and the three versions nothing
-  watches.
-- **`country-stats-models`** — the country-year domain: coverage that thins per
-  column, current against constant dollars, and the World Bank and Eurostat
-  shapes.
-- **`the-lakehouse`** — the DuckLake catalog: the change feed dlt destroys, the
-  `data_path` that decides portability, and what `lakehouse.tar.gz` may hold.
-- **`publishing-a-release`** — the export boundary: the two format ceilings and
-  what carries forward between releases.
-- **`dagster-graph-and-jobs`** — partitions, registration, the three jobs, and
-  the `dg`/declarative-automation decisions.
-
-Eleven of the fifteen were split out of this file: domain or task reasoning that
-one session in ten needs, against a file loaded in full before every one. **A new
-section here is a question about where it belongs, not only about what it
-says.** The file does not drift upward; it accretes in bursts behind feature
-work, so check it at the end of anything large rather than on a schedule, and
-split in a commit of its own so the before and after stay measurable with
-`git show`.
-
-`tests/test_course.py` globs every `SKILL.md`, so each path and `just` recipe a
-skill cites is checked, and it checks cross-file markdown anchors across all
-tracked markdown. **It does not scan this file's paths**, deliberately: `lake/`
-and `reports/` are both directories and Dagster asset-key prefixes, so a correct
-citation of the asset `reports/evidence_site` is indistinguishable from a dead
+Fourteen of the eighteen were split out of this file, because it loads in full
+before every session. **A new section here is a question about where it belongs,
+not only about what it says**: it stays only if every session needs it — not
+knowing it does irreversible damage, gives a silent wrong answer outside any one
+domain, or is needed to find everything else. The file accretes in bursts behind
+feature work, so check it at the end of anything large, and split in a commit of
+its own so the before and after stay measurable with `git show`.
+`tests/test_course.py` checks every path and `just` recipe a skill cites, but
+**not this file's paths**: `lake/` and `reports/` are both directories and
+Dagster asset-key prefixes, so a correct citation of an asset reads as a dead
 path.
 
 ## Warehouse schemas (`data/lakehouse/` and `data/warehouse.duckdb`)
@@ -321,25 +302,6 @@ stay reconcilable.
   an empty file and restores the previous release's `history` first, so anything
   that counts carried rows goes through `restore_history.CARRIED`, never a table
   name (`publishing-a-release`).
-
-## Domain models with their own skills
-
-Domains with enough hard-won detail load on demand. The table is one row per dbt
-group plus the two sources that cut across them, so a group with no skill shows
-up as a missing row.
-
-| Domain | Skill | What is in it |
-|--------|-------|---------------|
-| OWID, the World Bank and Eurostat (the `country_stats` group) | `country-stats-models` | coverage that thins per column, current against constant dollars, territorial against consumption emissions, the WDI window and its restatements, and Eurostat's semi-annual grain |
-| Scope 2 factors and CBAM (the dbt `compliance` group) | `compliance-models` | the vintage filter that cannot be a year literal, the fabricated worked example, the annex transcription policy, the 2026/1740 migration, and why Annexes II–IV are left out |
-| Retail transactions (the `retail` group) | `retail-models` | the three cleaning decisions whose wrong answers are plausible, the returns inference, the ragged cohort triangle, why `ntile(5)` is wrong for RFM, and the country map that joins retail to the country domain |
-| ECB rates and the calendar | `currency-and-calendar` | the 7-day carry-forward cap, spot against average, ISO year against calendar year, and the project's one incremental model |
-| Capital-city weather (`om_weather_daily`) | `weather-models` | the weighted rate budget that bounds the whole source, the positional multi-location response, the three-year cold start, and the two degree-day conventions |
-
-The one-liners that must not wait for a skill are in *Warehouse schemas* above
-(the fabricated example ships, CBAM has no year, retail is below country grain,
-weather cannot be rebuilt) and in *Conventions & gotchas* (four country-stats
-facts that change what a query *means*).
 
 ## Personal data (`meta: {pii: …}`, `publish/export_warehouse.py`)
 
