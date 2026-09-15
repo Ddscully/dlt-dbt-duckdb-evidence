@@ -9,12 +9,10 @@ adds only Claude Code's plugin declarations, and the project skills live in
 `.agents/skills/` with `.claude/skills` a symlink to them — Claude Code reads
 only its own directory, and Codex only this one.
 
-- **The file is about 70 KB, and Codex reads 32 KiB of it by default.** Codex
-  cuts an instructions file at `project_doc_max_bytes` and says so only in a
-  trace log, so more than half of this file would be missing with no error.
-  The limit is user configuration the repo cannot set: put
-  `project_doc_max_bytes = 131072` in `~/.codex/config.toml`.
-  `tests/test_agent_instructions.py` keeps this bullet inside the budget.
+- **It stays under 32 KiB, because that is all Codex reads by default**, and it
+  cuts the rest with nothing but a trace-log line. `project_doc_max_bytes` is
+  user configuration the repo cannot set, so `tests/test_agent_instructions.py`
+  holds the size instead: a section that would push past it belongs in a skill.
 - **Gemini CLI reads `GEMINI.md`** unless `context.fileName` in its settings
   names `AGENTS.md`.
 
@@ -30,59 +28,40 @@ dlt (EL) → DuckLake (raw) → dbt (staging/marts) → Polars (heavy T) → Evi
 ```
 
 Starting a *different* project on this shape is
-[`docs/REUSING_THIS_STACK.md`](docs/REUSING_THIS_STACK.md): what carries over,
-what has to be rewritten, and the decisions that are expensive to change later.
-The rest of this file is about *this* warehouse.
+[`docs/REUSING_THIS_STACK.md`](docs/REUSING_THIS_STACK.md); the rest of this file
+is about *this* warehouse.
 
-**The README is the tour; the reference prose sits in `docs/`, one file per
-topic:** [`WAREHOUSE.md`](docs/WAREHOUSE.md) (sources, grains, schemas, the lake),
-[`ORCHESTRATION.md`](docs/ORCHESTRATION.md) (the asset graph and its three jobs),
-[`DATA_QUALITY.md`](docs/DATA_QUALITY.md) (tests, contracts, groups, exposures,
-versions), [`PUBLISHED_DATA.md`](docs/PUBLISHED_DATA.md) (the release and how to
-query it), [`DATA_PROTECTION.md`](docs/DATA_PROTECTION.md) (the one personal
-column and what the release does to it),
-[`DASHBOARD.md`](docs/DASHBOARD.md) (the eleven Evidence pages and the deploy)
-and [`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). Those files carry the
-*explanation*; this one carries what it cost to learn, and the two should not
-duplicate each other. A change to how a layer works usually needs an edit in
-`docs/` **and** here.
+**The README is the tour, and the explanation sits in `docs/`, one file per
+topic** — [`WAREHOUSE.md`](docs/WAREHOUSE.md),
+[`ORCHESTRATION.md`](docs/ORCHESTRATION.md),
+[`DATA_QUALITY.md`](docs/DATA_QUALITY.md),
+[`PUBLISHED_DATA.md`](docs/PUBLISHED_DATA.md),
+[`DATA_PROTECTION.md`](docs/DATA_PROTECTION.md),
+[`DASHBOARD.md`](docs/DASHBOARD.md) and
+[`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). What it cost to learn sits here and
+in the skills, so a change to how a layer works usually needs an edit in `docs/`
+**and** in one of those.
 
-- **[`PRACTICES.md`](docs/PRACTICES.md) is the README's main entry point** — an
-  index over the topics: each practice, the failure it prevents, the number that
-  measures it, and where in the code it happens. It restates figures from five
-  other files, so a claim added there is a claim to keep in step;
-  `tests/test_documented_counts.py` covers its test, mart and additivity counts,
-  and nothing covers the rest.
+- **[`PRACTICES.md`](docs/PRACTICES.md) restates figures from five other files**,
+  and `tests/test_documented_counts.py` covers only its test, mart and additivity
+  counts; any other claim added there is kept in step by hand.
 - **[`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) mostly describes
-  what the repo has not built** — an always-on deployment and publish-and-swap
-  around the single-writer lock. Its §2 exists as `just serve`; the unit file and
-  §4's swap asset do not. Its first paragraph says which is which, and nothing
-  else does: `tests/test_course.py` checks cited paths and recipes in the course
-  and the skills, never in `docs/`.
+  what the repo has not built.** Only its §2 exists, as `just serve`, and nothing
+  checks the paths `docs/` cites.
 
-Three lessons from building `just serve` apply well beyond it:
+Three lessons that apply well beyond where they were learned:
 
-- **A design block nobody has executed is prose.** §2's recipe carried two
-  defects, both the failure that document is about — a service that looks fine
-  and is not. `trap 'kill 0' EXIT` kills the recipe's own shell by SIGTERM, which
-  systemd counts as a clean exit, so `Restart=on-failure` never fires; a bare
-  `wait` returns only once *every* child has exited, so a dead webserver leaves
-  the unit healthy. Neither was visible by reading. The doc's "Stopping it"
-  section has the measurements.
-- **The DuckDB lock is one writer XOR many readers**, across processes, on the
-  pinned 1.5.5: a read-only connection fails while a build holds the file, and a
-  build fails while anyone is reading it. The one read that works mid-build is
-  `lake.lakehouse.read_only_connection()`, which opens the catalog and never the
-  warehouse. The measured table is in `querying-the-warehouse`.
-- **`uv sync` strips the venv; `uv run` does not.** `[tool.uv] default-groups` is
-  deliberately unset, so a bare `uv sync` installs `dev` alone and removes the
-  `orchestration` group — 46 packages including `dagster` and `grpcio`, per
-  `uv sync --dry-run` — from under any running service. `uv run` only adds what
-  its own groups need (measured 2026-09-11 on uv 0.12.12: a bare `uv run` left
-  Dagster installed). This file briefly said the opposite, citing that same dry
-  run: **a measurement of one command is not evidence about another.** Widening
-  `default-groups` would close the `uv sync` hazard and is deliberately not done;
-  the note on that key in `pyproject.toml` says why.
+- **A design block nobody has executed is prose.** `just serve`'s first recipe
+  carried two defects, both a service that looks healthy and is not, and neither
+  was visible by reading; the doc's "Stopping it" section has the measurements.
+- **The DuckDB lock is one writer XOR many readers**, across processes: a
+  read-only connection fails while a build holds the file, and a build fails
+  while anyone is reading it. `lake.lakehouse.read_only_connection()` is the one
+  read that works mid-build (`querying-the-warehouse`).
+- **`uv sync` strips the venv; `uv run` does not.** A bare `uv sync` installs
+  `dev` alone and removes the `orchestration` group from under any running
+  service. This file once said the opposite, citing a dry run of the other
+  command: **a measurement of one command is not evidence about another.**
 
 ## The layers, and what each directory is for
 
@@ -129,16 +108,15 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 
 | Command | What it does |
 |---------|--------------|
-| `just setup` | `uv sync --group dev --group orchestration`, then `install ducklake` — the extension is a binary from extensions.duckdb.org that no lockfile can name, so it is fetched rather than pinned (DuckDB asks for its own build, so it matches `uv.lock` by construction) |
+| `just setup` | `uv sync --group dev --group orchestration`, then `install ducklake` — an extension binary no lockfile can name |
 | `just ingest` | run the dlt pipeline → `raw` in the DuckLake catalog |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
-| `just dlt-state` | dlt's incremental state — the WDI watermark and the ECB's last fixing (lives in `~/.dlt`, not the warehouse) |
+| `just dlt-state` | dlt's incremental state, which lives in `~/.dlt`, not the warehouse |
 | `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
 | `just dbt-build` | `dbt deps` then `dbt build` (33 models, 2 snapshots, 8 seeds + 482 data tests + 36 unit tests) |
 | `just dbt-unit-test` | the dbt unit tests alone — the inner loop for model logic |
 | `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
-| `just dbt-docs` | `dbt docs generate` — renders the metadata layer (columns, contracts, groups, exposures, versions) to `dbt/target/` |
-| `just dbt-docs-serve` | the same, then serve it on :8080 |
+| `just dbt-docs` / `just dbt-docs-serve` | `dbt docs generate` to `dbt/target/`, and serve it on :8080 |
 | `just transform` | Polars derived metrics → `analytics` schema |
 | `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
 | `just lakehouse` | report what the DuckLake landing zone holds — tables, rows, snapshots |
@@ -147,23 +125,21 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just materialize` | same pipeline, ordered by the asset graph (`load_retail` then `full_refresh`, no Evidence) |
 | `just materialize-site` | the same two jobs + the Evidence site (`publish_site`; needs Node) |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
-| `just materialize-preview '<sel>'` | print what a selection resolves to, materializing nothing — a selection matching zero assets exits 0 |
+| `just materialize-preview '<sel>'` | what a selection resolves to, materializing nothing — zero matches still exits 0 |
 | `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — the partitioned `raw/wb_wdi` asset |
-| `just backfill-weather 2012 2026` | deepen the capital-city weather archive one year at a time — paced against Open-Meteo's budget, so a decade is about an hour and fifteen years is the most one run can hold |
+| `just backfill-weather 2012 2026` | deepen the weather archive a year at a time, paced to Open-Meteo's budget: about an hour a decade, fifteen years at most per run |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
-| `just serve` | run the graph and the dashboard as one always-on service — webserver, daemon and a static file server, no container (`docs/RUNNING_AS_A_SERVICE.md`) |
-| `just export-data` | package `data/export/` — the DuckDB copy, Parquet, the lakehouse tarball and checksums that `release-data.yml` publishes |
-| `just restore-history prev/warehouse.duckdb` | carry a published release's unreproducible state into this build — `history`, `analytics.pipeline_runs`, and the lakehouse tarball beside the file — refuses if dlt has local state |
+| `just serve` | the graph and the dashboard as one always-on service (`docs/RUNNING_AS_A_SERVICE.md`) |
+| `just export-data` | package `data/export/`, which `release-data.yml` publishes |
+| `just restore-history prev/warehouse.duckdb` | carry a published release's unreproducible state into this build; refuses if dlt has local state |
 | `just bus-matrix` | regenerate the bus matrix block in `docs/WAREHOUSE.md` from the manifest |
 | `just disclosure-risk` | reprint the re-identification table from the warehouse |
-| `just test` | `pytest` — mocked-payload unit tests, no network |
-| `just coverage` | the same with line + branch coverage; reports, gates nothing |
+| `just test` / `just coverage` | `pytest`, mocked, no network; the same with line + branch coverage, gating nothing |
 | `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
 | `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
-| `just lint` | `sqlfluff lint dbt/models dbt/snapshots` |
-| `just typecheck` | `ty check` — Python type diagnostics; reports, gates nothing |
-| `just where` | print which warehouse file and landing zone the recipes will use — dbt's own log line names the *target*, never the file |
-| `just sql` | open the warehouse in the DuckDB CLI with the lakehouse attached, read-only (`just sql write` to write) |
+| `just lint` / `just typecheck` | `sqlfluff lint dbt/models dbt/snapshots`; `ty check`, gating nothing |
+| `just where` | which warehouse file and landing zone the recipes will use — dbt's log names the *target*, never the file |
+| `just sql` | the warehouse in the DuckDB CLI with the lakehouse attached, read-only (`just sql write` to write) |
 | `just clean` | delete the gitignored build output (`deep` also drops `reports/node_modules`) |
 
 Always run tools through `uv run` so they use the project venv, with
@@ -523,5 +499,6 @@ Every PR here is **squash-merged**, so `main` is linear with one commit per PR.
 Exported agent session logs go in `docs/sessions/`, which is **gitignored
 in full**: transcripts are a local working record, long and duplicating what the
 commits say. **Anything learned in a session that should outlive it belongs in
-this file**, which is the part of that history meant to survive — not in an
-agent's own memory store, which no other agent, and no other machine, reads.
+the repo** — in this file if every session needs it, otherwise in the skill for
+its area — not in an agent's own memory store, which no other agent, and no
+other machine, reads.

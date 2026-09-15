@@ -8,9 +8,11 @@ fails without an error:
   session with the plugin section and nothing else.
 - Claude Code reads skills only from `.claude/skills/`, and Codex only from
   `.agents/skills/`. One is a symlink to the other; a real directory in its
-  place is a second copy of fifteen skills, drifting from the first.
+  place is a second copy of eighteen skills, drifting from the first.
 - Codex reads `project_doc_max_bytes` of `AGENTS.md` — 32 KiB by default — and
-  cuts the rest, saying so only in a trace log.
+  cuts the rest, saying so only in a trace log. The budget is one number for
+  every `AGENTS.md` from the repo root down to the working directory, root
+  first, and it is user configuration the repo cannot set.
 
 Sources checked 2026-09-15: code.claude.com/docs/en/memory (the import and the
 symlink), and openai/codex `codex-rs/core/src/agents_md.rs` (`data.truncate`
@@ -71,24 +73,29 @@ def test_claude_skills_is_a_symlink_to_the_shared_skills():
     assert (ROOT / ".claude" / "skills").resolve() == ROOT / ".agents" / "skills"
 
 
-def test_the_codex_budget_notice_is_one_codex_reads_and_is_enough():
-    """The notice has to sit inside the budget it warns about, and be right.
+def test_agents_md_fits_the_budget_codex_reads_by_default():
+    """Every tracked `AGENTS.md`, together, inside Codex's default 32 KiB.
 
-    A notice past byte 32,768 is cut off with everything else it explains. The
-    value it recommends has to cover the file too, or following the advice still
-    truncates.
-
-    Once `AGENTS.md` is trimmed under the default budget, delete the notice and
-    replace this with `len(AGENTS_MD.read_bytes()) <= CODEX_DEFAULT_BUDGET`.
+    Codex concatenates each `AGENTS.md` from the project root down to the
+    working directory against one `remaining` budget and truncates the rest, so
+    a nested file counts against the root's allowance. Summing every tracked one
+    is the bound for the deepest working directory, and it is exact while the
+    root file is the only one. The budget cannot be raised from the repo, which
+    is why the file is held under it rather than a notice asking each reader to
+    raise it — the notice this replaced reached only the users who read it.
     """
-    data = AGENTS_MD.read_bytes()
-    match = re.search(rb"project_doc_max_bytes = (\d+)", data)
-    assert match, "AGENTS.md no longer tells Codex users to raise its budget"
-    assert match.end() <= CODEX_DEFAULT_BUDGET, (
-        f"the project_doc_max_bytes notice ends at byte {match.end()}, past "
-        f"Codex's default {CODEX_DEFAULT_BUDGET} — Codex truncates before it"
-    )
-    assert int(match.group(1)) >= len(data), (
-        f"AGENTS.md is {len(data)} bytes but its notice recommends "
-        f"project_doc_max_bytes = {int(match.group(1))} — raise the figure"
+    files = subprocess.run(
+        ["git", "ls-files", "AGENTS.md", "*/AGENTS.md"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    total = sum((ROOT / f).stat().st_size for f in files)
+    assert files, "no tracked AGENTS.md — every agent but Claude Code has lost its instructions"
+    assert total <= CODEX_DEFAULT_BUDGET, (
+        f"{', '.join(files)} total {total:,} bytes, past Codex's default "
+        f"{CODEX_DEFAULT_BUDGET:,}: Codex silently drops the last "
+        f"{total - CODEX_DEFAULT_BUDGET:,}. A section every session does not need "
+        f"belongs in the skill for its area (AGENTS.md, *Agent skills*)."
     )
