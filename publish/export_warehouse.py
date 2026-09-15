@@ -761,7 +761,7 @@ select count(*) from lakehouse.raw.om_weather_daily;
   has always used — the two renamed tables were the only ones spelling the
   currency key a second way, so nothing joined them to the dimension without an
   alias. There is no compatibility view for this one, unlike the emissions
-  rename below: `sed -i 's/quote_currency/currency_code/g'` over your queries is
+  rename below, which had one until 2026-11-01: `sed -i 's/quote_currency/currency_code/g'` over your queries is
   the whole migration, and carrying a v1 of two tables to say so would cost more
   than it tells you.
 - **`marts.fct_retail_returns` gained a column.** `date_key`, the same
