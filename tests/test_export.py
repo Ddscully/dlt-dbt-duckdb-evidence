@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 
 import duckdb
 import pytest
-from test_fixtures import ALL_URLS
+from pipeline_urls import ALL_URLS
 
 from modern_data_stack import export as _export
 from modern_data_stack.db import scalar
@@ -521,9 +521,15 @@ LAKEHOUSE_SETUP = [
 
 
 @pytest.fixture
-def lakehouse_dir(tmp_path: Path) -> Path:
+def lakehouse_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A miniature DuckLake holding one publishable table and one that is not."""
     from modern_data_stack.ducklake import attach
+
+    # The allowlist names the fixture's table rather than trusting the project's
+    # to: the publish mechanism is under test, and a project that published
+    # nothing from its landing zone would otherwise pass these cases by shipping
+    # an empty catalog.
+    monkeypatch.setattr("lake.lakehouse.PUBLISHED_TABLES", ("raw.om_weather_daily",))
 
     lake = tmp_path / "lakehouse"
     (lake / "data").mkdir(parents=True)

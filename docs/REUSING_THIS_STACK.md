@@ -25,8 +25,9 @@ grain and no country), until CI's `build` job passed. The "a third" held up for
 the code. The lists below did not, and they are corrected from that run: the
 package rename touched 63 files rather than six, `orchestration/assets.py` was
 56% example, and three defects passed every local check and would have failed
-only in CI or at the first release (the `*.csv` fixture in §4, the export's
-personal-data refusal in §7, the lakehouse release check in §7).
+only in CI or at the first release (the `*.csv` fixture in §4, since fixed
+here, the export's personal-data refusal in §7, the lakehouse release check in
+§7).
 
 ## 1. What you're actually reusing
 
@@ -122,9 +123,8 @@ keep the split a split:
   checks `run_history_records_this_build` and `site_pages_all_rendered`.
   - **Every other asset check is yours**, and so are the year- and
     month-partitioned blocks and `RAW_DESCRIPTIONS`' entries.
-  - **Two generic pieces reach through the example.** `_scalar` takes the
-    warehouse path from `transform.co2_intensity`; use `paths.warehouse_path()`.
-    `pipeline_status` depends on the two Polars assets; with none, depend on
+  - **One generic piece reaches through the example.** `pipeline_status`
+    depends on the two Polars assets; with none, depend on
     `list(dbt_models.keys)`, because `deps=[dbt_models]` is refused.
 - `orchestration/definitions.py` — **three jobs, not two.** `full_refresh` (without
   the site) and `publish_site` (with it) are about Node and carry over.
@@ -153,17 +153,18 @@ keep the split a split:
   - `test_report.py` asserts `marts.fct_emissions_energy` is among the tables the
     pages read;
   - `test_lakehouse.py` names the weather table;
-  - `test_export.py` imports its URL list from `test_fixtures.py`, which imports
-    every source module, and five of its lakehouse cases assert against the
-    project's `PUBLISHED_TABLES` instead of their own fixture;
+  - `test_export.py` and `test_fixtures.py` both read `tests/pipeline_urls.py`,
+    the list of every URL the pipeline builds, which imports every source
+    module and is yours to rewrite;
   - `test_asset_checks.py` is three quarters the six domain checks;
   - `test_privacy.py`, `test_additivity.py`, `test_definitions.py`,
     `test_bus_matrix.py` and `test_exposures.py` each hold a few pytest cases
     that pin the example's models, pages or retail identifier.
 
   On a new project, delete those cases and keep the rest. A mechanism test that
-  reads a project allowlist should patch it to its own fixture, or it goes
-  vacuous when the allowlist is empty.
+  reads a project allowlist patches it to its own fixture, as the lakehouse
+  cases in `test_export.py` and `test_restore_history.py` do, or it goes vacuous
+  when the allowlist is empty.
 - **The prose guards are calibrated to this repo's volume of prose.**
   - `test_documented_counts.py` floors its scans: the count-claim scanner must
     find more than 35 claims, the additivity one at least 8. Two of its cases require a specific
@@ -325,12 +326,11 @@ anything built this way:
 - **dlt state is keyed on the pipeline *name*, not the destination.** A fixture run
   hands its watermarks to the next real run unless the name differs.
 - **A recorded fixture can be ignored by git and pass everywhere but CI.**
-  `.gitignore` carries `*.csv` with exceptions for the seeds and dbt's unit-test
-  fixtures, and this repo's ingest fixtures are gzipped, so it has never needed
-  one for `tests/fixtures/ingest/`. A new source with a plain CSV fixture
-  records it, passes `just test-pipeline` in the working tree, and `git add -A`
-  silently leaves the file out; a clean checkout then fails with `No such file
-  or directory`. Add `!tests/fixtures/ingest/*.csv` before the first CSV source.
+  `.gitignore` carries `*.csv` with exceptions for the seeds and both kinds of
+  test fixture. Keep all three. Without the ingest one, a new source with a
+  plain CSV fixture records it, passes `just test-pipeline` in the working tree,
+  and `git add -A` silently leaves the file out; a clean checkout then fails
+  with `No such file or directory`. A new directory of CSVs needs its own line.
 - **Evidence's build state can go stale after a column change.** `just report`
   has validated a page against a dropped column's old schema; clearing
   `reports/.evidence/` (`just report-clean`) after any mart change fixes it.

@@ -61,7 +61,7 @@ from lake.lakehouse import (
     versions as table_versions_for,
 )
 from modern_data_stack.db import row, scalar
-from modern_data_stack.paths import dbt_run_results_path, dbt_target_path
+from modern_data_stack.paths import dbt_run_results_path, dbt_target_path, warehouse_path
 from orchestration.resources import dbt_project
 from publish.build_report import (
     BUILD_DIR,
@@ -70,9 +70,14 @@ from publish.build_report import (
     page_routes,
     run as build_report,
 )
-from transform.co2_intensity import DUCKDB_PATH, run as run_co2_intensity
+from transform.co2_intensity import run as run_co2_intensity
 from transform.pipeline_status import run as run_pipeline_status
 from transform.retail_rfm import run as run_retail_rfm
+
+# The warehouse the asset checks read. The checks' tests point it at a throwaway
+# file, so it is this module's own constant rather than a transform's.
+DUCKDB_PATH = warehouse_path()
+
 
 # --------------------------------------------------------------------------- #
 # Freshness policies

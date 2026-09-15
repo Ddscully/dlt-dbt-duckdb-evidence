@@ -37,9 +37,12 @@ data/cache/
 data/course/
 *.csv
 !dbt/seeds/*.csv
-# Unit-test fixtures are source, like the seeds. Without this line `dbt test`
-# passes locally against files git never took, and CI fails.
+# Test fixtures are source, like the seeds. Without these lines a test passes
+# locally against files git never took, and CI fails: `dbt test` on a unit-test
+# fixture, `just test-pipeline` on a recorded payload. Every ingest fixture is
+# gzipped today, which is the only reason the second has not happened.
 !dbt/tests/fixtures/*.csv
+!tests/fixtures/ingest/*.csv
 
 # dbt
 dbt/target/
