@@ -374,15 +374,10 @@ stay reconcilable.
 - **Never test a snapshot change in the real warehouse**: a simulated revision
   stays in the history even after a re-ingest. The recipe, against copies, is in
   `country-stats-models`.
-- **The published history is carried, not rebuilt.** Every workflow builds from
-  an empty file, so `release-data.yml` restores the previous release's `history`
-  before the graph runs, and `pages.yml` borrows the same file so the Restatements
-  page shows real revisions. CI starts empty, so there every row is version 1; the
-  page's "nothing revised yet" branch is the honest state, not a broken build.
-- **Anything that counts carried rows goes through `restore_history.CARRIED`**,
-  never a table name, so a new snapshot is verified as well as carried. `history`
-  is carried whole because everything in it is unreproducible; any other schema
-  needs a table allowlist.
+- **The published history is carried, not rebuilt**: every workflow builds from
+  an empty file and restores the previous release's `history` first, so anything
+  that counts carried rows goes through `restore_history.CARRIED`, never a table
+  name (`publishing-a-release`).
 
 ## Domain models with their own skills
 
@@ -405,56 +400,19 @@ facts that change what a query *means*).
 
 ## Personal data (`meta: {pii: …}`, `publish/export_warehouse.py`)
 
-One column identifies a person — `dim_retail_customer.customer_id`, UCI's own
-pseudonym for a shopper. It is classified in the ymls, pseudonymised at the
-publication boundary, and measured rather than asserted. Full reasoning in
-[`docs/DATA_PROTECTION.md`](docs/DATA_PROTECTION.md); what it cost to learn:
+One column identifies a person — `dim_retail_customer.customer_id`. It is
+classified in the ymls and pseudonymised at the export, never in a model; the
+measurements and the mechanism are `publishing-a-release`, and the reasoning is
+[`docs/DATA_PROTECTION.md`](docs/DATA_PROTECTION.md). In any task:
 
-- **Deleting the id does not anonymise a customer-grain extract.** 98.6% of
-  customers are unique on `(first_order_gbp, net_revenue_gbp, n_orders)` with no
-  id at all; 97.4% on `net_revenue_gbp` alone. A near-continuous money column at
-  person grain is an identifier, which is why `quasi_identifier` is a label with
-  no action attached: generalising it would delete the analysis it exists for.
-  `just disclosure-risk` reprints the table.
-- **Quote shares, never counts, of anything aggregated over floats.** Two
-  consecutive builds of `dim_retail_customer` on identical sources gave 5,781 and
-  5,785 distinct `net_revenue_gbp` values: float addition is not associative, and
-  DuckDB's parallel aggregation fixes no order. Per-row arithmetic, like the
-  order-line fact's, is stable.
-- **The policy is applied to the published copy, not in a model.** The copy holds
-  identifiers no model declares — `dbt_test__audit` tables, and the `staging`
-  tables `solidify_staging` materialises from views over `lakehouse.raw`.
-  `prepare_copy` solidifies staging *then* pseudonymises; the other order ships
-  clear ids in `staging` beside hashed marts, with matching row counts and no
-  error.
-- **The declared set is expanded by column name across every schema**, because
-  copies of the identifier appear where nobody would classify them by hand —
-  `dbt_test__audit` tables, and dlt's `raw_staging` merge scratch, a full copy of
-  the landing table. The export then verifies what it rewrote against
-  `^[0-9a-f]{16}$`, which a five-digit id cannot match.
-- **`||`, never `concat()`.** `concat` ignores NULLs, so all 243,007 anonymous
-  rows would hash the bare salt onto one pseudonym indistinguishable from a real
-  customer. `||` propagates. Pinned in `tests/test_privacy.py`.
-- **The salt is required and never defaulted**: the ids run 12346–18287, so the
-  whole unsalted rainbow table takes 5 ms to build. The release salt is a stable
-  repository secret — a per-run salt would repseudonymise every customer monthly,
-  and no consumer could tell a restatement from a re-salting. `just export-data`
-  generates a throwaway locally, and even `tests/test_export.py` supplies one.
-- **DuckDB cannot enforce access**: `create role`, `grant`, `create user` and
-  `create policy` are parser errors in 1.5.5. The boundary is the export, the one
-  moment the data leaves the machine it is on.
-- **The coverage test is scoped to name collisions.**
-  `dim_retail_product.net_revenue_gbp` identifies nobody and
-  `dim_retail_customer.net_revenue_gbp` identifies 97.4% — same name, opposite
-  answer — so `tests/test_privacy.py` requires a label wherever a name collides
-  with a classified one, and nowhere else.
-- **A `select *` source query ships every column to every visitor**, and grepping
-  the queries for `customer_id` cannot find one that names no columns. The site's
-  retail queries select only what their charts draw.
-- **Changing a source query's column list needs `just report-clean`**: `just
-  report` kept building against a schema that still declared a dropped column
-  (`reports/.evidence/template/static/data/…/*.schema.json`). Clear `.evidence/`
-  rather than reason about what it reuses.
+- **Deleting the id does not anonymise a customer-grain extract**: 97.4% of
+  customers are unique on `net_revenue_gbp` alone.
+- **Hash with `||`, never `concat()`**, which skips NULLs and would give every
+  anonymous row the same pseudonym.
+- **An Evidence source query names its columns**: a `select *` ships every
+  column to every visitor.
+- **Quote shares, never counts, of anything aggregated over floats** — two
+  builds on identical sources disagreed on the number of distinct values.
 
 ## Data quality and contracts (`dbt/models/**/_*.yml`)
 
@@ -489,75 +447,35 @@ the third table no rebuild can reproduce.
 
 ## The lakehouse (`lake/lakehouse.py`)
 
-**dlt lands `raw` in a DuckLake catalog under `data/lakehouse/`, and the DuckDB
-file holds only what dbt builds.** dbt attaches the catalog (`profiles.yml`'s
-`attach:`, `_sources.yml`'s `database: lakehouse`). `just ingest` fills it;
-`just lakehouse` *reports* on it. The mechanics are the `the-lakehouse` skill —
-the change feed dlt makes useless, reading table versions from the catalog, the
-publishing allowlist, the unpinnable extension, migrating an old tree. What bites
-outside that task:
+dlt lands `raw` in a DuckLake catalog under `data/lakehouse/`, and the DuckDB
+file holds only what dbt builds. The mechanics are the `the-lakehouse` skill.
+What bites outside that task:
 
-- **`just sql` attaches the lakehouse**, because the `staging` views, and the
-  `intermediate` views over them, read `lakehouse.raw`; a bare
-  `duckdb data/warehouse.duckdb` fails each with `Catalog "lakehouse" does not
-  exist!`. It attaches in the warehouse's mode, so only `just sql write` can touch
-  a landing table.
 - **It is the only copy of every landing table**, so `just clean` never takes it:
   deleting it costs the snapshot lineage and the weather archive, which is days
   of Open-Meteo budget.
+- **`just sql` attaches it**, because `staging` and `intermediate` are views over
+  `lakehouse.raw`; a bare `duckdb data/warehouse.duckdb` fails them with
+  `Catalog "lakehouse" does not exist!`.
 - **`LAKEHOUSE_DIR` must be absolute, so `just` exports it for every recipe.**
-  DuckLake compares the stored `data_path` with the given one *as strings*, so dlt
-  (running from the repo root) and dbt (from `dbt/`) spelling one directory two
-  ways is refused inside `dbt build`, a layer downstream of the cause — and no
-  recipe reproduces it, because every recipe exports the variable that hides it.
-  `WAREHOUSE_PATH` gets away with a relative default because a plain file keeps
-  no such record.
-- **`.github/actions/setup` is the one definition of that environment** — uv, the
-  venv, `just`, and all three paths absolute. `tests/test_workflows.py` requires
-  the action to export them, no workflow to set them, and every workflow that
-  runs the pipeline to use it.
+  DuckLake compares the stored `data_path` as a string, so dlt and dbt spelling
+  one directory two ways is refused inside `dbt build`, a layer downstream of the
+  cause. `.github/actions/setup` is the one definition of that environment for
+  the workflows.
 
 ## Publishing (`publish/export_warehouse.py`)
 
-`just export-data` packages the built warehouse into `data/export/`: a
-`COPY FROM DATABASE` copy of the DuckDB file, a zstd Parquet per table in
-`staging`/`marts`/`analytics`, `lakehouse.tar.gz`, `manifest.json`,
-`SHA256SUMS`, `ATTRIBUTION.md` and the release body. `release-data.yml` runs it
-monthly (and on demand) against live sources and publishes a dated
-`data-YYYY-MM-DD` release.
+`just export-data` packages the warehouse into `data/export/`, and
+`release-data.yml` publishes it monthly as a dated `data-YYYY-MM-DD` release;
+the boundary is `publishing-a-release`. Two things not to need it for:
 
-- **The published file must be named `warehouse.duckdb` and attached as
-  `warehouse`.** DuckDB names a catalog after the file stem, and dbt writes the
-  `intermediate` views fully qualified (`warehouse.staging.stg_co2`); rename the
-  file or `ATTACH … AS wh` and they raise `Catalog "warehouse" does not exist`
-  while the tables keep working. `tests/test_export.py` guards it.
-- **Releases redistribute upstream data** under licences — CC BY 4.0, the
-  Eurostat and ECB reuse policies, Decision 2011/833 for the CBAM annex — that
-  all require attribution. `ATTRIBUTION` is the single source for the shipped file
-  and the notes, and `tests/test_export.py` ties it to `ALL_URLS` and to README's
-  `## License`.
-- **`history` ships in the DuckDB file but not as Parquet**; `raw` is not in the
-  file at all, and of the landing tables only `raw.om_weather_daily` ships, in
-  `lakehouse.tar.gz`.
-- **The rest is the `publishing-a-release` skill.** Three of its results matter
-  outside it:
-  - The manifest carries `duckdb_version` *and* `storage_version`, because "who
-    wrote this" and "can I open it" differ: DuckDB 1.x writes format 64, which
-    every client back to v0.10.0 reads. `MAX_PUBLISHED_STORAGE_VERSION` is
-    checked against the *toolchain*, so it fires on the Dependabot PR that moves
-    DuckDB. Not an upper bound on `duckdb`, deliberately.
-  - `lakehouse.tar.gz` has the same kind of ceiling
-    (`MAX_PUBLISHED_LAKE_VERSION`), but the DuckLake spec moves when
-    extensions.duckdb.org republishes — **there is no PR to fail**, only the next
-    CI run.
-  - **Each release carries the previous one's unreproducible state forward** —
-    the snapshots, `analytics.pipeline_runs`, and the lakehouse with its weather
-    archive — so the revision log and the build history span releases and the
-    archive keeps deepening instead of cold-starting every month.
-    `irreplaceable_rows()` is the one count behind `just clean warehouse`'s gate,
-    the restore and the "did not shrink" verify. **Only "no previous release" may
-    skip**; a failed download or restore is fatal, or the next release inherits
-    an empty history.
+- **Each release carries the previous one's unreproducible state forward** — the
+  snapshots, `analytics.pipeline_runs` and the weather archive. **Only "no
+  previous release" may skip the restore**; a failed download or restore is
+  fatal, or the next release inherits an empty history.
+- **The published file must stay named `warehouse.duckdb`**: dbt writes the
+  `intermediate` views fully qualified, so a renamed file breaks them while the
+  tables keep working.
 
 ## Conventions & gotchas (learned the hard way)
 

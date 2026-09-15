@@ -29,7 +29,17 @@ just report-clean   # rm -rf .evidence build && npm install && npm run sources &
 ```
 
 not `just report`. `just report` is only safe when the warehouse schema is
-unchanged.
+unchanged. **The same goes for a source query's column list**, even when no mart
+changed: `just report` kept building against a schema that still declared a
+dropped column (`reports/.evidence/template/static/data/…/*.schema.json`). Clear
+`.evidence/` rather than reason about what it reuses.
+
+## A source query ships every column it selects
+
+**A `select *` source query ships every column to every visitor**, and grepping
+the queries for `customer_id` cannot find one that names no columns. The site's
+retail queries select only what their charts draw, which is the site's half of
+the personal-data policy; the release's half is `publishing-a-release`.
 
 ## A source query must return rows
 
