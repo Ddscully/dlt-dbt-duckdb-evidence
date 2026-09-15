@@ -371,41 +371,25 @@ quotation from an assertion, so never quote an old count in its old words.
   only incremental model and a direct site input, but is arguably an
   intermediate concern.
 
-**The country-year is the dominant grain, not a house rule.** Country facts and
-staging models are `(country_iso3, year)`, joined on ISO3 + year, with `region`
-and `income_group` from `marts.dim_country`. The exceptions are deliberate:
-Eurostat prices keep their published `(country_iso3, year, half)` grain (the
-annual average is a price nobody paid — see `country-stats-models`),
-`fct_cbam_exposure` has no year, and the FX tables have no country. Reaching for
-`dim_country_year` when the thing modelled isn't a country-year is how a fact
-gets a fabricated dimension.
-
-**The fact hangs off the spine, not off a source.** `dim_country_year` is
-`dim_country` × every year the data covers (bounds read from the sources);
-`fct_emissions_energy` inner-joins it to the union of country-years any source
-reports, then left-joins each source. So:
-
-- A country-year only one source reports still reaches the mart. Expect nulls in
-  the columns the others don't cover, and filter charts for what they need.
-- The dimension decides *what a country is*: codes it doesn't carry — the World
-  Bank's aggregates (`WLD`, `EUU`), Antarctica — cannot reach the mart.
-- `max(year)` reports whichever source is furthest ahead, so
-  `mart_covers_recent_years` measures each source column separately.
-- The spine is the full cross join; left-join a fact onto it to see coverage gaps
-  as rows.
+**The country-year is the dominant grain, not a house rule.** Country facts are
+`(country_iso3, year)`, with `region` and `income_group` from
+`marts.dim_country`; joining something that isn't a country-year to
+`dim_country_year` gives it a fabricated dimension. The exceptions, and how
+`fct_emissions_energy` hangs off the spine (a country-year one source reports
+still arrives, with nulls elsewhere), are `country-stats-models`.
 
 ## Snapshot history (`dbt/snapshots/`)
 
-`snap_co2_estimates` is an SCD2 snapshot of `stg_co2` (`co2_mt`,
-`co2_per_capita`, 1990 onwards, `check` strategy, `hard_deletes='invalidate'`):
-OWID restates published years, and every other model overwrites the old number.
-`marts.fct_co2_estimate_versions` summarises it and
-`reports/pages/restatements.md` renders it. `snap_grid_emission_factors` keeps the
-Scope 2 factor's versions from 2015, because a *filed* number has to stay
-reconcilable.
+`snap_co2_estimates` keeps OWID's restatements of published years, which every
+other model overwrites (`country-stats-models`); `snap_grid_emission_factors`
+keeps the Scope 2 factor's versions from 2015, because a *filed* number has to
+stay reconcilable.
 
 - **A snapshot is state, not a build artifact.** It cannot be recomputed, and
   deleting `data/warehouse.duckdb` destroys it — which is why both are narrow.
+- **Never test a snapshot change in the real warehouse**: a simulated revision
+  stays in the history even after a re-ingest. The recipe, against copies, is in
+  `country-stats-models`.
 - **The published history is carried, not rebuilt.** Every workflow builds from
   an empty file, so `release-data.yml` restores the previous release's `history`
   before the graph runs, and `pages.yml` borrows the same file so the Restatements
@@ -415,15 +399,6 @@ reconcilable.
   never a table name, so a new snapshot is verified as well as carried. `history`
   is carried whole because everything in it is unreproducible; any other schema
   needs a table allowlist.
-- **Verify a snapshot change by simulating a revision**, never in the real
-  warehouse — the fake version stays in the history even after a re-ingest. With
-  `WAREHOUSE_PATH` and `LAKEHOUSE_DIR` pointed at copies: build, `update
-  lakehouse.raw.owid_co2 set co2 = co2 * 1.05 where iso_code = 'DEU' and year =
-  2019` through `just sql write`, build again, and read
-  `fct_co2_estimate_versions`.
-- **Evidence cannot write a zero-row source to Parquet** ("too small to be a
-  Parquet file"), so `reports/sources/warehouse/co2_estimate_versions.sql`
-  selects every country-year and the page filters on `is_revised` itself.
 
 ## Domain models with their own skills
 
@@ -649,24 +624,10 @@ monthly (and on demand) against live sources and publishes a dated
   largest body of "plausible number, wrong basis" in the repo. Four facts cannot
   wait for it, because they change what a query *means*:
   - **`income_group` and `region` are today's answer applied to every year.** The
-    World Bank `/country` endpoint publishes only the current classification, so
-    every rollup by income group inherits it. `marts.dim_country_income_history`,
-    transcribed from the publisher's own history (`OGHIST.xlsx`, by
-    `scripts/build_income_classification_seed.py`), measures the cost:
-
-    | Year | Economies classified | In a different group today |
-    |------|---------------------|----------------------------|
-    | 1990 | 174 | **89 (51%)** |
-    | 2000 | 203 | 102 (50%) |
-    | 2010 | 211 | 59 (28%) |
-    | 2020 | 212 | 22 (10%) |
-    | 2025 | 213 | 0 |
-
-    The current year's 0 is an invariant — the same classification reached two
-    ways — so a `warn` test fires when they stop agreeing, which is what a July
-    reclassification looks like before anyone re-runs the script. Nothing is
-    repointed at the history yet: that is a contract change on every relation
-    carrying `income_group`, and a separate decision.
+    World Bank publishes only the current classification, so every rollup by
+    income group inherits it: 51% of the economies classified in 1990 are in a
+    different group today. `marts.dim_country_income_history` holds the
+    classification as it stood each year.
   - **Divide by `gdp_constant_usd`, never `gdp_usd`.** `gdp_usd` is *current*
     US$, moving with inflation and the exchange rate; of the 193 countries with
     both series in 2010 and 2024, 30 flip the sign of their decarbonisation trend
