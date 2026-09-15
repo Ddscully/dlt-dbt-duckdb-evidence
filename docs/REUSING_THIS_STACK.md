@@ -214,7 +214,8 @@ one era, because it's the table `rm data/warehouse.duckdb` destroys for good.
 
 ## 4. Invariants that fail silently
 
-`AGENTS.md` has the full list for this project. These are the ones that recur in
+`AGENTS.md` and the skills under `.agents/skills/` have the full list for this
+project. These are the ones that recur in
 anything built this way:
 
 - **`WAREHOUSE_PATH` must be absolute.** dbt resolves it from `dbt/`, the Python

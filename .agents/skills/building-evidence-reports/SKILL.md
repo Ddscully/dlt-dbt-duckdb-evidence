@@ -320,7 +320,7 @@ filed here, because all three are about the site rather than about Dagster.
   `tests/test_report.py` parses `reports/sources/**/*.sql` and fails if the two
   disagree. Without it, adding a source query on a new mart would leave the site
   building from a stale copy of it while the graph still showed complete lineage —
-  no error, just an old number. The maps live in `scripts/` rather than beside the
+  no error, just an old number. The maps live in `publish/` rather than beside the
   asset because `just test` runs before `dbt parse` in CI and so can't import
   anything that needs the dbt manifest.
 - **`site_pages_all_rendered` is blocking, and it checks file *size*.**

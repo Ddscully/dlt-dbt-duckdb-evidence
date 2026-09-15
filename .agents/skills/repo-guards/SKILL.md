@@ -39,7 +39,7 @@ section here. The mutation method these guards were written with is in the
   both fail green.** `SOURCE_TABLES` (`transform/pipeline_status.py`) is
   iterated by `observability.build_sources`, so an unlisted source yields no
   row and the pipeline page under-reports while looking complete — the exact
-  symptom AGENTS.md already records from a *different* cause (the Arrow path's
+  symptom `adding-a-data-source` records from a *different* cause (the Arrow path's
   missing `_dlt_load_id`, "six sources for seven"). `RAW_DESCRIPTIONS`
   (`orchestration/assets.py`) is read with `.get(name)`, so an unlisted
   resource materialises with no description at all. Both are now held to
@@ -80,7 +80,7 @@ section here. The mutation method these guards were written with is in the
   - **`WB_WDI_INDICATORS` against `stg_wdi.sql`.** The dict maps eleven
     indicator codes to column names and the model says it again as
     `max(case when indicator = 'X' then value end) as Y`. Written twice,
-    nothing tying them, while the bullet under *Conventions* in `AGENTS.md`
+    nothing tying them, while *Adding a WDI indicator* in `adding-a-data-source`
     invites the edit.
     **The dangerous drift is the one where both sides agree on the keys**: swap
     `NY.GDP.MKTP.CD` for `.KD` and current-dollar GDP lands in

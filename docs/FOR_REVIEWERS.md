@@ -13,7 +13,7 @@ of it estimated.
 | [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including the partitioned WDI load |
 | [`dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest. Also the repo's one versioned model, aliased back to the bare relation name so the rename is invisible to its consumers ([`_v1`](../dbt/models/marts/country_stats/fct_emissions_energy_v1.sql) is a compatibility view over it, not a second copy) |
 | [`ingest/pipeline.py`](../ingest/pipeline.py) | seven sources, two write dispositions, and why that has to be two `run()` calls |
-| [`AGENTS.md`](../AGENTS.md) | every gotcha that cost more than an hour, written down at the point it was learned |
+| [`AGENTS.md`](../AGENTS.md) | the gotchas every session needs, written down at the point they were learned — the rest are in the skills under `.agents/skills/` |
 
 ---
 
@@ -403,5 +403,6 @@ eight tables each feeding a named model. Of the rest:
 
 ---
 
-<sub>Ideas and their post-mortems accumulate in `AGENTS.md`; it is the file to
-read if you want to know what this cost to learn rather than what it does.</sub>
+<sub>Ideas and their post-mortems accumulate in `AGENTS.md` and the skills under
+`.agents/skills/`; they are the files to read if you want to know what this cost
+to learn rather than what it does.</sub>

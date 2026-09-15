@@ -29,12 +29,12 @@ dev = [
     "pre-commit>=4.0",     # git hooks
     "pytest>=8.3",         # unit tests over the ingest/transform logic (see tests/)
     # Driven as `coverage run -m pytest`: pytest-cov measured identically for one
-    # more package. `>=` and no CI gate, for ty's reason below. See AGENTS.md's
-    # Testing section.
+    # more package. `>=` and no CI gate, for ty's reason below. See
+    # tests/README.md.
     "coverage>=7.0",       # `just coverage`; reports, gates nothing
     # `>=` unlike sqlfluff because nothing gates on it. It is 0.0.x and its
     # diagnostics move between patches — promote to an exact pin *before* putting
-    # it in pre-commit or a workflow. See AGENTS.md.
+    # it in pre-commit or a workflow. See the linting-and-type-checking skill.
     "ty>=0.0.74",           # `just typecheck`; agent/editor LSP via `ty server`
     # The official CLI wheel (the `duckdb` library ships no binary), locked here
     # rather than installed by curl or `uvx`, so `just sql` tracks uv.lock.
@@ -72,7 +72,8 @@ line-length = 100
 # No `select`: this runs ruff's own defaults, and the exact `rev` in
 # .pre-commit-config.yaml is the only thing that holds them still. `extend-select`
 # re-adds the 18 rules 0.16 dropped from that set, so a version bump can't
-# silently stop checking star imports and `== None`. See AGENTS.md.
+# silently stop checking star imports and `== None`. See the
+# linting-and-type-checking skill.
 extend-select = [
     "E401", "E402",                                   # multiple / non-top-level imports
     "E701", "E702", "E703",                           # colons and stray semicolons
@@ -85,7 +86,8 @@ extend-select = [
 [tool.ruff.lint.isort]
 # Keep `from x import a, run as b` on one statement. ruff's default splits the
 # alias onto its own line, which shreds orchestration/assets.py's import block —
-# four layers each export a `run()`, so it aliases every one. See AGENTS.md.
+# four layers each export a `run()`, so it aliases every one. See the
+# linting-and-type-checking skill.
 combine-as-imports = true
 
 [tool.pytest.ini_options]
@@ -109,7 +111,7 @@ branch = true
 
 [tool.coverage.report]
 # No `fail_under`: nothing gates on this, and a threshold nobody chose is the
-# vanity metric ty's entry in AGENTS.md argues against. Nothing is `omit`ted
+# vanity metric ty's entry in the linting-and-type-checking skill argues against. Nothing is `omit`ted
 # either — hiding a deliberate gap is how it stops being a decision.
 # tests/README.md has the two caveats on reading the total.
 show_missing = true
