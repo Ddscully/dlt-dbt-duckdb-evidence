@@ -9,8 +9,12 @@ the file reaches the model, so this note costs no context.
 
 ## Claude Code plugins
 
-Everything above is [`AGENTS.md`](AGENTS.md), which every agent reads; this
-section is what only Claude Code does.
+The shared instructions are [`AGENTS.md`](AGENTS.md), which every agent reads
+and the `@AGENTS.md` line imports; this section is what only Claude Code does.
+Claude Code loads the import as a file of its own, after this one, not spliced
+in at that line — the model sees the line itself, then this section, then
+`AGENTS.md` (observed 2026-09-15 on Claude Code 2.1.272) — so nothing here may
+say the shared text is "above".
 
 Vendor skills for each layer are declared in [`.claude/settings.json`](.claude/settings.json),
 so Claude Code offers to install them when you trust this repo. They carry the
@@ -75,4 +79,5 @@ declare it in `.claude/settings.json` by hand.
 **`.claude/skills` is a symlink to `.agents/skills`**, and Claude Code follows
 it. Replacing it with a real directory gives two copies of every skill that
 drift; `tests/test_agent_instructions.py` fails on that, and on this file
-losing its `@AGENTS.md` line, which would drop everything above with no error.
+losing its `@AGENTS.md` line, which would leave Claude Code this section and
+nothing else, with no error.
