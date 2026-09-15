@@ -492,11 +492,14 @@ Every PR here is **squash-merged**, so `main` is linear with one commit per PR.
   cherry-picked independently.
 - **`git branch --merged` is useless here**: a squashed commit shares no SHA with
   its branch, and once `main` moves on, a merged branch and one with unique work
-  both show a diff. **`git merge-tree --write-tree main <branch>` decides it**: if
-  the tree it prints equals `git rev-parse main^{tree}`, the branch adds nothing.
-  A conflict there is inconclusive on prose-heavy branches; `gh pr list --state
-  merged --json headRefName` maps a branch to the PR that merged it. Look before
-  `-D`.
+  both show a diff. **`git merge-tree --write-tree main <branch>` decides it only
+  until `main` touches the branch's files again**: a tree equal to
+  `git rev-parse main^{tree}` means the branch adds nothing, but a conflict proves
+  nothing — on 2026-09-15 three merged branches, three to five PRs behind, all
+  conflicted, one on `CLAUDE.md` alone. **Past that, ask GitHub what it merged**:
+  `gh pr list --state merged --head <branch> --json number,headRefOid` gives the
+  PR and its final commit, and `git merge-base --is-ancestor <branch> <headRefOid>`
+  exiting 0 means every commit on the branch went into it. Look before `-D`.
 
 ## Session history
 
