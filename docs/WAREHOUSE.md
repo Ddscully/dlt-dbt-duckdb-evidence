@@ -103,6 +103,32 @@ dimension does not (`EIRE`, `RSA`, `USA`, `Korea`, `Czech Republic`,
 `Hong Kong`, and three that are not countries at all), which is why the
 resolution is a seed rather than a join on name.
 
+### What "mart" means, and two refactors measured against
+
+**"Mart" means the subject area, not the file.** There are four marts — the
+groups in `dbt/models/_groups.yml` — and the relations in the `marts/` layer are
+**mart models**. Counting models and calling them marts is how a stale count once
+survived two additions to the layer. `+group:` is set on the folder in
+`dbt_project.yml`, and `+schema: marts` on all four, so relation names, the
+release layout and the asset keys ignore the nesting.
+
+- **Consolidating models was measured against.** Pairs that share a grain are
+  sparse against each other — `fct_retail_returns` is 18,286 rows against
+  `fct_retail_order_line`'s 1,067,371, and `fct_country_weather_year` covers 41
+  countries against 228 — so merging means columns null on nearly every row. One
+  fact table per business *process*, not per grain.
+- **Country attributes stay on the facts.** Normalising `country_name`, `region`
+  and `income_group` out to `dim_country` would save 0.4% of
+  `fct_emissions_energy`'s Parquet, because zstd dictionary-encodes 228 repeated
+  strings to nearly nothing, and no copy can drift, since every one is built from
+  the dimension in the same run. It would cost eight pages, two source queries
+  and a transform a join each, plus a v3 of the versioned model. Kimball's rule is
+  a row-store storage argument.
+- **The near-miss is `fct_fx_rates_published`**, a strict subset of
+  `fct_fx_rates_daily` (`where is_published_rate`). It stays a mart model as the
+  only incremental model and a direct site input, but is arguably an
+  intermediate concern.
+
 ## The bus matrix
 
 Business processes down, conformed dimensions across — Kimball's planning

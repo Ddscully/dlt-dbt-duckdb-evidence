@@ -109,32 +109,19 @@ src/modern_data_stack/   the domain-neutral mechanisms every layer calls
 
 ## The package (`src/modern_data_stack/`)
 
-The domain-neutral mechanisms live here — `paths`, `fixtures`, `ducklake`,
-`observability`, `export`, `history`, `db` — and take their configuration as
-arguments. The project modules that call them (`ingest/fixtures.py`,
-`lake/lakehouse.py`, `transform/pipeline_status.py`, `publish/export_warehouse.py`,
-`publish/restore_history.py`) hold this project's constants and stay the entry
-points.
+The domain-neutral mechanisms live here and take their configuration as
+arguments; the project modules that call them (`lake/lakehouse.py`,
+`publish/export_warehouse.py`, …) hold this project's constants and stay the
+entry points. The module table and the rules behind the split are
+[`docs/REUSING_THIS_STACK.md`](docs/REUSING_THIS_STACK.md). Two of them bite in
+any change:
 
-- **`modern_data_stack.paths` is the single answer to "where is the project".**
-  Resolution is `PROJECT_ROOT`, then the package's own grandparent when it looks
-  like a project, then a marker search up from the cwd — last, because the Dagster
-  daemon and the CLI don't necessarily run from the project directory.
-  **Exhausting all three raises**, and a cwd fallback must not be added: it would
-  resolve the warehouse to `./data/warehouse.duckdb`, which DuckDB then
-  *creates*, so an install started outside the tree runs green against an empty
-  database. `tests/test_paths.py` pins it.
+- **`modern_data_stack.paths` raises when it cannot find the project**, and a cwd
+  fallback must not be added: it would resolve `./data/warehouse.duckdb`, which
+  DuckDB *creates*, so a run outside the tree goes green against an empty
+  database.
 - **Config reaches a package module as a parameter, never as a constant.**
-  Nothing under `src/` knows what a country is; a hardcoded table name there
-  undoes the split.
-- **A general operation belongs in the general module, even when the duplication
-  is small.** `db.write_frames` (register a Polars frame, `create or replace`,
-  unregister) first lived in `observability`, so both Polars transforms
-  hand-rolled a copy — and both omitted the `unregister`. Its `schema` parameter
-  has **no default**: every caller writes `analytics`, which is exactly what
-  would make a default invisible to the caller that means something else.
-- **`RawSchemaDltTranslator` stays in `orchestration/assets.py`**: moving it would
-  put Dagster, an optional dependency group, behind a package import.
+  Nothing under `src/` knows what a country is.
 
 ## Commands
 
@@ -200,21 +187,11 @@ files outside that task:
 
 ## Dependency and action versions
 
-`.github/dependabot.yml` watches three ecosystems — `github-actions` (the
-workflows and the composite actions), `uv` and `npm` (`/reports`) — monthly, each
-grouped to one PR. **What pins what, and why, is the `dependency-versions`
-skill.** Four things not to need it for:
-
-- **Python is 3.13, set in `.python-version` alone.** No workflow passes a
-  `python-version`, so that file is what CI, the release and a venv all read.
-- **No upper bound is written on a dependency in `pyproject.toml`**; the ceilings
-  come from upstream. dagster-dbt caps `dbt-core<1.12` and Python `<3.14`, and
-  dagster caps Python `<3.15`.
-- **Three versions can only age deliberately** — `.python-version`, the sqlfluff
-  pair and ruff — because no watched ecosystem covers them.
-- **The `uv` entry is `versioning-strategy: lockfile-only`**, so `pyproject.toml`'s
-  bounds stay minimum-supported versions. `npm` stays on the default, because
-  there the major *is* the pin.
+`.github/dependabot.yml` watches `github-actions`, `uv` and `npm` monthly. What
+pins what, and why, is the `dependency-versions` skill. Python is 3.13, set in
+`.python-version` alone, and three versions can only age deliberately —
+`.python-version`, the sqlfluff pair and ruff — because no watched ecosystem
+covers them.
 
 ## Agent skills
 
@@ -283,77 +260,43 @@ path.
 ## Warehouse schemas (`data/lakehouse/` and `data/warehouse.duckdb`)
 
 dlt lands `raw` in the DuckLake catalog; dbt builds everything else into the one
-DuckDB file.
+DuckDB file. The full account is [`docs/WAREHOUSE.md`](docs/WAREHOUSE.md).
 
-- `raw` (in the lakehouse) — dlt landing tables: `owid_co2`, `owid_energy`,
-  `wb_country`, `wb_wdi`, `eu_elec_prices`, `ecb_fx_rates`,
-  `retail_invoice_lines`, `om_weather_daily`. **`om_weather_daily` cannot be
-  rebuilt** within Open-Meteo's daily allowance, so each release carries it
-  forward in `lakehouse.tar.gz` (see *Publishing*)
-- `staging` — dbt views, `stg_*`, cleaned to `(country_iso3, year)` grain —
-  except `stg_fx_rates` `(rate_date, currency_code)`, `stg_retail_lines`
-  `(invoice, line_number)` and `stg_weather_daily` `(country_iso3, weather_date)`
-- `intermediate` — dbt views, `int_*`: three, each earning its place by removing
-  a specific cost. `int_country_year_observed` (the country-years the four
-  country-stats sources report, derived once instead of twice),
-  `int_cbam_default_factors` (Annex I's fallback rule, separately testable) and
-  `int_retail_return_matches` (the returns-to-purchase inference). `private` and
-  uncontracted, like staging; not shipped as Parquet
+- `raw` (in the lakehouse) — `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`,
+  `eu_elec_prices`, `ecb_fx_rates`, `retail_invoice_lines`, `om_weather_daily`.
+  **`om_weather_daily` cannot be rebuilt** within Open-Meteo's daily allowance,
+  so each release carries it forward in `lakehouse.tar.gz`
+- `staging` — dbt views, `stg_*`, at `(country_iso3, year)` except `stg_fx_rates`
+  `(rate_date, currency_code)`, `stg_retail_lines` `(invoice, line_number)` and
+  `stg_weather_daily` `(country_iso3, weather_date)`; `intermediate` — three
+  `int_*` views, `private` and uncontracted like staging, and not shipped as
+  Parquet
 - `marts` — dbt tables, one folder per dbt group:
   - `country_stats/` — `dim_country_year` (the spine), `fct_emissions_energy`
-    (the wide join on the spine; **the one versioned model**, with
-    `fct_emissions_energy_v1` a compatibility view until 2026-11-01),
-    `fct_co2_estimate_versions` (revision history, off the snapshot),
-    `fct_eu_electricity_prices_semiannual` (Eurostat's half-year grain),
-    `fct_country_weather_year`
-  - `reference/` — `dim_country` (**the conformed country dimension**, one row
-    per `country_iso3`, 228 of them), `dim_country_income_history` (the income
-    classification **as it stood in each year** — every other `income_group` is
-    today's, stamped on every year), and five with no country in them: `dim_date`,
-    `dim_currency`, `fct_fx_rates_published` (the ECB's fixings, and **the only
-    incremental model**), `fct_fx_rates_daily` (gap-filled) and
-    `fct_fx_rates_periods` (month / quarter / half / year)
-  - `compliance/` — `dim_grid_emission_factors` (the Scope 2 reference product),
-    `fct_example_scope2_emissions` (the worked example — **the only fabricated
-    data in the warehouse**, and it ships), `fct_cbam_exposure` (the CBAM border
-    cost, at `(sourcing country, good)` with **no year at all**)
-  - `retail/` — **the only grain below a country**: `fct_retail_order_line`
-    (`(invoice, line_number)`), `dim_retail_product`, `dim_retail_customer`,
-    `fct_retail_returns`, `fct_retail_customer_cohorts`
-    (`(cohort_month, months_since_first_order)`)
-- `history` — the snapshots `snap_co2_estimates` and `snap_grid_emission_factors`:
-  **two of the three tables no rebuild can reproduce**
-- `analytics` — Polars output: `co2_intensity` and `retail_rfm`, plus
-  `pipeline_sources` / `pipeline_tables` / `pipeline_tests` / `pipeline_runs`.
-  **`pipeline_runs` is the third unreproducible table**: it is appended per dbt
-  invocation, and the artifact it reads holds only the latest one
+    (**the one versioned model**; `fct_emissions_energy_v1` is a compatibility
+    view until 2026-11-01), `fct_co2_estimate_versions`,
+    `fct_eu_electricity_prices_semiannual`, `fct_country_weather_year`
+  - `reference/` — `dim_country` (**the conformed country dimension**),
+    `dim_country_income_history`, `dim_date`, `dim_currency` and the
+    `fct_fx_rates_*` models, of which `fct_fx_rates_published` is **the only
+    incremental model**
+  - `compliance/` — `dim_grid_emission_factors`, `fct_example_scope2_emissions`
+    (**the only fabricated data in the warehouse, and it ships**),
+    `fct_cbam_exposure` (at `(sourcing country, good)`, **no year at all**)
+  - `retail/` — **the only grain below a country**: `fct_retail_order_line`,
+    `dim_retail_product`, `dim_retail_customer`, `fct_retail_returns`,
+    `fct_retail_customer_cohorts`
+- `history` — the snapshots `snap_co2_estimates` and `snap_grid_emission_factors`;
+  `analytics` — Polars output, `co2_intensity`, `retail_rfm` and the `pipeline_*`
+  tables. **The two snapshots and `analytics.pipeline_runs` are the three tables
+  no rebuild can reproduce.**
 
-**"Mart" means the subject area, not the file.** There are four marts — the
-groups in `dbt/models/_groups.yml` — and the 21 relations (20 models, one of them
-versioned) in the `marts/` layer are **mart models**. Counting models and calling
-them marts is how a stale count once survived two additions to the layer.
-`tests/test_documented_counts.py` guards the number, and it cannot tell a
-quotation from an assertion, so never quote an old count in its old words.
-
-- **`+group:` is set on the folder** in `dbt_project.yml`, and `+schema: marts` on
-  all four, so relation names, the release layout and the asset keys ignore the
-  nesting.
-- **Consolidating models was measured against.** Pairs that share a grain are
-  sparse against each other — `fct_retail_returns` is 18,286 rows against
-  `fct_retail_order_line`'s 1,067,371, and `fct_country_weather_year` covers 41
-  countries against 228 — so merging means columns null on nearly every row. One
-  fact table per business *process*, not per grain.
-- **Country attributes stay on the facts.** Normalising `country_name`, `region`
-  and `income_group` out to `dim_country` would save 0.4% of
-  `fct_emissions_energy`'s Parquet, because zstd dictionary-encodes 228 repeated
-  strings to nearly nothing, and no copy can drift, since every one is built from
-  the dimension in the same run. It would cost eight pages, two source queries
-  and a transform a join each, plus a v3 of the versioned model. Kimball's rule is
-  a row-store storage argument.
-- **The near-miss is `fct_fx_rates_published`**, a strict subset of
-  `fct_fx_rates_daily` (`where is_published_rate`). It stays a mart model as the
-  only incremental model and a direct site input, but is arguably an
-  intermediate concern.
+**"Mart" means the subject area, not the file**: there are four marts, the groups
+in `dbt/models/_groups.yml`, and the relations in `marts/` are *mart models*.
+`tests/test_documented_counts.py` cannot tell a quotation from an assertion, so
+never quote an old count in its old words. Consolidating same-grain models and
+moving country attributes off the facts were both measured against — read
+[`docs/WAREHOUSE.md`](docs/WAREHOUSE.md) before proposing either.
 
 **The country-year is the dominant grain, not a house rule.** Country facts are
 `(country_iso3, year)`, with `region` and `income_group` from
