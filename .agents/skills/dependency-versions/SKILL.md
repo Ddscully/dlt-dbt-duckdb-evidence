@@ -139,11 +139,12 @@ linter, formatter and type checker those pins serve behave is
   rewrites the linter will make. It reports `3.13` now; it reported `3.12`
   before, which is why nothing 3.13-only could have been written in the gap
   even by accident.
-- **3.14 and dbt 1.12 are blocked upstream, not by us.** No dependency in
-  `pyproject.toml` carries an upper bound of its own; the ceilings are in the
-  packages' metadata. dagster-dbt declares `Requires-Python <3.14` and
-  `dbt-core<1.12`, dagster declares `Requires-Python <3.15`, and dbt-core ships
-  no 3.14 classifier — dbt Labs certifies a Python roughly a year behind.
+- **3.14 is blocked upstream, not by us.** No dependency in `pyproject.toml`
+  carries an upper bound of its own; the ceilings are in the packages' metadata.
+  dagster-dbt declares `Requires-Python <3.14` (dagster issue #33903), dagster
+  declares `Requires-Python <3.15`, and dbt-core ships no 3.14 classifier — dbt
+  Labs certifies a Python roughly a year behind. dbt 1.12 sat behind the same
+  shape of ceiling, dagster-dbt's `dbt-core<1.12`, until dagster-dbt 0.29.22.
 - **`pyarrow` is a runtime dependency and was undeclared until 2026-08-25.**
   DuckDB reaches it for `to_arrow_reader()` (the retail ingest,
   `ingest/sources/retail.py`) *and* for `.pl()` — so a tree without it raises
@@ -178,44 +179,85 @@ linter, formatter and type checker those pins serve behave is
   - **The manifest stays schema v12**, so `dagster-dbt`, `transform/pipeline_status.py`
     and `tests/test_documented_counts.py` all read it unchanged. Worth checking
     rather than assuming on any dbt minor: three consumers here parse it.
-  - **1.12 is blocked on dagster-dbt, not on us** — it requires `dbt-core<1.12`,
-    and the newest release (0.29.21, 2026-09-03) still does. Same shape as the
-    3.14 bullet above, one layer over. Everything else here is already ready for
-    it: resolved without dagster-dbt, `dbt-core 1.12.3`, `dbt-duckdb 1.11.0` and
-    `sqlfluff-templater-dbt 4.3.0` land together cleanly, so the day the cap
-    lifts this is a re-lock and the full check, and nothing else.
-    - **The fix has merged upstream and is waiting on a release.**
-      [dagster#34085](https://github.com/dagster-io/dagster/pull/34085) ("Allow
-      dbt-core 1.12") merged 2026-09-10: `master`'s dagster-dbt says
-      `dbt-core>=1.7,<1.13`. It is a *pure bound relaxation*, and its author
-      verified the thing the bullet above says to check — **the manifest stays
-      schema v12**, the `dbt.*`/`dbt_common.*` import sites still resolve, and
-      dagster-dbt's CI passes identically on 1.11 and 1.12. Dagster releases
-      roughly weekly, so it should arrive in 0.29.22. The Python cap is
-      unchanged there (`<3.14`; dagster issue #33903).
-    - **Forcing it early is refused.** `[tool.uv] override-dependencies` would
-      install 1.12 today, and buys nothing — nothing 1.12 removes (`dbt login`,
-      the bundled dbt-state plugin, `--manage-state`) is used here — while
-      costing a **fourth entry in the three-versions table**: an override is as
-      invisible to `lockfile-only` as a `==`, so nothing would report when it
-      turned from a workaround into the thing holding dbt back.
-    - **What would change that is adding a semantic layer.** 1.12 reworks the
-      Semantic Layer YAML spec and adds `osi_document.json`; this project has
-      no semantic model or metric yet, so authoring one against 1.11's spec
-      would mean migrating it almost immediately. That is the one piece of work
-      whose value here is worth reopening the override question for.
-  - **`sqlfluff-templater-dbt` is pinned exactly at 4.3.0 and compiled 1.11
-    fine**, but it is the thing to check first on any dbt bump: it is the one
-    consumer that cannot move independently, by deliberate design. 4.3.0
-    resolves against dbt-core 1.12 when nothing holds it back, so the cap that
-    keeps this tree on 1.11 is `dagster-dbt`'s, not the templater's.
+  - **`sqlfluff-templater-dbt` is pinned exactly at 4.3.0 and compiles 1.11 and
+    1.12 alike**, but it is the thing to check first on any dbt bump: it is the
+    one consumer that cannot move independently, by deliberate design.
+- **dbt 1.12 was a no-op as well, measured four ways on 2026-09-15.** It waited
+  on dagster-dbt's `dbt-core<1.12` until 0.29.22 (2026-09-11), the release of
+  [dagster#34085](https://github.com/dagster-io/dagster/pull/34085), a pure
+  bound relaxation. Then:
+  - `dbt parse` emits zero deprecation warnings and no hints, and the manifest
+    is still v12.
+  - `just test-pipeline` and `just materialize` against fixtures both build
+    `PASS=561`, as 1.11 did. The summary line gains a `REUSED=` field that
+    nothing here parses.
+  - **A build on a copy of the real warehouse moved no row count in any
+    `history` or `marts` table, and changed no snapshot's `dbt_scd_id`s.** That
+    is the check a dbt minor needs and a fixture run cannot make: a changed
+    snapshot hash would re-version every row of the tables no rebuild
+    reproduces, and a copy of the warehouse is the only safe place to see it.
+  - **The deprecation-date promotion still fails parse.** With the date moved
+    into the past, `DeprecatedModel` exits 2; with the `flags:` block removed,
+    0. 1.12 routes every warning through the `--warn-error` handler, the
+    machinery that promotion rides on, and no test covers it.
+- **A re-lock across an exact pin is a silent no-op unless the pinned package is
+  named.** dagster-dbt, dagster-dlt, dagster-webserver and dagster-graphql pin
+  `dagster==` exactly, so from 1.11's lock `uv lock --upgrade-package dbt-core`
+  and `uv lock --upgrade-package dagster-dbt` each print `Resolved 154
+  packages`, exit 0 and change nothing: the locked dagster holds the locked
+  dagster-dbt, which holds dbt. Naming `dagster` as well frees the family —
+  `uv lock --upgrade-package dagster-dbt --upgrade-package dagster
+  --upgrade-package dbt-core` moved all seven dagster packages and dbt with them.
+  **Read the `Updated` lines, never
+  the exit code.**
+- **dbt-core 1.12's "parser" is dbt v2, 174 MB of it, and a default run never
+  calls it.** `dbt-core-experimental-parser` is an unconditional dependency whose
+  one executable in `.venv/bin/` answers `--version` with `dbt-oss 2.0.1`, the
+  v2 open-source engine. The locked sdist is 4.8 KB: its build step downloads
+  the wheel from the same GitHub release as `dbt-core` 2.0.0rc4 and checks it
+  against an embedded sha256, so a `uv sync` reaches github.com as well as PyPI.
+  With the binary hidden, a default `dbt parse` exits 0, and `--use-v2-parser`
+  fails with `Fusion parser command not found`. With `metricflow` (3.7 MB) and
+  `rapidfuzz` (12 MB) replacing `dbt-semantic-interfaces`, 1.12 costs about
+  190 MB of venv.
+  - **Its one use here is measuring the distance to v2**, and on 2026-09-15
+    `dbt parse --use-v2-parser` failed on 224 locations with a single code,
+    `UnusedConfigKey (dbt1060)`: 219 `meta:` blocks, plus source `freshness:`
+    and `loaded_at_field:`, that v2 wants under `config:`. 1.12's own parse warns
+    about none of them, so a clean v1 parse is not v2 readiness. The `meta`
+    blocks are the additivity and PII labels that Python reads out of the
+    manifest, so the move is more than a yml rewrite.
+  - **Moving to v2 drops the package, not the weight.** `dbt-core` 2.0.0rc4
+    installs as 200 MB in four packages and reports the same `dbt-oss 2.0.1`;
+    what goes is the Python stack around it. The rest of the move is unmeasured:
+    DuckDB is a beta, CLI-only adapter in v2, `sqlfluff-templater-dbt` cannot
+    template it (`dbt lint` ships only in the proprietary `dbt` distribution),
+    and dagster-dbt already reads v2's event stream (`DbtFusionCliEventMessage`).
+  - **Leaving it out would take an override, and overrides stay refused.**
+    `[tool.uv] override-dependencies` could also have forced 1.12 before the cap
+    lifted. Either would be a **fourth entry in the three-versions table**: an
+    override is as invisible to `lockfile-only` as a `==`, so nothing would
+    report when it turned from a workaround into the thing holding dbt back.
+  - **A semantic layer can now be written against 1.12's spec**, which reworks
+    the Semantic Layer YAML and adds `osi_document.json`. Authoring one against
+    1.11's would have meant migrating it almost at once.
+- **dbt 1.12 reads a `.env` from its working directory, which here is `dbt/`,
+  so `just where` refuses while one exists.** Measured against a copy: a `.env`
+  there naming `WAREHOUSE_PATH` sent `dbt debug` to that file — and DuckDB
+  created it — while the shell left the variable unset, as most recipes do; a
+  shell value still wins. `just where` reads only the shell, so it would have
+  named the default file while dbt wrote to another. The repo-root `.env` is the
+  place for such values: `dotenv-load` exports it to every recipe, and `where`
+  prints it. The recipes that export their own `WAREHOUSE_PATH` skip `where`,
+  so the guard does not cover them.
 - **"Lightweight" is a measured claim, and the dev tooling was most of the
   weight.** Removing harlequin and marimo on 2026-08-25 took the tree from 198
   packages to 153 and the venv from 1.1 GB to 736 MB — a third of it — for two
   tools that duplicated capability the stack already had: the DuckDB CLI
   replaces harlequin (`just sql`, read-only by default), and marimo cost 122 MB
-  plus jedi/loro/pyzmq to render one `select *`. What is left *is* the stack:
-  polars 206 MB, pyarrow 137 MB, duckdb 58 MB, dagster 62 MB.
+  plus jedi/loro/pyzmq to render one `select *`. What was left *was* the stack
+  — polars 206 MB, pyarrow 137 MB, duckdb 58 MB, dagster 62 MB — until dbt
+  1.12's parser binary (above).
   - **The venv is not where this repo's disk goes**, which is worth knowing
     before optimising it again. `reports/node_modules` alone is 931 MB and the
     regenerable build output under `data/`, `dbt/target` and `reports/` is

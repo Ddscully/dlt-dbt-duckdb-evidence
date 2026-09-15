@@ -23,8 +23,19 @@ default:
 # so every recipe that writes to the warehouse or the landing zone depends on
 # this. The recipes that export their own WAREHOUSE_PATH (`test-pipeline`, the
 # course ones) do not: this would print the outer value.
+#
+# It refuses while dbt/.env exists. dbt 1.12 loads a .env from its working
+# directory, which is dbt/ for every recipe, and a value there fills any variable
+# the shell leaves unset — WAREHOUSE_PATH, usually — so dbt would build a file
+# this recipe never printed. The repo-root .env is safe: `dotenv-load` exports it
+# to the recipes, so the lines below show it.
 # Print which warehouse file and landing zone the pipeline recipes will use
 where:
+    @if [ -e "{{ justfile_directory() }}/dbt/.env" ]; then \
+        echo "refusing: dbt/.env exists, and dbt reads it where this recipe cannot." >&2; \
+        echo "Move its values to the repo-root .env, which just exports and prints, then delete it." >&2; \
+        exit 1; \
+    fi
     @echo "warehouse: ${WAREHOUSE_PATH:-(unset - this repo's data/warehouse.duckdb)}"
     @echo "lakehouse: $LAKEHOUSE_DIR"
 
