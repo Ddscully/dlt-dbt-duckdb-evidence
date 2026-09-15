@@ -526,51 +526,20 @@ the boundary is `publishing-a-release`. Two things not to need it for:
 
 ## Orchestration (`orchestration/`)
 
-Dagster wraps the existing layers; it doesn't replace them. `ingest`, `dbt` and
-`transform` stay independently runnable, and `orchestration/assets.py` imports
-them rather than duplicating logic (`build_pipeline()`, `dbt build`,
-`transform.co2_intensity.run()`).
+Dagster wraps the existing layers rather than replacing them: `ingest`, `dbt`
+and `transform` stay independently runnable. Partitions, registration, the three
+jobs and the rest are `dagster-graph-and-jobs`. What bites outside it:
 
-- **Asset keys are the join between the layers.** dlt resources are keyed
-  `raw/<resource>` by `RawSchemaDltTranslator` to match the keys dagster-dbt
-  derives from `_sources.yml`. Rename a dbt source table without renaming the dlt
-  resource and the graph silently splits in two — both halves still run. Check
-  with `dagster definitions validate` and a look at the graph.
-- **`orchestration/assets.py` must not use `from __future__ import annotations`.**
-  Dagster inspects the `context` parameter's annotation *object*; a stringified
-  one fails with a confusing "Cannot annotate `context`".
-- **Everything runs in one process** (`in_process_executor`, and the `replace`
-  resources in a single op): DuckDB takes one writer at a time, so parallel steps
-  would fight over the lock.
-- **Three resources are partitioned, under two partition definitions**:
-  `raw/wb_wdi` and `raw/om_weather_daily` by year, `raw/retail_invoice_lines` by
-  month. `define_asset_job` resolves a selection to a *single* `partitions_def` or
-  raises, so `load_retail` carries the retail ingest alone, `full_refresh` is
-  everything else but the site, and **`load_retail` runs first**, because dbt
-  reads what it lands. `full_refresh` alone against a fresh warehouse fails in dbt
-  with `Table with name retail_invoice_lines does not exist!`.
-- **Every asset and check is listed by hand in `definitions.py`, and an omission
-  is silent** — the asset is simply not in the graph, and `dagster definitions
-  validate` passes. `tests/test_definitions.py` compares what `assets.py` defines
-  with what the graph resolves.
-- **The Evidence site is an asset, excluded from `full_refresh` because it needs
-  Node.** `reports/evidence_site` shells out to npm; `ci.yml`, `nightly.yml` and
-  `release-data.yml` run `full_refresh` with no Node, and `pages.yml` runs
-  `publish_site`. Both selections name what they leave out, so a second
-  npm-shaped or differently partitioned asset has to be excluded by hand too.
-- **Importing `orchestration.assets` leaves a dlt pipeline active process-wide.**
-  The `@dlt_assets` decorators call `build_pipeline()` at import time, so a later
-  test calling a resource directly reads the real `~/.dlt` state and fails on
-  pagination it never got wrong — only in a full-suite run, only on a machine
-  that has loaded WDI. `tests/conftest.py` deactivates it on teardown.
-- **The rest is the `dagster-graph-and-jobs` skill** — what earns a partition and
-  what a partitioned asset needs to keep working unpartitioned, the traps in the
-  registration test, and the costed decisions against `dg` and declarative
-  automation. How the site meets the graph is `building-evidence-reports`.
-- The `daily_refresh` schedule ships `STOPPED`, so opening the UI does not start
-  hammering public APIs. It targets `full_refresh`, so it never builds the site.
-- Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile);
-  only `dagster.yaml` is checked in.
+- **Asset keys are the join between the layers.** Rename a dbt source table
+  without renaming the dlt resource and the graph silently splits in two — both
+  halves still run.
+- **Everything runs in one process**, because DuckDB takes one writer at a time.
+- **`load_retail` runs before `full_refresh`**: dbt reads what it lands, so
+  `full_refresh` alone against a fresh warehouse fails in dbt.
+- **Every asset and check is listed by hand in `definitions.py`**, and an
+  omission is silent — `dagster definitions validate` passes.
+- **`orchestration/assets.py` must not use `from __future__ import annotations`**:
+  Dagster inspects the `context` parameter's annotation object.
 
 ## Testing (`tests/`)
 

@@ -7,8 +7,42 @@ description: This repo's Dagster graph — the two partitioned assets and the gu
 
 Dagster wraps the existing layers; it doesn't replace them. The facts that must
 not depend on this skill loading — asset keys as the join between layers, the
-`from __future__ import annotations` ban, and the single-process executor — are
-in `AGENTS.md`'s *Orchestration* section. This file is the rest.
+`from __future__ import annotations` ban, the single-process executor, the job
+order and hand registration — stay as one-liners in `AGENTS.md`'s
+*Orchestration* section. This file is the whole account.
+
+## Standing rules of the graph
+
+`ingest`, `dbt` and `transform` stay independently runnable, and
+`orchestration/assets.py` imports them rather than duplicating logic
+(`build_pipeline()`, `dbt build`, `transform.co2_intensity.run()`).
+
+- **Asset keys are the join between the layers.** dlt resources are keyed
+  `raw/<resource>` by `RawSchemaDltTranslator` to match the keys dagster-dbt
+  derives from `_sources.yml`. Rename a dbt source table without renaming the dlt
+  resource and the graph silently splits in two — both halves still run. Check
+  with `dagster definitions validate` and a look at the graph.
+- **`orchestration/assets.py` must not use `from __future__ import annotations`.**
+  Dagster inspects the `context` parameter's annotation *object*; a stringified
+  one fails with a confusing "Cannot annotate `context`".
+- **Everything runs in one process** (`in_process_executor`, and the `replace`
+  resources in a single op): DuckDB takes one writer at a time, so parallel steps
+  would fight over the lock.
+- **The Evidence site is an asset, excluded from `full_refresh` because it needs
+  Node.** The `evidence_site` asset shells out to npm; `ci.yml`, `nightly.yml` and
+  `release-data.yml` run `full_refresh` with no Node, and `pages.yml` runs
+  `publish_site`. Both selections name what they leave out, so a second
+  npm-shaped or differently partitioned asset has to be excluded by hand too.
+  How the site meets the graph is `building-evidence-reports`.
+- **Importing `orchestration.assets` leaves a dlt pipeline active process-wide.**
+  The `@dlt_assets` decorators call `build_pipeline()` at import time, so a later
+  test calling a resource directly reads the real `~/.dlt` state and fails on
+  pagination it never got wrong — only in a full-suite run, only on a machine
+  that has loaded WDI. `tests/conftest.py` deactivates it on teardown.
+- The `daily_refresh` schedule ships `STOPPED`, so opening the UI does not start
+  hammering public APIs. It targets `full_refresh`, so it never builds the site.
+- Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile);
+  only `dagster.yaml` is checked in.
 
 The vendor `dagster-expert` skill overlapped this barely at all and **is no
 longer enabled** (2026-09-02, zero invocations across 211 transcripts covering 9
