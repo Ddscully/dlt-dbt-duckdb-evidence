@@ -100,28 +100,12 @@ scripts/    genuinely one-off: seed transcription, fixture recording, a
 src/modern_data_stack/   the domain-neutral mechanisms every layer calls
 ```
 
-- **`ingest/` is six source modules plus a coordination layer.** It was split for
-  cohesion, not size: no function was oversized, but the names partitioned almost
-  perfectly by publisher, with only five shared.
-  - The split made one real dependency visible: `weather_locations` reads capital
-    coordinates from the World Bank, so `ingest/sources/weather.py` imports
-    `worldbank`.
-  - **The coordination tuples stay together in `ingest/pipeline.py`** rather than
-    becoming per-source metadata, because the comment on `PARTITIONED_RESOURCES`
-    argues the rule *comparatively* ("`ecb_fx_rates` merges but is not
-    partitioned: its whole series is one request"), which cannot be read if the
-    facts live in different files.
-  - **Shared helpers are reached as `http.get_json(...)`, never imported by
-    name.** `tests/test_ingest.py` monkeypatches them through string literals
-    (`setattr(http, "get_json", …)`); a name bound into each source would leave
-    those patches pointing at nothing — green tests against the live fetch path.
-    There is no re-export facade either, so a stale patch raises
-    `AttributeError`.
+- **`ingest/` is one module per publisher, split for cohesion rather than size,
+  plus `pipeline.py`'s coordination tuples.** Shared helpers are reached as
+  `http.get_json(...)`, never imported by name, because the tests patch them
+  through the module; the rest is `adding-a-data-source`.
 - **`publish/` is the boundary outward** — the personal-data policy, the storage
-  ceiling, attribution. It was carved out of `scripts/` so that
-  `orchestration/assets.py` stopped importing the top of its own graph from a
-  directory named for helpers, and `pages.yml` triggers on `publish/**` rather
-  than `scripts/**`.
+  ceiling, attribution — so `pages.yml` triggers on `publish/**`.
 
 ## The package (`src/modern_data_stack/`)
 
@@ -592,34 +576,11 @@ monthly (and on demand) against live sources and publishes a dated
     prints the file, and every recipe that writes to the warehouse or the landing
     zone takes it as its first dependency — except the three that export
     `WAREHOUSE_PATH` themselves and announce their own.
-- **dlt persists its schema and only *widens* types**, so a column that lands with
-  the wrong type stays wrong. The pipeline uses `refresh="drop_resources"`
-  (`REFRESH` in `ingest/pipeline.py`) to force re-inference; `drop_resources`
-  rather than `drop_sources`, because Dagster can run a subset of the source and
-  `drop_sources` would wipe the tables that weren't selected.
-- **Four resources `replace` and four `merge`, so a load is two `run()`s.**
-  `refresh` is an argument to `run()`, not a property of a resource, and it would
-  drop a merge table and its watermark. `load_groups()` returns the replace group
-  with `REFRESH` and the merge group without, restricted to the resources
-  selected. A new resource must join `FULL_REFRESH_RESOURCES` or
-  `INCREMENTAL_RESOURCES`; a test asserts the two cover the source.
-- **dlt state is keyed on the pipeline *name*, not the destination**, so a
-  fixture run would hand its watermarks to the next real run. `build_pipeline()`
-  appends `_fixtures` to the name under `INGEST_FIXTURES=1`. (dlt resets state
-  when the destination is empty, so this bites only once a real landing zone
-  exists.)
-- **A resource that yields Arrow gets no `_dlt_load_id` unless you ask** —
-  `build_pipeline()` sets `NORMALIZE__PARQUET_NORMALIZER__ADD_DLT_LOAD_ID=true`,
-  or the retail table lands with no load provenance and freshness and
-  `pipeline_sources` silently skip it. Adding the column to an existing table
-  needs a `drop table` plus `refresh="drop_resources"`.
-- **`.arrow()` is a streaming reader with a 1,000,000-row default batch**; handed
-  to dlt as a table it stored exactly 1,000,000 of 1,067,371 rows, with no error.
-  `to_arrow_reader(BATCH)` and `yield from` is the fix, and
-  `test_retail_yields_every_row_the_workbook_holds` counts.
-- **Declare `timezone: False` on a timestamp column**, or dlt makes it
-  `TIMESTAMP WITH TIME ZONE` and a 07:45 till time reads `08:45:00+01:00` on a CET
-  machine.
+- **dlt only widens types, and a load is two `run()`s**: the `replace` resources
+  with `refresh="drop_resources"`, the `merge` resources without, or the refresh
+  drops a merge table and its watermark. A new resource must join
+  `FULL_REFRESH_RESOURCES` or `INCREMENTAL_RESOURCES`. How dlt's state, Arrow
+  batches and timestamps bite is `adding-a-data-source`.
 - **The country-year semantics are the `country-stats-models` skill** — the
   largest body of "plausible number, wrong basis" in the repo. Four facts cannot
   wait for it, because they change what a query *means*:
@@ -640,16 +601,10 @@ monthly (and on demand) against live sources and publishes a dated
   - **Eurostat prices are semi-annual.** Chart prices off
     `marts.fct_eu_electricity_prices_semiannual`; the annual column exists to join
     prices to emissions or GDP and is a price nobody paid.
-- **Adding a WDI indicator is two places** — `WB_WDI_INDICATORS` in
-  `ingest/sources/worldbank.py` and a `max(case …)` in `stg_wdi.sql`, held
-  together by `tests/test_ingest.py`.
-- **Retail reaches the country domain through a seed, and that join must stay a
-  *left* join.** `retail_country_map` resolves the source's own country labels
-  in `stg_retail_lines`; a join on name would silently lose the nine labels that
-  don't match (`EIRE` is the second-largest market). The
-  `relationships` test makes an unmapped label from a re-ingest loud — and an
-  inner join defeats it, by deleting the unresolved rows before the test reads
-  them. The labels and the judgements are the `retail-models` skill.
+- **Retail reaches the country domain through the `retail_country_map` seed, and
+  that join must stay a *left* join**: an inner join deletes the unmapped labels
+  before the `relationships` test that exists to catch them can read them
+  (`retail-models`).
 
 ## Orchestration (`orchestration/`)
 
