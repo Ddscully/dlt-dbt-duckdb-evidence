@@ -5,14 +5,18 @@ description: How to inspect data/warehouse.duckdb in this project — read-only 
 
 # Querying the warehouse
 
-One DuckDB file, `data/warehouse.duckdb`. Four schemas:
+Two files, and which one holds a schema decides how you reach it:
 
-| Schema | Written by | Contents |
-|---|---|---|
-| `raw` | dlt | `owid_co2`, `owid_energy`, `wb_country`, `wb_wdi`, `eu_elec_prices` |
-| `staging` | dbt (views) | `stg_*`, cleaned to `(country_iso3, year)` |
-| `marts` | dbt (tables) | `fct_emissions_energy` |
-| `analytics` | Polars | `co2_intensity` |
+- **`raw` is in the DuckLake catalog under `data/lakehouse/`, not in
+  `data/warehouse.duckdb`.** dlt lands there; see "Querying the landing tables".
+- **Everything dbt and Polars build is in `data/warehouse.duckdb`**: `staging` and
+  `intermediate` as views, `marts`, `history` and `analytics` as tables. The
+  `staging` views read the catalog by name, so they need it attached as
+  `lakehouse`, which `just sql` does.
+
+What each schema holds is [`docs/WAREHOUSE.md`](../../../docs/WAREHOUSE.md)
+§Schemas — not repeated here, because a table list in a skill is a copy that
+goes stale without failing anything.
 
 ## Always connect read-only for inspection
 
@@ -116,22 +120,32 @@ and you wrote `main_`, that's why.
 
 dlt snake_cases and flattens the source payload. The World Bank's `iso2Code`,
 `capitalCity` and `incomeLevel.value` land as `iso2_code`, `capital_city` and
-`income_level__value`. Don't infer names from the API docs — read them:
+`income_level__value`. Don't infer names from the API docs — read them, from the
+catalog:
 
 ```bash
-uv run python -c "import duckdb; \
-  duckdb.connect('data/warehouse.duckdb', read_only=True).sql(\
-  \"select table_name, column_name, data_type from information_schema.columns \
-    where table_schema='raw' order by table_name, ordinal_position\").show(max_rows=500)"
+uv run python -c "
+from lake.lakehouse import read_only_connection
+read_only_connection().sql(\"select table_name, column_name, data_type from information_schema.columns \
+  where table_schema='raw' order by table_name, ordinal_position\").show(max_rows=500)"
 ```
+
+**The same query against `data/warehouse.duckdb` returns zero rows and no error**
+(measured 2026-09-15: 0 there, 296 columns in the catalog), which reads as an
+answer. This skill and `adding-a-data-source` both gave that query for weeks after
+the landing zone moved.
 
 Staging and marts columns follow [`docs/STYLE_GUIDE.md`](../../../docs/STYLE_GUIDE.md)
 and are stable; `raw` columns are whatever dlt inferred.
 
 ## Grain and coverage
 
-Everything is `(country_iso3, year)`. Three coverage facts that produce confusing
-query results if you don't know them:
+Country facts are `(country_iso3, year)`, and most of the warehouse is country
+facts — but not all of it: the FX tables are `(rate_date, currency_code)`, the
+retail models sit below country grain, weather lands daily, Eurostat prices are
+semi-annual and `fct_cbam_exposure` has no year. `country-stats-models` has the
+exceptions. Three coverage facts about the country-year fact that produce
+confusing query results if you don't know them:
 
 - `fct_emissions_energy` sits on the `dim_country_year` spine and left-joins each
   source onto it, so a row exists wherever *any* source reports. Whole columns are
@@ -190,14 +204,71 @@ print(len(revisions(WEATHER_TABLE, v[-2], v[-1])), 'rows genuinely restated') if
 "
 ```
 
+## Connecting a GUI (DBeaver)
+
+Any JDBC client meets the lock and the catalog attach, without `just sql` to
+handle either. What follows was measured with DBeaver and its DuckDB JDBC driver
+1.5.5.1 on 2026-09-09; the `ATTACH` rules were re-measured on the pinned DuckDB
+1.5.5 through the Python client on 2026-09-15.
+
+**Why it fails out of the box.** The `staging` views store SQL that names the
+catalog literally (`select * from lakehouse.raw.owid_co2`), and DuckDB resolves
+that name at *query* time. A fresh GUI connection opens every table and fails
+11 views — the nine `staging` ones and the two `intermediate` ones that read them —
+with `Catalog "lakehouse" does not exist!`. Attaching the catalog under any other
+alias (`lake`, `ducklake`) fails them identically.
+
+1. **Driver properties → `duckdb.read_only = true`, before the first connect.**
+   Without it the GUI takes the writer lock and every `just run`,
+   `just dbt-build` and `just materialize` fails until it disconnects.
+2. **Connection → Initialization → Bootstrap queries: one entry**, with
+   `<LAKEHOUSE_DIR>` being the absolute path `just where` prints:
+
+   ```sql
+   ATTACH 'ducklake:duckdb:<LAKEHOUSE_DIR>/catalog.duckdb' AS lakehouse (DATA_PATH '<LAKEHOUSE_DIR>/data/', READ_ONLY)
+   ```
+
+   Bootstrap queries run on every physical connection, which is what is wanted:
+   DBeaver opens separate ones for the navigator and each editor, and an attach in
+   one is invisible to the others.
+
+Two traps, both of which look like something else:
+
+- **One bootstrap entry is one JDBC statement.** A `LOAD ducklake` and the
+  `ATTACH` in the same entry arrive as one statement and fail with
+  `Parser Error: syntax error at or near "ATTACH"`; the poisoned connection then
+  reports `Attempting to execute an unsuccessful or closed pending query result`
+  followed by `Catalog "lakehouse" does not exist!` — cause and effect, not two
+  problems. The `LOAD` is not needed at all: the `ducklake:` prefix autoloads the
+  extension.
+- **`DATA_PATH` must match the path the catalog stored, as a string.** A relative
+  spelling, a symlinked route to the same directory and a doubled slash are all
+  refused with `DATA_PATH parameter "…" does not match existing data path in the
+  catalog`; a missing trailing slash is tolerated. This is the justfile's
+  `LAKEHOUSE_DIR` rule met from the GUI side.
+
+Verify with `select database_name, type from duckdb_databases()` — `lakehouse`
+must be listed as `ducklake` — and then a view:
+`select co2_mt from staging.stg_co2 where country_iso3 = 'DEU' and year = 2020`.
+
+**Don't read `lakehouse.raw_staging`.** It is dlt's merge scratch, a full copy of
+each merge table's latest load, not a layer of the warehouse. And `read_only`
+makes the GUI a good citizen among *readers* only — disconnect before any recipe
+that writes.
+
 ## `history` is not rebuildable
 
-`history.snap_co2_estimates` is a dbt snapshot: SCD2 versions of OWID's CO2
-numbers, appended to on every `dbt build`. Every other table in the file can be
-recreated from the sources; this one can't. Don't delete the warehouse to fix an
-unrelated problem without meaning to throw the revision history away, and don't
-hand-edit `raw.owid_co2` in the real warehouse to test something — the snapshot
-records the fake version permanently. Use a `WAREHOUSE_PATH` copy for that.
+`history.snap_co2_estimates` and `history.snap_grid_emission_factors` are dbt
+snapshots: SCD2 versions of OWID's CO2 numbers and of the Scope 2 factors,
+appended to on every `dbt build`. With `analytics.pipeline_runs` (each dbt
+invocation's timings, which `run_results.json` keeps only for the latest) they
+are the tables no rebuild can reproduce, and the weather archive in the catalog
+cannot be refetched within Open-Meteo's budget. Don't delete the warehouse or the
+landing zone to fix an unrelated problem without meaning to throw that away, and
+don't hand-edit `lakehouse.raw.owid_co2` to test something — the next build's
+snapshot records the fake version permanently. Test against copies, with both
+`WAREHOUSE_PATH` and `LAKEHOUSE_DIR` pointed at them (`country-stats-models` has
+the recipe).
 
 Query it through `marts.fct_co2_estimate_versions` (first vs. current value per
 country-year, `is_revised`) rather than the raw SCD2 table, unless you need the
