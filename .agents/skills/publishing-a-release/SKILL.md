@@ -1,6 +1,6 @@
 ---
 name: publishing-a-release
-description: The publication boundary — publish/export_warehouse.py and publish/restore_history.py. The storage-format ceiling and the two moments its tripwire fires, the DuckLake spec ceiling that has no PR to fail, reading data_loaded_at from the catalog rather than the copy, and carrying the unreproducible tables forward so the snapshot accumulates and the weather archive deepens. Use when editing anything under publish/, changing release-data.yml or pages.yml, or reasoning about what a consumer of a data-YYYY-MM-DD release can open.
+description: The publication boundary — publish/export_warehouse.py and publish/restore_history.py. What a release holds and must be named, attribution, the personal-data policy applied at export (pseudonymising customer_id, why deleting an id does not anonymise, the salt), the storage-format ceiling and the two moments its tripwire fires, the DuckLake spec ceiling that has no PR to fail, reading data_loaded_at from the catalog rather than the copy, and carrying the unreproducible tables forward so the snapshot accumulates and the weather archive deepens. Use when editing anything under publish/, changing release-data.yml or pages.yml, or reasoning about what a consumer of a data-YYYY-MM-DD release can open.
 ---
 
 # The publication boundary (`publish/`)
@@ -14,8 +14,76 @@ before the graph runs.
 **This is the only moment data crosses from a machine it is on to a machine it is
 not**, which is why the personal-data policy, the storage ceiling and the
 attribution obligation are all applied here rather than in a model. The
-constraints that must not depend on this skill loading are in `AGENTS.md`'s
-*Publishing* section; this file is the rest.
+one-liners that must not depend on this skill loading stay in `AGENTS.md`'s
+*Publishing* and *Personal data* sections; this file is the whole account.
+
+## What a release holds, and the two rules that bind it
+
+`just export-data` writes a `COPY FROM DATABASE` copy of the DuckDB file, a zstd
+Parquet per table in `staging`/`marts`/`analytics`, `lakehouse.tar.gz`,
+`manifest.json`, `SHA256SUMS`, `ATTRIBUTION.md` and the release body.
+
+- **The published file must be named `warehouse.duckdb` and attached as
+  `warehouse`.** DuckDB names a catalog after the file stem, and dbt writes the
+  `intermediate` views fully qualified (`warehouse.staging.stg_co2`); rename the
+  file or `ATTACH … AS wh` and they raise `Catalog "warehouse" does not exist`
+  while the tables keep working. `tests/test_export.py` guards it.
+- **Releases redistribute upstream data** under licences — CC BY 4.0, the
+  Eurostat and ECB reuse policies, Decision 2011/833 for the CBAM annex — that
+  all require attribution. `ATTRIBUTION` is the single source for the shipped file
+  and the notes, and `tests/test_export.py` ties it to `ALL_URLS` and to README's
+  `## License`.
+- **`history` ships in the DuckDB file but not as Parquet**; `raw` is not in the
+  file at all, and of the landing tables only `raw.om_weather_daily` ships, in
+  `lakehouse.tar.gz`.
+
+## Personal data at the boundary (`meta: {pii: …}`)
+
+One column identifies a person — `dim_retail_customer.customer_id`, UCI's own
+pseudonym for a shopper. It is classified in the ymls, pseudonymised here, and
+measured rather than asserted. Full reasoning in `docs/DATA_PROTECTION.md`; what
+it cost to learn:
+
+- **Deleting the id does not anonymise a customer-grain extract.** 98.6% of
+  customers are unique on `(first_order_gbp, net_revenue_gbp, n_orders)` with no
+  id at all; 97.4% on `net_revenue_gbp` alone. A near-continuous money column at
+  person grain is an identifier, which is why `quasi_identifier` is a label with
+  no action attached: generalising it would delete the analysis it exists for.
+  `just disclosure-risk` reprints the table.
+- **Quote shares, never counts, of anything aggregated over floats.** Two
+  consecutive builds of `dim_retail_customer` on identical sources gave 5,781 and
+  5,785 distinct `net_revenue_gbp` values: float addition is not associative, and
+  DuckDB's parallel aggregation fixes no order. Per-row arithmetic, like the
+  order-line fact's, is stable.
+- **The policy is applied to the published copy, not in a model.** The copy holds
+  identifiers no model declares — `dbt_test__audit` tables, and the `staging`
+  tables `solidify_staging` materialises from views over `lakehouse.raw`.
+  `prepare_copy` solidifies staging *then* pseudonymises; the other order ships
+  clear ids in `staging` beside hashed marts, with matching row counts and no
+  error.
+- **The declared set is expanded by column name across every schema**, because
+  copies of the identifier appear where nobody would classify them by hand —
+  `dbt_test__audit` tables, and dlt's `raw_staging` merge scratch, a full copy of
+  the landing table. The export then verifies what it rewrote against
+  `^[0-9a-f]{16}$`, which a five-digit id cannot match.
+- **`||`, never `concat()`.** `concat` ignores NULLs, so all 243,007 anonymous
+  rows would hash the bare salt onto one pseudonym indistinguishable from a real
+  customer. `||` propagates. Pinned in `tests/test_privacy.py`.
+- **The salt is required and never defaulted**: the ids run 12346–18287, so the
+  whole unsalted rainbow table takes 5 ms to build. The release salt is a stable
+  repository secret — a per-run salt would repseudonymise every customer monthly,
+  and no consumer could tell a restatement from a re-salting. `just export-data`
+  generates a throwaway locally, and even `tests/test_export.py` supplies one.
+- **DuckDB cannot enforce access**: `create role`, `grant`, `create user` and
+  `create policy` are parser errors in 1.5.5. The boundary is the export, the one
+  moment the data leaves the machine it is on.
+- **The coverage test is scoped to name collisions.**
+  `dim_retail_product.net_revenue_gbp` identifies nobody and
+  `dim_retail_customer.net_revenue_gbp` identifies 97.4% — same name, opposite
+  answer — so `tests/test_privacy.py` requires a label wherever a name collides
+  with a classified one, and nowhere else.
+- **The site is a second way out.** A `select *` source query ships every column
+  to every visitor; `building-evidence-reports` has the rule its queries follow.
 
 ## What the manifest tells a consumer they cannot see
 
@@ -158,6 +226,11 @@ constraints that must not depend on this skill loading are in `AGENTS.md`'s
 
 ## Carrying the unreproducible tables forward
 
+- **Anything that counts carried rows goes through `restore_history.CARRIED`**,
+  never a table name, so a new snapshot is verified as well as carried. `history`
+  is carried whole because everything in it is unreproducible; any other schema
+  needs a table allowlist. `pages.yml` restores the same file, so the
+  Restatements page shows real revisions rather than CI's all-version-1 history.
 - **Each release carries the previous one's unreproducible tables forward**
   (`publish/restore_history.py`), which is what makes the published snapshot
   accumulate a real revision log instead of holding one version per row forever,

@@ -49,7 +49,13 @@ be read against the other half.
   a `requests.get`. **Reach through the module, never `from ingest.http import
   get_json`** — binding the name makes
   `monkeypatch.setattr(http, "get_json", …)` patch something nothing looks up,
-  and `tests/test_ingest.py` does that in ten places.
+  and `tests/test_ingest.py` does that in ten places. There is no re-export
+  facade either, so a stale patch raises `AttributeError` rather than passing
+  green against the live fetch path.
+- **A source may import another, and should say so.** `weather_locations` reads
+  capital coordinates from the World Bank, so `ingest/sources/weather.py`
+  imports `worldbank` — the one real dependency the per-publisher split made
+  visible.
 - **CSV sources:** `pl.read_csv(..., infer_schema_length=None)`. The default
   100-row inference sees OWID's empty early rows and lands numerics as VARCHAR.
 - **Leave `REFRESH = "drop_resources"` alone.** dlt persists its schema and only
@@ -63,6 +69,28 @@ be read against the other half.
   inference can't save you), a *lookback window* rather than a high-water mark if
   the publisher restates, and the name in `INCREMENTAL_RESOURCES` so it loads in
   the un-refreshed call.
+- **Four resources `replace` and four `merge`, so a load is two `run()`s.**
+  `refresh` is an argument to `run()`, not a property of a resource, and it would
+  drop a merge table and its watermark. `load_groups()` returns the replace group
+  with `REFRESH` and the merge group without, restricted to the resources
+  selected.
+- **dlt state is keyed on the pipeline *name*, not the destination**, so a
+  fixture run would hand its watermarks to the next real run. `build_pipeline()`
+  appends `_fixtures` to the name under `INGEST_FIXTURES=1`. (dlt resets state
+  when the destination is empty, so this bites only once a real landing zone
+  exists.)
+- **A resource that yields Arrow gets no `_dlt_load_id` unless you ask** —
+  `build_pipeline()` sets `NORMALIZE__PARQUET_NORMALIZER__ADD_DLT_LOAD_ID=true`,
+  or the retail table lands with no load provenance and freshness and
+  `pipeline_sources` silently skip it. Adding the column to an existing table
+  needs a `drop table` plus `refresh="drop_resources"`.
+- **`.arrow()` is a streaming reader with a 1,000,000-row default batch**; handed
+  to dlt as a table it stored exactly 1,000,000 of 1,067,371 rows, with no error.
+  `to_arrow_reader(RETAIL_BATCH_ROWS)` and `yield from` is the fix, and
+  `test_retail_yields_every_row_the_workbook_holds` counts.
+- **Declare `timezone: False` on a timestamp column**, or dlt makes it
+  `TIMESTAMP WITH TIME ZONE` and a 07:45 till time reads `08:45:00+01:00` on a CET
+  machine.
 
 Run `just ingest` and look at the real column names before writing any SQL:
 

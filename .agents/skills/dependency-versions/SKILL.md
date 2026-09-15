@@ -6,8 +6,9 @@ description: What pins what in this repo and why — dependabot's three ecosyste
 # Dependency and action versions
 
 Green CI proves nothing about versions — that sentence is the whole section, and
-everything below is a way it has already cost this repo something. The linter
-policy those pins serve is in `AGENTS.md` under *Style guide*.
+everything below is a way it has already cost this repo something. How the
+linter, formatter and type checker those pins serve behave is
+`linting-and-type-checking`.
 
 
 `.github/dependabot.yml` watches three ecosystems — `github-actions` (`/`), `uv`

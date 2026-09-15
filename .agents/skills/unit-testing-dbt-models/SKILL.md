@@ -44,6 +44,25 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     build to skip and so runs every one, then `dbt build --select <model>
     --exclude test_type:unit` for the data tests against the mutated model.
 
+## Claims the method had to correct
+
+- **A join is not a census.** The FX periods staleness gap was sized by comparing
+  the period-ends two models share — five rows — and was 22: the daily model stops
+  emitting rows for a currency that leaves the ECB panel, which took the worst
+  rows out of both sides of the comparison. To ask how often two models disagree,
+  first count the rows only one of them has.
+- **A fix that moves no number needs the part of it that does.** Restricting
+  `fct_cbam_exposure`'s cleanest-source baseline to listed countries changes no
+  cell, so only a fixture can hold it; the half that could be made visible — the
+  fallback row's own excess, now null — is held by an `expression_is_true`. When a
+  correctness fix is invisible in the data, look for the part that can be made to
+  show.
+- **A correct number reused for a different claim is a wrong number.** A review
+  quoted the 70,174 lines *in* tied groups as the lines the tie-break *dropped*
+  (36,656): a real figure with a new meaning, which no scanner can see.
+- **Read a red set as candidates.** A unit test whose input is mocked `rows: []`
+  goes red on any inner join, guarding nothing.
+
 ## The twelve models, and what mutating each one proved
 
 - **There are thirty-six unit tests, over twelve models, and they exist because a data

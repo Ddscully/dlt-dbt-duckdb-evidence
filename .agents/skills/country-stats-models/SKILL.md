@@ -20,6 +20,72 @@ wrong year, a rank computed in current dollars, a semi-annual price averaged to
 an annual one nobody paid. None of it is a build failure and none of it is
 caught by a data test.
 
+## The spine, and what the grain leaves out
+
+**The country-year is the dominant grain, not a house rule.** The exceptions are
+deliberate: Eurostat prices keep their published `(country_iso3, year, half)`
+grain (the annual average is a price nobody paid — see below),
+`fct_cbam_exposure` has no year, and the FX tables have no country. Reaching for
+`dim_country_year` when the thing modelled isn't a country-year is how a fact
+gets a fabricated dimension.
+
+**The fact hangs off the spine, not off a source.** `dim_country_year` is
+`dim_country` × every year the data covers (bounds read from the sources);
+`fct_emissions_energy` inner-joins it to the union of country-years any source
+reports, then left-joins each source. So:
+
+- A country-year only one source reports still reaches the mart. Expect nulls in
+  the columns the others don't cover, and filter charts for what they need.
+- The dimension decides *what a country is*: codes it doesn't carry — the World
+  Bank's aggregates (`WLD`, `EUU`), Antarctica — cannot reach the mart.
+- `max(year)` reports whichever source is furthest ahead, so
+  `mart_covers_recent_years` measures each source column separately.
+- The spine is the full cross join; left-join a fact onto it to see coverage gaps
+  as rows.
+
+## `income_group` and `region` are today's answer, applied to every year
+
+The World Bank `/country` endpoint publishes only the current classification, so
+every rollup by income group inherits it. `marts.dim_country_income_history`,
+transcribed from the publisher's own history (`OGHIST.xlsx`, by
+`scripts/build_income_classification_seed.py`), measures the cost:
+
+| Year | Economies classified | In a different group today |
+|------|---------------------|----------------------------|
+| 1990 | 174 | **89 (51%)** |
+| 2000 | 203 | 102 (50%) |
+| 2010 | 211 | 59 (28%) |
+| 2020 | 212 | 22 (10%) |
+| 2025 | 213 | 0 |
+
+The current year's 0 is an invariant — the same classification reached two
+ways — so a `warn` test fires when they stop agreeing, which is what a July
+reclassification looks like before anyone re-runs the script. Nothing is
+repointed at the history yet: that is a contract change on every relation
+carrying `income_group`, and a separate decision.
+
+## Revisions: `snap_co2_estimates`
+
+`snap_co2_estimates` is an SCD2 snapshot of `stg_co2` (`co2_mt`,
+`co2_per_capita`, 1990 onwards, `check` strategy, `hard_deletes='invalidate'`):
+OWID restates published years, and every other model overwrites the old number.
+`marts.fct_co2_estimate_versions` summarises it and
+`reports/pages/restatements.md` renders it. A snapshot is state, not a build
+artifact — deleting `data/warehouse.duckdb` destroys it — and how each release
+carries it forward is `publishing-a-release`.
+
+- **Verify a snapshot change by simulating a revision**, never in the real
+  warehouse — the fake version stays in the history even after a re-ingest. With
+  `WAREHOUSE_PATH` and `LAKEHOUSE_DIR` pointed at copies: build, `update
+  lakehouse.raw.owid_co2 set co2 = co2 * 1.05 where iso_code = 'DEU' and year =
+  2019` through `just sql write`, build again, and read
+  `fct_co2_estimate_versions`.
+- **Evidence cannot write a zero-row source to Parquet** ("too small to be a
+  Parquet file"), so `reports/sources/warehouse/co2_estimate_versions.sql`
+  selects every country-year and the page filters on `is_revised` itself. CI
+  starts from an empty warehouse, so there every row is version 1, and the page's
+  "nothing revised yet" branch is the honest state, not a broken build.
+
 ## Ingesting the World Bank
 
 - **WDI's incremental window is 5 years, and that's about restatements.** The
@@ -118,7 +184,7 @@ caught by a data test.
   but only back to 1960, where WDI starts. Levels aren't comparable between the
   two; the rank uses only the derived one. The mart's column was called
   `co2_per_gdp` until the v2 rename, which is the whole reason that model is
-  versioned — see *Contracts, ownership and versions* above.
+  versioned — see `contracts-and-data-quality`.
 - **Divide by `gdp_constant_usd`, never `gdp_usd`, for anything measured over
   time.** `gdp_usd` (`NY.GDP.MKTP.CD`) is *current* US$, so it moves with
   inflation and the exchange rate: on that basis Japan cut emissions 21% from
@@ -144,13 +210,13 @@ caught by a data test.
     (Nigeria −13.5% → +76.3%, then Brazil, Japan, Lesotho, Namibia).
 - **World Bank WDI** is fetched long (one row per indicator/country/year) and
   pivoted to wide columns in `stg_wdi.sql`. Add indicators in two places:
-  `WB_WDI_INDICATORS` in `ingest/pipeline.py` and a `max(case …)` in `stg_wdi.sql`.
+  `WB_WDI_INDICATORS` in `ingest/sources/worldbank.py` and a `max(case …)` in `stg_wdi.sql`.
   The dict already carries the column name, so those two places restate the
   same mapping — `tests/test_ingest.py` holds them together, including against
   a code pointed at the *wrong* column, which no range test can see.
 - **Eurostat is JSON-stat** — a flat `value` dict keyed by a row-major index over
   all dimensions. `eu_elec_prices` filters every dimension but `geo`/`time`
-  server-side, then walks that grid (see `pipeline.py`). Its `geo` codes are ISO2
+  server-side, then walks that grid (see `ingest/sources/eurostat.py`). Its `geo` codes are ISO2
   *except* `EL`=Greece (GR) and `UK`=UK (GB);
   `stg_eu_electricity_prices_semiannual.sql` remaps those and joins `stg_country`
   for ISO3. EU/EEA only, so the mart column is null for the rest of the world.

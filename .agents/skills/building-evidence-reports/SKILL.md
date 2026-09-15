@@ -10,7 +10,20 @@ to a static site. It reads the same DuckDB file as everything else, so the
 warehouse must exist first (`just run`).
 
 There is no vendor agent skill for Evidence — this is the repo's own guidance.
-Component reference lives at <https://docs.evidence.dev>.
+The charting traps a page author hits — reserved column names like `tests` and
+`rows`, the screenshot budget that fakes the same blank chart, `*_pct` scaling,
+years rendering as `2025.0` — are written up in `reports/README.md`.
+
+**Trust the installed components over any hosted doc.** This repo pins Evidence
+OSS 40.1.8 (`@evidence-dev/core-components` 5.4.2). The Evidence Studio docs, and
+the `evidence-studio` MCP that serves them, describe the cloud, Markdoc-based
+product and are wrong here in both directions: they list components that do not
+exist in OSS (`treemap`, `pie_chart`, `radar_chart`, …), omit `BoxPlot`, which
+does and is used on `findings.md`, and write `{% line_chart … /%}` where pages
+here write `<LineChart data={x} yFmt="…"/>`. The MCP was installed once and
+removed for exactly that; don't re-add it. Read a component's props in
+`reports/node_modules/@evidence-dev/core-components/dist/` (the `.svelte` file)
+first, then <https://docs.evidence.dev>, which matches 40.x.
 
 ## The one gotcha that will cost you an hour
 
@@ -29,7 +42,17 @@ just report-clean   # rm -rf .evidence build && npm install && npm run sources &
 ```
 
 not `just report`. `just report` is only safe when the warehouse schema is
-unchanged.
+unchanged. **The same goes for a source query's column list**, even when no mart
+changed: `just report` kept building against a schema that still declared a
+dropped column (`reports/.evidence/template/static/data/…/*.schema.json`). Clear
+`.evidence/` rather than reason about what it reuses.
+
+## A source query ships every column it selects
+
+**A `select *` source query ships every column to every visitor**, and grepping
+the queries for `customer_id` cannot find one that names no columns. The site's
+retail queries select only what their charts draw, which is the site's half of
+the personal-data policy; the release's half is `publishing-a-release`.
 
 ## A source query must return rows
 
@@ -178,8 +201,8 @@ where year = ${inputs.year.value}
   and `evidence build` still exits 0. Bisected: the same page with the same SQL
   blocks, the same `<DataTable contentType=bar>` and the same `<BarChart>` and
   no `agg=` builds silently. It is another prop the hosted docs describe and
-  this OSS version does not implement — see [[evidence-mcp-serves-studio-docs]]
-  for why the docs disagree with the build. **Aggregate in the query instead**,
+  this OSS version does not implement — see *Trust the installed components*,
+  at the top, for why the docs disagree with the build. **Aggregate in the query instead**,
   which also prerenders the number server-side. The reason to care about a
   working component is the log: two permanent errors in every build are what a
   real one then hides in.
@@ -310,7 +333,7 @@ filed here, because all three are about the site rather than about Dagster.
   `tests/test_report.py` parses `reports/sources/**/*.sql` and fails if the two
   disagree. Without it, adding a source query on a new mart would leave the site
   building from a stale copy of it while the graph still showed complete lineage —
-  no error, just an old number. The maps live in `scripts/` rather than beside the
+  no error, just an old number. The maps live in `publish/` rather than beside the
   asset because `just test` runs before `dbt parse` in CI and so can't import
   anything that needs the dbt manifest.
 - **`site_pages_all_rendered` is blocking, and it checks file *size*.**

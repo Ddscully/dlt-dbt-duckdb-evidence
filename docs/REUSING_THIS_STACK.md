@@ -40,7 +40,28 @@ depend on it and write only the layers below.
 | `db` | single-row and scalar reads, without the `Optional` | nothing |
 
 Each project module keeps the entry point, so `python -m lake.lakehouse`, the
-justfile recipes and the asset graph all still call the same names.
+justfile recipes and the asset graph all still call the same names. Four rules
+keep the split a split:
+
+- **`modern_data_stack.paths` is the single answer to "where is the project".**
+  Resolution is `PROJECT_ROOT`, then the package's own grandparent when it looks
+  like a project, then a marker search up from the cwd — last, because the Dagster
+  daemon and the CLI don't necessarily run from the project directory.
+  **Exhausting all three raises**, and a cwd fallback must not be added: it would
+  resolve the warehouse to `./data/warehouse.duckdb`, which DuckDB then
+  *creates*, so an install started outside the tree runs green against an empty
+  database. `tests/test_paths.py` pins it.
+- **Config reaches a package module as a parameter, never as a constant.**
+  Nothing under `src/` knows what a country is; a hardcoded table name there
+  undoes the split.
+- **A general operation belongs in the general module, even when the duplication
+  is small.** `db.write_frames` (register a Polars frame, `create or replace`,
+  unregister) first lived in `observability`, so both Polars transforms
+  hand-rolled a copy — and both omitted the `unregister`. Its `schema` parameter
+  has **no default**: every caller writes `analytics`, which is exactly what
+  would make a default invisible to the caller that means something else.
+- **`RawSchemaDltTranslator` stays in `orchestration/assets.py`**: moving it would
+  put Dagster, an optional dependency group, behind a package import.
 
 ### Config-only — copy the file, change the constants at the top
 
@@ -193,7 +214,8 @@ one era, because it's the table `rm data/warehouse.duckdb` destroys for good.
 
 ## 4. Invariants that fail silently
 
-`AGENTS.md` has the full list for this project. These are the ones that recur in
+`AGENTS.md` and the skills under `.agents/skills/` have the full list for this
+project. These are the ones that recur in
 anything built this way:
 
 - **`WAREHOUSE_PATH` must be absolute.** dbt resolves it from `dbt/`, the Python

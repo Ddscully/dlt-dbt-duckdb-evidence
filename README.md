@@ -150,8 +150,9 @@ Modules 00–04 are written; 05–10 are outlined in the course index.
 Plus [`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) for SQL conventions,
 [`tests/README.md`](./tests/README.md) for the two test tiers,
 [`reports/README.md`](./reports/README.md) for the Evidence layer, and
-[`AGENTS.md`](./AGENTS.md) for every gotcha that cost more than an hour,
-including the directory-by-directory map of what each layer is for. Working on
+[`AGENTS.md`](./AGENTS.md) for the gotchas every session needs, including the
+directory-by-directory map of what each layer is for, with the rest in the
+skills under `.agents/skills/`. Working on
 this with an AI agent: `AGENTS.md` is the instructions file any agent reads, and
 `.agents/skills/` holds project skills for the seams the vendor skills can't
 know about ([AGENTS.md](./AGENTS.md#agent-skills)). Claude Code reads both

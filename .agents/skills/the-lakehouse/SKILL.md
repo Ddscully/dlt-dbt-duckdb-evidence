@@ -6,10 +6,14 @@ description: The DuckLake landing zone under data/lakehouse/ — why the change 
 # The DuckLake landing zone (`lake/lakehouse.py`)
 
 dlt lands `raw` in a DuckLake catalog under `data/lakehouse/`; the DuckDB file
-holds only what dbt builds. `just lakehouse` reports the catalog, `just ingest`
-fills it, and `just sql` attaches it. The one-liners that must not depend on this
-skill loading are in `AGENTS.md`'s *The lakehouse* section — this file is the
-rest.
+holds only what dbt builds. dbt attaches the catalog (`profiles.yml`'s
+`attach:`, `_sources.yml`'s `database: lakehouse`). `just lakehouse` reports the
+catalog, `just ingest` fills it, and `just sql` attaches it — in the warehouse's
+mode, so only `just sql write` can touch a landing table. It is the only copy of
+every landing table, so `just clean` never takes it: deleting it costs the
+snapshot lineage and the weather archive, which is days of Open-Meteo budget.
+The one-liners that must not depend on this skill loading are in `AGENTS.md`'s
+*The lakehouse* section — this file is the rest.
 
 **The hive archive is gone with it** — `archive.py` under `lake/`, `data/lake/`,
 `ARCHIVED_TABLES`, the `parquet_archive` asset and `lake_matches_warehouse`.
