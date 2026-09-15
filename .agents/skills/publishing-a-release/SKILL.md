@@ -14,7 +14,7 @@ before the graph runs.
 **This is the only moment data crosses from a machine it is on to a machine it is
 not**, which is why the personal-data policy, the storage ceiling and the
 attribution obligation are all applied here rather than in a model. The
-constraints that must not depend on this skill loading are in `CLAUDE.md`'s
+constraints that must not depend on this skill loading are in `AGENTS.md`'s
 *Publishing* section; this file is the rest.
 
 ## What the manifest tells a consumer they cannot see

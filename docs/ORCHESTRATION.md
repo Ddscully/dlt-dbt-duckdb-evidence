@@ -92,7 +92,7 @@ the UI shouldn't start hammering public APIs on a timer; start it yourself if yo
 want it running.
 
 Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile).
-Only `dagster.yaml` is checked in. [CLAUDE.md](../CLAUDE.md#orchestration-orchestration)
+Only `dagster.yaml` is checked in. [AGENTS.md](../AGENTS.md#orchestration-orchestration)
 covers the traps: asset-key matching between dlt and dbt, the unpartitioned
 fallback inside the partitioned asset, and the fact that an asset missing from
 `definitions.py` is silently absent rather than an error.

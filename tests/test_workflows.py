@@ -32,8 +32,10 @@ NOT_A_SITE_INPUT = (
     "docs/**",  # prose about the warehouse, read by people not by the build
     "tests/**",  # this job runs no tests; ci.yml does
     "data/**",  # a .gitkeep; everything real under it is gitignored
-    ".claude/**",  # agent skills and plugin settings
+    ".agents/**",  # agent skills, for every agent
+    ".claude/**",  # Claude Code's plugin settings, and the skills symlink
     "README.md",
+    "AGENTS.md",
     "CLAUDE.md",
     "LICENSE",
     ".gitignore",

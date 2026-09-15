@@ -497,7 +497,7 @@ def test_the_wdi_pivot_maps_every_indicator_to_the_column_it_was_configured_for(
     `gdp_constant_usd`, which every intensity figure downstream divides by.
     `stg_wdi`'s data tests check ranges, nulls and the grain, and both series
     are non-negative USD, so every one passes — while the substitution flips
-    the decarbonisation trend's sign for 30 countries (CLAUDE.md).
+    the decarbonisation trend's sign for 30 countries (AGENTS.md).
 
     Every branch below has been seen to fire. The whitespace tolerance is
     deliberate: a branch reflowed across a newline still matches, so a

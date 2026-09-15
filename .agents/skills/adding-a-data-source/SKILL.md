@@ -12,7 +12,7 @@ disconnected halves. Work the checklist top to bottom.
 The `dbt` vendor plugin covers the *how* of dbt, and is the only vendor skill
 still enabled — `dagster-expert`, `polars` and `duckdb-skills` were all retired
 on measured zero use, so the tool-level knowledge for those layers is the
-project skills and `CLAUDE.md`. This skill covers the *seams between the
+project skills and `AGENTS.md`. This skill covers the *seams between the
 layers*, which are specific to this repo. Naming rules live in [`docs/STYLE_GUIDE.md`](../../../docs/STYLE_GUIDE.md).
 
 ## 0. First decide whether you need a new source at all
@@ -147,7 +147,7 @@ coverage in the column's YAML description either way — that's the convention.
   `just report-clean`, not `just report`: after a column change `just report`
   can validate against a stale schema under `reports/.evidence/` (see
   `building-evidence-reports`).
-- **Docs** — the source table belongs in the `raw` list in `CLAUDE.md` and the
+- **Docs** — the source table belongs in the `raw` list in `AGENTS.md` and the
   "Data sources" section of `README.md`.
 
 ## Verify before you call it done

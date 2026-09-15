@@ -7,7 +7,7 @@ description: What pins what in this repo and why — dependabot's three ecosyste
 
 Green CI proves nothing about versions — that sentence is the whole section, and
 everything below is a way it has already cost this repo something. The linter
-policy those pins serve is in `CLAUDE.md` under *Style guide*.
+policy those pins serve is in `AGENTS.md` under *Style guide*.
 
 
 `.github/dependabot.yml` watches three ecosystems — `github-actions` (`/`), `uv`
@@ -222,7 +222,7 @@ policy those pins serve is in `CLAUDE.md` under *Style guide*.
     `node_modules`.
   - **`data/warehouse.duckdb` is the one target `just clean` must not treat as
     derived.** It holds the `history` schema — see *Snapshot history* in
-    `CLAUDE.md` — which no
+    `AGENTS.md` — which no
     rebuild reproduces. `just clean warehouse` mirrors
     `publish/restore_history.py`: it gates on *whether there is history to
     lose*, not on how alarming the file looks, so an empty `history` schema

@@ -185,7 +185,7 @@ and each exists because of a specific mutation the data tests could not see.
 The method: break the model in a plausible way against a *copy* of the warehouse,
 run its full suite, and record the number that moves. Across seven models, 38
 mutations were run and the data tests caught 5.
-→ [`.claude/skills/unit-testing-dbt-models/SKILL.md`](../.claude/skills/unit-testing-dbt-models/SKILL.md)
+→ [`.agents/skills/unit-testing-dbt-models/SKILL.md`](../.agents/skills/unit-testing-dbt-models/SKILL.md)
 
 **Determinism is a property to pin, and a determinism guard has to be mutated
 repeatedly rather than once.** The tie-break in the returns-matching model makes
@@ -322,7 +322,7 @@ downloads the result.
 ## Where the reasoning lives
 
 This page is the index. The arguments, and what each one cost to learn, are in
-[`CLAUDE.md`](../CLAUDE.md) and the skills under `.claude/skills/`, written at
+[`AGENTS.md`](../AGENTS.md) and the skills under `.agents/skills/`, written at
 the point they were learned rather than reconstructed afterwards.
 [`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md) answers the evaluation questions
 (SLA, run cost, what breaks at 1000×, what I would do differently), and

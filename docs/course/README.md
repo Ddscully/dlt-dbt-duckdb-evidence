@@ -76,6 +76,6 @@ set the format.
 
 ## The rest of the documentation
 
-The course teaches; [`docs/`](../) explains and [`CLAUDE.md`](../../CLAUDE.md)
+The course teaches; [`docs/`](../) explains and [`AGENTS.md`](../../AGENTS.md)
 records what each lesson cost to learn. When a module wants the full reference
 it links there rather than restating it: a fact in two places drifts in one.

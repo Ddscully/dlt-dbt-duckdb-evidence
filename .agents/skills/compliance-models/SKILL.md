@@ -61,7 +61,7 @@ packaging.
   gates, and CI builds against the 17-country fixtures — the first draft was a
   twelve-site *European* group, which passed locally and failed `dbt build` with
   8 null factors under `INGEST_FIXTURES=1`, because only six of the fixture
-  countries are European. This is the usual fixture-slice trap (CLAUDE.md's
+  countries are European. This is the usual fixture-slice trap (AGENTS.md's
   "17 countries will happily pass a threshold the full 200+ would break") running
   the other way: the slice is too *narrow* for a seed that joins to it. The
   global footprint is the fix and the spread is better for it.

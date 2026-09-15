@@ -64,8 +64,8 @@ reports/.evidence/
 reports/build/
 node_modules/
 
-# Claude Code session transcripts and scratch notes: a local working record,
-# never committed. What should outlive a session belongs in CLAUDE.md.
+# Agent session transcripts and scratch notes: a local working record,
+# never committed. What should outlive a session belongs in AGENTS.md.
 docs/sessions/
 
 # The DuckLake landing zone, filled by `just ingest`. **Holds state no rebuild

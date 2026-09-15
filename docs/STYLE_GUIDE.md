@@ -154,7 +154,7 @@ below are the ones it can't check.
   imports `ingest`, `dbt` and `transform` — it never reimplements them. If you
   add logic to a Dagster asset that isn't wiring, it belongs in the layer.
 - **[convention]** `orchestration/assets.py` must not use
-  `from __future__ import annotations`. See CLAUDE.md for why.
+  `from __future__ import annotations`. See AGENTS.md for why.
 - **[convention]** Column and table names produced by Python match the SQL
   conventions above — `snake_case`, units in the name.
 
@@ -164,7 +164,7 @@ below are the ones it can't check.
 |---|---|
 | [`.sqlfluff`](../.sqlfluff) | The **[lint]** rules above |
 | [`.pre-commit-config.yaml`](../.pre-commit-config.yaml) | Runs sqlfluff + ruff on commit |
-| [`CLAUDE.md`](../CLAUDE.md) | Stack gotchas and per-source quirks |
+| [`AGENTS.md`](../AGENTS.md) | Stack gotchas and per-source quirks |
 | This file | Naming and structure conventions |
 
 Run `just lint` before committing SQL. Pre-commit runs the same check.

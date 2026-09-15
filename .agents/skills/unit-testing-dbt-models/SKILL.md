@@ -11,7 +11,7 @@ mutating the model and watching its data tests stay green. This file is the
 record of those mutations — what moved, what did not, and which fixture shapes
 are strong enough to catch them.
 
-The models are listed under *Warehouse schemas* in `CLAUDE.md`; the domain
+The models are listed under *Warehouse schemas* in `AGENTS.md`; the domain
 reasoning behind each is in `compliance-models`, `retail-models` and
 `currency-and-calendar`.
 
