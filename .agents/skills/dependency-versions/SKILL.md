@@ -210,13 +210,29 @@ linter, formatter and type checker those pins serve behave is
   --upgrade-package dbt-core` moved all seven dagster packages and dbt with them.
   **Read the `Updated` lines, never
   the exit code.**
-- **dbt-core 1.12 installs a 174 MB binary this project never runs.**
-  `dbt-core-experimental-parser`, the Rust parser behind `--use-v2-parser`, is
-  an unconditional dependency and lands as one executable in `.venv/bin/`. With
-  it hidden, a default `dbt parse` exits 0, and `--use-v2-parser` fails with
-  `Fusion parser command not found`. With `metricflow` (3.7 MB) and `rapidfuzz`
-  (12 MB) replacing `dbt-semantic-interfaces`, 1.12 costs about 190 MB of venv
-  for nothing used.
+- **dbt-core 1.12's "parser" is dbt v2, 174 MB of it, and a default run never
+  calls it.** `dbt-core-experimental-parser` is an unconditional dependency whose
+  one executable in `.venv/bin/` answers `--version` with `dbt-oss 2.0.1`, the
+  v2 open-source engine. The locked sdist is 4.8 KB: its build step downloads
+  the wheel from the same GitHub release as `dbt-core` 2.0.0rc4 and checks it
+  against an embedded sha256, so a `uv sync` reaches github.com as well as PyPI.
+  With the binary hidden, a default `dbt parse` exits 0, and `--use-v2-parser`
+  fails with `Fusion parser command not found`. With `metricflow` (3.7 MB) and
+  `rapidfuzz` (12 MB) replacing `dbt-semantic-interfaces`, 1.12 costs about
+  190 MB of venv.
+  - **Its one use here is measuring the distance to v2**, and on 2026-09-15
+    `dbt parse --use-v2-parser` failed on 224 locations with a single code,
+    `UnusedConfigKey (dbt1060)`: 219 `meta:` blocks, plus source `freshness:`
+    and `loaded_at_field:`, that v2 wants under `config:`. 1.12's own parse warns
+    about none of them, so a clean v1 parse is not v2 readiness. The `meta`
+    blocks are the additivity and PII labels that Python reads out of the
+    manifest, so the move is more than a yml rewrite.
+  - **Moving to v2 drops the package, not the weight.** `dbt-core` 2.0.0rc4
+    installs as 200 MB in four packages and reports the same `dbt-oss 2.0.1`;
+    what goes is the Python stack around it. The rest of the move is unmeasured:
+    DuckDB is a beta, CLI-only adapter in v2, `sqlfluff-templater-dbt` cannot
+    template it (`dbt lint` ships only in the proprietary `dbt` distribution),
+    and dagster-dbt already reads v2's event stream (`DbtFusionCliEventMessage`).
   - **Leaving it out would take an override, and overrides stay refused.**
     `[tool.uv] override-dependencies` could also have forced 1.12 before the cap
     lifted. Either would be a **fourth entry in the three-versions table**: an
@@ -226,19 +242,22 @@ linter, formatter and type checker those pins serve behave is
     the Semantic Layer YAML and adds `osi_document.json`. Authoring one against
     1.11's would have meant migrating it almost at once.
 - **dbt 1.12 reads a `.env` from its working directory, which here is `dbt/`,
-  and `just where` cannot see it.** Measured against a copy: a `.env` there naming
-  `WAREHOUSE_PATH` sent `dbt debug` to that file — and DuckDB created it — while
-  the shell left the variable unset, as most recipes do; a shell value still
-  wins. `just where` reads the shell, so it would name the default file while
-  dbt wrote to another. Nothing creates that file and `.env` is not gitignored,
-  so `git status` is the tell.
+  so `just where` refuses while one exists.** Measured against a copy: a `.env`
+  there naming `WAREHOUSE_PATH` sent `dbt debug` to that file — and DuckDB
+  created it — while the shell left the variable unset, as most recipes do; a
+  shell value still wins. `just where` reads only the shell, so it would have
+  named the default file while dbt wrote to another. The repo-root `.env` is the
+  place for such values: `dotenv-load` exports it to every recipe, and `where`
+  prints it. The recipes that export their own `WAREHOUSE_PATH` skip `where`,
+  so the guard does not cover them.
 - **"Lightweight" is a measured claim, and the dev tooling was most of the
   weight.** Removing harlequin and marimo on 2026-08-25 took the tree from 198
   packages to 153 and the venv from 1.1 GB to 736 MB — a third of it — for two
   tools that duplicated capability the stack already had: the DuckDB CLI
   replaces harlequin (`just sql`, read-only by default), and marimo cost 122 MB
-  plus jedi/loro/pyzmq to render one `select *`. What was left *was* the stack, until dbt 1.12's unused parser (above):
-  polars 206 MB, pyarrow 137 MB, duckdb 58 MB, dagster 62 MB.
+  plus jedi/loro/pyzmq to render one `select *`. What was left *was* the stack
+  — polars 206 MB, pyarrow 137 MB, duckdb 58 MB, dagster 62 MB — until dbt
+  1.12's parser binary (above).
   - **The venv is not where this repo's disk goes**, which is worth knowing
     before optimising it again. `reports/node_modules` alone is 931 MB and the
     regenerable build output under `data/`, `dbt/target` and `reports/` is
