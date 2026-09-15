@@ -491,8 +491,12 @@ Every PR here is **squash-merged**, so `main` is linear with one commit per PR.
   behaves like a lock**: no two commits touching it can be reordered or
   cherry-picked independently.
 - **`git branch --merged` is useless here**: a squashed commit shares no SHA with
-  its branch. `git diff main..<branch>` being empty is the check; where it is not,
-  look before `-D` — a stale branch and one with unique work look the same.
+  its branch, and once `main` moves on, a merged branch and one with unique work
+  both show a diff. **`git merge-tree --write-tree main <branch>` decides it**: if
+  the tree it prints equals `git rev-parse main^{tree}`, the branch adds nothing.
+  A conflict there is inconclusive on prose-heavy branches; `gh pr list --state
+  merged --json headRefName` maps a branch to the PR that merged it. Look before
+  `-D`.
 
 ## Session history
 
