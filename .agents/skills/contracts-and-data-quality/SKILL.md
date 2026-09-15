@@ -101,7 +101,7 @@ account of the same ground is `docs/DATA_QUALITY.md`.
     `original_quantity` belongs to the matched purchase, so summing it counts a
     purchase once per return matched to it. `gdp_usd` is `semi_additive` and
     `gdp_constant_usd` `additive` — the constant-dollar gotcha as metadata.
-  - The labels ship in `manifest.json`'s `additivity` map (285 columns across 26
+  - The labels ship in `manifest.json`'s `additivity` map (288 columns across 27
     relations), with `analytics`' in `EXTRA_ADDITIVITY` because dbt cannot see
     Polars output. They are stated rather than derived from the mart, because a
     derived label fails *open* when a mart column is renamed.

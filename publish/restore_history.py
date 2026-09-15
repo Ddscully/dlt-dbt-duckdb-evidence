@@ -26,6 +26,7 @@ must also carry the columns that make it what it claims to be — see `Carry`.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import duckdb
@@ -166,7 +167,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    summary = run(args.source, args.warehouse, args.force)
+    # The two refusals — history already in the destination, dlt holding local
+    # state — carry messages written to be acted on, the second naming its `rm`.
+    # `run()` keeps raising them for its callers and tests; only the command line
+    # trades the traceback that buried them for the message and a non-zero exit.
+    try:
+        summary = run(args.source, args.warehouse, args.force)
+    except (ValueError, RuntimeError) as exc:
+        print(f"restore-history: {exc}", file=sys.stderr)
+        sys.exit(1)
     for table, rows in summary.get("lakehouse", {}).items():
         print(f"  {table:32} {rows:>8,} rows  (lakehouse)")
     if not summary["tables"]:

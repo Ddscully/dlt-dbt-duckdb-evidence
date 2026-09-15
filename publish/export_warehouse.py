@@ -229,6 +229,12 @@ EXTRA_ADDITIVITY: dict[tuple[str, str, str], str] = {
     ("analytics", "pipeline_tables", "year_min"): "not_a_measure",
     ("analytics", "pipeline_tables", "year_max"): "not_a_measure",
     ("analytics", "pipeline_tests", "failing_rows"): "additive",
+    # The run history's timings sum across nodes and across runs, but to
+    # thread-seconds: dbt builds four nodes at once, so a run's summed
+    # `execution_time_s` is several times the wall clock it took.
+    ("analytics", "pipeline_runs", "execution_time_s"): "additive",
+    ("analytics", "pipeline_runs", "compile_time_s"): "additive",
+    ("analytics", "pipeline_runs", "execute_time_s"): "additive",
 }
 
 
