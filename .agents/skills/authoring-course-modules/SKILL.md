@@ -154,6 +154,22 @@ measures nothing. What it deliberately does *not* require is the marker alone on
 its line — `01-grain.md` writes "**Verification.** When you think it is fixed:"
 with the block below, which is good prose and a bad thing to forbid.
 
+**A citation test is not a correctness test, and the course proved it twice in
+one audit.** `tests/test_course.py` checked paths, recipes, links and anchors,
+all green, while two drills seeded nothing (their `sed` targets had moved to
+`ingest/sources/`, but `ingest/pipeline.py` still exists) and the quoted build
+verdict had drifted 159 nodes below the truth. Both classes are now covered —
+the drills by running their `sed` against a copy, the verdict by
+`tests/test_documented_counts.py` deriving it from the manifest — and the
+lesson generalises: **when prose quotes a mechanism rather than a name, the
+guard has to run the mechanism.**
+
+**Every stale figure in that audit was one no scanner could see.** The counts
+guard needs a test noun after the number, so "425 of them", "462 of the 482
+tests" and "agrees 367 times out of 369" all passed it, and a whole stale test
+census survived inside the module about counting tests. Widening `CLAIM` is one
+answer; the cheaper one is to write a count in the shape the guard reads.
+
 ## The thesis, and the findings that support it
 
 **Absence is the blind spot the whole course is organised around.** Every test in

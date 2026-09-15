@@ -577,128 +577,44 @@ them rather than duplicating logic (`build_pipeline()`, `dbt build`,
 Two tiers, and the split is the point — see [`tests/README.md`](tests/README.md).
 
 - `just test` — mocked-payload unit tests over the Python layers. No network, no
-  warehouse; ~42s for the whole suite (2026-09-11).
-- `just coverage` — the same under coverage.py: ~53s, 67% branch / 78% statement
-  (2026-09-09). It reports and gates nothing, for ty's reason, and measures the
-  mocked tier only, so the transform and lake layers read low.
+  warehouse.
 - `just test-pipeline` — the real modules end to end with `INGEST_FIXTURES=1`,
   every source served from `tests/fixtures/ingest/`, into a throwaway warehouse
   and landing zone. This is what CI runs, so a red PR build means the repo broke,
   not that OWID was down.
-
-**A wall-clock figure in prose drifts, and nothing can guard it.** The pytest
-timing was documented at ~1s while the suite grew to ~42s, and its first
-correction missed one of the four files that quoted it. Date a timing when you
-write it, and after correcting any figure restated across files, `grep` for the
-*old* value and expect a hit. Figures that move with the code — coverage
-percentages, dbt timing a fixed set of unit tests — hold; the pytest wall clock
-does not. Phrase a pytest count as "pytest cases": the counts guard reads a
-number in front of a bare test noun as a dbt claim.
-
-- `[tool.coverage.run] source` is a hand-maintained directory list with no
-  guard: `publish/` was missing from it, and adding it moved the totals *up*,
-  because the blind spot hid well-covered code.
-- `coverage run -m pytest`, not `pytest --cov`, which measured identically for
-  one more package. `COVERAGE_CORE=sysmon` saves nothing here: the cost is
-  imports and DuckDB/dlt work, not line tracing.
-- `branch = true`, because the repo argues about deliberately unreachable
-  branches in prose, and branch coverage makes them a number.
-
-Gotchas:
-
-- **No routine command evaluates an asset check body.** `just test-pipeline` runs
-  the modules in shell order and never executes a job;
-  `tests/test_asset_checks.py` calls the bodies directly. **Patching the database
-  under a check proves its logic, never its wiring**: a check kept reading the
-  warehouse for `raw` after `raw` moved into DuckLake, and its tests passed
-  against a fixture that had the table. Assert a count as well as the verdict,
-  since the wrong source can get the verdict right by accident.
-- **A test file that skips itself in CI's first step runs nowhere unless the
-  second names it.** `ci.yml` runs pytest before `dbt parse`, so the five
-  manifest-gated files skip there and a later step re-runs them by name;
-  `tests/test_workflows.py` compares the two sets both ways. Its detector is
-  anchored at column 0, because a guard that reads source as text finds its own
-  strings.
-- **A join is not a census.** The FX periods staleness gap was sized by comparing
-  the period-ends two models share — five rows — and was 22: the daily model stops
-  emitting rows for a currency that leaves the ECB panel, which took the worst
-  rows out of both sides of the comparison. To ask how often two models disagree,
-  first count the rows only one of them has.
-- **A fix that moves no number needs the part of it that does.** Restricting
-  `fct_cbam_exposure`'s cleanest-source baseline to listed countries changes no
-  cell, so only a fixture can hold it; the half that could be made visible — the
-  fallback row's own excess, now null — is held by an `expression_is_true`. When a
-  correctness fix is invisible in the data, look for the part that can be made to
-  show.
-- **A test earns its place by mutation**: break the model plausibly against a
-  copy of the warehouse, run its data tests, and record what moves. Across seven
-  models, 38 mutations, the data tests caught 5. Read a red set as candidates — a
-  unit test whose input is mocked `rows: []` goes red on any inner join, guarding
-  nothing. The method is in `unit-testing-dbt-models`.
-- **A correct number reused for a different claim is a wrong number.** A review
-  quoted the 70,174 lines *in* tied groups as the lines the tie-break *dropped*
-  (36,656): a real figure with a new meaning, which no scanner can see.
-- **A yml `description:` is prose**, and `tests/test_documented_counts.py` scans
-  every `dbt/models/**/_*.yml` for test and mart counts. The other numeric claims
-  there — row counts, shares — are unguarded, because checking them needs the
-  full warehouse, which CI lacks. A stale claim can *move* rather than expire —
-  Antarctica's null region left the facts and survives in
-  `fct_co2_estimate_versions` — and a figure covering two models is written as
-  two numbers, never as a total no model has.
-- **Scoring against an external rubric finds counts nothing else counted** —
-  `docs/FOR_REVIEWERS.md` §6. It is also where access governance scores
-  *Absent*: dbt's `access` governs who may build on a model, not who may read it,
-  and DuckDB has no grants.
-- **Every hand-maintained list is asserted against the authority it copies** —
-  `SOURCE_TABLES`, `RAW_DESCRIPTIONS`, `WB_WDI_INDICATORS`, `ATTRIBUTION`,
-  `pages.yml`'s allowlist, the asset-check bodies, the counts in prose. None of
-  their failures is loud. What each guard found is in `repo-guards`.
-- **A fixture run leaks through any state it does not override.**
-  `just test-pipeline` overrides `WAREHOUSE_PATH` (or it overwrites the real
-  warehouse with the 17-country slice), `LAKEHOUSE_DIR` (or it merges the slice
-  into the real landing zone and its weather archive) and dbt's artifact paths —
-  `DBT_TARGET_PATH`, `DBT_MANIFEST_PATH`, `DBT_RUN_RESULTS_PATH` and
-  `--target-path` — or the next `just pipeline-status` files the fixture's
-  timings in the real build history. `tests/test_workflows.py` holds all four,
-  because each is invisible when missing: the fixture run passes and the *next*
-  command is the one that is wrong.
-- **`WAREHOUSE_PATH` must be absolute**: dbt resolves paths from `dbt/`, the
-  Python layers from the repo root.
-- **Fixtures filter rows, never columns**, and `fixtures.path_for()` raises on an
-  unmapped URL rather than fall back to the network. `_ROUTES` is an ordered
-  dispatch table in which a route can be shadowed silently; the checks that close
-  it are in `repo-guards`.
 - `.github/workflows/nightly.yml` runs the graph against the *live* sources daily
   and opens a `nightly-failure` issue — the signal that the fixtures have drifted.
 
+The suite's own traps (asset-check wiring, CI's re-run set, fixture leaks) are
+`repo-guards`, and the mutation method is `unit-testing-dbt-models`. For any
+number written into prose or a review:
+
+- **A wall-clock figure drifts, and nothing can guard it.** Date a timing when you
+  write it, and after correcting a figure restated across files, `grep` for the
+  *old* value and expect a hit. Phrase a pytest count as "pytest cases": the
+  counts guard reads a number in front of a bare test noun as a dbt claim.
+- **A join is not a census.** To ask how often two models disagree, first count
+  the rows only one of them has.
+- **A correct number reused for a different claim is a wrong number**, and no
+  scanner can see it.
+- **A fix that moves no number needs the part of it that does** — when a
+  correctness fix is invisible in the data, find the half that can be made to
+  show.
+- **A test earns its place by mutation**: break the model plausibly against a
+  copy of the warehouse and record what moves. A red set is candidates, not a
+  verdict.
+- **A fixture run leaks through any state it does not override** —
+  `WAREHOUSE_PATH`, `LAKEHOUSE_DIR` and dbt's artifact paths. The fixture run
+  passes either way; the *next* command against the real warehouse is the one
+  that is wrong.
+
 ## The course (`docs/course/`)
 
-Ten modules teaching this warehouse to analytics engineers, built around the
-failures that stay green rather than the happy path. Modules 00-04 are written;
-05-10 are outlined in `docs/course/README.md`, and `tests/test_course.py` keeps
-the material from rotting against the repo it cites.
-
-**Authoring a module is the `authoring-course-modules` skill.** Two things to
-know without it: the course builds into `data/course/` via `just course-sandbox`,
-and **`just dbt-build` is the trap** — it targets the real warehouse, so a drill
-run through the wrong recipe writes a deliberately broken model into
-`data/warehouse.duckdb`.
-
-- **A citation test is not a correctness test, and the course proved it twice in
-  one audit.** `tests/test_course.py` checked paths, recipes, links and anchors,
-  all green, while two drills seeded nothing (their `sed` targets had moved to
-  `ingest/sources/`, but `ingest/pipeline.py` still exists) and the quoted build
-  verdict had drifted 159 nodes below the truth. Both classes are now covered —
-  the drills by
-  running their `sed` against a copy, the verdict by
-  `tests/test_documented_counts.py` deriving it from the manifest — and the
-  lesson generalises: **when prose quotes a mechanism rather than a name, the
-  guard has to run the mechanism.**
-- **Every stale figure in that audit was one no scanner could see.** The counts
-  guard needs a test noun after the number, so "425 of them", "462 of the 482
-  tests" and "agrees 367 times out of 369" all passed it, and a whole stale test
-  census survived inside the module about counting tests. Widening `CLAIM` is one
-  answer; the cheaper one is to write a count in the shape the guard reads.
+Ten modules teaching this warehouse, built around the failures that stay green;
+00-04 are written. Authoring is the `authoring-course-modules` skill. The course
+builds into `data/course/` via `just course-sandbox`, and **`just dbt-build` is
+the trap** — it targets the real warehouse, so a drill run through the wrong
+recipe writes a deliberately broken model into `data/warehouse.duckdb`.
 
 ## Verifying changes
 

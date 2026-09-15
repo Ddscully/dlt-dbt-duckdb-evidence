@@ -11,9 +11,10 @@ unlisted source yields no row and the page under-reports while looking complete,
 an unlisted resource materialises with no description, a stale count reads as
 authoritative. Each one below is now asserted against the authority it copies.
 
-The two-tier test split, `WAREHOUSE_PATH`, coverage and `nightly.yml` stay in
-`AGENTS.md` under *Testing*. The mutation method these guards were written with
-is in the `unit-testing-dbt-models` skill.
+The two-tier test split and `nightly.yml` stay in `AGENTS.md` under *Testing*,
+and coverage is `tests/README.md`. The traps in the suite itself are the last
+section here. The mutation method these guards were written with is in the
+`unit-testing-dbt-models` skill.
 
 ## The lists and what holds them
 
@@ -379,3 +380,41 @@ is in the `unit-testing-dbt-models` skill.
   left rather than pruned — the cache is gitignored and safe to delete.
 - **Adding a WDI indicator means re-recording** (`just record-fixtures`), on top
   of the two places listed above.
+
+## Traps in the test suite itself
+
+- **No routine command evaluates an asset check body.** `just test-pipeline` runs
+  the modules in shell order and never executes a job;
+  `tests/test_asset_checks.py` calls the bodies directly. **Patching the database
+  under a check proves its logic, never its wiring**: a check kept reading the
+  warehouse for `raw` after `raw` moved into DuckLake, and its tests passed
+  against a fixture that had the table. Assert a count as well as the verdict,
+  since the wrong source can get the verdict right by accident.
+- **A test file that skips itself in CI's first step runs nowhere unless the
+  second names it.** `ci.yml` runs pytest before `dbt parse`, so the five
+  manifest-gated files skip there and a later step re-runs them by name;
+  `tests/test_workflows.py` compares the two sets both ways. Its detector is
+  anchored at column 0, because a guard that reads source as text finds its own
+  strings.
+- **A yml `description:` is prose**, and `tests/test_documented_counts.py` scans
+  every `dbt/models/**/_*.yml` for test and mart counts. The other numeric claims
+  there — row counts, shares — are unguarded, because checking them needs the
+  full warehouse, which CI lacks. A stale claim can *move* rather than expire —
+  Antarctica's null region left the facts and survives in
+  `fct_co2_estimate_versions` — and a figure covering two models is written as
+  two numbers, never as a total no model has.
+- **Scoring against an external rubric finds counts nothing else counted** —
+  `docs/FOR_REVIEWERS.md` §6. It is also where access governance scores
+  *Absent*: dbt's `access` governs who may build on a model, not who may read it,
+  and DuckDB has no grants.
+- **A fixture run leaks through any state it does not override.**
+  `just test-pipeline` overrides `WAREHOUSE_PATH` (or it overwrites the real
+  warehouse with the 17-country slice), `LAKEHOUSE_DIR` (or it merges the slice
+  into the real landing zone and its weather archive) and dbt's artifact paths —
+  `DBT_TARGET_PATH`, `DBT_MANIFEST_PATH`, `DBT_RUN_RESULTS_PATH` and
+  `--target-path` — or the next `just pipeline-status` files the fixture's
+  timings in the real build history. `tests/test_workflows.py` holds all four,
+  because each is invisible when missing: the fixture run passes and the *next*
+  command is the one that is wrong.
+- **`WAREHOUSE_PATH` must be absolute**: dbt resolves paths from `dbt/`, the
+  Python layers from the repo root.

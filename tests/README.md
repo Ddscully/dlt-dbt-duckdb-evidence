@@ -52,6 +52,11 @@ Branch coverage is on. This project carries at least four branches that are
 deliberately unreachable and argued for in prose; branch coverage is what makes
 them a number rather than a paragraph.
 
+**`[tool.coverage.run] source` is a hand-maintained directory list with no
+guard.** `publish/` was missing from it, and adding it moved the totals *up*,
+because the blind spot hid well-covered code. `COVERAGE_CORE=sysmon` saves
+nothing here: the cost is imports and DuckDB/dlt work, not line tracing.
+
 ## `tests/fixtures/ingest/` — the recorded payloads
 
 Produced by `just record-fixtures` (`scripts/record_fixtures.py`), which hits the
