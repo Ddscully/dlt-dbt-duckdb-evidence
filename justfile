@@ -23,21 +23,24 @@ default:
 # so every recipe that writes to the warehouse or the landing zone depends on
 # this. The recipes that export their own WAREHOUSE_PATH (`test-pipeline`, the
 # course ones) do not: this would print the outer value.
-#
-# It refuses while dbt/.env exists. dbt 1.12 loads a .env from its working
-# directory, which is dbt/ for every recipe, and a value there fills any variable
-# the shell leaves unset — WAREHOUSE_PATH, usually — so dbt would build a file
-# this recipe never printed. The repo-root .env is safe: `dotenv-load` exports it
-# to the recipes, so the lines below show it.
 # Print which warehouse file and landing zone the pipeline recipes will use
-where:
-    @if [ -e "{{ justfile_directory() }}/dbt/.env" ]; then \
-        echo "refusing: dbt/.env exists, and dbt reads it where this recipe cannot." >&2; \
-        echo "Move its values to the repo-root .env, which just exports and prints, then delete it." >&2; \
-        exit 1; \
-    fi
+where: _no-dbt-dotenv
     @echo "warehouse: ${WAREHOUSE_PATH:-(unset - this repo's data/warehouse.duckdb)}"
     @echo "lakehouse: $LAKEHOUSE_DIR"
+
+# Every recipe that writes depends on this, through `where` or directly (the ones
+# that export their own WAREHOUSE_PATH). dbt 1.12 loads a .env from its working
+# directory, which is dbt/ for every recipe, and a value there fills any variable
+# the shell leaves unset — WAREHOUSE_PATH in `where`'s recipes, and whatever a
+# recipe does not export in the rest — so dbt would build against a file no
+# recipe printed. The repo-root .env is safe: `dotenv-load` exports it to the
+# recipes, so `where` shows it.
+_no-dbt-dotenv:
+    @if [ -e "{{ justfile_directory() }}/dbt/.env" ]; then \
+        echo "refusing: dbt/.env exists, and dbt reads it for any variable this recipe leaves unset." >&2; \
+        echo "Move its values to the repo-root .env, which just exports and 'just where' prints, then delete it." >&2; \
+        exit 1; \
+    fi
 
 # DuckLake is a binary from extensions.duckdb.org that no lockfile can name.
 # DuckDB would autoload it on first use; installing it here moves the download,
@@ -135,7 +138,7 @@ coverage:
     uv run coverage report
 
 # The whole pipeline against checked-in fixtures, into a throwaway warehouse — what CI runs
-test-pipeline:
+test-pipeline: _no-dbt-dotenv
     #!/usr/bin/env bash
     set -euo pipefail
     export INGEST_FIXTURES=1
@@ -354,7 +357,7 @@ serve dagster_port="3000" site_port="8081": where dbt-parse
 # on the next command. It is the 17-country fixture slice; exercises that
 # investigate the data read the real warehouse instead.
 # Build the course sandbox in data/course/ (gitignored) from the fixtures
-course-sandbox:
+course-sandbox: _no-dbt-dotenv
     #!/usr/bin/env bash
     set -euo pipefail
     export INGEST_FIXTURES=1
@@ -374,7 +377,7 @@ course-sandbox:
 
 # No re-ingest: a broken model needs only the dbt layer rebuilt.
 # The drill inner loop: rebuild the dbt layer against the sandbox
-course-rebuild:
+course-rebuild: _no-dbt-dotenv
     #!/usr/bin/env bash
     set -euo pipefail
     export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"
@@ -385,7 +388,7 @@ course-rebuild:
 # because the raw form forgets WAREHOUSE_PATH once and rewrites the real
 # warehouse's `analytics`.
 # Re-run the Polars derived metrics against the course sandbox
-course-transform:
+course-transform: _no-dbt-dotenv
     #!/usr/bin/env bash
     set -euo pipefail
     export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"

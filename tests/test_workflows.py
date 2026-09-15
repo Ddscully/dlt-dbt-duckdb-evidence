@@ -550,6 +550,29 @@ def test_both_ways_of_announcing_are_actually_in_use():
     assert by_own_export, "no recipe exports its own WAREHOUSE_PATH any more"
 
 
+def test_every_recipe_that_writes_refuses_a_dbt_dotenv():
+    """dbt 1.12 loads `dbt/.env` for any variable a recipe leaves unset, so a
+    writing recipe must reach `_no-dbt-dotenv` — through `where`, which depends
+    on it, or directly. The recipes that export their own WAREHOUSE_PATH skip
+    `where` and repeat the dependency by hand, and the announcing test above
+    passes a new one without it."""
+    guard = "_no-dbt-dotenv"
+    assert guard in just_recipes()["where"][0].split(), (
+        f"`where` no longer depends on `{guard}`, so no recipe that depends on "
+        f"`where` is guarded against dbt/.env"
+    )
+    unguarded = sorted(
+        name
+        for name, (deps, _) in writing_recipes().items()
+        if not {"where", guard} & set(deps.split())
+    )
+    assert not unguarded, (
+        f"these recipes write without refusing a dbt/.env: {unguarded}. Add "
+        f"`where` as their first dependency or, if they export WAREHOUSE_PATH, "
+        f"`{guard}`."
+    )
+
+
 def _recipe(name: str) -> str:
     """The body of one `just` recipe, from its header to the next blank-line gap.
 
