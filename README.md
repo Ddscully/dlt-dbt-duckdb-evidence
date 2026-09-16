@@ -102,10 +102,14 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 | [**pytest**](https://docs.pytest.org/) | unit tests over the ingest/transform logic |
 | **GitHub Actions** | fixture-backed pipeline run on every PR, live run nightly |
 
-Want this shape for your own dataset?
-[`docs/REUSING_THIS_STACK.md`](./docs/REUSING_THIS_STACK.md) covers what copies
-over unchanged, what has to be rewritten, and the four decisions that are
-expensive to revisit later.
+Want this shape for your own dataset? Start from
+[**`dlt-dbt-duckdb-template`**](https://github.com/Ddscully/dlt-dbt-duckdb-template),
+which is this repo simplified to a starting point: the same layers, wiring and
+CI, with the subject matter, the publishing layer and the course cut out and
+one trivial source (monthly gold prices) left in place so every layer keeps a
+worked example. [`docs/REUSING_THIS_STACK.md`](./docs/REUSING_THIS_STACK.md) is
+the reasoning behind it — what copies over unchanged, what has to be rewritten,
+and the four decisions that are expensive to revisit later.
 
 ## Orchestration
 
