@@ -401,11 +401,14 @@ def test_a_history_only_restore_is_unaffected_by_local_dlt_state(tmp_path, monke
     assert summary["lakehouse"] == {}, "no published lakehouse, so nothing to refuse over"
 
 
-def test_carries_the_published_lakehouse_in_beside_the_snapshot(tmp_path):
+def test_carries_the_published_lakehouse_in_beside_the_snapshot(tmp_path, monkeypatch):
     """Both halves of the release, one command. `history` is unreproducible in
     principle and the weather archive within a budget; a release has the pair or
     it has neither, so finding the directory beside the database is what keeps
     them from drifting apart."""
+    # The fixture's table, not the project's allowlist: the carry is the
+    # mechanism under test, and it must not go vacuous if the allowlist empties.
+    monkeypatch.setattr(lakehouse, "PUBLISHED_TABLES", ("raw.om_weather_daily",))
     source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT)
     _published_lakehouse(tmp_path / "prev")
 
