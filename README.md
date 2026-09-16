@@ -44,9 +44,8 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
   own snapshot lineage, 33 dbt models, two Polars transforms for what SQL models
   badly, and an Evidence site with a query behind every chart.
 - **Dagster wraps the layers rather than replacing them**, so `ingest`, `dbt` and
-  `transform` stay independently runnable. Nothing declares the order by hand:
-  dlt's resource keys match the source keys dagster-dbt derives from
-  `_sources.yml`, and the model edges come from dbt's own `ref()` graph.
+  `transform` stay independently runnable. The asset graph is derived from keys
+  the layers already share, not declared by hand.
 - **518 tests — 482 data tests and 36 unit tests** — and an enforced schema
   contract on every mart model. The unit tests came out of a measurement: across
   five models mutated against a warehouse copy, 24 mutations were run and the
@@ -78,7 +77,7 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 | [**Polars**](https://pola.rs/) | heavy columnar transforms / window logic in Python |
 | [**DuckLake**](https://ducklake.select/) | where `raw` lands: Parquet under a catalog in `data/lakehouse/`, with snapshot lineage you can diff |
 | [**Evidence**](https://evidence.dev/) | BI-as-code dashboard, deployable to GitHub Pages |
-| [**sqlfluff**](https://sqlfluff.com/) + pre-commit | SQL linting / CI rigor |
+| [**sqlfluff**](https://sqlfluff.com/) + pre-commit | SQL linting, in the hooks and in CI |
 | [**pytest**](https://docs.pytest.org/) | unit tests over the ingest/transform logic |
 | **GitHub Actions** | fixture-backed pipeline run on every PR, live run nightly |
 
@@ -292,15 +291,13 @@ edit that drops two thirds of the countries with all 482 tests still passing.
 Modules 00–04 are written; 05–10 are outlined in the course index.
 
 Plus [`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) for SQL conventions,
-[`tests/README.md`](./tests/README.md) for the two test tiers,
-[`reports/README.md`](./reports/README.md) for the Evidence layer, and
-[`AGENTS.md`](./AGENTS.md) for the gotchas every session needs, including the
-directory-by-directory map of what each layer is for, with the rest in the
-skills under `.agents/skills/`. Working on
-this with an AI agent: `AGENTS.md` is the instructions file any agent reads, and
-`.agents/skills/` holds project skills for the seams the vendor skills can't
-know about ([AGENTS.md](./AGENTS.md#agent-skills)). Claude Code reads both
-through `CLAUDE.md`, which also declares its plugins.
+[`tests/README.md`](./tests/README.md) for the two test tiers, and
+[`reports/README.md`](./reports/README.md) for the Evidence layer.
+
+[`AGENTS.md`](./AGENTS.md) is the instructions file every coding agent reads, and
+a directory-by-directory map of the repo worth reading as a human too. The
+per-area detail sits in [`.agents/skills/`](./.agents/skills/), for the seams a
+vendor skill cannot know about; `CLAUDE.md` adds Claude Code's plugins on top.
 
 ## License
 
