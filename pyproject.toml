@@ -56,6 +56,15 @@ mds = "modern_data_stack:main"
 requires = ["uv_build>=0.12.0,<0.13.0"]
 build-backend = "uv_build"
 
+[tool.uv.build-backend]
+# `modern_data_stack` is the package; `[project] name` is this warehouse. Without
+# this key uv_build derives the one from the other, so renaming the project
+# refuses to build until `src/` is renamed too, and every import with it. Nothing
+# here plans to be renamed — the coupling is invisible until someone does, which
+# is the whole problem, and `docs/REUSING_THIS_STACK.md` §5 is written for people
+# who will. `tests/test_packaging.py` holds the key so deleting it is not silent.
+module-name = "modern_data_stack"
+
 [tool.uv]
 # `default-groups` deliberately unset, so uv's default (`dev`) applies and a bare
 # `uv sync` removes `orchestration`. A wider default would hide an undeclared

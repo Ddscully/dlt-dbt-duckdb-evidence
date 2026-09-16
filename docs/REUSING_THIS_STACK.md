@@ -344,17 +344,21 @@ anything built this way:
 
 ## 5. Renaming the project
 
-**The name is three names in one string**, and "rename the project" touches all of
-them: the Python package (`src/modern_data_stack/`, imported by 36 files), the dbt
-project and profile, and the dlt pipeline name (which also names dlt's state
-directory). The dry run renamed all three to `gold_warehouse`; on the tree left
-after §1's deletes that was **63 files**, 12 moves and 51 edits.
+**The name is three names in one string**: the Python package
+(`src/modern_data_stack/`, imported by 36 files), the dbt project and profile,
+and the dlt pipeline name (which also names dlt's state directory). The package
+is decoupled from the other two, so renaming the project need not touch it — but
+only because of one key, below. The dry run renamed all three to
+`gold_warehouse`; on the tree left after §1's deletes that was **63 files**, 12
+moves and 51 edits.
 
-- **The distribution name and the package are coupled by the build backend.**
-  Change `[project] name` alone and `uv sync` fails: `Expected a Python module at:
-  src/<new_name>/__init__.py`, because uv_build derives the module from the
-  project name. To rename the project and keep the package, add
-  `[tool.uv.build-backend] module-name = "modern_data_stack"`.
+- **The distribution name and the package are decoupled by one key**, which
+  this repo now sets: `[tool.uv.build-backend] module-name = "modern_data_stack"`
+  in `pyproject.toml`. Delete it and uv_build derives the module from the project
+  name again, so `uv sync` fails with `Expected a Python module at:
+  src/<new_name>/__init__.py` — **the first time anyone renames the project, and
+  not before**. A coupling that only fails years later in someone else's fork is
+  why `tests/test_packaging.py` holds the key rather than trusting it.
 - **Renaming the project** (keeping the package) touches:
   - `pyproject.toml`: `[project] name` and `[tool.dagster] code_location_name`;
   - `uv.lock`, rewritten by `uv sync`;
