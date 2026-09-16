@@ -122,6 +122,9 @@ just run        # ingest -> dbt build -> polars transform
 just dagster    # ...or the same pipeline as an asset graph, UI on :3000
 just sql        # poke around the warehouse in the DuckDB CLI
 just report     # build the Evidence dashboard (needs Node ≥ 18)
+
+# Tab-completion for recipe names, if you want it: `just --completions <shell>`
+# https://just.systems/man/en/shell-completion-scripts.html
 ```
 
 No credentials at any point; every source is a public endpoint. uv reads
