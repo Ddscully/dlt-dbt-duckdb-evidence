@@ -4,6 +4,14 @@ How to start a *new* project on this shape (dlt → DuckDB → dbt → Polars �
 Evidence, orchestrated by Dagster), using this repo as the reference
 implementation.
 
+**If you would rather start from a tree than a document**, there is one:
+[`Ddscully/dlt-dbt-duckdb-template`](https://github.com/Ddscully/dlt-dbt-duckdb-template)
+is this repo with §1's deletes done, §5's rename reduced to one script, and one
+trivial source (monthly gold prices) left in, so `just test-pipeline` and the
+asset graph are green from the first commit. It is a fork rather than a
+generated cut, so the two trees drift by hand — and it carries the tree, not
+the reasoning. Read this document either way.
+
 This is not a checklist for adding a source to *this* warehouse; that's
 [`.agents/skills/adding-a-data-source`](../.agents/skills/adding-a-data-source/SKILL.md).
 It's the layer above: what carries over to a different dataset, what has to be
@@ -389,8 +397,10 @@ tooling identity, not project identity, and nothing breaks if it keeps the name.
 Each step leaves the repo runnable, so a failure has one plausible cause.
 
 1. **Skeleton.** Copy the tree, delete the example files listed in §1, rename per
-   §5. `just setup` succeeding says only that the dependencies resolve: it
-   imports nothing from the project, and it passed on the dry run while seven of
+   §5 — or start from the template above, which is steps 1–6 done, keeping the
+   fixtures and the observability of §7 and leaving out its snapshots and
+   publishing. `just setup` succeeding says only that the dependencies resolve:
+   it imports nothing from the project, and it passed on the dry run while seven of
    CI's eight steps failed. The useful gate is `just dbt-parse && dagster
    definitions validate -m orchestration.definitions`. **An empty skeleton
    cannot pass the test suite**: with no resource dlt never creates the
