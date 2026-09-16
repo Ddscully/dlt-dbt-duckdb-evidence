@@ -115,7 +115,7 @@ keep the split a split:
 - `scripts/record_fixtures.py` — 333 lines, almost all per-source trimming; one
   untrimmed CSV needs about thirty.
 - `orchestration/assets.py` — **more than half of it is the example**: on the
-  dry run it went from 801 lines to 352. What carries over is
+  dry run it went from 801 lines (at `c054e53`) to 352. What carries over is
   `RawSchemaDltTranslator` (§2 says why it matters; it stays here rather than in
   the package because it's twenty lines wrapped around two of that module's
   constants), `FolderGroupDbtTranslator`, the freshness policies, the unpartitioned
@@ -367,9 +367,14 @@ after §1's deletes that was **63 files**, 12 moves and 51 edits.
   - `tests/test_lakehouse.py`, which reads the profile by that key;
   - `tests/test_restore_history.py`'s state directory names;
   - `reports/package.json` and its lockfile (cosmetic).
-- **Renaming the package** as well moves `src/` and rewrites every import. Expect
-  the first pre-commit run afterwards to re-sort imports in files the rename did
-  not otherwise touch: ruff orders first-party imports alphabetically, so the
+- **Renaming the package** as well moves `src/` and rewrites every import —
+  including two places a scan of `*.py` misses: `pyproject.toml`'s
+  `[project.scripts]` entry point (`mds = "modern_data_stack:main"`, which
+  nothing validates at install time, so it fails the first time someone runs the
+  script) and the inline Python in `.github/workflows/release-data.yml`'s
+  heredocs, which import the package and run nowhere but a release. Expect the
+  first pre-commit run afterwards to re-sort imports in files the rename did not
+  otherwise touch: ruff orders first-party imports alphabetically, so the
   package's position among `ingest`, `lake` and `publish` moves with its name.
 
 `.claude/`'s plugin marketplace is also named `modern-data-stack`. That is

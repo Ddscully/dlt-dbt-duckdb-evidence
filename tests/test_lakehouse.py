@@ -185,6 +185,30 @@ def test_the_weather_table_named_here_is_the_one_dlt_loads():
     assert name in INCREMENTAL_RESOURCES
 
 
+def test_the_published_allowlist_is_still_only_the_weather_archive():
+    """`PUBLISHED_TABLES` is a disclosure decision, not a convenience list.
+
+    Every mechanism test patches it to its own fixture's table — the publish and
+    carry paths are the same whatever the list holds, and a test that reads the
+    project's copy goes vacuous the day someone empties it. That leaves nothing
+    asserting the project's own value, which is the half that matters: this list
+    decides what leaves the building.
+
+    Weather is on it for cost — refetching the archive is days of Open-Meteo's
+    budget, and everything else in `raw` is free to rebuild. Adding
+    `raw.retail_invoice_lines` would ship clear customer ids inside
+    `lakehouse.tar.gz`, and **a release cannot take it back**: DuckLake keeps a
+    dropped table readable at earlier versions, which is why the published
+    catalog is built from this list rather than filtered down to it.
+    """
+    assert lakehouse.PUBLISHED_TABLES == ("raw.om_weather_daily",), (
+        "the landing tables a release publishes have changed. This is a "
+        "disclosure decision: check the new table holds no personal data, and "
+        "that it is here for a cost that a rebuild cannot pay "
+        "(docs/DATA_PROTECTION.md, the publishing-a-release skill)."
+    )
+
+
 def test_the_attach_alias_is_the_database_dbt_declares():
     """dbt's `_sources.yml` says `database: lakehouse` and `profiles.yml` attaches
     under that alias. Both are the constant here; a change to one of the three
