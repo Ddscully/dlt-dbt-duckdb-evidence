@@ -5,6 +5,18 @@ from dlt.common.configuration.container import Container
 from dlt.common.pipeline import PipelineContext
 
 
+@pytest.fixture(autouse=True)
+def _lakehouse_on_disk(monkeypatch: pytest.MonkeyPatch):
+    """Every test's landing zone is the directory it names, never a bucket.
+
+    `LAKEHOUSE_DATA_PATH` outranks the `lakehouse_dir` a test passes (see
+    `lake.lakehouse.data_path`), and `just test` loads the developer's `.env`, so
+    without this a machine set up for S3 would run the suite's throwaway
+    catalogs against its real bucket. A test about the bucket case sets it back.
+    """
+    monkeypatch.delenv("LAKEHOUSE_DATA_PATH", raising=False)
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _release_the_dlt_pipeline():
     """Importing `orchestration.assets` leaves a dlt pipeline *active* process-wide.

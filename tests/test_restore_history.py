@@ -330,6 +330,23 @@ def test_refuses_to_restore_the_lakehouse_when_dlt_has_local_state(tmp_path, mon
     assert not dest.exists(), "history was restored before the refusal fired"
 
 
+def test_refuses_to_restore_the_lakehouse_under_a_bucket_data_path(tmp_path, monkeypatch):
+    """The release is restored onto disk. With `LAKEHOUSE_DATA_PATH` set, the
+    carried Parquet would be unpacked locally under a catalog rewritten to name
+    the bucket, and the weather archive would be unreadable from the next attach
+    on. Refused before either half is written, like the dlt-state refusal."""
+    source = _db(tmp_path / "prev" / "warehouse.duckdb", SNAPSHOT)
+    _published_lakehouse(tmp_path / "prev")
+    monkeypatch.setenv(lakehouse.DATA_PATH_ENV_VAR, "s3://lake/prefix/")
+
+    dest = tmp_path / "wh" / "warehouse.duckdb"
+    with pytest.raises(RuntimeError, match=lakehouse.DATA_PATH_ENV_VAR):
+        run(source, dest, lakehouse_dir=tmp_path / "lh")
+
+    assert not (tmp_path / "lh").exists(), "refused after writing"
+    assert not dest.exists(), "history was restored before the refusal fired"
+
+
 def test_the_refusal_leaves_existing_history_untouched(tmp_path, monkeypatch):
     """The same ordering, where it costs something.
 

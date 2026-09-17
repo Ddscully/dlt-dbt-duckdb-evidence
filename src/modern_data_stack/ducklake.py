@@ -25,6 +25,7 @@ the catalog.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 import duckdb
@@ -59,6 +60,7 @@ def attach(
     alias: str,
     read_only: bool = False,
     data_inlining_row_limit: int | None = None,
+    storage_secret: Mapping[str, str] | None = None,
 ) -> None:
     """Attach the DuckLake at `catalog_path` as `alias`, and its catalog beside it.
 
@@ -69,11 +71,34 @@ def attach(
     `table_versions` reads it, because the query surface cannot say which
     snapshots changed one table; the catalog schema is part of the DuckLake 1.0
     spec, not an internal.
+
+    A `data_path` URL (`s3://…`) is kept as a string, because `Path` collapses
+    `s3://` to `s3:/`. `storage_secret` — `key_id`, `secret`, `endpoint` (host
+    and port), `use_ssl` (`"true"`/`"false"`), `region` — is created first as an
+    S3 secret scoped to that URL, path-style as S3-compatible stores expect.
+    DuckDB reads no endpoint from the environment, so every connection needs it.
     """
     con.execute("install ducklake")
     con.execute("load ducklake")
 
-    options = [f"data_path '{Path(data_path)}/'"]
+    if "://" in str(data_path):
+        data_path_sql = str(data_path).rstrip("/") + "/"
+    else:
+        data_path_sql = f"{Path(data_path)}/"
+    if storage_secret is not None:
+        use_ssl = "true" if str(storage_secret["use_ssl"]).lower() == "true" else "false"
+        con.execute("load httpfs")
+        # No bind parameters here either, so the values are quoted literals.
+        con.execute(
+            f"create or replace secret {alias}_storage (type s3, "
+            f"key_id {_quoted(storage_secret['key_id'])}, "
+            f"secret {_quoted(storage_secret['secret'])}, "
+            f"endpoint {_quoted(storage_secret['endpoint'])}, use_ssl {use_ssl}, "
+            f"region {_quoted(storage_secret['region'])}, url_style 'path', "
+            f"scope {_quoted(data_path_sql)})"
+        )
+
+    options = [f"data_path '{data_path_sql}'"]
     if read_only:
         options.append("read_only")
     if data_inlining_row_limit is not None:
@@ -159,6 +184,11 @@ def revisions(
         select {projection} from {alias}.{table} at (version => {since})
         """
     ).fetchall()
+
+
+def _quoted(value: str) -> str:
+    """A SQL string literal, for the statements that take no bind parameters."""
+    return "'" + str(value).replace("'", "''") + "'"
 
 
 def _split(table: str) -> tuple[str, str]:

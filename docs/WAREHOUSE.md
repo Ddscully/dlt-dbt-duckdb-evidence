@@ -249,3 +249,48 @@ Weather is the table worth diffing because it is the only source here that
 restates on a schedule — Open-Meteo serves preliminary ERA5T and Copernicus
 supersedes it with final ERA5 two to three months later, so every ingest
 re-merges 90 days of daily rows in place.
+
+### The Parquet in an S3-compatible bucket
+
+The catalog is always a local file, but the Parquet under it can live in a
+bucket instead of `data/lakehouse/data/`. One variable switches it,
+`LAKEHOUSE_DATA_PATH=s3://bucket/prefix/`, and three more say how to reach the
+store: `LAKEHOUSE_S3_ENDPOINT` and the standard `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY`. [`.env.example`](../.env.example) has all four, and
+`just where` prints the data path the recipes will use. Unset, everything above
+holds unchanged.
+
+Measured on 2026-09-17 against SeaweedFS in Docker, which is enough to try it
+(`--rm` and no named volume, so stopping the container deletes the bucket):
+
+```sh
+docker run -d --rm --name mds-s3 -p 127.0.0.1:8333:8333 \
+  -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=testtest -e S3_BUCKET=lake \
+  chrislusf/seaweedfs mini -dir=/data
+cp .env.example .env    # then uncomment the S3 block
+```
+
+`just test-pipeline`, Dagster's `load_retail` then `publish_site`, and `just sql`
+all ran against it, with every `raw` row count identical to a run on disk.
+
+- **Choose before the first `just ingest`.** The catalog records its data path
+  and DuckLake refuses to attach it with any other, so setting the variable over
+  an existing landing zone fails with `DATA_PATH parameter … does not match`.
+  Moving one means copying the Parquet and rewriting that record, and nothing
+  here does it.
+- **Every connection needs the endpoint and keys.** DuckDB reads no endpoint from
+  the environment, and with no secret it sends the request to AWS, access key id
+  included. So they are spelled three times: `storage_secret()` in
+  `lake/lakehouse.py` (dlt and every Python reader), the `secrets:` block in
+  `dbt/profiles.yml`, and `just sql`.
+- **The release stays on disk.** `just export-data` refuses while the variable
+  is set, and so does `just restore-history` when the release carries the landing
+  zone. Allowed to run, the export failed partway, after copying the warehouse,
+  customer ids not yet pseudonymised, into its output directory.
+- **Throwaway runs keep the storage, not the place.** `just test-pipeline` writes
+  its fixture Parquet under `test-pipeline/` in the same bucket; the course
+  sandbox and the test suite are always on disk.
+- **A green `just lakehouse` does not prove the keys**, and nor does a
+  `count(*)`: both come from catalog statistics and read no Parquet, so they
+  answer with a wrong key. Reading a column fails with a 403 as it should:
+  `select max(capital_city) from lakehouse.raw.wb_country` in `just sql`.

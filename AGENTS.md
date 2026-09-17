@@ -343,6 +343,9 @@ What bites outside that task:
   one directory two ways is refused inside `dbt build`, a layer downstream of the
   cause. `.github/actions/setup` is the one definition of that environment for
   the workflows.
+- **`LAKEHOUSE_DATA_PATH` puts the Parquet in an S3-compatible bucket and
+  outranks `LAKEHOUSE_DIR`.** The catalog stays local, `just where` prints the
+  data path, and the release refuses the variable (`the-lakehouse`).
 
 ## Publishing (`publish/export_warehouse.py`)
 
@@ -454,7 +457,8 @@ number written into prose or a review:
   copy of the warehouse and record what moves. A red set is candidates, not a
   verdict.
 - **A fixture run leaks through any state it does not override** —
-  `WAREHOUSE_PATH`, `LAKEHOUSE_DIR` and dbt's artifact paths. The fixture run
+  `WAREHOUSE_PATH`, `LAKEHOUSE_DIR` (and `LAKEHOUSE_DATA_PATH`, when set) and
+  dbt's artifact paths. The fixture run
   passes either way; the *next* command against the real warehouse is the one
   that is wrong.
 

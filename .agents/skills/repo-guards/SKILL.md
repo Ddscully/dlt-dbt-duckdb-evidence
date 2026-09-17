@@ -413,8 +413,10 @@ section here. The mutation method these guards were written with is in the
   into the real landing zone and its weather archive) and dbt's artifact paths —
   `DBT_TARGET_PATH`, `DBT_MANIFEST_PATH`, `DBT_RUN_RESULTS_PATH` and
   `--target-path` — or the next `just pipeline-status` files the fixture's
-  timings in the real build history. `tests/test_workflows.py` holds all four,
-  because each is invisible when missing: the fixture run passes and the *next*
-  command is the one that is wrong.
+  timings in the real build history. With the Parquet in a bucket it also
+  overrides `LAKEHOUSE_DATA_PATH`, which outranks `LAKEHOUSE_DIR`.
+  `tests/test_workflows.py` holds all five, because each is invisible when
+  missing: the fixture run passes and the *next* command is the one that is
+  wrong.
 - **`WAREHOUSE_PATH` must be absolute**: dbt resolves paths from `dbt/`, the
   Python layers from the repo root.

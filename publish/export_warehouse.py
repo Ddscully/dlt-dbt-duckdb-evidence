@@ -801,7 +801,13 @@ def run(
     second asset, which one `data_loaded_at` is read from, and which one the
     `staging` views are materialised against. It is bound here, once, so the
     three cannot disagree.
+
+    Refuses a landing zone whose Parquet is in a bucket, before anything is
+    written (`lake.lakehouse.refuse_bucket_data_path` says why).
     """
+    from lake.lakehouse import refuse_bucket_data_path
+
+    refuse_bucket_data_path("export")
     if not Path(duckdb_path).exists():
         raise FileNotFoundError(f"no warehouse at {duckdb_path} — run `just run` first")
     return export(

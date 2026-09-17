@@ -39,6 +39,7 @@ NOT_A_SITE_INPUT = (
     "CLAUDE.md",
     "LICENSE",
     ".gitignore",
+    ".env.example",  # a template for a local .env, which no runner has
     ".pre-commit-config.yaml",  # lint gates, and this job does not lint
     ".sqlfluff",
     ".github/dependabot.yml",
@@ -606,6 +607,11 @@ def test_the_fixture_pipeline_isolates_every_piece_of_state_it_touches():
     * `DBT_MANIFEST_PATH` — the same directory, so the test inventory reads the
       fixture build's manifest rather than a real one alongside it.
 
+    And a fifth, set only when the landing zone's Parquet is in a bucket:
+    `LAKEHOUSE_DATA_PATH` outranks `LAKEHOUSE_DIR`, so without its own override
+    the slice's Parquet lands under the real prefix — the second leak again, in
+    a bucket.
+
     Asserted as a set rather than by reading the recipe's behaviour, because
     each is invisible when missing: the fixture run still passes, and what
     breaks is the *next* command against real data.
@@ -616,6 +622,7 @@ def test_the_fixture_pipeline_isolates_every_piece_of_state_it_touches():
         "LAKEHOUSE_DIR",
         "DBT_RUN_RESULTS_PATH",
         "DBT_MANIFEST_PATH",
+        "LAKEHOUSE_DATA_PATH",
     ):
         assert f"export {variable}=" in recipe, (
             f"`just test-pipeline` no longer overrides {variable}, so a fixture run "
