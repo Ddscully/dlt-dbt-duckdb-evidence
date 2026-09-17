@@ -252,7 +252,10 @@ behaviour is exactly the on-disk one. The how-to is `docs/WAREHOUSE.md`. Measure
   Each strips a trailing slash from the endpoint. dlt's `endpoint_url` is
   rebuilt from `storage_secret()`'s parts rather than read from the variable,
   because dlt removes only the scheme: `http://host:8333/` reached its secret as
-  `host:8333/` and every other as `host:8333`.
+  `host:8333/` and every other as `host:8333`. **The slash is a 403, not a 404**:
+  DuckDB requests `http://host:8333//lake/…`, the signed path no longer matches,
+  and SeaweedFS refuses the write and the read as Forbidden — which reads as a
+  wrong key.
 - **`Path()` breaks a URL**: `Path("s3://b/")` is `s3:/b`, so `attach()` keeps a
   `://` path as a string.
 - **The variable outranks `lakehouse_dir`**, which makes it the fifth piece of
