@@ -265,3 +265,269 @@ def test_a_bucket_connection_installs_httpfs_before_loading_it(tmp_path):
     assert "install httpfs" in statements[:loaded], (
         "httpfs is loaded without being installed first, which fails on a fresh machine"
     )
+
+
+# --- The catalog in Postgres -------------------------------------------------
+#
+# Nothing below connects to a database. The one thing a unit test *can* hold
+# about a catalog it cannot reach is the SQL that would be sent, and the rules
+# about what may appear in it — which is where the password rule lives.
+
+PG_URL = "postgres://mds@db.example:5432/lakehouse"
+
+
+def test_a_postgres_catalog_installs_postgres_before_attaching():
+    """`load postgres` alone fails on a machine that has never downloaded it.
+
+    The same finding as httpfs above, and it bites harder here: httpfs is in the
+    dbt profile, so any machine that has run dbt has it, while `postgres` has no
+    such second source. `just extensions` installs all three.
+
+    On a bare mock rather than the `MagicMock(wraps=con)` spy the httpfs test
+    uses: that one executes for real, and a real `install postgres` downloads a
+    binary from extensions.duckdb.org — inside `just test`, which has no network
+    by design. Only the order of the statements is under test, and a mock
+    records that exactly.
+    """
+    con = MagicMock()
+    attach(con, PG_URL, "/tmp/lake/data/", alias="lakehouse", metadata_schema="lakehouse")
+
+    statements = [call.args[0].strip().lower() for call in con.execute.call_args_list]
+    assert "install postgres" in statements, "a Postgres catalog no longer installs the extension"
+    loaded = statements.index("load postgres")
+    assert "install postgres" in statements[:loaded], (
+        "postgres is loaded without being installed first, which fails on a fresh machine"
+    )
+    attached = [s for s in statements if s.startswith("attach ")]
+    assert len(attached) == 1
+    assert statements.index(attached[0]) > loaded, "the attach runs before the extension loads"
+
+
+def test_the_postgres_attach_carries_the_schema_and_no_password():
+    """The URL reaches DuckLake verbatim, and the password is not in it.
+
+    `Path()` would collapse `postgres://` to `postgres:/`, and the metadata
+    schema is what separates two lakehouses in one database — so both are
+    asserted on the literal, which is the only place they appear.
+    """
+    con = MagicMock()
+    attach(con, PG_URL, "/tmp/lake/data/", alias="lakehouse", metadata_schema="lakehouse")
+
+    statement = next(
+        call.args[0] for call in con.execute.call_args_list if call.args[0].startswith("attach ")
+    )
+    assert statement.startswith(f"attach 'ducklake:postgres:{PG_URL}'")
+    assert "metadata_schema 'lakehouse'" in statement
+    assert "password" not in statement.lower()
+
+
+def test_a_file_catalog_is_still_spelled_as_a_duckdb_path(tmp_path):
+    """The file case did not move. `main` is spelled out rather than defaulted.
+
+    Measured 2026-09-17: DuckLake accepts an explicit `metadata_schema 'main'` on
+    a catalog file, which is what lets `attach()` and the dbt profile keep one
+    code path instead of branching on the catalog type twice.
+    """
+    con = MagicMock()
+    catalog = tmp_path / "catalog.duckdb"
+    attach(con, catalog, tmp_path / "data", alias="lakehouse", metadata_schema="main")
+
+    statement = next(
+        call.args[0] for call in con.execute.call_args_list if call.args[0].startswith("attach ")
+    )
+    assert statement.startswith(f"attach 'ducklake:duckdb:{catalog}'")
+    assert "metadata_schema 'main'" in statement
+    assert "install postgres" not in [c.args[0] for c in con.execute.call_args_list]
+
+
+def test_the_catalog_is_a_path_until_the_variable_names_a_database(tmp_path, monkeypatch):
+    assert lakehouse.catalog(tmp_path) == tmp_path / lakehouse.CATALOG_NAME
+    assert lakehouse.is_remote_catalog() is False
+    assert lakehouse.metadata_schema() == lakehouse.FILE_METADATA_SCHEMA
+
+    monkeypatch.setenv(lakehouse.CATALOG_ENV_VAR, PG_URL)
+    # The variable outranks the directory, exactly as LAKEHOUSE_DATA_PATH does.
+    assert lakehouse.catalog(tmp_path) == PG_URL
+    assert lakehouse.is_remote_catalog() is True
+    assert lakehouse.metadata_schema() == lakehouse.DEFAULT_METADATA_SCHEMA
+
+    monkeypatch.setenv(lakehouse.METADATA_SCHEMA_ENV_VAR, "somewhere_else")
+    assert lakehouse.metadata_schema() == "somewhere_else"
+
+
+def test_a_password_in_the_catalog_url_is_refused_and_names_pgpassword(monkeypatch):
+    """The rule the whole design rests on, and the only place it can be enforced.
+
+    A password in the URL would reach the process list, dbt's rendered profile
+    and dlt's config, none of which redact it. It is also unnecessary: libpq
+    reads PGPASSWORD, and DuckDB's postgres extension is libpq (measured
+    2026-09-17 — unset, the attach fails with `fe_sendauth: no password
+    supplied`).
+    """
+    monkeypatch.setenv(
+        lakehouse.CATALOG_ENV_VAR, "postgres://mds:hunter2@db.example:5432/lakehouse"
+    )
+    with pytest.raises(ValueError, match="PGPASSWORD"):
+        lakehouse.catalog()
+
+
+def test_a_catalog_url_that_is_not_postgres_is_refused(monkeypatch):
+    monkeypatch.setenv(lakehouse.CATALOG_ENV_VAR, "mysql://mds@db.example:3306/lakehouse")
+    with pytest.raises(ValueError, match=lakehouse.CATALOG_ENV_VAR):
+        lakehouse.catalog()
+
+
+@pytest.mark.parametrize("variable", lakehouse.REMOTE_ENV_VARS)
+def test_the_release_refuses_a_landing_zone_that_is_not_on_disk(variable, monkeypatch):
+    """Both halves, each named in its own message.
+
+    The release publishes a catalog file beside its Parquet. Either half living
+    elsewhere breaks it, and a refusal that named only one would let the other
+    through — which is how the export came to leave an unpseudonymised copy of
+    the warehouse behind before it failed.
+    """
+    monkeypatch.setenv(variable, "postgres://mds@db.example:5432/lakehouse")
+    with pytest.raises(RuntimeError, match=variable):
+        lakehouse.refuse_remote_lakehouse("export")
+
+
+def test_the_remote_variables_are_the_ones_that_outrank_lakehouse_dir(monkeypatch, tmp_path):
+    """The tuple is not a list of names, it is the answer to one question.
+
+    Four places read it — the release's refusal, `tests/conftest.py`, the course
+    recipes' guard in `tests/test_workflows.py` and the docs — so a variable that
+    redirects part of the landing zone and is missing here is missing from all of
+    them at once.
+    """
+    for variable in lakehouse.REMOTE_ENV_VARS:
+        monkeypatch.delenv(variable, raising=False)
+    assert lakehouse.data_path(tmp_path) == tmp_path / lakehouse.DATA_DIRNAME
+    assert lakehouse.catalog(tmp_path) == tmp_path / lakehouse.CATALOG_NAME
+
+    monkeypatch.setenv(lakehouse.DATA_PATH_ENV_VAR, "s3://bucket/prefix/")
+    monkeypatch.setenv(lakehouse.CATALOG_ENV_VAR, PG_URL)
+    assert lakehouse.data_path(tmp_path) == "s3://bucket/prefix/"
+    assert lakehouse.catalog(tmp_path) == PG_URL
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        "lakehouse",
+        "",
+        "public",
+        "test_pipeline",
+        "TEST_PIPELINE_X",
+        "a; drop schema b",
+        # Past the prefix, and still not this function's to delete. A prefix
+        # check passes all three: the first two would reach the statement as
+        # written, and the third is why the name is matched rather than escaped.
+        "test_pipeline_TMP",
+        "test_pipeline_a b",
+        "test_pipeline_x'; drop schema lakehouse cascade; --",
+    ],
+)
+def test_dropping_anything_but_a_fixture_schema_is_refused(schema, monkeypatch):
+    """The guard on a `cascade` that cannot be undone.
+
+    `just test-pipeline` builds the name in shell, so the failure to defend
+    against is a name that arrives empty or unexpanded — next to which sits the
+    real landing zone's schema. Checked as a whole pattern rather than a prefix,
+    which is also what leaves nothing to escape in the statement.
+    """
+    monkeypatch.setenv(lakehouse.CATALOG_ENV_VAR, PG_URL)
+    with pytest.raises(ValueError, match=lakehouse.FIXTURE_SCHEMA_PREFIX):
+        lakehouse.drop_fixture_schema(schema)
+
+
+def test_dlt_is_given_the_database_and_the_schema_with_no_password(monkeypatch, tmp_path):
+    """dlt attaches through DuckDB, so it needs the URL and nothing else.
+
+    The schema is passed only for a Postgres catalog: a file catalog's is `main`,
+    which is DuckLake's own default, and dlt renders no option for None.
+    """
+    monkeypatch.setenv(lakehouse.CATALOG_ENV_VAR, PG_URL)
+    credentials = lakehouse.dlt_credentials(tmp_path)
+    assert credentials.catalog.drivername == "postgres"
+    assert credentials.catalog.password is None
+    assert credentials.metadata_schema == lakehouse.DEFAULT_METADATA_SCHEMA
+
+    monkeypatch.delenv(lakehouse.CATALOG_ENV_VAR)
+    on_disk = lakehouse.dlt_credentials(tmp_path)
+    assert on_disk.catalog.drivername == "duckdb"
+    assert on_disk.metadata_schema is None
+
+
+def test_the_profile_spells_the_postgres_catalog_the_way_the_code_does():
+    """dbt reaches the same lakehouse, or the graph quietly splits in two.
+
+    The counterpart of the attach-alias test above: that one holds *which*
+    database, this one holds *where* it is. Both defaults are read from the
+    constants rather than retyped, since a profile that disagreed by one word
+    would build `staging` against an empty catalog and go green.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    profile = yaml.safe_load(Path("dbt/profiles.yml").read_text())
+    output = profile["modern_data_stack"]["outputs"]["dev"]
+    assert "postgres" in output["extensions"], (
+        "the profile no longer installs the postgres extension, so a catalog in "
+        "Postgres fails the attach on a machine that has never downloaded it"
+    )
+
+    (attached,) = output["attach"]
+    assert lakehouse.CATALOG_ENV_VAR in attached["path"]
+    assert "ducklake:postgres:" in attached["path"]
+
+    schema = attached["options"]["metadata_schema"]
+    assert lakehouse.METADATA_SCHEMA_ENV_VAR in schema
+    assert f"'{lakehouse.DEFAULT_METADATA_SCHEMA}'" in schema, (
+        "the profile's default metadata schema no longer matches the code's, so dbt "
+        "and dlt would write DuckLake's tables into two different schemas"
+    )
+    assert f"'{lakehouse.FILE_METADATA_SCHEMA}'" in schema, (
+        "the profile no longer falls back to the file catalog's schema"
+    )
+
+
+def test_the_metadata_schema_reaches_the_query_and_is_not_assumed(tmp_path):
+    """`table_versions` reads the catalog database, and `main` is not always there.
+
+    Under a Postgres catalog the `ducklake_*` tables sit in the metadata schema
+    and `main` does not exist at all, so an unqualified read fails with
+    `schema "main" does not exist` (measured 2026-09-17). No unit test can reach
+    a Postgres catalog, but pointing the file case at a schema that is not there
+    proves the argument is what the SQL is built from — which is the half that
+    silently returned nothing when it was missing.
+    """
+    _write(tmp_path, [DAY])
+    con = _connect(tmp_path)
+    try:
+        assert table_versions(con, "lakehouse", WEATHER, "main")
+        with pytest.raises(duckdb.Error):
+            table_versions(con, "lakehouse", WEATHER, "not_a_schema")
+    finally:
+        con.close()
+
+
+def test_every_reader_here_asks_where_the_metadata_schema_is(tmp_path, monkeypatch):
+    """`versions()` passes it on rather than taking the default.
+
+    The default is the file case, so leaving the argument off is invisible until
+    the catalog is in Postgres — where every version list comes back empty and
+    the revision log silently reports nothing changed.
+    """
+    seen = {}
+
+    def spy(con, alias, table, metadata_schema="main"):
+        seen["metadata_schema"] = metadata_schema
+        return []
+
+    monkeypatch.setattr(lakehouse, "table_versions", spy)
+    monkeypatch.setenv(lakehouse.CATALOG_ENV_VAR, PG_URL)
+    monkeypatch.setattr(lakehouse, "read_only_connection", lambda _: MagicMock())
+
+    lakehouse.versions(WEATHER, tmp_path)
+    assert seen["metadata_schema"] == lakehouse.DEFAULT_METADATA_SCHEMA

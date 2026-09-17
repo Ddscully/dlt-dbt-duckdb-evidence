@@ -26,15 +26,8 @@ from __future__ import annotations
 import duckdb
 import polars as pl
 
-from lake.lakehouse import (
-    ATTACH_ALIAS,
-    LAKEHOUSE_DIR,
-    catalog_path,
-    data_path,
-    storage_secret,
-)
+from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, attach_lakehouse
 from modern_data_stack import db, observability
-from modern_data_stack.ducklake import attach
 from modern_data_stack.paths import dbt_manifest_path, dbt_run_results_path, warehouse_path
 
 DUCKDB_PATH = warehouse_path()
@@ -112,14 +105,7 @@ def run(
     con = duckdb.connect(duckdb_path)
     try:
         # `raw` lives in the lakehouse.
-        attach(
-            con,
-            catalog_path(lakehouse_dir),
-            data_path(lakehouse_dir),
-            ATTACH_ALIAS,
-            read_only=True,
-            storage_secret=storage_secret(),
-        )
+        attach_lakehouse(con, lakehouse_dir, read_only=True)
         frames = {
             "pipeline_sources": build_sources(con),
             "pipeline_tables": build_tables(con),

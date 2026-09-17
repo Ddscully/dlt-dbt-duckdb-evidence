@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from lake import lakehouse
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PAGES_WORKFLOW = REPO_ROOT / ".github/workflows/pages.yml"
 CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
@@ -63,6 +65,10 @@ NOT_A_SITE_INPUT = (
     # so the site moves when `dbt/**` does), `record_fixtures.py` (this job runs
     # live) and `measure_disclosure_risk.py` (read-only).
     "scripts/**",
+    # The backing services, which no runner starts: the site is built from the
+    # landing zone the setup action places on disk, whatever a deployment does.
+    "compose.yaml",
+    "deploy/**",
 )
 
 
@@ -608,10 +614,19 @@ def test_the_fixture_pipeline_isolates_every_piece_of_state_it_touches():
     * `DBT_MANIFEST_PATH` — the same directory, so the test inventory reads the
       fixture build's manifest rather than a real one alongside it.
 
-    And a fifth, set only when the landing zone's Parquet is in a bucket:
-    `LAKEHOUSE_DATA_PATH` outranks `LAKEHOUSE_DIR`, so without its own override
-    the slice's Parquet lands under the real prefix — the second leak again, in
-    a bucket.
+    And two more, each set only when the landing zone has left the disk, and
+    each the second leak again in another place:
+
+    * `LAKEHOUSE_DATA_PATH` outranks `LAKEHOUSE_DIR`, so without its own
+      override the slice's Parquet lands under the real prefix.
+    * `LAKEHOUSE_METADATA_SCHEMA` is what separates two lakehouses inside one
+      Postgres database, and `LAKEHOUSE_DIR` does not separate them at all — so
+      without it the fixture run rewrites the real catalog's tables. It is the
+      metadata *schema* and not `LAKEHOUSE_CATALOG` on purpose: the fixture run
+      keeps the same database, because a throwaway one would have to be created.
+
+    A conditional `export X=` satisfies this, as `LAKEHOUSE_DATA_PATH`'s already
+    does — the recipe only overrides what the environment actually set.
 
     Asserted as a set rather than by reading the recipe's behaviour, because
     each is invisible when missing: the fixture run still passes, and what
@@ -624,6 +639,7 @@ def test_the_fixture_pipeline_isolates_every_piece_of_state_it_touches():
         "DBT_RUN_RESULTS_PATH",
         "DBT_MANIFEST_PATH",
         "LAKEHOUSE_DATA_PATH",
+        "LAKEHOUSE_METADATA_SCHEMA",
     ):
         assert f"export {variable}=" in recipe, (
             f"`just test-pipeline` no longer overrides {variable}, so a fixture run "
@@ -693,10 +709,17 @@ def test_every_course_recipe_keeps_the_sandbox_to_itself():
                     f"reads or writes the real one"
                 )
             if "LAKEHOUSE_DIR" in variables:
-                assert "unset LAKEHOUSE_DATA_PATH" in code, (
-                    f"`just {name}` sets the course LAKEHOUSE_DIR but leaves "
-                    f"LAKEHOUSE_DATA_PATH, which outranks it and names the real bucket"
-                )
+                # Every variable that outranks LAKEHOUSE_DIR, read from the one
+                # tuple rather than listed here: a third of them added to
+                # `lake/lakehouse.py` alone is a sandbox writing into the real
+                # landing zone, and nothing else would notice.
+                for remote in lakehouse.REMOTE_ENV_VARS:
+                    # Matched as a word on an `unset` line, not as `unset <name>`:
+                    # one `unset A B` clears both and is how the recipes spell it.
+                    assert re.search(rf"^\s*unset\b[^\n#]*\b{remote}\b", code, re.MULTILINE), (
+                        f"`just {name}` sets the course LAKEHOUSE_DIR but leaves "
+                        f"{remote}, which outranks it and names the real landing zone"
+                    )
 
         # The variable alone is not enough, as in `test-pipeline`: every dbt
         # command that builds has to be told to write there. Split on every

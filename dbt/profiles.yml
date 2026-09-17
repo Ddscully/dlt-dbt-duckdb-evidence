@@ -9,6 +9,10 @@
 # this file resolves relative paths from `dbt/`, the Python layers from the repo
 # root. LAKEHOUSE_DATA_PATH moves the lakehouse's Parquet into a bucket
 # (`.env.example`), and must reach this file spelled exactly as it reaches dlt.
+# LAKEHOUSE_CATALOG moves the *catalog* into Postgres, with
+# LAKEHOUSE_METADATA_SCHEMA naming the schema that then holds DuckLake's tables;
+# the password is never here, because libpq reads PGPASSWORD and DuckDB's
+# postgres extension is libpq. `lake/lakehouse.py` spells the same for Python.
 #
 # One target, deliberately. On Snowflake or BigQuery a target separates schemas
 # inside one database; here WAREHOUSE_PATH swaps the whole database file, and
@@ -27,6 +31,10 @@ modern_data_stack:
         - httpfs
         - parquet
         - ducklake
+        # For a catalog in Postgres. Listed rather than autoloaded for
+        # httpfs's reason: a machine that has never downloaded it fails the
+        # attach, not the query. Inert with LAKEHOUSE_CATALOG unset.
+        - postgres
       # For a lakehouse whose Parquet is in a bucket: DuckDB reads no endpoint
       # from the environment, so the connection needs this secret, which
       # `storage_secret()` in lake/lakehouse.py spells for Python. It is scoped to
@@ -40,8 +48,14 @@ modern_data_stack:
           region: "{{ env_var('AWS_REGION', 'us-east-1') }}"
           url_style: path
           scope: "{{ env_var('LAKEHOUSE_DATA_PATH', 's3://lakehouse-data-path-unset/') }}"
+      # One attach entry, conditional rather than two: `_sources.yml` names one
+      # database, and a second entry would attach a second lakehouse.
       attach:
-        - path: "ducklake:duckdb:{{ env_var('LAKEHOUSE_DIR', '../data/lakehouse') }}/catalog.duckdb"
+        - path: "{{ ('ducklake:postgres:' ~ env_var('LAKEHOUSE_CATALOG')) if env_var('LAKEHOUSE_CATALOG', '') else ('ducklake:duckdb:' ~ env_var('LAKEHOUSE_DIR', '../data/lakehouse') ~ '/catalog.duckdb') }}"
           alias: lakehouse
           options:
             data_path: "{{ env_var('LAKEHOUSE_DATA_PATH', env_var('LAKEHOUSE_DIR', '../data/lakehouse') ~ '/data/') }}"
+            # Where the ducklake_* tables sit in the catalog database. A file
+            # catalog keeps them in `main`, and DuckLake accepts that spelled
+            # out (measured 2026-09-17), so this stays one entry.
+            metadata_schema: "{{ env_var('LAKEHOUSE_METADATA_SCHEMA', 'lakehouse') if env_var('LAKEHOUSE_CATALOG', '') else 'main' }}"

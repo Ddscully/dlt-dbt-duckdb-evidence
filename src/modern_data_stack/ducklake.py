@@ -21,6 +21,19 @@ the catalog database, so the files return the superseded value. At 0 it reaches
 Parquet, but with a `…-delete.parquet` of `(file_path, pos)` that breaks a glob's
 schema — or, excluded by name, returns both versions of the row. Read through
 the catalog.
+
+## The catalog in a SQL database
+
+`attach()` takes either a path to a catalog file or a connection URI. A URI is
+kept verbatim, for the reason a bucket `data_path` is: `Path()` collapses
+`postgres://` to `postgres:/`. It carries no password — libpq reads `PGPASSWORD`,
+measured 2026-09-17 to reach the bundled extension, which fails loudly as
+`fe_sendauth: no password supplied` when it is unset.
+
+DuckLake then keeps its `ducklake_*` tables in that database's `METADATA_SCHEMA`
+rather than a file's `main`, and **`main` does not exist there at all**, so every
+read of the catalog database has to name the schema. `table_versions()` takes it
+and defaults to the file case, which is why the file case needs no caller change.
 """
 
 from __future__ import annotations
@@ -61,8 +74,13 @@ def attach(
     read_only: bool = False,
     data_inlining_row_limit: int | None = None,
     storage_secret: Mapping[str, str] | None = None,
+    metadata_schema: str | None = None,
 ) -> None:
     """Attach the DuckLake at `catalog_path` as `alias`, and its catalog beside it.
+
+    `catalog_path` is a path to a catalog file, or a connection URI for a catalog
+    in a SQL database (`postgres://user@host:5432/db`, told apart by `://`). The
+    URI is kept verbatim and carries no password — see the module docstring.
 
     `data_path` is passed although the catalog records it, because DuckLake
     checks the two agree and refuses a mismatch (a moved lakehouse).
@@ -70,7 +88,10 @@ def attach(
     DuckLake also attaches the catalog database, as `meta_alias(alias)`.
     `table_versions` reads it, because the query surface cannot say which
     snapshots changed one table; the catalog schema is part of the DuckLake 1.0
-    spec, not an internal.
+    spec, not an internal. `metadata_schema` says which schema of that database
+    holds the tables; DuckLake's own default is `main`, which is where a file
+    catalog keeps them, and passing `'main'` explicitly for a file catalog is
+    accepted (measured 2026-09-17) — so there is one code path, not two.
 
     A `data_path` URL (`s3://…`) is kept as a string, because `Path` collapses
     `s3://` to `s3:/`. `storage_secret` — `key_id`, `secret`, `endpoint` (host
@@ -80,6 +101,16 @@ def attach(
     """
     con.execute("install ducklake")
     con.execute("load ducklake")
+
+    if "://" in str(catalog_path):
+        # Installed as well as loaded, for httpfs's reason below: DuckDB would
+        # autoload it on first use, but a machine that has never downloaded it
+        # fails a bare `load`. `just extensions` installs it up front.
+        con.execute("install postgres")
+        con.execute("load postgres")
+        catalog_sql = f"ducklake:postgres:{catalog_path}"
+    else:
+        catalog_sql = f"ducklake:duckdb:{Path(catalog_path)}"
 
     if "://" in str(data_path):
         data_path_sql = str(data_path).rstrip("/") + "/"
@@ -106,10 +137,12 @@ def attach(
         options.append("read_only")
     if data_inlining_row_limit is not None:
         options.append(f"data_inlining_row_limit {int(data_inlining_row_limit)}")
+    if metadata_schema is not None:
+        options.append(f"metadata_schema {_quoted(metadata_schema)}")
 
     # ATTACH takes literals, not bind parameters — `attach $path` is a parser
     # error — so the paths are interpolated, as they are in `history.restore`.
-    con.execute(f"attach 'ducklake:duckdb:{Path(catalog_path)}' as {alias} ({', '.join(options)})")
+    con.execute(f"attach '{catalog_sql}' as {alias} ({', '.join(options)})")
 
 
 def snapshots(con: duckdb.DuckDBPyConnection, alias: str) -> list[int]:
@@ -119,15 +152,22 @@ def snapshots(con: duckdb.DuckDBPyConnection, alias: str) -> list[int]:
     ]
 
 
-def table_versions(con: duckdb.DuckDBPyConnection, alias: str, table: str) -> list[int]:
+def table_versions(
+    con: duckdb.DuckDBPyConnection, alias: str, table: str, metadata_schema: str = "main"
+) -> list[int]:
     """Snapshots in which `table` actually changed, oldest first.
 
     A dlt load writes several snapshots (staging, merge, cleanup), so most say
     nothing about a given table; this is what makes "the previous version" mean
     the previous version of *this* table.
+
+    `metadata_schema` is where the `ducklake_*` tables sit in the catalog
+    database — `main` for a catalog file, and the schema named at attach for one
+    in Postgres, where `main` does not exist and an unqualified read fails with
+    `schema "main" does not exist`.
     """
     schema, name = _split(table)
-    meta = meta_alias(alias)
+    meta = f"{meta_alias(alias)}.{metadata_schema}"
     ids = [
         row[0]
         for row in con.execute(

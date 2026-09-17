@@ -387,8 +387,7 @@ def solidify_staging(
     The resulting tables hold the original customer ids, which is why this runs
     before `pseudonymise` — see `prepare_published_copy`.
     """
-    from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, catalog_path, data_path
-    from modern_data_stack.ducklake import attach
+    from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, attach_lakehouse
 
     # The caller's landing zone, so the views are solidified against the catalog
     # that belongs to the database being packaged.
@@ -405,7 +404,7 @@ def solidify_staging(
     # (as `tests/test_export.py` builds) is exportable with no catalog at all.
     needs_catalog = any(f"{ATTACH_ALIAS}." in (sql or "") for _, sql in defined)
     if needs_catalog:
-        attach(con, catalog_path(lake_dir), data_path(lake_dir), ATTACH_ALIAS, read_only=True)
+        attach_lakehouse(con, lake_dir, read_only=True)
     try:
         for name in views:
             # Two statements: DuckDB will not `create or replace table` over a
@@ -434,14 +433,13 @@ def landed_at(
     where both exist the catalog wins, since an in-file `raw` left by an older
     layout is the stale copy.
     """
-    from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, catalog_path, data_path, is_catalog
-    from modern_data_stack.ducklake import attach
+    from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, attach_lakehouse, is_catalog
 
     lake_dir = LAKEHOUSE_DIR if lakehouse_dir is None else Path(lakehouse_dir)
     if not is_catalog(lake_dir):
         return loaded_at(con)
 
-    attach(con, catalog_path(lake_dir), data_path(lake_dir), ATTACH_ALIAS, read_only=True)
+    attach_lakehouse(con, lake_dir, read_only=True)
     try:
         return loaded_at(con, raw_database=ATTACH_ALIAS)
     finally:
@@ -803,11 +801,11 @@ def run(
     three cannot disagree.
 
     Refuses a landing zone whose Parquet is in a bucket, before anything is
-    written (`lake.lakehouse.refuse_bucket_data_path` says why).
+    written (`lake.lakehouse.refuse_remote_lakehouse` says why).
     """
-    from lake.lakehouse import refuse_bucket_data_path
+    from lake.lakehouse import refuse_remote_lakehouse
 
-    refuse_bucket_data_path("export")
+    refuse_remote_lakehouse("export")
     if not Path(duckdb_path).exists():
         raise FileNotFoundError(f"no warehouse at {duckdb_path} — run `just run` first")
     return export(

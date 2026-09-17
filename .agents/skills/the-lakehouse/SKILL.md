@@ -1,6 +1,6 @@
 ---
 name: the-lakehouse
-description: The DuckLake landing zone under data/lakehouse/, or with its Parquet in an S3-compatible bucket — why the change feed is useless behind dlt and what replaces it, reading table versions out of the catalog database, the absolute-vs-relative data_path that decides portability, publishing the catalog as lakehouse.tar.gz with an allowlist, the unpinnable extension and the spec-version guard. Use when editing lake/lakehouse.py, changing what the landing zone holds or publishes, debugging a DATA_PATH mismatch or an S3 secret, or migrating a tree that predates the move.
+description: The DuckLake landing zone under data/lakehouse/, with its Parquet in an S3-compatible bucket or its catalog in Postgres — why the change feed is useless behind dlt and what replaces it, reading table versions out of the catalog database, the absolute-vs-relative data_path that decides portability, publishing the catalog as lakehouse.tar.gz with an allowlist, the unpinnable extension and the spec-version guard. Use when editing lake/lakehouse.py, changing what the landing zone holds or publishes, debugging a DATA_PATH mismatch, an S3 secret or a Postgres catalog connection, or migrating a tree that predates the move.
 ---
 
 # The DuckLake landing zone (`lake/lakehouse.py`)
@@ -249,6 +249,10 @@ behaviour is exactly the on-disk one. The how-to is `docs/WAREHOUSE.md`. Measure
   unpacked into `AwsCredentials` for dlt, which builds its own and needs no
   s3fs), the `secrets:` block in `dbt/profiles.yml`, and `just sql`, which reads
   the keys through the CLI's `getenv` so they stay out of the process list.
+  **Python's copy is reached through `attach_lakehouse()`**, which is the one
+  place the ATTACH is spelled at all: it was spelled from parts in five callers
+  until the catalog could move, and a combination that reaches four of them is a
+  reader silently opening a different lakehouse.
   Each strips a trailing slash from the endpoint. dlt's `endpoint_url` is
   rebuilt from `storage_secret()`'s parts rather than read from the variable,
   because dlt removes only the scheme: `http://host:8333/` reached its secret as
@@ -265,10 +269,12 @@ behaviour is exactly the on-disk one. The how-to is `docs/WAREHOUSE.md`. Measure
   reproduced with an empty `HOME`). Both install it first, and
   `tests/test_lakehouse.py` holds the order, since no unit test can make a
   machine without it short of downloading it.
-- **The variable outranks `lakehouse_dir`**, which makes it the fifth piece of
-  state a redirected run must override. `just test-pipeline` rewrites it to
-  `s3://<bucket>/test-pipeline/<tmp>/`; the course recipes that point at the
-  sandbox unset it; `tests/conftest.py` deletes it for every test. That guard is
+- **The variable outranks `lakehouse_dir`**, which makes it one of the pieces of
+  state a redirected run must override — and it is no longer the only one, so
+  the list is `lakehouse.REMOTE_ENV_VARS` rather than a name repeated in four
+  files. `just test-pipeline` rewrites it to `s3://<bucket>/test-pipeline/<tmp>/`;
+  the course recipes that point at the sandbox unset every name in the tuple;
+  `tests/conftest.py` deletes them all for every test. That guard is
   load-bearing: with it removed and the variable set, 16 pytest cases failed.
 - **`python -m lake.lakehouse` passes with a wrong key**, and so does
   `select count(*)` in `just sql`: both are answered from catalog statistics and
@@ -280,3 +286,86 @@ behaviour is exactly the on-disk one. The how-to is `docs/WAREHOUSE.md`. Measure
   directory — customer ids still clear, since that copy is pseudonymised later —
   then died in `solidify_staging` on the 403. A restore would unpack local
   Parquet under a catalog rewritten to name the bucket.
+
+## The catalog in Postgres
+
+`LAKEHOUSE_CATALOG=postgres://mds@host:5432/lakehouse` puts DuckLake's own tables
+in that database instead of `catalog.duckdb`, under `LAKEHOUSE_METADATA_SCHEMA`
+(default `lakehouse`, which is also dlt's). It is orthogonal to the data path, so
+all four combinations are legal and unset the behaviour is exactly the on-disk
+one. The how-to is `docs/WAREHOUSE.md`. Measured 2026-09-17 against
+`postgres:17.11` in the compose stack, DuckDB 1.5.5.
+
+- **`PGPASSWORD` reaches libpq inside DuckDB's bundled extension**, which is what
+  the whole design rests on: the URL carries no password in Python, in the DuckDB
+  CLI, in dbt's profile or in dlt's config, and `catalog()` *refuses* one that
+  does. Verified both ways — unset gives `fe_sendauth: no password supplied`, and
+  a wrong one `FATAL: password authentication failed`. A password in the URL
+  would reach the process list and dbt's rendered profile, and nothing redacts it
+  there.
+- **`main` does not exist in a Postgres catalog**, so every read of the catalog
+  database has to name the schema: unqualified, `ducklake_table` fails with
+  `schema "main" does not exist`. `table_versions()` takes the schema and
+  defaults to `main`, which is why the file case needed no caller change — and
+  why the version list came back *empty rather than wrong* while it was missing.
+  The inlined-data tables live in that schema too.
+- **One attach entry serves both, because a file catalog accepts an explicit
+  `metadata_schema 'main'`.** Measured against a copy of the real catalog and a
+  fresh one. `metadata_schema 'lakehouse'` on a *file* catalog is refused
+  (`Existing DuckLake at metadata catalog … does not exist`), which is the right
+  refusal: the option says where the tables are, not what to call them. Without
+  this the dbt profile would have needed a second output, against the one-target
+  decision.
+- **`is_catalog()` raises rather than answering, and that is the point.** A
+  missing file is a reliable "nothing here"; an unreachable database is not. A
+  wrong host, a wrong password and a missing database each fail the ATTACH with
+  an `IO Error` naming the URL, and only a reachable database with nothing in the
+  schema is False. `ingest/sources/weather.py` is why: it asked
+  `catalog_path(lake).exists()`, which is False forever under Postgres, and its
+  None cold-starts three years of ERA5 for every capital city — days of
+  Open-Meteo budget, silently, on *every* load.
+- **dbt's `ATTACH IF NOT EXISTS` creates the DuckLake here, rather than an empty
+  file.** A `dbt show` against an empty database left 28 `ducklake_*` tables in
+  the metadata schema, so `is_catalog()` is True after any dbt run — the opposite
+  of the file case's empty-DuckDB-file trap, with the same outcome, because what
+  answers "nothing loaded yet" is then the table check one layer down.
+- **A fixture run takes a schema, not a database.** `LAKEHOUSE_DIR` separates two
+  file catalogs and separates nothing inside one Postgres database, so
+  `just test-pipeline` exports `LAKEHOUSE_METADATA_SCHEMA=test_pipeline_<tmp>` and
+  drops it as its last line, on success only — a failed run leaves its schema to
+  be inspected, the same bargain as the orphaned Parquet an S3 fixture run
+  leaves. `drop_fixture_schema` matches `test_pipeline_[a-z0-9_]+` as a whole
+  pattern rather than checking a prefix: the recipe builds the name in shell, the
+  real landing zone's schema sits beside it, and a whole-pattern match leaves
+  nothing to escape in a `cascade` that cannot be undone.
+- **`python -m lake.lakehouse` prints the schema, not just the URL.** One database
+  holds many lakehouses, so the URL alone printed the same line for a fixture run
+  and the real landing zone — `just where`'s trap one layer down. Found by
+  running the two and reading identical output.
+- **dlt's incremental state is still keyed on the pipeline, not the catalog.**
+  `~/.dlt` holds WDI's and FX's watermarks, so a real load against a second
+  lakehouse advances the first one's. Not new — the same is true of a bucket data
+  path — and `DLT_DATA_DIR` is what separates them.
+- **The release refuses either half** (`refuse_remote_lakehouse`, first thing in
+  the export's `run()` and in `preflight()`). It publishes a *file* catalog built
+  beside its Parquet; with the catalog in Postgres there is no file to publish,
+  and a restore would unpack one under a catalog that is not a file.
+- **All four combinations were run, including both halves remote at once**:
+  `just test-pipeline` with the catalog in Postgres and the Parquet in the bucket
+  completed the whole pipeline in 50 s, leaving 14 chunks in `lake` and dropping
+  its own schema afterwards.
+
+Two things the compose services cost, neither of them about DuckLake:
+
+- **Pinning the SeaweedFS tag surfaced what `latest` had been hiding.** The S3
+  work ran against `chrislusf/seaweedfs:latest`, whose `mini` subcommand is what
+  `docs/WAREHOUSE.md` documented; a pinned 4.01 exits 2 with
+  `weed: unknown subcommand "mini"`, because it is forty releases older, not
+  newer. The tag list has to come from the registry API — and a rate-limited
+  `docker manifest inspect` reports a tag that exists as missing, which is how
+  4.01 got chosen.
+- **A 403 from the S3 gateway is the healthy answer**, so a healthcheck on `/`
+  fails forever against a service that is working: the gateway is authenticated
+  and the request is unsigned. `/healthz` returns 200 and is what `compose.yaml`
+  asks. The same shape as the finding above that a `count(*)` passes with a wrong
+  key — what the endpoint means is not what its status code first suggests.

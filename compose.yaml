@@ -1,0 +1,74 @@
+# The backing services a deployment needs, and which a laptop does not.
+#
+# Nothing here is required to use this repo: with LAKEHOUSE_CATALOG unset the
+# DuckLake catalog is a file under `data/lakehouse/` and none of this runs. It
+# exists so the catalog and the Parquet can leave the machine the pipeline runs
+# on, which is what the containerised deployment is built on.
+#
+# `${...}` is interpolated from the repo-root `.env` — the same file `just`
+# loads (`set dotenv-load`), so one file configures both. `just compose-up`
+# starts it; `just compose-down volumes` destroys the data.
+#
+# Every port is bound to 127.0.0.1: neither service authenticates well enough to
+# face a network, and both hold the whole landing zone.
+#
+# Image tags are pinned exactly, and Dependabot's `docker` ecosystem is what
+# watches them.
+name: mds
+
+networks:
+  default:
+    name: mds
+
+volumes:
+  mds_postgres:
+    name: mds_postgres
+  mds_seaweedfs:
+    name: mds_seaweedfs
+
+services:
+  # The DuckLake catalog (database `lakehouse`), and Dagster's storage
+  # (database `dagster`, created by the init script).
+  postgres:
+    image: postgres:17.11
+    environment:
+      POSTGRES_USER: mds
+      # `:?` rather than a default: an unset password would start a database
+      # nothing could reach, and the error names the variable.
+      POSTGRES_PASSWORD: ${PGPASSWORD:?set it in .env — see .env.example}
+      POSTGRES_DB: lakehouse
+    volumes:
+      - mds_postgres:/var/lib/postgresql/data
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      # `-d lakehouse` and not the default: the entrypoint starts a private
+      # server to run the init script, and `pg_isready` answers on it. Naming
+      # the real database keeps `--wait` from returning before the init is done.
+      test: ["CMD-SHELL", "pg_isready -U mds -d lakehouse"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # S3-compatible storage for the lakehouse Parquet (LAKEHOUSE_DATA_PATH).
+  # `mini` is SeaweedFS's all-in-one: master, volume, filer and S3 gateway.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.47
+    command: mini -dir=/data
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-testtest}
+      S3_BUCKET: ${LAKEHOUSE_S3_BUCKET:-lake}
+    volumes:
+      - mds_seaweedfs:/data
+    ports:
+      - "127.0.0.1:8333:8333"
+    healthcheck:
+      # `/healthz`, not `/`. The S3 gateway answers an unsigned request to `/`
+      # with a 403, which is correct behaviour and not a health signal — a check
+      # on `/` fails forever against a perfectly good service.
+      test: ["CMD-SHELL", "curl -sf -o /dev/null --max-time 3 http://127.0.0.1:8333/healthz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

@@ -260,13 +260,12 @@ store: `LAKEHOUSE_S3_ENDPOINT` and the standard `AWS_ACCESS_KEY_ID` and
 `just where` prints the data path the recipes will use. Unset, everything above
 holds unchanged.
 
-Measured on 2026-09-17 against SeaweedFS in Docker, which is enough to try it
-(`--rm` and no named volume, so stopping the container deletes the bucket):
+Measured on 2026-09-17 against SeaweedFS in Docker. It is now a service in
+[`compose.yaml`](../compose.yaml), on a named volume so the bucket survives a
+restart:
 
 ```sh
-docker run -d --rm --name mds-s3 -p 127.0.0.1:8333:8333 \
-  -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=testtest -e S3_BUCKET=lake \
-  chrislusf/seaweedfs mini -dir=/data
+just compose-up         # Postgres and SeaweedFS
 cp .env.example .env    # then uncomment the S3 block
 ```
 
@@ -294,3 +293,47 @@ all ran against it, with every `raw` row count identical to a run on disk.
   `count(*)`: both come from catalog statistics and read no Parquet, so they
   answer with a wrong key. Reading a column fails with a 403 as it should:
   `select max(capital_city) from lakehouse.raw.wb_country` in `just sql`.
+
+### The catalog in Postgres
+
+The other half of the same move. `LAKEHOUSE_CATALOG=postgres://mds@host:5432/lakehouse`
+puts DuckLake's own tables in that database instead of
+`data/lakehouse/catalog.duckdb`, under the schema `LAKEHOUSE_METADATA_SCHEMA`
+names (default `lakehouse`). It is independent of the data path, so the catalog
+and the Parquet each move on their own; unset, everything above holds unchanged.
+`just where` prints which catalog the recipes will use.
+
+**The URL carries no password, and one that does is refused.** libpq reads
+`PGPASSWORD`, and DuckDB's postgres extension *is* libpq — so a single variable
+reaches Python, the DuckDB CLI, dbt and dlt, with no secret in a URL, in dbt's
+rendered profile or in the process list.
+
+Measured on 2026-09-17 against the `postgres:17.11` service in
+[`compose.yaml`](../compose.yaml), which also creates the `dagster` database a
+later change needs:
+
+```sh
+just compose-up               # Postgres and SeaweedFS, both on 127.0.0.1
+cp .env.example .env          # then uncomment the Postgres block
+```
+
+A live load of the public indicators took 41 s, `just sql` read a column value
+back through the catalog, and `just test-pipeline` ran the whole pipeline
+against it.
+
+- **Choose before the first `just ingest`**, for the reason the data path has:
+  the catalog records its data path and refuses any other.
+- **`just setup` installs three extensions now** — `ducklake`, `httpfs` and
+  `postgres` — through the new `just extensions`. DuckDB would autoload the
+  last two, but a bare `load` fails on a machine that has never downloaded one,
+  and it fails at the attach rather than at the query.
+- **A fixture run takes its own schema, not its own database.** `LAKEHOUSE_DIR`
+  separates two catalog files and separates nothing inside one Postgres
+  database, so `just test-pipeline` gives itself `test_pipeline_<tmp>` and drops
+  it when it succeeds. A failed run leaves the schema to be looked at.
+- **The release stays on disk.** `just export-data` and `just restore-history`
+  refuse while the variable is set, as they already do for a bucket data path:
+  a release publishes a catalog *file* built beside its Parquet.
+- **A green `just lakehouse` proves the catalog, not the Parquet.** The two
+  halves fail separately, so check both — a column value for the storage
+  (above), and `just where` plus `\dt lakehouse.*` in `psql` for the catalog.
