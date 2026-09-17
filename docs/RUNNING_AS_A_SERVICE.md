@@ -1,11 +1,13 @@
 # Running this warehouse as a service
 
-> **§2's `just serve` is built; everything else here is still a design.** The
-> recipe is in the justfile and was run rather than sketched — three processes,
-> twelve once Dagster's code servers are counted, and a measured answer for what
-> happens to all of them when one dies. What does not exist is everything around
-> it: no unit file, no container, no swap asset (§4), and no host anybody has
-> stood this up on. The pipeline still runs from `just` recipes on a laptop and
+> **§2's `just serve` is built, and so is the Postgres-backed instance §3, §5
+> and §10 describe; everything else here is still a design.** The recipe is in
+> the justfile and was run rather than sketched — three processes, twelve once
+> Dagster's code servers are counted, and a measured answer for what happens to
+> all of them when one dies. `deploy/dagster.yaml` is likewise real: run, event
+> and schedule storage in Postgres, run through a restart rather than argued
+> about. What does not exist is everything around them: no unit file, no
+> container, no swap asset (§4), and no host anybody has stood this up on. The pipeline still runs from `just` recipes on a laptop and
 > from four GitHub workflows on cron, and that is the whole of what runs
 > unattended today. Read §2 as instructions and the rest as a plan.
 
@@ -283,7 +285,9 @@ Everything below has to be on durable storage, and each row fails differently:
 | `data/lakehouse/` | dlt's landing zone, and the only copy of every raw table | the weather archive cold-starts at three years: days of Open-Meteo budget, gone silently |
 | `data/warehouse.duckdb` | the `history` schema only; every other schema is derived | the revision log, permanently. No rebuild invents a version upstream has overwritten |
 | dlt's data dir | the WDI watermark and the ECB's last fixing | a silent full re-fetch, or a five-year window into a warehouse with no history |
-| `.dagster/` | run and event storage (SQLite), plus **schedule on/off state**; its `dagster.yaml` is config, checked in, and has to be carried to any other `DAGSTER_HOME` | run history, and a service that looks running and ingests nothing (§5); without `dagster.yaml`, runs no longer queue behind each other (§5) |
+| `.dagster/` | the laptop instance: run and event storage (SQLite), plus **schedule on/off state**; its `dagster.yaml` is config, checked in, and has to be carried to any other `DAGSTER_HOME` | run history, and a service that looks running and ingests nothing (§5); without `dagster.yaml`, runs no longer queue behind each other (§5) |
+| the `dagster` database | the same three, when `DAGSTER_HOME` names `deploy/` instead: `deploy/dagster.yaml` puts run, event and schedule storage in Postgres, so they outlive a container that is replaced rather than restarted | the same three losses, with nothing left on a filesystem to restore them from |
+| `$DAGSTER_STORAGE_DIR` | compute logs and the artifacts a run writes, which Dagster keeps on a filesystem under *either* instance — Postgres storage does not take these | a finished run whose logs the UI shows as empty |
 | `data/cache/` | the retail workbook | a download, never data |
 
 **The dlt row is the one a service gets wrong**, and the reason is written into
@@ -419,16 +423,23 @@ Two facts combine into this repo's collected failure mode, a service that looks
 running and is not:
 
 - **`daily_refresh` ships `STOPPED`**, deliberately: opening the UI should not
-  start hammering public APIs on a timer. Starting it is **instance state in
-  `DAGSTER_HOME`**, not code, and that was measured rather than assumed. A fresh
-  instance reports `daily_refresh [STOPPED]`, `dagster schedule start` flips it
-  to `[RUNNING]`, a *separate process* pointed at the same `DAGSTER_HOME` reads
-  that back, and a `schedules/` directory appears under it. Pointed at a
-  different `DAGSTER_HOME` the same schedule is still `STOPPED`, which is the
-  same fact from the other side. So it survives a restart only if that directory is on the durable volume
-  of §3, and a wipe silently returns the service to ingesting nothing. Flipping
-  `default_status` instead is a code change that changes what `dagster dev` does
-  for everyone who clones the repo.
+  start hammering public APIs on a timer. Starting it is **instance state in the
+  schedule storage**, not code, and that was measured rather than assumed. A
+  fresh instance reports `daily_refresh [STOPPED]`, `dagster schedule start`
+  flips it to `[RUNNING]`, a *separate process* reading the same instance reads
+  that back, and a `schedules/` directory appears under `DAGSTER_HOME`. Pointed
+  at a different `DAGSTER_HOME` the same schedule is still `STOPPED`, which is
+  the same fact from the other side. So it survives a restart only if that
+  storage is durable, and a wipe silently returns the service to ingesting
+  nothing. Flipping `default_status` instead is a code change that changes what
+  `dagster dev` does for everyone who clones the repo.
+
+  Under `deploy/dagster.yaml` the schedule storage is Postgres rather than
+  SQLite, so the durable thing is the `dagster` database and `DAGSTER_HOME` holds
+  no schedule state at all — measured 2026-09-17: starting the schedule against
+  that instance wrote a `RUNNING` row to `instigators` and left every file under
+  `.dagster/` byte-identical. The failure mode is unchanged, only relocated: drop
+  the database and the service comes back up ingesting nothing.
 - **It targets `full_refresh` only, which excludes two things, and the second
   one only started mattering when §2 became real.** It excludes `load_retail`:
   correct forever on an established lakehouse (retail is a closed archive whose
@@ -563,12 +574,34 @@ keeps, extended with the ones only an always-on deployment meets:
   fails to load, or loads against a stale manifest (§2).
 - **A `STOPPED` schedule survives a `.dagster/` wipe as stopped.** The service
   runs, serves an increasingly old site, and ingests nothing (§5).
+- **A code location name is part of a schedule's identity, and `-m` changes
+  it.** `dagster schedule start daily_refresh -m orchestration.definitions`
+  prints `Started schedule daily_refresh` and writes a row the running service
+  never reads: the instigator's selector id hashes the *code location name*, and
+  `-m` names the location after the module while `pyproject.toml`'s
+  `[tool.dagster]` names it `modern_data_stack`. Measured 2026-09-17 against the
+  deployed instance: the two spellings put **two `RUNNING` rows for one
+  schedule** in `instigators`, and the bare `dagster schedule list` — which
+  resolves the location the same way the webserver and daemon do — still read
+  `[STOPPED]`. The same mismatch fails a run *after* the CLI reports success:
+  `dagster job launch -j load_retail -m orchestration.definitions` returned 0,
+  and the daemon then marked the run `FAILURE` with
+  `DagsterCodeLocationNotFoundError: Location orchestration.definitions does not
+  exist in workspace`. Dropping `-m` made the same launch succeed. **Against a
+  service, never pass `-m`**: let the CLI fall back to `[tool.dagster]`, which is
+  what the service itself falls back to.
 - **A `DAGSTER_HOME` outside the checkout has no `dagster.yaml`.** §10 puts it on
   the durable volume, where Dagster finds no config, prints one notice at start
   and falls back to its defaults — ten runs at once rather than one, so a restart
   after a missed tick plus one click is two writers again (§5). Measured: an
   empty `DAGSTER_HOME` reports `max_concurrent_runs` as 10, and one holding a
   symlink to the checked-in file reports 1.
+- **`dagster instance info` prints `compute_logs: NoneType` for a configured
+  compute log manager.** Measured 2026-09-17 on `deploy/dagster.yaml`: the line
+  says `NoneType` while the instance's manager really is a `LocalComputeLogManager`
+  writing to `$DAGSTER_STORAGE_DIR`. It is a display quirk of that command and
+  not a config that failed to load — read it back off the instance rather than
+  out of `instance info` before changing anything to chase it.
 - **The recipes do not queue behind the service.** `just materialize` and
   `materialize-site` run `dagster job execute`, and `materialize-select` and both
   `backfill-*` recipes run `dagster asset materialize`; each executes in its own
@@ -580,7 +613,11 @@ keeps, extended with the ones only an always-on deployment meets:
   imports and keep answering; the grpc code servers and run workers they fork
   afterwards do not exist any more. `uv run` does not do this — it only adds
   packages — so the recipes are safe; stop the service before a `uv sync`, or
-  give it its own checkout (§2).
+  give it its own checkout (§2). The `deploy` group is the same trap one group
+  further out: against a venv built by `just deploy-deps`, a
+  `uv sync --group dev --group orchestration` would uninstall `dagster-postgres`
+  and `psycopg2-binary` (measured `--dry-run`, 2026-09-17), and the next restart
+  of a `deploy/` instance fails on its own storage config.
 - **The schedule refreshes the warehouse and never the site.** `daily_refresh`
   targets `full_refresh`, which excludes `reports/evidence_site`; only
   `publish_site` builds it and nothing schedules that. So a host that follows §10
@@ -652,6 +689,23 @@ repo:
 mkdir -p /srv/mds/state/dagster
 ln -s /srv/mds/repo/.dagster/dagster.yaml /srv/mds/state/dagster/dagster.yaml
 ```
+
+**Or point `DAGSTER_HOME` at `deploy/` instead**, which is the same decision
+made the other way: the config is already in the repo, so nothing is linked, and
+run, event and schedule storage go to Postgres rather than to the volume. It
+needs `just deploy-deps` for the driver, the four `DAGSTER_*` lines and
+`PGPASSWORD` from `.env.example`, and a reachable database — `just compose-up`
+starts one, and `deploy/postgres/init.sql` creates the `dagster` database beside
+the DuckLake catalog's. Then the unit's line is:
+
+```sh
+Environment=DAGSTER_HOME=/srv/mds/repo/deploy
+```
+
+`$DAGSTER_STORAGE_DIR` still belongs on the volume: compute logs and run
+artifacts stay on a filesystem under either instance (§3). Measured 2026-09-17:
+the first use of that instance created 22 tables in the `dagster` database, and
+after one `load_retail` the database was 9.3 MB.
 
 **3. Bootstrap, by hand, before the service exists.** This is the step that
 differs from steady state, and it differs because `daily_refresh` targets

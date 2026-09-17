@@ -110,6 +110,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 |---------|--------------|
 | `just setup` | `uv sync --group dev --group orchestration`, then `just extensions` — ducklake, httpfs and postgres, binaries no lockfile can name |
 | `just compose-up` / `just compose-down` | the optional backing services — Postgres for the catalog, SeaweedFS for the Parquet (`compose-down volumes` destroys both) |
+| `just deploy-deps` | add the `deploy` group — Dagster's own storage in Postgres, under `DAGSTER_HOME=<repo>/deploy` |
 | `just ingest` | run the dlt pipeline → `raw` in the DuckLake catalog |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state, which lives in `~/.dlt`, not the warehouse |
@@ -422,7 +423,8 @@ jobs and the rest are `dagster-graph-and-jobs`. What bites outside it:
   halves still run.
 - **Everything runs in one process, and one run at a time**, because DuckDB
   takes one writer at a time: `.dagster/dagster.yaml` queues runs, but
-  `just materialize` runs outside that queue.
+  `just materialize` runs outside that queue. `deploy/dagster.yaml` is the same
+  instance with its storage in Postgres, held in step by a test.
 - **`load_retail` runs before `full_refresh`**: dbt reads what it lands, so
   `full_refresh` alone against a fresh warehouse fails in dbt.
 - **Every asset and check is listed by hand in `definitions.py`**, and an

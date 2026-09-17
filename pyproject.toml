@@ -48,6 +48,15 @@ orchestration = [
     "dagster-dlt>=0.29.15",       # dlt resources -> assets, with subset loading
     "dagster-webserver>=1.13.15", # the UI behind `just dagster`
 ]
+# `uv sync --group deploy` — what a *deployed* instance needs and a laptop does
+# not. Kept out of `orchestration` on purpose: `just setup` is the laptop
+# install, and the laptop's Dagster storage is SQLite beside `.dagster/`, which
+# needs no driver. The container image is the only thing that syncs this group.
+deploy = [
+    # Brings psycopg2-binary. Only `deploy/dagster.yaml` asks for it, and only
+    # when DAGSTER_HOME points at that directory. See docs/RUNNING_AS_A_SERVICE.md.
+    "dagster-postgres>=0.29.15",  # Dagster run/event/schedule storage in Postgres
+]
 
 [project.scripts]
 mds = "modern_data_stack:main"
