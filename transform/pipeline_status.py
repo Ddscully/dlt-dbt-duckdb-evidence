@@ -26,7 +26,13 @@ from __future__ import annotations
 import duckdb
 import polars as pl
 
-from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, catalog_path, data_path
+from lake.lakehouse import (
+    ATTACH_ALIAS,
+    LAKEHOUSE_DIR,
+    catalog_path,
+    data_path,
+    storage_secret,
+)
 from modern_data_stack import db, observability
 from modern_data_stack.ducklake import attach
 from modern_data_stack.paths import dbt_manifest_path, dbt_run_results_path, warehouse_path
@@ -112,6 +118,7 @@ def run(
             data_path(lakehouse_dir),
             ATTACH_ALIAS,
             read_only=True,
+            storage_secret=storage_secret(),
         )
         frames = {
             "pipeline_sources": build_sources(con),

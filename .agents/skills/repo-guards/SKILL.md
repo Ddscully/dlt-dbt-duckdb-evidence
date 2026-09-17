@@ -413,8 +413,35 @@ section here. The mutation method these guards were written with is in the
   into the real landing zone and its weather archive) and dbt's artifact paths —
   `DBT_TARGET_PATH`, `DBT_MANIFEST_PATH`, `DBT_RUN_RESULTS_PATH` and
   `--target-path` — or the next `just pipeline-status` files the fixture's
-  timings in the real build history. `tests/test_workflows.py` holds all four,
-  because each is invisible when missing: the fixture run passes and the *next*
-  command is the one that is wrong.
+  timings in the real build history. With the Parquet in a bucket it also
+  overrides `LAKEHOUSE_DATA_PATH`, which outranks `LAKEHOUSE_DIR`.
+  `tests/test_workflows.py` holds all five, because each is invisible when
+  missing: the fixture run passes and the *next* command is the one that is
+  wrong.
+  - **A live run isolated by hand needs two more, and no recipe or test holds
+    either.** Nothing isolates `just ingest` or `just materialize`, so pointing
+    one at a scratch warehouse means exporting the five above yourself, plus:
+    - `DLT_DATA_DIR`, because dlt keys state on the pipeline name, not the
+      destination, and a live run cannot take the `_fixtures` suffix. This is the
+      trap `build_pipeline()`'s docstring gives as the suffix's reason, in
+      reverse: the real `~/.dlt` watermarks would load only WDI's and FX's
+      lookback windows into the empty landing zone, and the run would rewrite
+      the real pipeline's state. Weather escapes, since its watermark is read
+      from the destination.
+    - `DAGSTER_HOME`, or the scratch runs are filed in `.dagster/`'s real run
+      and asset history. Copy `.dagster/dagster.yaml` in, or telemetry is back on.
+  - **Two readers ignore the variables entirely, and both would pass.** Read from
+    the code, not reproduced. dagster-dbt's `DbtProject` loads the graph from
+    `dbt/target/manifest.json` whatever `DBT_TARGET_PATH` says, which is only
+    safe while the run's `dbt parse` would write the same manifest. And
+    `publish/build_report.py` passes Evidence no warehouse path, so a redirected
+    `just materialize-site` builds the site from the repo's own
+    `data/warehouse.duckdb`; the override is `EVIDENCE_SOURCE__warehouse__filename`,
+    relative (`building-evidence-reports`).
+  - **Prove the isolation with the real files, not the exit code.** Record
+    `find … -printf '%T@ %s %p'` over the real warehouse, catalog, dlt state,
+    `dbt/target/` and `.dagster/storage` before, and diff after. Measured
+    2026-09-17: `just ingest`, `just test-pipeline` and `just materialize`
+    against a SeaweedFS bucket left all of them unchanged.
 - **`WAREHOUSE_PATH` must be absolute**: dbt resolves paths from `dbt/`, the
   Python layers from the repo root.

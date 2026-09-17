@@ -232,6 +232,10 @@ alias (`lake`, `ducklake`) fails them identically.
    DBeaver opens separate ones for the navigator and each editor, and an attach in
    one is invisible to the others.
 
+   With `LAKEHOUSE_DATA_PATH` set, `DATA_PATH` is that URL, and a `CREATE SECRET`
+   has to come first as its own entry — the `sql` recipe in the `justfile`
+   spells out both. (Not tried in a GUI.)
+
 Two traps, both of which look like something else:
 
 - **One bootstrap entry is one JDBC statement.** A `LOAD ducklake` and the

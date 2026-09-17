@@ -1,6 +1,6 @@
 ---
 name: the-lakehouse
-description: The DuckLake landing zone under data/lakehouse/ — why the change feed is useless behind dlt and what replaces it, reading table versions out of the catalog database, the absolute-vs-relative data_path that decides portability, publishing the catalog as lakehouse.tar.gz with an allowlist, the unpinnable extension and the spec-version guard. Use when editing lake/lakehouse.py, changing what the landing zone holds or publishes, debugging a DATA_PATH mismatch, or migrating a tree that predates the move.
+description: The DuckLake landing zone under data/lakehouse/, or with its Parquet in an S3-compatible bucket — why the change feed is useless behind dlt and what replaces it, reading table versions out of the catalog database, the absolute-vs-relative data_path that decides portability, publishing the catalog as lakehouse.tar.gz with an allowlist, the unpinnable extension and the spec-version guard. Use when editing lake/lakehouse.py, changing what the landing zone holds or publishes, debugging a DATA_PATH mismatch or an S3 secret, or migrating a tree that predates the move.
 ---
 
 # The DuckLake landing zone (`lake/lakehouse.py`)
@@ -221,3 +221,55 @@ survives a format that content-addresses its files and prunes on statistics.
       direct analogue of `storage_version` and `duckdb_version`, and both now
       ship in `manifest.json` and the release notes. See *Publishing* for the
       shape, which is the storage-version guard's with one part working harder.
+
+## The Parquet in an S3-compatible bucket
+
+`LAKEHOUSE_DATA_PATH=s3://bucket/prefix/` moves the data files; the catalog stays
+a local DuckDB file. `LAKEHOUSE_S3_ENDPOINT`, `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` say how to reach the store (`.env.example`); unset, the
+behaviour is exactly the on-disk one. The how-to is `docs/WAREHOUSE.md`. Measured
+2026-09-17 against SeaweedFS in Docker (`chrislusf/seaweedfs mini`).
+
+- **The fixture pipeline, Dagster and `just sql` all run on it.** `raw` row
+  counts matched a run on disk, 12 data files landed in the bucket and none on
+  disk, and the catalog's stored `data_path` was byte-equal to the variable.
+  `load_retail` then `publish_site` both succeeded with 489 asset checks passing.
+  Evidence never opens the lakehouse (its source queries read `marts`,
+  `analytics` and `history` only), so it needed nothing.
+- **The string-compare trap still decides everything.** dlt and dbt read the
+  same variable, so they agree; `data_path()` returns it exactly as given for
+  that reason. Setting it over an existing on-disk catalog is refused at attach
+  (`DATA_PATH parameter … does not match`) — the mode is chosen before the first
+  ingest.
+- **DuckDB reads no S3 endpoint from the environment**, and `AWS_ENDPOINT_URL`
+  and `DUCKDB_S3_*` both sent the request to AWS. It *does* pick up the keys:
+  an export whose attach carried no secret got `InvalidAccessKeyId … "test"` back
+  from `amazonaws.com`. So every connection creates a secret, spelled three
+  times — `storage_secret()` (passed to `modern_data_stack.ducklake.attach`, and
+  unpacked into `AwsCredentials` for dlt, which builds its own and needs no
+  s3fs), the `secrets:` block in `dbt/profiles.yml`, and `just sql`, which reads
+  the keys through the CLI's `getenv` so they stay out of the process list.
+  Each strips a trailing slash from the endpoint. dlt's `endpoint_url` is
+  rebuilt from `storage_secret()`'s parts rather than read from the variable,
+  because dlt removes only the scheme: `http://host:8333/` reached its secret as
+  `host:8333/` and every other as `host:8333`. **The slash is a 403, not a 404**:
+  DuckDB requests `http://host:8333//lake/…`, the signed path no longer matches,
+  and SeaweedFS refuses the write and the read as Forbidden — which reads as a
+  wrong key.
+- **`Path()` breaks a URL**: `Path("s3://b/")` is `s3:/b`, so `attach()` keeps a
+  `://` path as a string.
+- **The variable outranks `lakehouse_dir`**, which makes it the fifth piece of
+  state a redirected run must override. `just test-pipeline` rewrites it to
+  `s3://<bucket>/test-pipeline/<tmp>/`; the course recipes that point at the
+  sandbox unset it; `tests/conftest.py` deletes it for every test. That guard is
+  load-bearing: with it removed and the variable set, 16 pytest cases failed.
+- **`python -m lake.lakehouse` passes with a wrong key**, and so does
+  `select count(*)` in `just sql`: both are answered from catalog statistics and
+  read no Parquet. SeaweedFS does enforce auth, so a credentials check must read
+  column values — `max(capital_city)` from `raw.wb_country` gets the 403.
+- **The release is on disk by decision, and both halves refuse the variable**
+  (`refuse_bucket_data_path`, first thing in the export's `run()` and in
+  `preflight()`). Allowed to run, the export copied the warehouse into its output
+  directory — customer ids still clear, since that copy is pseudonymised later —
+  then died in `solidify_staging` on the 403. A restore would unpack local
+  Parquet under a catalog rewritten to name the bucket.

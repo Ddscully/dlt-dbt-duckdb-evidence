@@ -542,6 +542,31 @@ def lakehouse_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return lake
 
 
+def test_an_export_refuses_a_landing_zone_in_a_bucket(
+    warehouse: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The release is built from a landing zone on disk. Let run with the Parquet
+    in a bucket, the export copied the warehouse — customer ids still clear —
+    into the output directory, then died on a 403 from AWS, where its
+    secret-less attach had sent the access key id (measured 2026-09-17). So it
+    refuses before the first write. This warehouse needs no catalog, so without
+    the refusal the export would succeed."""
+    monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
+    monkeypatch.setenv("LAKEHOUSE_DATA_PATH", "s3://lake/prefix/")
+    out = tmp_path / "export"
+
+    with pytest.raises(RuntimeError, match="LAKEHOUSE_DATA_PATH"):
+        run(
+            str(warehouse),
+            str(out),
+            tag="data-1999-12-31",
+            repo="acme/demo",
+            lakehouse_dir=tmp_path / "no-lakehouse",
+        )
+
+    assert not out.exists(), "refused after writing into the output directory"
+
+
 @pytest.fixture
 def export_with_lakehouse(
     warehouse: Path, lakehouse_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

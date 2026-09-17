@@ -76,7 +76,9 @@ def _lakehouse(tmp_path: Path, *statements: str) -> Path:
     as the check does.
     """
     lakehouse_dir = tmp_path / "lakehouse"
-    data_path(lakehouse_dir).mkdir(parents=True, exist_ok=True)
+    data = data_path(lakehouse_dir)
+    assert isinstance(data, Path), "a bucket data path; tests/conftest.py should have cleared it"
+    data.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
     try:
         attach(con, catalog_path(lakehouse_dir), data_path(lakehouse_dir), alias=ATTACH_ALIAS)

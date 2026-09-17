@@ -27,6 +27,7 @@ default:
 where: _no-dbt-dotenv
     @echo "warehouse: ${WAREHOUSE_PATH:-(unset - this repo's data/warehouse.duckdb)}"
     @echo "lakehouse: $LAKEHOUSE_DIR"
+    @echo "lakehouse data: ${LAKEHOUSE_DATA_PATH:-(unset - $LAKEHOUSE_DIR/data/)}"
 
 # Every recipe that writes depends on this, through `where` or directly (the ones
 # that export their own WAREHOUSE_PATH). dbt 1.12 loads a .env from its working
@@ -151,6 +152,14 @@ test-pipeline: _no-dbt-dotenv
     export DBT_TARGET_PATH="$(dirname "$WAREHOUSE_PATH")/dbt-target"
     export DBT_MANIFEST_PATH="$DBT_TARGET_PATH/manifest.json"
     export DBT_RUN_RESULTS_PATH="$DBT_TARGET_PATH/run_results.json"
+    # A landing zone in a bucket keeps its storage and loses its prefix: the
+    # fixture Parquet goes under `test-pipeline/<tmp>/` in the same bucket, so an
+    # S3 setup is what gets tested, under a prefix no real run uses.
+    if [[ "${LAKEHOUSE_DATA_PATH:-}" == s3://* ]]; then
+      bucket="${LAKEHOUSE_DATA_PATH#s3://}"
+      export LAKEHOUSE_DATA_PATH="s3://${bucket%%/*}/test-pipeline/$(basename "$(dirname "$WAREHOUSE_PATH")")/"
+      echo "fixture lakehouse data: $LAKEHOUSE_DATA_PATH"
+    fi
     echo "fixture warehouse: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
     cd dbt && uv run dbt deps && uv run dbt build --target-path "$DBT_TARGET_PATH" && cd ..
@@ -262,15 +271,30 @@ backfill-weather start end='': where dbt-parse
 # readers, never both. The lakehouse is attached in the same mode because the
 # staging views read `lakehouse.raw`; without it they fail with `Catalog
 # "lakehouse" does not exist!`. The CLI is the `duckdb-cli` dev dependency.
+#
+# With LAKEHOUSE_DATA_PATH set it needs the S3 secret too — the third spelling,
+# after `storage_secret()` and the dbt profile. The keys go in through the CLI's
+# `getenv`, so they never appear in the process list.
 # Open the warehouse in the DuckDB CLI (`just sql write` for a writer)
 sql mode="read":
     #!/usr/bin/env bash
     set -euo pipefail
-    attach="install ducklake; load ducklake; attach 'ducklake:duckdb:$LAKEHOUSE_DIR/catalog.duckdb' as lakehouse (data_path '$LAKEHOUSE_DIR/data/'"
+    warehouse="${WAREHOUSE_PATH:-data/warehouse.duckdb}"
+    data="${LAKEHOUSE_DATA_PATH:-$LAKEHOUSE_DIR/data/}"
+    secret=""
+    if [ -n "${LAKEHOUSE_DATA_PATH:-}" ]; then
+      unset_msg="is unset, and LAKEHOUSE_DATA_PATH names a bucket (see .env.example)"
+      endpoint="${LAKEHOUSE_S3_ENDPOINT:?$unset_msg}"
+      : "${AWS_ACCESS_KEY_ID:?$unset_msg}" "${AWS_SECRET_ACCESS_KEY:?$unset_msg}"
+      ssl=true; [[ "$endpoint" == http://* ]] && ssl=false
+      host="${endpoint#*://}"
+      secret="load httpfs; create secret (type s3, key_id getenv('AWS_ACCESS_KEY_ID'), secret getenv('AWS_SECRET_ACCESS_KEY'), endpoint '${host%/}', use_ssl $ssl, region '${AWS_REGION:-us-east-1}', url_style 'path', scope '$data');"
+    fi
+    attach="install ducklake; load ducklake; $secret attach 'ducklake:duckdb:$LAKEHOUSE_DIR/catalog.duckdb' as lakehouse (data_path '$data'"
     if [ "{{ mode }}" = "write" ]; then
-      uv run duckdb data/warehouse.duckdb -cmd "$attach);"
+      uv run duckdb "$warehouse" -cmd "$attach);"
     else
-      uv run duckdb -readonly data/warehouse.duckdb -cmd "$attach, read_only);"
+      uv run duckdb -readonly "$warehouse" -cmd "$attach, read_only);"
     fi
 
 # From dbt/, because the dbt templater resolves the profile's relative
@@ -365,6 +389,9 @@ course-sandbox: _no-dbt-dotenv
     # from the repo root) resolve it to two different files.
     export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"
     export LAKEHOUSE_DIR="{{ justfile_directory() }}/data/course/lakehouse"
+    # On disk whatever the real landing zone is on: a bucket data path would
+    # outrank LAKEHOUSE_DIR and put the slice's Parquet beside the real files.
+    unset LAKEHOUSE_DATA_PATH
     mkdir -p "$(dirname "$WAREHOUSE_PATH")"
     rm -f "$WAREHOUSE_PATH" "$WAREHOUSE_PATH.wal"
     echo "course sandbox: $WAREHOUSE_PATH"
@@ -410,6 +437,7 @@ course-query sql:
     #!/usr/bin/env bash
     set -euo pipefail
     export LAKEHOUSE_DIR="{{ justfile_directory() }}/data/course/lakehouse"
+    unset LAKEHOUSE_DATA_PATH  # the sandbox is on disk (see course-sandbox)
     uv run python -c "import duckdb, sys; \
         from lake.lakehouse import LAKEHOUSE_DIR, attach, catalog_path, data_path; \
         con = duckdb.connect('{{ justfile_directory() }}/data/course/warehouse.duckdb', read_only=True); \

@@ -7,7 +7,8 @@
 #
 # WAREHOUSE_PATH and LAKEHOUSE_DIR override the two paths. Set them absolute:
 # this file resolves relative paths from `dbt/`, the Python layers from the repo
-# root.
+# root. LAKEHOUSE_DATA_PATH moves the lakehouse's Parquet into a bucket
+# (`.env.example`), and must reach this file spelled exactly as it reaches dlt.
 #
 # One target, deliberately. On Snowflake or BigQuery a target separates schemas
 # inside one database; here WAREHOUSE_PATH swaps the whole database file, and
@@ -26,8 +27,21 @@ modern_data_stack:
         - httpfs
         - parquet
         - ducklake
+      # For a lakehouse whose Parquet is in a bucket: DuckDB reads no endpoint
+      # from the environment, so the connection needs this secret, which
+      # `storage_secret()` in lake/lakehouse.py spells for Python. It is scoped to
+      # the data path, so with LAKEHOUSE_DATA_PATH unset it is inert.
+      secrets:
+        - type: s3
+          key_id: "{{ env_var('AWS_ACCESS_KEY_ID', '') }}"
+          secret: "{{ env_var('AWS_SECRET_ACCESS_KEY', '') }}"
+          endpoint: "{{ env_var('LAKEHOUSE_S3_ENDPOINT', 's3.amazonaws.com').split('://')[-1].rstrip('/') }}"
+          use_ssl: "{{ 'false' if env_var('LAKEHOUSE_S3_ENDPOINT', '').startswith('http://') else 'true' }}"
+          region: "{{ env_var('AWS_REGION', 'us-east-1') }}"
+          url_style: path
+          scope: "{{ env_var('LAKEHOUSE_DATA_PATH', 's3://lakehouse-data-path-unset/') }}"
       attach:
         - path: "ducklake:duckdb:{{ env_var('LAKEHOUSE_DIR', '../data/lakehouse') }}/catalog.duckdb"
           alias: lakehouse
           options:
-            data_path: "{{ env_var('LAKEHOUSE_DIR', '../data/lakehouse') }}/data/"
+            data_path: "{{ env_var('LAKEHOUSE_DATA_PATH', env_var('LAKEHOUSE_DIR', '../data/lakehouse') ~ '/data/') }}"
