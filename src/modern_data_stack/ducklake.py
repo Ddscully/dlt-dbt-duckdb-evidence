@@ -53,6 +53,8 @@ __all__ = [
     "set_data_path",
     "snapshots",
     "spec_version",
+    "sql_identifier",
+    "sql_literal",
     "table_versions",
 ]
 
@@ -125,24 +127,26 @@ def attach(
         # No bind parameters here either, so the values are quoted literals.
         con.execute(
             f"create or replace secret {alias}_storage (type s3, "
-            f"key_id {_quoted(storage_secret['key_id'])}, "
-            f"secret {_quoted(storage_secret['secret'])}, "
-            f"endpoint {_quoted(storage_secret['endpoint'])}, use_ssl {use_ssl}, "
-            f"region {_quoted(storage_secret['region'])}, url_style 'path', "
-            f"scope {_quoted(data_path_sql)})"
+            f"key_id {sql_literal(storage_secret['key_id'])}, "
+            f"secret {sql_literal(storage_secret['secret'])}, "
+            f"endpoint {sql_literal(storage_secret['endpoint'])}, use_ssl {use_ssl}, "
+            f"region {sql_literal(storage_secret['region'])}, url_style 'path', "
+            f"scope {sql_literal(data_path_sql)})"
         )
 
-    options = [f"data_path '{data_path_sql}'"]
+    options = [f"data_path {sql_literal(data_path_sql)}"]
     if read_only:
         options.append("read_only")
     if data_inlining_row_limit is not None:
         options.append(f"data_inlining_row_limit {int(data_inlining_row_limit)}")
     if metadata_schema is not None:
-        options.append(f"metadata_schema {_quoted(metadata_schema)}")
+        options.append(f"metadata_schema {sql_literal(metadata_schema)}")
 
     # ATTACH takes literals, not bind parameters — `attach $path` is a parser
     # error — so the paths are interpolated, as they are in `history.restore`.
-    con.execute(f"attach '{catalog_sql}' as {alias} ({', '.join(options)})")
+    # Through `sql_literal`, because a catalog URI and a data path both come
+    # from the environment and neither is validated for quotes.
+    con.execute(f"attach {sql_literal(catalog_sql)} as {alias} ({', '.join(options)})")
 
 
 def snapshots(con: duckdb.DuckDBPyConnection, alias: str) -> list[int]:
@@ -167,7 +171,7 @@ def table_versions(
     `schema "main" does not exist`.
     """
     schema, name = _split(table)
-    meta = f"{meta_alias(alias)}.{metadata_schema}"
+    meta = f"{meta_alias(alias)}.{sql_identifier(metadata_schema)}"
     ids = [
         row[0]
         for row in con.execute(
@@ -193,7 +197,7 @@ def table_versions(
     inlined = con.execute(
         f"select table_name from {meta}.ducklake_inlined_data_tables where table_id in ({id_list})"
     ).fetchall()
-    sources += [f'select begin_snapshot from {meta}."{row[0]}"' for row in inlined]
+    sources += [f"select begin_snapshot from {meta}.{sql_identifier(row[0])}" for row in inlined]
 
     rows = con.execute(
         f"select distinct begin_snapshot from ({' union all '.join(sources)}) order by 1"
@@ -229,9 +233,30 @@ def revisions(
     ).fetchall()
 
 
-def _quoted(value: str) -> str:
-    """A SQL string literal, for the statements that take no bind parameters."""
+def sql_literal(value: str | Path) -> str:
+    """A SQL string literal, for the statements that take no bind parameters.
+
+    Takes a `Path` as well as a `str` because a catalog is either — `attach`
+    below and `lake.lakehouse`'s probes both hand it whatever `catalog()`
+    returned, and a cast at each call site is what invites one of them to skip it.
+
+    Public because `lake.lakehouse` builds ATTACH statements of its own around
+    the same catalog URI: a second copy of this two-line function is how the
+    two spellings drift apart, and a value quoted in one place and interpolated
+    raw in another is the bug that shape produces.
+    """
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def sql_identifier(name: str) -> str:
+    """A quoted SQL identifier, for the names that arrive from configuration.
+
+    `LAKEHOUSE_METADATA_SCHEMA` reaches ATTACH as a literal (`metadata_schema
+    'mds-lake'`) and every later read of the catalog database as an identifier.
+    Spelling the second one bare accepts the schema at attach and then fails
+    every `ducklake_*` read with a parser error, a layer away from the cause.
+    """
+    return '"' + str(name).replace('"', '""') + '"'
 
 
 def _split(table: str) -> tuple[str, str]:

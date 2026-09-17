@@ -1,7 +1,7 @@
 version: 2
 
 # Green CI says nothing about outdated versions, so something has to watch them.
-# The three ecosystems below are the ones with a pinned version in the tree.
+# The four ecosystems below are the ones with a pinned version in the tree.
 # Monthly and grouped — one open PR per ecosystem — to match the release cadence
 # rather than trickle single-dependency PRs.
 
@@ -54,4 +54,26 @@ updates:
     open-pull-requests-limit: 1
     groups:
       evidence:
+        patterns: ["*"]
+
+  # The two service images in compose.yaml.
+  #
+  # **`docker-compose`, not `docker`.** They are separate ecosystems: `docker`
+  # matches Dockerfiles, Containerfiles and Kubernetes manifests, none of which
+  # this repo has, so it would find no files and watch nothing while looking
+  # like it watched something. `docker-compose`'s own pattern is
+  # `(docker-)?compose(-\w+)?(\.[\w-]+)?\.ya?ml`, which the root
+  # `compose.yaml` matches (dependabot-core, checked 2026-09-17).
+  #
+  # Not lockfile-only and not grouped away: the tags are exact (`postgres:17.11`),
+  # so there is no range for a patch to arrive through silently and every bump
+  # is a real one. Without this entry they were the fourth and fifth versions
+  # that could only age deliberately, and `compose.yaml` claimed otherwise.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      containers:
         patterns: ["*"]

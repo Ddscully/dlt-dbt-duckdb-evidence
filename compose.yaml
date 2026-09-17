@@ -12,8 +12,8 @@
 # Every port is bound to 127.0.0.1: neither service authenticates well enough to
 # face a network, and both hold the whole landing zone.
 #
-# Image tags are pinned exactly, and Dependabot's `docker` ecosystem is what
-# watches them.
+# Image tags are pinned exactly, and Dependabot's `docker-compose` ecosystem is
+# what watches them — `docker` is Dockerfiles, which this repo has none of.
 name: mds
 
 networks:
@@ -43,10 +43,21 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
-      # `-d lakehouse` and not the default: the entrypoint starts a private
-      # server to run the init script, and `pg_isready` answers on it. Naming
-      # the real database keeps `--wait` from returning before the init is done.
-      test: ["CMD-SHELL", "pg_isready -U mds -d lakehouse"]
+      # `-h 127.0.0.1`, and not the default socket, because the default answers
+      # during initdb. The entrypoint runs a private bootstrap server to execute
+      # `init.sql` with `listen_addresses=''` — no TCP — but a live unix socket
+      # in `/var/run/postgresql`, which is exactly where `pg_isready` connects
+      # when nothing says otherwise. `-d` does not rescue it: that only shapes
+      # the conninfo, and `pg_isready` never opens the database it names.
+      #
+      # Measured on a fresh volume with a `pg_sleep(20)` init script
+      # (2026-09-17): over the socket it returned 0 at four seconds, while the
+      # init was still running and TCP answered `no response`; over TCP it
+      # returned 2 until the real server came up. So the socket check let
+      # `compose up --wait` return before `init.sql` had created the `dagster`
+      # database, and the `just ingest` behind it failed with `connection
+      # refused`.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U mds -d lakehouse"]
       interval: 2s
       timeout: 3s
       retries: 30

@@ -164,11 +164,11 @@ files outside that task:
 
 ## Dependency and action versions
 
-`.github/dependabot.yml` watches `github-actions`, `uv` and `npm` monthly. What
-pins what, and why, is the `dependency-versions` skill. Python is 3.13, set in
-`.python-version` alone, and three versions can only age deliberately —
-`.python-version`, the sqlfluff pair and ruff — because no watched ecosystem
-covers them.
+`.github/dependabot.yml` watches `github-actions`, `uv`, `npm` and
+`docker-compose` monthly. What pins what, and why, is the `dependency-versions`
+skill. Python is 3.13, set in `.python-version` alone, and three versions can
+only age deliberately — `.python-version`, the sqlfluff pair and ruff — because
+no watched ecosystem covers them.
 
 ## Agent skills
 

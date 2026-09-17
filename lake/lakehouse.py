@@ -61,6 +61,7 @@ from modern_data_stack.ducklake import (
     row_count,
     set_data_path,
     snapshots,
+    sql_literal,
     table_versions,
 )
 from modern_data_stack.paths import lakehouse_dir as default_lakehouse_dir
@@ -440,7 +441,7 @@ def _postgres_holds_catalog() -> bool:
         # name goes in as a bind parameter: it comes from an environment
         # variable, and nesting it in a SQL string inside a SQL string is how
         # the quoting goes wrong.
-        con.execute(f"attach '{catalog()}' as {_PROBE_ALIAS} (type postgres, read_only)")
+        con.execute(f"attach {sql_literal(catalog())} as {_PROBE_ALIAS} (type postgres, read_only)")
         return bool(
             con.execute(
                 f"""
@@ -519,7 +520,7 @@ def drop_fixture_schema(schema: str) -> None:
     try:
         con.execute("install postgres")
         con.execute("load postgres")
-        con.execute(f"attach '{catalog()}' as {_PROBE_ALIAS} (type postgres)")
+        con.execute(f"attach {sql_literal(catalog())} as {_PROBE_ALIAS} (type postgres)")
         # `postgres_execute` and not a DuckDB `drop schema`: the schema holds
         # Postgres tables the scanner does not own and will not cascade.
         con.execute(
@@ -637,12 +638,22 @@ def restore(source_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -
     there is no force; delete it first to replace it. dlt then merges onto the
     carried rows, because it judges a destination fresh by its own bookkeeping
     tables, which the published catalog does not carry.
+
+    Repeats `run()`'s preflight, as a public entry point must, and *before* it
+    reads `source_dir` — see the comment below.
     """
+    # **The preflight goes first, and the order is load-bearing.** `is_catalog`
+    # answers about Postgres whenever LAKEHOUSE_CATALOG is set, and ignores the
+    # directory it is given — but `source` is an unpacked release, a file
+    # catalog by construction. Asked first, an empty metadata schema would make
+    # it raise `no published lakehouse` about a directory that holds a perfectly
+    # good catalog, and an unreachable host a raw `IO Error`; either way the
+    # refusal `refuse_remote_lakehouse` exists to give never fires.
+    preflight(lakehouse_dir)
+
     source = Path(source_dir)
     if not is_catalog(source):
         raise FileNotFoundError(f"no published lakehouse at {source / CATALOG_NAME}")
-
-    preflight(lakehouse_dir)
 
     dest = Path(lakehouse_dir)
     if dest.exists():
