@@ -19,6 +19,8 @@ assert the zero as hard as they assert the one.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import duckdb
 import pytest
 
@@ -224,3 +226,42 @@ def test_the_attach_alias_is_the_database_dbt_declares():
     profile = yaml.safe_load(Path("dbt/profiles.yml").read_text())
     attached = profile["modern_data_stack"]["outputs"]["dev"]["attach"]
     assert [a["alias"] for a in attached] == [lakehouse.ATTACH_ALIAS]
+
+
+def test_a_bucket_connection_installs_httpfs_before_loading_it(tmp_path):
+    """The S3 secret needs httpfs, and a bare `load httpfs` fails on a machine
+    that has never downloaded it: `Extension "httpfs" … not found`. The template
+    cut from this repo hit exactly that on its first CI run (2026-09-17), and
+    an empty `HOME` reproduces it here.
+
+    Any machine that has run dbt has httpfs, because the profile lists it, so a
+    real attach cannot fail locally, and making a machine without it means a
+    download inside a unit test. So this spies on a real connection and holds
+    the order of the statements `attach` sends. Attaching an `s3://` data path
+    writes nothing to the bucket, so the attach itself runs offline.
+    """
+    con = duckdb.connect()
+    spy = MagicMock(wraps=con)
+    try:
+        attach(
+            spy,
+            tmp_path / "catalog.duckdb",
+            "s3://lake/prefix/",
+            alias="lakehouse",
+            storage_secret={
+                "key_id": "test",
+                "secret": "testtest",
+                "endpoint": "127.0.0.1:8333",
+                "use_ssl": "false",
+                "region": "us-east-1",
+            },
+        )
+    finally:
+        con.close()
+
+    statements = [call.args[0].strip().lower() for call in spy.execute.call_args_list]
+    assert "load httpfs" in statements, "a bucket attach no longer loads httpfs at all"
+    loaded = statements.index("load httpfs")
+    assert "install httpfs" in statements[:loaded], (
+        "httpfs is loaded without being installed first, which fails on a fresh machine"
+    )

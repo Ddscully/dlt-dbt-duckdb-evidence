@@ -288,7 +288,7 @@ sql mode="read":
       : "${AWS_ACCESS_KEY_ID:?$unset_msg}" "${AWS_SECRET_ACCESS_KEY:?$unset_msg}"
       ssl=true; [[ "$endpoint" == http://* ]] && ssl=false
       host="${endpoint#*://}"
-      secret="load httpfs; create secret (type s3, key_id getenv('AWS_ACCESS_KEY_ID'), secret getenv('AWS_SECRET_ACCESS_KEY'), endpoint '${host%/}', use_ssl $ssl, region '${AWS_REGION:-us-east-1}', url_style 'path', scope '$data');"
+      secret="install httpfs; load httpfs; create secret (type s3, key_id getenv('AWS_ACCESS_KEY_ID'), secret getenv('AWS_SECRET_ACCESS_KEY'), endpoint '${host%/}', use_ssl $ssl, region '${AWS_REGION:-us-east-1}', url_style 'path', scope '$data');"
     fi
     attach="install ducklake; load ducklake; $secret attach 'ducklake:duckdb:$LAKEHOUSE_DIR/catalog.duckdb' as lakehouse (data_path '$data'"
     if [ "{{ mode }}" = "write" ]; then

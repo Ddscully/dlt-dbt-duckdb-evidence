@@ -87,6 +87,9 @@ def attach(
         data_path_sql = f"{Path(data_path)}/"
     if storage_secret is not None:
         use_ssl = "true" if str(storage_secret["use_ssl"]).lower() == "true" else "false"
+        # Installed as well as loaded: a fresh machine has no httpfs until
+        # something downloads it, and a bare `load` fails there.
+        con.execute("install httpfs")
         con.execute("load httpfs")
         # No bind parameters here either, so the values are quoted literals.
         con.execute(
