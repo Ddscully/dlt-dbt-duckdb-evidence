@@ -126,19 +126,20 @@ keep the split a split:
   dry run it went from 801 lines (at `c054e53`) to 352. What carries over is
   `RawSchemaDltTranslator` (§2 says why it matters; it stays here rather than in
   the package because it's twenty lines wrapped around two of that module's
-  constants), `FolderGroupDbtTranslator`, the freshness policies, the unpartitioned
+  constants), `FolderGroupDbtTranslator`, the freshness policies, the unwindowed
   `raw_assets`, `dbt_models`, `pipeline_status`, `evidence_site`, and the two wiring
   checks `run_history_records_this_build` and `site_pages_all_rendered`.
-  - **Every other asset check is yours**, and so are the year- and
-    month-partitioned blocks and `RAW_DESCRIPTIONS`' entries.
+  - **Every other asset check is yours**, and so are the year-range block (with
+    its `YearRange` config), the month-partitioned block and
+    `RAW_DESCRIPTIONS`' entries.
   - **One generic piece reaches through the example.** `pipeline_status`
     depends on the two Polars assets; with none, depend on
     `list(dbt_models.keys)`, because `deps=[dbt_models]` is refused.
 - `orchestration/definitions.py` — **three jobs, not two.** `full_refresh` (without
   the site) and `publish_site` (with it) are about Node and carry over.
   `load_retail` and its selection exist only because retail is month-partitioned
-  where WDI is yearly, and `just materialize` / `just materialize-site` run it by
-  name. The `assets=` and `asset_checks=` lists name every example asset.
+  and a job holding it would be too; `just materialize` / `just materialize-site`
+  run it by name. The `assets=` and `asset_checks=` lists name every example asset.
 - `publish/export_warehouse.py` — not only constants. `PUBLISHED_SCHEMAS` and
   `ATTRIBUTION` are config. **`release_notes()` is the example's release body
   written inside the function**: its grain exceptions, retail, FX and CBAM
@@ -191,8 +192,9 @@ this example's domain.
 Keep `ingest/http.py`, and keep `ingest/pipeline.py` as coordination:
 - **Keep** `load_groups`, `build_pipeline`, `pipeline_name`, `REFRESH` and
   `PIPELINE_DATASET` (which `publish/restore_history.py` reads).
-- **Keep, emptied:** the `FULL_REFRESH_RESOURCES`, `INCREMENTAL_RESOURCES` and
-  `PARTITIONED_RESOURCES` tuples, which `orchestration/assets.py` imports.
+- **Keep, emptied:** the `FULL_REFRESH_RESOURCES`, `INCREMENTAL_RESOURCES`,
+  `YEAR_RANGE_RESOURCES` and `PARTITIONED_RESOURCES` tuples, which
+  `orchestration/assets.py` imports.
 - **Keep, with its resource list emptied:** the `@dlt.source` function and
   `main()`, which `python -m ingest.pipeline` needs.
 

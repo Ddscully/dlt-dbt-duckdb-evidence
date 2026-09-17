@@ -138,8 +138,8 @@ def _job_keys(name: str) -> set[dg.AssetKey]:
 def test_the_jobs_between_them_cover_every_asset():
     """Registered is not the same as reachable, and the second one is what runs.
 
-    `full_refresh` excludes the retail *ingest* — it has to, an asset job takes
-    one partitions definition — so the exclusion has to be paid for by
+    `full_refresh` excludes the retail *ingest* — it has to, or the job would be
+    month-partitioned (below) — so the exclusion has to be paid for by
     `load_retail` rather than dropped. Anything in neither job is built by no
     workflow.
     """
@@ -159,7 +159,7 @@ def test_retail_ingest_is_the_only_thing_full_refresh_leaves_out():
     """Excluded on purpose, and only the one asset.
 
     `AssetSelection.all() - site - retail_ingest` subtracts a multi-asset's keys;
-    a source added to `MONTH_PARTITIONED_RESOURCES` would join that block and be
+    a source added to `PARTITIONED_RESOURCES` would join that block and be
     dropped from `full_refresh` silently.
     """
     from orchestration import assets
@@ -171,6 +171,57 @@ def test_retail_ingest_is_the_only_thing_full_refresh_leaves_out():
 
     # The downstream retail models are unpartitioned and must stay in the graph.
     assert dg.AssetKey(["analytics", "retail_rfm"]) in _job_keys("full_refresh")
+
+
+def test_the_routine_jobs_are_not_partitioned():
+    """A partitioned job's Materialize button in the Dagster UI launches a
+    backfill, and its dialog has no "no partition" choice: only the Launchpad
+    runs the job plain.
+
+    Measured on 2026-09-13, while WDI and weather were yearly partitions: the
+    button launched `full_refresh` over 1960-2026 as one run, cancelled after ten
+    minutes with days of Open-Meteo's budget still to pace; the same job from
+    the Launchpad finished in 1m38s. A job takes its partitions
+    definition from its assets, so one partitioned asset joining either selection
+    brings that back with nothing else red — which is why retail stays out.
+    """
+    from orchestration.definitions import defs
+
+    for name in ("full_refresh", "publish_site"):
+        partitions = defs.resolve_job_def(name).partitions_def
+        assert partitions is None, (
+            f"`{name}` is partitioned ({type(partitions).__name__}), so its Materialize "
+            "button in the UI is a backfill of every partition. Keep the partitioned "
+            "asset out of the selection, as `load_retail` does for retail, or give it "
+            "run config instead (`YearRange` in orchestration/assets.py)."
+        )
+
+
+def test_the_backfill_recipes_address_the_op_that_takes_the_years():
+    """`just backfill-wdi` and `just backfill-weather` pass their years as
+    `{"ops": {"<op>": {"config": ...}}}`, spelling the op name by hand.
+
+    `dagster asset materialize` does not refuse config for an op it does not know.
+    Measured: a stale name loads the incremental lookback and reports success, so
+    renaming the op in `assets.py` would turn both backfills into routine loads
+    with nothing red. (`dagster job execute` does refuse it; the asset CLI does
+    not.)
+    """
+    import re
+
+    from modern_data_stack.paths import project_root
+    from orchestration.assets import raw_by_year_assets
+
+    justfile = (project_root() / "justfile").read_text()
+    for recipe in ("backfill-wdi", "backfill-weather"):
+        # The header line, then every indented or blank line under it.
+        body = re.search(rf"^{recipe} [^\n]*\n((?:[ \t][^\n]*\n|\n)*)", justfile, re.MULTILINE)
+        assert body, f"no `{recipe}` recipe in the justfile"
+        addressed = re.findall(r'"ops": \{"([\w-]+)"', body[1])
+        assert addressed == [raw_by_year_assets.op.name], (
+            f"`just {recipe}` addresses its year config to {addressed}, but the op "
+            f"that reads it is `{raw_by_year_assets.op.name}`"
+        )
 
 
 def test_every_retail_month_has_a_partition_to_land_in():

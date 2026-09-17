@@ -2,12 +2,14 @@
 
 Everything `just run` does, as one asset graph, plus the Evidence site. Three jobs:
 
-* `load_retail` — the month-partitioned retail load. `define_asset_job` resolves
-  a selection to one `partitions_def` or raises, with no opt-out for a named job,
-  and retail is monthly where `raw/wb_wdi` and `raw/om_weather_daily` are yearly.
-* `full_refresh` — everything else bar the site. Pure Python, so `ci.yml`,
-  `nightly.yml` and `release-data.yml` run it without Node; the daily schedule
-  targets it.
+* `load_retail` — the month-partitioned retail load. A job takes its
+  partitions definition from its assets, so with retail inside it `full_refresh`
+  would be month-partitioned, and a partitioned job's Materialize button in the
+  UI launches a backfill instead of the routine load.
+* `full_refresh` — everything else bar the site, and unpartitioned: WDI and
+  weather take their backfill years as run config (`YearRange`), not partitions.
+  Pure Python, so `ci.yml`, `nightly.yml` and `release-data.yml` run it without
+  Node; the daily schedule targets it.
 * `publish_site` — `full_refresh` plus `reports/evidence_site`, which shells out
   to npm. `pages.yml` runs it.
 
@@ -17,8 +19,8 @@ jobs. It is not called `ingest_retail` because jobs share a namespace with ops,
 and the retail `@dlt_assets` op has that name.
 
 Both selections name what they exclude, so a new asset joins `full_refresh`
-automatically; a second npm-shaped or differently-partitioned asset has to be
-excluded by hand.
+automatically; a second npm-shaped or partitioned asset has to be excluded by
+hand, and `tests/test_definitions.py` fails on a partitioned one.
 """
 
 from __future__ import annotations
@@ -36,9 +38,9 @@ load_retail_job = dg.define_asset_job(
     name="load_retail",
     selection=retail_ingest,
     description=(
-        "Load raw.retail_invoice_lines. Separate from `full_refresh` because an "
-        "asset job takes a single partitions definition and this source's is "
-        "monthly where wb_wdi's is yearly. Run it before `full_refresh`."
+        "Load raw.retail_invoice_lines. Separate from `full_refresh` because this "
+        "source is partitioned by month, and a partitioned job's Materialize "
+        "button launches a backfill. Run it before `full_refresh`."
     ),
 )
 
@@ -76,9 +78,9 @@ defs = dg.Definitions(
     # in the graph at all, and `AssetSelection.all()` won't tell you.
     assets=[
         assets.raw_assets,
-        # The partitioned multi-assets, one per grain: WDI and weather by year,
-        # retail by month.
-        assets.raw_year_partitioned_assets,
+        # WDI and weather, which take a year range as run config; then retail,
+        # partitioned by month.
+        assets.raw_by_year_assets,
         assets.raw_retail_asset,
         assets.dbt_models,
         assets.co2_intensity,

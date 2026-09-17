@@ -63,7 +63,7 @@ WEATHER_EXPECTED_UNITS = {
 }
 
 # The floor of a watermark-driven load: 2007 is Eurostat's first electricity
-# price year. Not a hard limit — a partitioned backfill reaches back to 1960 —
+# price year. Not a hard limit — a year-range backfill reaches back to 1960 —
 # and not where a cold start begins (WEATHER_COLD_START_YEARS).
 WEATHER_FIRST_YEAR = 2007
 
@@ -277,8 +277,8 @@ def weather_windows(
     """The `(start, end)` date windows to request, one per calendar year.
 
     A year for all 41 locations is ~641 units — just over the per-minute budget,
-    well inside the hourly one — and is the asset's partition, so backfill and
-    incremental loads chunk identically.
+    well inside the hourly one — and is the unit a backfill is asked for in, so
+    backfill and incremental loads chunk identically.
 
     `years` is the backfill window, asked for verbatim and clipped to the
     archive's end. Without it the window runs from the incremental start date.
@@ -298,6 +298,45 @@ def weather_windows(
         end = min(last, date(year, 12, 31).isoformat())
         windows.append((start, end))
     return windows
+
+
+def weather_range_units(years: tuple[int, int], today: date | None = None) -> float:
+    """What a backfill over `years` costs: every window, every capital."""
+    return sum(
+        weather_call_units(
+            len(WEATHER_COUNTRIES),
+            (date.fromisoformat(end) - date.fromisoformat(start)).days + 1,
+        )
+        for start, end in weather_windows(years, today=today)
+    )
+
+
+def check_weather_range_is_affordable(years: tuple[int, int], today: date | None = None) -> None:
+    """Refuse a backfill that costs more than a day's allowance, before any request.
+
+    The limiter honours the daily window by *sleeping*, so an oversized range
+    does not fail: it waits for the window to drain, for as many days as the
+    range overspends, looking exactly like a hung run. 1960-2026 is ~42,800
+    units, over four days — what the Dagster UI launched on 2026-09-13, when a
+    partitioned asset made "every year" its Materialize button's default. A range
+    inside the allowance still takes hours, paced by the hourly window, but ends.
+
+    The check is against a whole day's allowance, not what is left of it: only
+    Open-Meteo knows the rest, and it answers with the daily 429 that
+    `weather_retry_after` already refuses to wait out.
+    """
+    daily = dict(WEATHER_RATE_LIMITS)[86400.0]
+    cost = weather_range_units(years, today)
+    if cost <= daily:
+        return
+    most = int(daily // weather_call_units(len(WEATHER_COUNTRIES), 366))
+    first, last = years
+    raise ValueError(
+        f"a weather backfill over {first}-{last} costs ~{cost:,.0f} Open-Meteo units against "
+        f"{daily:,.0f} a day, and the rate limiter would sleep through the daily window rather "
+        f"than fail. Split it across days, at most {most} years a run: e.g. "
+        f"`just backfill-weather {last - most + 1} {last}`."
+    )
 
 
 def weather_retry_after(reason: str) -> float:
@@ -433,10 +472,13 @@ def om_weather_daily(years: tuple[int, int] | None = None):
     previous release and this asks only for what is new (`weather_watermark`).
 
     With `years` (a backfill, `just backfill-weather`) it loads exactly those
-    years and ignores the watermark. Without, it loads from the watermark's
+    years and ignores the watermark, provided they fit a day's allowance
+    (`check_weather_range_is_affordable`). Without, it loads from the watermark's
     lookback to the archive's end — or `WEATHER_COLD_START_YEARS` into an empty
     destination.
     """
+    if years is not None:
+        check_weather_range_is_affordable(years)
     locations = weather_locations()
     limiter = WeightedWindowLimiter(WEATHER_RATE_LIMITS)
     watermark = None if years is not None else weather_watermark()

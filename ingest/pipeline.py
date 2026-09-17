@@ -45,10 +45,11 @@ def public_indicators(
 ):
     """The eight resources as one dlt source.
 
-    The window arguments are passed to their resources, so a Dagster partition
-    range and an unpartitioned CLI run build the source with the same call. One
-    per resource: the grains differ (years, months), and WDI and weather are
-    separate assets, so a backfill of one is not a backfill of the other.
+    The window arguments are passed to their resources, so a backfill (a year
+    range, a retail partition) and an incremental CLI run build the source with
+    the same call. One per resource: the grains differ (years, months), and WDI
+    and weather are separate assets, so a backfill of one is not a backfill of
+    the other.
     """
     return [
         owid_co2(),
@@ -73,21 +74,30 @@ REFRESH = "drop_resources"
 FULL_REFRESH_RESOURCES = ("owid_co2", "owid_energy", "wb_country", "eu_elec_prices")
 INCREMENTAL_RESOURCES = ("wb_wdi", "ecb_fx_rates", "retail_invoice_lines", "om_weather_daily")
 
-# Which resources the orchestration layer partitions — a different question from
-# which merge. A partition must be a re-runnable unit of work that maps onto a
-# slice of the destination:
+# How the orchestration layer lets a run load *less* than a whole resource — a
+# different question from which resources merge. The unit has to be re-runnable
+# work that maps onto a slice of the destination:
 #
-#   * `wb_wdi` — the API takes `&date=lo:hi` and `year` is in the primary key.
-#   * `retail_invoice_lines` — one static workbook, so the fetch cannot narrow,
-#     but the load can: `invoice_month` comes from the partition's timestamp.
-#   * `om_weather_daily` — the API takes a date range, `weather_date` is in the
-#     primary key, and a year is the unit its budget is spent in: the full
-#     archive costs more than a day's allowance.
+#   * `YEAR_RANGE_RESOURCES` take a year range as run config. `wb_wdi`: the API
+#     takes `&date=lo:hi` and `year` is in the primary key. `om_weather_daily`:
+#     the API takes a date range, `weather_date` is in the primary key, and a
+#     year is the unit its budget is spent in.
+#   * `PARTITIONED_RESOURCES` are Dagster partitions. `retail_invoice_lines` is
+#     one static workbook, so the fetch cannot narrow, but the load can:
+#     `invoice_month` comes from the partition's timestamp.
 #
-# `ecb_fx_rates` merges but is not partitioned: its whole series is one request.
-# Kept here, not in `orchestration/`, so `tests/test_ingest.py` can hold both
-# splits to the source without importing Dagster.
-PARTITIONED_RESOURCES = ("wb_wdi", "retail_invoice_lines", "om_weather_daily")
+# The year-range pair were yearly partitions until 2026-09. Every routine run
+# loads their lookback, so nothing but a backfill ever filled a partition, and a
+# partitioned asset makes the Dagster UI's Materialize button a backfill: every
+# year from 1960, which for weather is days of Open-Meteo's allowance. Retail
+# keeps its partitions because every month together costs what the one file
+# does.
+#
+# `ecb_fx_rates` merges and takes neither: its whole series is one request.
+# Kept here, not in `orchestration/`, so `tests/test_ingest.py` can hold the
+# split to the source without importing Dagster.
+YEAR_RANGE_RESOURCES = ("wb_wdi", "om_weather_daily")
+PARTITIONED_RESOURCES = ("retail_invoice_lines",)
 
 
 def load_groups(resources: Iterable[str] | None = None) -> list[tuple[list[str], dict]]:

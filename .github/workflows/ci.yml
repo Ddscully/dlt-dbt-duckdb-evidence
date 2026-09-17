@@ -47,9 +47,9 @@ jobs:
       # evaluates the asset checks alongside dbt's tests — all against fixtures.
       #
       # The recipe is the definition of what a pipeline run *is*: two jobs in
-      # order, because an asset job takes one partitions definition and the
-      # retail ingest is monthly where wb_wdi is yearly. All four workflows call
-      # it, so `just materialize` on a laptop is the same run.
+      # order, because the retail ingest is partitioned by month and
+      # `full_refresh` must not be, or its UI button is a backfill. All four
+      # workflows call it, so `just materialize` on a laptop is the same run.
       - name: Materialize the asset graph
         run: just materialize
 
