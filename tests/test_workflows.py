@@ -636,8 +636,10 @@ def test_the_fixture_pipeline_isolates_every_piece_of_state_it_touches():
 
 # What each command a course recipe runs reads or writes, so what the recipe has
 # to point at the sandbox before running it. `dbt deps` touches none of it.
+# Any whitespace between the words: a joined `\` continuation leaves two spaces.
+_DBT_COMMAND = r"\buv\s+run\s+dbt\s+(?!deps\b)\w+"
 _COURSE_STATE_BY_COMMAND = {
-    r"uv run dbt (?!deps\b)\w+": ("WAREHOUSE_PATH", "LAKEHOUSE_DIR", "DBT_TARGET_PATH"),
+    _DBT_COMMAND: ("WAREHOUSE_PATH", "LAKEHOUSE_DIR", "DBT_TARGET_PATH"),
     r"-m ingest\.pipeline\b": ("LAKEHOUSE_DIR",),
     r"-m transform\.pipeline_status\b": (
         "WAREHOUSE_PATH",
@@ -674,6 +676,8 @@ def test_every_course_recipe_keeps_the_sandbox_to_itself():
     for name in names:
         recipe = _recipe(name)
         code = "\n".join(line for line in recipe.splitlines() if not line.strip().startswith("#"))
+        # Read shell commands, not lines: a `\` continuation is one command.
+        code = re.sub(r"\\\n\s*", " ", code)
         exports = dict(re.findall(r'^\s*export (\w+)="([^"]*)"', code, re.MULTILINE))
         target = exports.get("DBT_TARGET_PATH", "$DBT_TARGET_PATH")
 
@@ -695,8 +699,12 @@ def test_every_course_recipe_keeps_the_sandbox_to_itself():
                 )
 
         # The variable alone is not enough, as in `test-pipeline`: every dbt
-        # command that builds has to be told to write there.
-        for command in re.findall(r"uv run dbt (?!deps\b)[^&\n]*", code):
+        # command that builds has to be told to write there. Split on every
+        # operator that starts another command; reading to the next `&` alone
+        # took `build --target-path …; uv run dbt docs generate` as one command.
+        for command in re.split(r"&&|\|\||[;|&\n]", code):
+            if not re.search(_DBT_COMMAND, command):
+                continue
             assert '--target-path "$DBT_TARGET_PATH"' in command, (
                 f"`just {name}` runs `{command.strip()}` without --target-path, so "
                 f"its artifacts land in dbt/target/"

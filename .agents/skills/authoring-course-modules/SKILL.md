@@ -46,6 +46,13 @@ in `data/course/dbt-target/` now.
   `lake.lakehouse`) to the state it reads or writes. So a new `course-*` recipe
   is held without editing the test. Ten mutations fail it, including `main`'s
   recipes as the issue found them and a recipe the test had never seen.
+- **It reads shell commands, not text, and review found that it did not.** Its
+  first version took everything up to the next `&` as one command. So
+  `build --target-path …; uv run dbt docs generate` passed while the second
+  command wrote to `dbt/target/`, and a correct flag on a `\` continuation line
+  failed. It now joins continuations and splits on every command operator, and
+  four more mutations hold that. One of them caught the fix's own first draft:
+  a joined continuation leaves two spaces, which a single-space pattern missed.
 
 **`course-query` attaches the sandbox lakehouse, and had to be taught to.** When
 `raw` moved into DuckLake the recipe kept opening the warehouse file alone, and
