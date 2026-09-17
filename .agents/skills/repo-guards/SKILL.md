@@ -43,8 +43,8 @@ section here. The mutation method these guards were written with is in the
   missing `_dlt_load_id`, "six sources for seven"). `RAW_DESCRIPTIONS`
   (`orchestration/assets.py`) is read with `.get(name)`, so an unlisted
   resource materialises with no description at all. Both are now held to
-  `public_indicators()`, the same authority `load_groups` and
-  `PARTITIONED_RESOURCES` use.
+  `public_indicators()`, the same authority `load_groups`,
+  `YEAR_RANGE_RESOURCES` and `PARTITIONED_RESOURCES` use.
   - **`SOURCE_TABLES` is asserted, not derived, and the layering is the
     reason.** Deriving deletes the list but makes `transform/` import from
     `ingest/`, which no transform module does — and `pipeline_status` is the one

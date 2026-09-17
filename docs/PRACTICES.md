@@ -243,11 +243,15 @@ resources are keyed to match the keys dagster-dbt derives from dbt's own
 graph splits in two: both halves still run, just unconnected.
 → [`orchestration/assets.py`](../orchestration/assets.py)
 
-**Partition only where a partition is a real unit of work.** One source earns
-yearly partitions: its API takes a date range, its disposition is `merge`, and
-the year is in the primary key. A second source is incremental *and* takes a date
-range and is deliberately **not** partitioned, because its whole 27-year series
-is one three-second request. Merging is not what earns a partition.
+**Partition only where materializing every partition is a routine-sized run.** A
+partitioned asset turns Dagster's Materialize button into a backfill, with no
+"no partition" choice. Two sources have a real per-year unit of work — a
+date-range API, `merge`, the year in the primary key — and are deliberately
+**not** partitioned: every partition of one of them is days of API budget, so
+both take their backfill years as run config and the button loads the lookback.
+The one partitioned source is the one where every partition together is one read
+of one file. And merging is not what earns a window: a third source merges and
+takes a date range, and its whole 27-year series is one three-second request.
 
 **CI runs offline against recorded fixtures; a nightly run against the live
 endpoints is what tells you reality moved.** A red pull request therefore means

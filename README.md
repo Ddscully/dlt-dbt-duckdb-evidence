@@ -217,7 +217,7 @@ just backfill-wdi 1990 1995               # re-load WDI for a range of years
 Nothing declares the order by hand: dlt resource keys match the source keys
 dagster-dbt derives from `_sources.yml`, the model edges come from dbt's own
 `ref()` graph, and the site declares one dep per table its queries read. The
-graph, the three jobs and the partitioned backfill are
+graph, the three jobs and the backfills are
 [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md).
 
 ## Tests

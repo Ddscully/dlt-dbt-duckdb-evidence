@@ -43,6 +43,7 @@ just materialize                          # whole graph, headless
 just materialize-site                     # ...plus the Evidence site (needs Node)
 just materialize-select 'raw/wb_wdi*'     # one source + everything downstream
 just backfill-wdi 1990 1995               # re-load WDI for a range of years
+just backfill-weather 2012 2026           # deepen the weather archive, 15 years a run at most
 ```
 
 The same runs are available from the UI — `just dagster`, then launch
@@ -52,11 +53,15 @@ straight off the asset graph. Three things the UI won't tell you:
 - **The ordering isn't enforced there either.** Launch `full_refresh` first and
   it fails inside dbt with `Catalog Error: Table with name retail_invoice_lines
   does not exist!` — one layer downstream of the actual mistake.
-- **Ad-hoc graph selections can do something the named jobs can't.** They run
-  through Dagster's implicit global job, which is the only one where
-  `allow_different_partitions_defs` is `True`, so a selection made in the UI may
-  span the yearly WDI partitions and the monthly retail ones together. That is
-  exactly what `define_asset_job` refuses, and it is why there are three jobs.
+- **Materialize on anything partitioned is a backfill.** The button's dialog asks
+  which partitions and offers no "none"; only the Launchpad runs a job plain.
+  That is why `full_refresh` and `publish_site` hold no partitioned asset, so
+  their button runs the routine load, and why a backfill of WDI or weather is
+  the Launchpad with run config — what `just backfill-wdi` passes:
+  `ops: {ingest_by_year: {config: {first_year: 1990, last_year: 1995}}}`. A
+  weather range over a day of Open-Meteo's budget is refused before any request.
+  `load_retail`'s button does ask for months, and all of them together are one
+  run over the one cached workbook.
 - **It is the easiest cold start**, because `dbt_project.prepare_if_dev()` fires
   only under `dagster dev`: the UI runs `dbt deps` and `dbt parse` for you, where
   the headless recipes need the manifest to exist already.
@@ -71,9 +76,10 @@ CI, the nightly run and the data release all want a graph that runs on a bare
 Python checkout. `publish_site` is `full_refresh` plus the site, and it's what
 the Pages workflow runs.
 
-`load_retail` is separate for a different reason: an asset job can't span two
-partitions definitions, and `raw/wb_wdi` is partitioned yearly while
-`raw/retail_invoice_lines` is monthly. It has to run before `full_refresh`,
+`load_retail` is separate for a different reason: retail is the one source
+partitioned in Dagster, by month, and a job takes its assets' partitions
+definition. With retail inside, `full_refresh` would be month-partitioned and its
+Materialize button a backfill. It has to run before `full_refresh`,
 because dbt reads the table it lands. The justfile recipes and all four workflows
 pair them.
 
@@ -82,7 +88,7 @@ pair them.
 | | |
 |---|---|
 | **Selective rebuilds** | `raw/wb_wdi*` reloads one API and rebuilds only what depends on it. dlt loads only that resource, so the other six keep their data. (`*` is all downstream; a bare `+` is only one layer.) |
-| **Re-runnable backfills** | `raw/wb_wdi` is partitioned by year (1960 → now), so a World Bank restatement older than the five-year lookback is a unit of work you can point at instead of a 190k-row full reload. A range is one request per indicator, and `merge` on `(indicator, country_code, year)` makes re-running a year a no-op. Retail is the other partitioned source, by month. The split is on *partitioning* and not on load disposition: the ECB rates merge too, but their whole 27-year series is one three-second request, so a partition there would buy nothing. |
+| **Re-runnable backfills** | `raw/wb_wdi` takes a year range (1960 → now) as run config, so a World Bank restatement older than the five-year lookback is a unit of work you can point at instead of a 190k-row full reload. A range is one request per indicator, and `merge` on `(indicator, country_code, year)` makes re-running a year a no-op. The weather archive deepens the same way. Both were yearly *partitions* until 2026-09: no routine run ever filled one, and they made the UI's Materialize button a backfill of every year since 1960, days of the weather API's budget. Retail is partitioned by month, where every partition together is one read of one file. The split is on the *window* and not on load disposition: the ECB rates merge too, but their whole 27-year series is one three-second request, so a window there would buy nothing. |
 | **Freshness policies** | Raw assets warn after 2 days and fail after 7; modelled assets are expected by 08:00 UTC daily. A schedule that quietly stops firing turns assets stale in the UI instead of leaving no trace. |
 | **Asset checks** | dbt's `not_null` tests show up as checks on the model they guard, next to Python checks dbt can't express: every WDI indicator present, mart reaching a recent year, dense ranks with no gaps, RFM scores not splitting ties, and the dbt build that just ran appearing in `analytics.pipeline_runs`. |
 | **Lineage that can't drift** | The graph is derived from the dbt manifest and the dlt source, not maintained alongside them. |
@@ -93,6 +99,6 @@ want it running.
 
 Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile).
 Only `dagster.yaml` is checked in. [AGENTS.md](../AGENTS.md#orchestration-orchestration)
-covers the traps: asset-key matching between dlt and dbt, the unpartitioned
-fallback inside the partitioned asset, and the fact that an asset missing from
+covers the traps: asset-key matching between dlt and dbt, `load_retail` running
+first, and the fact that an asset missing from
 `definitions.py` is silently absent rather than an error.

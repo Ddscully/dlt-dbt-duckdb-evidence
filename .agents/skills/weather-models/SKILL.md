@@ -1,6 +1,6 @@
 ---
 name: weather-models
-description: The Open-Meteo ERA5 capital-city weather source — raw.om_weather_daily, stg_weather_daily, the weighted rate-limit budget that bounds what can be fetched, the positional multi-location response, the two degree-day conventions and the yearly partition it shares with wb_wdi. Use when editing the weather resource or model, running just backfill-weather, changing which years or locations the archive covers, or reasoning about anything the weather budget constrains.
+description: The Open-Meteo ERA5 capital-city weather source — raw.om_weather_daily, stg_weather_daily, the weighted rate-limit budget that bounds what can be fetched, the positional multi-location response, the two degree-day conventions and the year-range backfill it shares with wb_wdi, which refuses a range over a day's budget. Use when editing the weather resource or model, running just backfill-weather, changing which years or locations the archive covers, or reasoning about anything the weather budget constrains.
 ---
 
 # Capital-city weather (`om_weather_daily`, `stg_weather_daily`)
@@ -127,7 +127,7 @@ its first source with a *finite budget*.
     as the one.
 - **A cold start fetches three years, not the whole series, and getting that
   wrong is a *hang* rather than a failure.** `WEATHER_FIRST_YEAR` (2007) is the
-  backfill floor; `WEATHER_COLD_START_YEARS` is what an unpartitioned load asks
+  backfill floor; `WEATHER_COLD_START_YEARS` is what a routine load asks
   for when the destination is empty — which is the normal state of a fresh clone
   and of `pages.yml`, `nightly.yml` and `release-data.yml`, all three of which
   build from nothing against the live APIs. Starting a cold load at 2007 is the
@@ -154,16 +154,28 @@ its first source with a *finite budget*.
   Copernicus supersedes it with final ERA5 two to three months later. FX's ten
   days would freeze preliminary numbers *permanently* here, because rows outside
   the window are carried forward rather than refetched.
-- **`wb_wdi` and `om_weather_daily` share one `@dlt_assets` block, and that is
-  required.** `full_refresh` is `AssetSelection.all()` minus two things, so it
-  contains both, and `define_asset_job` resolves a selection to a single
-  `partitions_def` or raises. Two yearly definitions differing only in start year
-  would break the job three workflows execute. The cost is that ERA5's 1940-1959
-  is not addressable as a partition, since 1960 is the World Bank's floor — the
-  right way round, because the alternative creates twenty WDI partitions that
-  load nothing. Giving the block a second resource is also what made
-  `raw_year_partitioned_assets` need `context.selected_asset_keys`; with one
-  resource in the tuple, ignoring the selection was a no-op.
+- **A backfill over more than a day's allowance is refused before any request,
+  and the Dagster UI is what proved it had to be.** The same shape as the cold
+  start below, on the path that never had a total bound: weather was a yearly
+  *partition* until 2026-09, and a partitioned job's Materialize button is a
+  backfill. On 2026-09-13 it asked for 1960–2026 — ~42,800 units, over four
+  days of allowance, which the limiter honours by sleeping — and the run was
+  cancelled after ten minutes with nothing red. (That step also fetched WDI's
+  whole series, so the ten minutes are not all weather's.)
+  `check_weather_range_is_affordable` sums `weather_windows` for every capital
+  and raises past 10,000, naming a split that fits: fifteen years a run, sized
+  against leap years. The resource calls it first thing, and
+  `raw_by_year_assets` calls it again before `dlt.run`, so the refusal is not
+  wrapped in dlt's extraction error. It checks a *whole* day's allowance, not
+  what is left of it — only Open-Meteo knows that, and its daily 429 already
+  raises (`weather_retry_after`).
+- **`wb_wdi` and `om_weather_daily` share one `@dlt_assets` block and one
+  `YearRange` config** (`dagster-graph-and-jobs` says why it is config and not
+  partitions). One block because a year range means the same thing to both;
+  the floor is WDI's 1960, so ERA5's 1940-1959 is not addressable, which is the
+  right way round for a source added for comparisons from 2007. The shared block
+  is also why `raw_by_year_assets` reads `context.selected_asset_keys`:
+  materialising `raw/om_weather_daily` alone must not re-fetch WDI.
 - **A capital is a coarse proxy and the model says so with a number.**
   `grid_distance_km` is the great-circle distance from the capital to the ERA5
   cell that answered — the API snaps to the nearest cell centre and reports where

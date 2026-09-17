@@ -67,7 +67,7 @@ history along with their watermarks. `load_groups()` in `ingest/pipeline.py` is
 what both `main()` and the Dagster assets iterate.
 
 A restatement older than the window doesn't need the whole series pulled again.
-WDI is partitioned by year in the asset graph, so `just backfill-wdi 1997`
+The WDI asset takes a year range as run config, so `just backfill-wdi 1997`
 re-fetches that year and merges it in.
 
 ## Schemas

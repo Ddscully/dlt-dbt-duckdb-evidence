@@ -126,7 +126,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just materialize-site` | the same two jobs + the Evidence site (`publish_site`; needs Node) |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
 | `just materialize-preview '<sel>'` | what a selection resolves to, materializing nothing — zero matches still exits 0 |
-| `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — the partitioned `raw/wb_wdi` asset |
+| `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — run config on `raw/wb_wdi`, not a partition |
 | `just backfill-weather 2012 2026` | deepen the weather archive a year at a time, paced to Open-Meteo's budget: about an hour a decade, fifteen years at most per run |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
 | `just serve` | the graph and the dashboard as one always-on service (`docs/RUNNING_AS_A_SERVICE.md`) |
@@ -195,7 +195,7 @@ globs, holding dbt Labs' skills to this repo's paths.
 | `pipeline-observability` | `transform/pipeline_status.py` and the `pipeline_*` tables |
 | `the-lakehouse` | the DuckLake catalog |
 | `publishing-a-release` | the export, personal data at the boundary, what carries forward |
-| `dagster-graph-and-jobs` | partitions, registration, the three jobs |
+| `dagster-graph-and-jobs` | backfill windows and partitions, registration, the three jobs |
 | `building-evidence-reports` | the Evidence site |
 | `linting-and-type-checking` | sqlfluff, ruff and ty |
 | `dependency-versions` | what pins what, and the versions nothing watches |
@@ -411,7 +411,7 @@ the boundary is `publishing-a-release`. Two things not to need it for:
 ## Orchestration (`orchestration/`)
 
 Dagster wraps the existing layers rather than replacing them: `ingest`, `dbt`
-and `transform` stay independently runnable. Partitions, registration, the three
+and `transform` stay independently runnable. Backfill windows, partitions, registration, the three
 jobs and the rest are `dagster-graph-and-jobs`. What bites outside it:
 
 - **Asset keys are the join between the layers.** Rename a dbt source table

@@ -203,8 +203,8 @@ def test_wdi_url_adds_the_date_window():
 
 
 def test_wdi_url_closes_the_window_when_given_an_end_year():
-    """A partition asks for one year, so the window needs a right-hand end — the
-    incremental path leaves it open at today."""
+    """A backfill can ask for one year, so the window needs a right-hand end —
+    the incremental path leaves it open at today."""
     url = worldbank.wdi_url("SP.POP.TOTL", 1, 1995, 1995)
     assert "&date=1995:1995" in url
     assert fixtures.path_for(url).name == "wb_wdi_SP.POP.TOTL.json"
@@ -326,12 +326,12 @@ def test_wb_wdi_full_reload_env_var_ignores_the_watermark(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# wb_wdi — the partitioned (backfill) window
+# wb_wdi — the backfill window
 # --------------------------------------------------------------------------- #
 
 
 def test_wb_wdi_partition_window_is_asked_for_verbatim(monkeypatch):
-    """A partition key means "load exactly these years", for every indicator —
+    """A year range means "load exactly these years", for every indicator —
     including the ones that have a watermark, which the incremental path would
     have windowed differently."""
     _state(monkeypatch, {worldbank.WDI_WATERMARK_KEY: {"SP.POP.TOTL": 2025}})
@@ -352,7 +352,7 @@ def test_wb_wdi_backfill_does_not_move_the_watermark(monkeypatch):
     """The watermark means "everything up to here is loaded", which a backfill
     of one window can't claim.
 
-    The failure it prevents: partitions 2020-2025 into an empty warehouse would
+    The failure it prevents: a 2020-2025 backfill into an empty warehouse would
     leave a 2025 watermark, and the next incremental run would look back five
     years over sixty years of history that was never fetched.
     """
@@ -365,7 +365,7 @@ def test_wb_wdi_backfill_does_not_move_the_watermark(monkeypatch):
 
 def test_public_indicators_threads_the_window_to_the_resource(monkeypatch):
     """The window reaches the resource through the *source*, which is what lets
-    the Dagster asset build a partitioned load with the same call the CLI makes
+    the Dagster asset build a backfill with the same call the CLI makes
     for an incremental one."""
     _state(monkeypatch, {})
     calls = _serve_wdi(monkeypatch, {"SP.POP.TOTL": [_wdi_row("USA", "1975", 1.0)]})
@@ -440,33 +440,32 @@ def test_source_tables_names_every_resource_in_the_source_exactly_once():
     assert len(listed) == len(set(listed))
 
 
-def test_partitioned_resources_is_a_subset_of_the_incremental_ones():
-    """The orchestration split is by *partitioning*, not by disposition, and the
-    two questions are not the same one — `ecb_fx_rates` merges and is not
-    partitioned.
+def test_the_windowed_resources_are_incremental_and_do_not_overlap():
+    """The orchestration split is by how a run can *narrow* a load, not by
+    disposition — `ecb_fx_rates` merges and takes no window at all.
 
-    `orchestration/assets.py` derives its unpartitioned block as everything
-    minus this tuple, so a name in here that isn't a real resource would quietly
-    remove nothing and leave WDI's block empty.
+    `orchestration/assets.py` derives its unwindowed block as everything minus
+    these two tuples, so a name in either that isn't a real resource would
+    quietly remove nothing and leave its own block short.
     """
-    assert set(pipeline.PARTITIONED_RESOURCES) <= set(pipeline.INCREMENTAL_RESOURCES)
-    # Named explicitly, because `orchestration/assets.py` splits this tuple again
-    # by partition grain — years for WDI and weather, months for retail — into
-    # two `@dlt_assets` blocks, one `partitions_def` each. A resource added here
-    # without a matching block would land in neither and leave the graph, which
-    # nothing else here would catch.
-    assert set(pipeline.PARTITIONED_RESOURCES) == {
-        "wb_wdi",
-        "retail_invoice_lines",
-        "om_weather_daily",
-    }
-    unpartitioned = [
+    year_range = set(pipeline.YEAR_RANGE_RESOURCES)
+    partitioned = set(pipeline.PARTITIONED_RESOURCES)
+    assert year_range | partitioned <= set(pipeline.INCREMENTAL_RESOURCES)
+    assert not year_range & partitioned, "a resource in two blocks loads twice"
+    # Named explicitly, because each tuple is one `@dlt_assets` block: year
+    # ranges as run config, months as partitions. A resource added to either
+    # joins that block's window, which is a decision, not a default — and a
+    # second partitioned resource would have to be excluded from `full_refresh`
+    # by hand, or the job becomes partitioned (`tests/test_definitions.py`).
+    assert year_range == {"wb_wdi", "om_weather_daily"}
+    assert partitioned == {"retail_invoice_lines"}
+    unwindowed = [
         name
         for names, _ in pipeline.load_groups()
         for name in names
-        if name not in pipeline.PARTITIONED_RESOURCES
+        if name not in year_range | partitioned
     ]
-    assert sorted(unpartitioned + list(pipeline.PARTITIONED_RESOURCES)) == sorted(
+    assert sorted(unwindowed + [*year_range, *partitioned]) == sorted(
         r.name for r in pipeline.public_indicators().resources.values()
     )
 
@@ -1017,6 +1016,31 @@ def test_a_cold_start_fits_inside_the_hourly_budget():
     )
 
 
+def test_a_backfill_over_a_days_allowance_is_refused_before_any_request(monkeypatch):
+    """The limiter honours the daily window by sleeping, so an unaffordable range
+    is a hang measured in days rather than a failure. The Dagster UI launched
+    exactly that on 2026-09-13 — 1960-2026, ~42,800 units — while WDI and
+    weather were yearly partitions, and it was cancelled by hand, not failed.
+    Refusing up front is the only loud signal left.
+    """
+    today = date(2026, 9, 17)
+    daily = dict(weather.WEATHER_RATE_LIMITS)[86400.0]
+    most = int(daily // weather.weather_call_units(len(weather.WEATHER_COUNTRIES), 366))
+    assert most == 15, "the justfile and the skills quote fifteen years a run"
+
+    # The largest range the refusal suggests fits, leap years and all.
+    weather.check_weather_range_is_affordable((2025 - most + 1, 2025), today=today)
+    with pytest.raises(ValueError, match=r"just backfill-weather 2011 2025"):
+        weather.check_weather_range_is_affordable((2025 - most, 2025), today=today)
+
+    # And the resource refuses before it looks anything up, let alone fetches.
+    monkeypatch.setattr(
+        weather, "weather_locations", lambda: pytest.fail("fetched before refusing")
+    )
+    with pytest.raises(ResourceExtractionError, match="1960-2026"):
+        list(weather.om_weather_daily((1960, 2026)))
+
+
 def test_a_cold_start_still_yields_two_complete_calendar_years():
     """The floor under `WEATHER_COLD_START_YEARS`, since the budget only pushes
     it down. Two complete years is the minimum for the year-over-year comparison
@@ -1047,7 +1071,7 @@ def test_weather_windows_are_calendar_years_clipped_at_both_ends():
 
 def test_weather_windows_never_ask_past_the_archive():
     """A backfill range reaching into the future is clipped, not refused — the
-    current year is a legitimate partition and it is simply not finished."""
+    current year is a legitimate year to backfill and it is simply not finished."""
     windows = weather.weather_windows(years=(2026, 2030), watermark=None, today=date(2026, 8, 27))
     assert windows == [("2026-01-01", "2026-08-24")]
 

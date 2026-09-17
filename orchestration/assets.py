@@ -39,6 +39,7 @@ from ingest.pipeline import (
     FULL_REFRESH_RESOURCES,
     INCREMENTAL_RESOURCES,
     PARTITIONED_RESOURCES,
+    YEAR_RANGE_RESOURCES,
     build_pipeline,
     load_groups,
     public_indicators,
@@ -47,6 +48,7 @@ from ingest.sources.retail import (
     RETAIL_FIRST_MONTH,
     RETAIL_LAST_MONTH,
 )
+from ingest.sources.weather import check_weather_range_is_affordable
 from ingest.sources.worldbank import (
     WB_WDI_INDICATORS,
     WDI_FIRST_YEAR,
@@ -118,7 +120,8 @@ RAW_DESCRIPTIONS = {
     "ecb_fx_rates": (
         "ECB daily euro FX reference rates via Frankfurter, at (rate_date, "
         "quote_currency). Loaded incrementally: "
-        "`merge` over a 10-day lookback, and *not* partitioned, unlike WDI."
+        "`merge` over a 10-day lookback, with no year-range backfill, unlike WDI: "
+        "the whole series is one request."
     ),
     "retail_invoice_lines": (
         "UCI Online Retail II — a UK gift retailer's order lines at "
@@ -132,27 +135,24 @@ RAW_DESCRIPTIONS = {
         "(country_iso3, weather_date) — the one source joined on a *coordinate*, "
         "the World Bank's capital latitude/longitude. Loaded "
         "incrementally: `merge` over a 90-day lookback (ERA5T is superseded by "
-        "final ERA5 months later), year-partitioned, and paced against a finite "
-        "API budget rather than fetched whole."
+        "final ERA5 months later), backfilled by year range, and paced against a "
+        "finite API budget rather than fetched whole."
     ),
 }
 
-# The eight resources in three multi-assets, split by partition grain because
-# Dagster gives every asset in a multi-asset one `partitions_def`: year (WDI,
-# weather), month (retail), none (the rest). The two yearly resources share a
-# block — separate blocks would mean separate definitions, which `full_refresh`
-# cannot resolve (see YEARLY_PARTITIONS). `load_groups` still owns the
-# refresh/merge split within each block.
+# The eight resources in three multi-assets, split by how a run can narrow them:
+# not at all (a whole-file replace, or the lookback alone), by a year range given
+# as run config (WDI, weather), or by a monthly partition (retail). `load_groups`
+# still owns the refresh/merge split within each block.
 #
 # The tuples must cover the source disjointly: a resource in two blocks loads
 # twice, one in none leaves the graph. `tests/test_ingest.py` asserts it against
-# PARTITIONED_RESOURCES, so the guard runs without the optional orchestration
-# dependency group.
-YEAR_PARTITIONED_RESOURCES = ("wb_wdi", "om_weather_daily")
-MONTH_PARTITIONED_RESOURCES = ("retail_invoice_lines",)
-UNPARTITIONED_RESOURCES = (
-    *FULL_REFRESH_RESOURCES,
-    *(name for name in INCREMENTAL_RESOURCES if name not in PARTITIONED_RESOURCES),
+# YEAR_RANGE_RESOURCES and PARTITIONED_RESOURCES, so the guard runs without the
+# optional orchestration dependency group.
+UNWINDOWED_RESOURCES = tuple(
+    name
+    for name in (*FULL_REFRESH_RESOURCES, *INCREMENTAL_RESOURCES)
+    if name not in YEAR_RANGE_RESOURCES and name not in PARTITIONED_RESOURCES
 )
 
 
@@ -181,27 +181,51 @@ class RawSchemaDltTranslator(DagsterDltTranslator):
         )
 
 
-# One definition for both yearly resources, and it has to be one: `full_refresh`
-# contains both, and `define_asset_job` resolves a selection to a single
-# `partitions_def` or raises. The shared start is WDI's 1960, so ERA5's
-# 1940-1959 is not addressable; starting at 1940 instead would add twenty WDI
-# partitions that can never load anything.
-YEARLY_PARTITIONS = dg.TimeWindowPartitionsDefinition(
-    start=str(WDI_FIRST_YEAR),
-    fmt="%Y",
-    cron_schedule="0 0 1 1 *",
-    # A yearly window closes on 1 January, so without the offset the current
-    # year — the one anybody wants to re-run — would not be a partition.
-    end_offset=1,
-)
+class YearRange(dg.Config):
+    """The years a WDI or weather run loads instead of its lookback.
+
+    Run config and not a partitions definition, deliberately. Every routine run —
+    the schedule, the live workflows, `just materialize` — loads the lookback, so
+    a partition was only ever filled by a backfill. And a job holding a
+    partitioned asset gets a partitioned Materialize button in the Dagster UI: on
+    2026-09-13 it launched 1960-2026 as one run, cancelled after ten minutes
+    with days of Open-Meteo's budget still to pace, where the same job with no
+    partition finished in 1m38s. Unset, the button loads the lookback; a
+    backfill is `just backfill-wdi`, `just backfill-weather`, or this config in
+    the Launchpad.
+    """
+
+    first_year: int | None = None
+    # Unset means `first_year`, so one year needs one field.
+    last_year: int | None = None
+
+    def years(self) -> tuple[int, int] | None:
+        """The closed range to load, or None for the lookback.
+
+        Bounded where the partitions were: WDI's 1960 floor, and the current
+        year, past which the World Bank serves projections `stg_wdi` would have
+        to cut again.
+        """
+        if self.first_year is None:
+            if self.last_year is not None:
+                raise ValueError("last_year is set without first_year — set both, or neither")
+            return None
+        last = self.first_year if self.last_year is None else self.last_year
+        this_year = datetime.now(UTC).year
+        if not WDI_FIRST_YEAR <= self.first_year <= last <= this_year:
+            raise ValueError(
+                f"years {self.first_year}-{last} are outside {WDI_FIRST_YEAR}-{this_year}, "
+                "or run backwards"
+            )
+        return (self.first_year, last)
 
 
 @dlt_assets(
-    # Everything that isn't year-partitioned: the four `replace` resources plus
-    # `ecb_fx_rates`, which merges but has no per-year fetch to express. The
-    # mixed dispositions are fine here because the body asks `load_groups` for
-    # the kwargs rather than spelling them.
-    dlt_source=public_indicators().with_resources(*UNPARTITIONED_RESOURCES),
+    # Everything with no window a run can ask for: the four `replace` resources
+    # plus `ecb_fx_rates`, which merges but whose whole series is one request.
+    # The mixed dispositions are fine here because the body asks `load_groups`
+    # for the kwargs rather than spelling them.
+    dlt_source=public_indicators().with_resources(*UNWINDOWED_RESOURCES),
     dlt_pipeline=build_pipeline(),
     dagster_dlt_translator=RawSchemaDltTranslator(),
     name="ingest_public_indicators",
@@ -221,44 +245,43 @@ def raw_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
 
 
 @dlt_assets(
-    dlt_source=public_indicators().with_resources(*YEAR_PARTITIONED_RESOURCES),
+    dlt_source=public_indicators().with_resources(*YEAR_RANGE_RESOURCES),
     dlt_pipeline=build_pipeline(),
     dagster_dlt_translator=RawSchemaDltTranslator(),
-    name="ingest_year_partitioned",
-    partitions_def=YEARLY_PARTITIONS,
-    # One run per range, not per year: the World Bank takes `&date=lo:hi`, so a
-    # 30-year WDI backfill is one request per indicator rather than 30. Weather
-    # chunks by year inside the resource either way, to pace its budget.
-    backfill_policy=dg.BackfillPolicy.single_run(),
+    # The op name is the config's address, and the justfile's backfill recipes
+    # spell it. `dagster asset materialize` *ignores* config for an op it does
+    # not know — a stale name loads the lookback and succeeds — so
+    # `tests/test_definitions.py` holds the recipe to this name.
+    name="ingest_by_year",
 )
-def raw_year_partitioned_assets(context: AssetExecutionContext, dlt: DagsterDltResource):
-    """The two sources with a per-year fetch: WDI and capital weather.
+def raw_by_year_assets(context: AssetExecutionContext, dlt: DagsterDltResource, config: YearRange):
+    """The two sources a run can load by year: WDI and capital weather.
 
-    The other five are not partitioned. Four are whole-file `replace` loads with
-    no way to ask for one year; `ecb_fx_rates` merges and takes a date range, but
-    its whole series is a single short request, so partitions would buy nothing.
+    The other five take no window. Four are whole-file `replace` loads with no
+    way to ask for one year; `ecb_fx_rates` merges and takes a date range, but
+    its whole series is a single short request, so a window would buy nothing.
     Weather's year is also the unit its API budget is spent in: the full archive
     costs more than a day's allowance, so it cannot be fetched in one run.
 
-    With a partition key or range (a backfill, `just backfill-wdi`,
+    With no config — the schedule, every workflow, the UI's Materialize button —
+    it loads the incremental lookback. With a year range (`just backfill-wdi`,
     `just backfill-weather`) it loads exactly those years and leaves the
-    watermark alone. Without one — `full_refresh`, which the schedule and three
-    workflows run — it loads the incremental lookback. Dagster does not reject a
-    partitioned asset in an unpartitioned run; the body fails when it touches
-    `context.partition_key`. The guard below is what keeps that path working.
+    watermarks alone. One range serves both sources, so a range is one request
+    per WDI indicator rather than one per year.
     """
-    years = None
-    # Both properties: `has_partition_key_range` is False for a single-partition
-    # run, so testing it alone would load the lookback window for
-    # `--partition 1995` and succeed. `partition_key_range` covers both cases.
-    if context.has_partition_key or context.has_partition_key_range:
-        key_range = context.partition_key_range
-        years = (int(key_range.start), int(key_range.end))
+    years = config.years()
 
     # Only what was selected: materialising `raw/om_weather_daily` alone must not
     # re-fetch WDI.
     selected = {key.path[-1] for key in context.selected_asset_keys}
-    window = f"{years[0]}-{years[1]} (partition backfill)" if years else "incremental lookback"
+
+    # The resource refuses an unaffordable range too; asking here first means
+    # the refusal comes before the load starts, and is not wrapped in dlt's
+    # extraction error.
+    if years is not None and "om_weather_daily" in selected:
+        check_weather_range_is_affordable(years)
+
+    window = f"{years[0]}-{years[1]} (backfill)" if years else "incremental lookback"
 
     # Through `load_groups`, which loads these without `refresh` — a refresh
     # would drop their tables and watermarks.
@@ -296,7 +319,7 @@ RETAIL_PARTITIONS = dg.TimeWindowPartitionsDefinition(
 
 
 @dlt_assets(
-    dlt_source=public_indicators().with_resources(*MONTH_PARTITIONED_RESOURCES),
+    dlt_source=public_indicators().with_resources(*PARTITIONED_RESOURCES),
     dlt_pipeline=build_pipeline(),
     dagster_dlt_translator=RawSchemaDltTranslator(),
     name="ingest_retail",
@@ -314,12 +337,18 @@ def raw_retail_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     same timestamp as the partition key, so re-running a month replaces exactly
     that month.
 
-    Monthly where WDI is yearly, so `full_refresh` cannot contain it;
-    `load_retail` runs it unpartitioned ahead of every `full_refresh` (see
-    `orchestration/definitions.py`). The partition guard is WDI's, for WDI's
-    reason.
+    Partitioned, so `full_refresh` must not contain it: a job takes its assets'
+    partitions definition, and a partitioned job's Materialize button is a
+    backfill. `load_retail` runs it unpartitioned ahead of every `full_refresh`
+    (see `orchestration/definitions.py`).
+
+    Dagster does not reject a partitioned asset in an unpartitioned run; the
+    body fails when it touches `context.partition_key`, hence the guard.
     """
     months = None
+    # Both properties: `has_partition_key_range` is False for a single-partition
+    # run, so testing it alone would load the whole workbook for
+    # `--partition 2010-03` and succeed. `partition_key_range` covers both cases.
     if context.has_partition_key or context.has_partition_key_range:
         key_range = context.partition_key_range
         months = (key_range.start, key_range.end)
@@ -327,7 +356,7 @@ def raw_retail_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     else:
         context.log.info("loading retail_invoice_lines whole (no partition key)")
 
-    for names, kwargs in load_groups(MONTH_PARTITIONED_RESOURCES):
+    for names, kwargs in load_groups(PARTITIONED_RESOURCES):
         yield from dlt.run(
             context=context,
             dlt_source=public_indicators(retail_months=months).with_resources(*names),
@@ -800,7 +829,7 @@ __all__ = [
     "evidence_site",
     "pipeline_status",
     "raw_assets",
+    "raw_by_year_assets",
     "raw_retail_asset",
-    "raw_year_partitioned_assets",
     "retail_rfm",
 ]

@@ -10,7 +10,7 @@ of it estimated.
 | File | Why |
 |------|-----|
 | [`reports/pages/findings.md`](../reports/pages/findings.md) | the analysis, and the "So what" box under each finding |
-| [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including the partitioned WDI load |
+| [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including why WDI and weather backfill by run config rather than partitions |
 | [`dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest. Also the repo's one versioned model, aliased back to the bare relation name so the rename is invisible to its consumers ([`_v1`](../dbt/models/marts/country_stats/fct_emissions_energy_v1.sql) is a compatibility view over it, not a second copy) |
 | [`ingest/pipeline.py`](../ingest/pipeline.py) | seven sources, two write dispositions, and why that has to be two `run()` calls |
 | [`AGENTS.md`](../AGENTS.md) | the gotchas every session needs, written down at the point they were learned — the rest are in the skills under `.agents/skills/` |
@@ -262,7 +262,7 @@ number before.
    serving layer.
 
 What *doesn't* break, which is the more interesting half: dlt already merges
-incrementally on a real primary key with year partitions behind it; the fixtures
+incrementally on a real primary key with year-range backfills behind it; the fixtures
 keep CI offline and constant-time; and the lake's documented small-file
 anti-pattern (275 partitions averaging 47 kB, when ~100 MB is the rule of thumb)
 actually *fixes itself* at 1000×: the partition sizes become right and the file

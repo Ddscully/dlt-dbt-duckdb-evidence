@@ -1,6 +1,6 @@
 ---
 name: dagster-graph-and-jobs
-description: This repo's Dagster graph — the two partitioned assets and the guards a partitioned asset needs to keep working unpartitioned, why there are three jobs and why load_retail runs first, the hand-maintained lists in definitions.py and the two traps in the test that guards them, and the costed decision not to be a dg-shaped project or to use declarative automation. Use when adding or registering an asset or asset check, changing a job or selection, running a backfill, or before reaching for dg, components or AutomationCondition.
+description: This repo's Dagster graph — why WDI and weather take their backfill years as run config rather than partitions (a partitioned job's Materialize button is a backfill), the one partitioned asset and the guards it needs to keep working unpartitioned, why there are three jobs and why load_retail runs first, the hand-maintained lists in definitions.py and the two traps in the test that guards them, and the costed decision not to be a dg-shaped project or to use declarative automation. Use when adding or registering an asset or asset check, changing a job or selection, running a backfill, or before reaching for dg, components or AutomationCondition.
 ---
 
 # The Dagster graph (`orchestration/`)
@@ -32,7 +32,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   Node.** The `evidence_site` asset shells out to npm; `ci.yml`, `nightly.yml` and
   `release-data.yml` run `full_refresh` with no Node, and `pages.yml` runs
   `publish_site`. Both selections name what they leave out, so a second
-  npm-shaped or differently partitioned asset has to be excluded by hand too.
+  npm-shaped or partitioned asset has to be excluded by hand too.
   How the site meets the graph is `building-evidence-reports`.
 - **Importing `orchestration.assets` leaves a dlt pipeline active process-wide.**
   The `@dlt_assets` decorators call `build_pipeline()` at import time, so a later
@@ -50,49 +50,87 @@ commits to `orchestration/`). The last bullet below is why: it is written around
 a `dg` CLI this project does not install. So this file is the Dagster knowledge
 for this repo, not a supplement to a vendor one.
 
-## Partitions
+## Backfill windows, and the one partition
 
-- **`raw/wb_wdi` is partitioned by year and nothing else is** — which is why it
-  sits in its own `@dlt_assets` block (`ingest_wdi`). Dagster gives every asset
-  in a multi-asset the same `partitions_def`, and four of the other five sources
-  are whole-file `replace` downloads with no per-year fetch to express, so
-  partitioning them would be a fiction. WDI earns it: the API takes `&date=lo:hi`,
-  the disposition is `merge`, and `year` is in the primary key, so a partition is
-  a real re-runnable unit of work.
-  - **Merging is not what earns a partition, and `ecb_fx_rates` is the near-miss
-    that proves it.** It is incremental *and* its API takes a date range, so by
-    the letter of the paragraph above it qualifies — but its entire 27-year
-    series is one three-second request, and partitioning it would trade that for
-    thousands of Dagster partitions and buy nothing. So the blocks split on
-    `PARTITIONED_RESOURCES`, not on the disposition, and
-    `UNPARTITIONED_RESOURCES` in `orchestration/assets.py` is derived as
-    everything else. **Before this there were two tuples and the WDI block was
-    built from `INCREMENTAL_RESOURCES` directly** — adding a second merge
-    resource to that constant would silently have given it yearly partitions.
-    `load_groups` still owns the refresh/merge split; the blocks only decide who
-    gets a `partitions_def`. Two tests in `tests/test_ingest.py` hold both
-    splits to the source.
-  - **The asset has two paths and the unpartitioned one has to keep working.**
-    `full_refresh` contains this asset and `ci.yml` / `nightly.yml` /
-    `release-data.yml` execute that job with no partition key. A partitioned
-    asset in an unpartitioned run doesn't fail at plan time — it fails *inside
-    the body*, at the first touch of `context.partition_key`. So the fallback is
-    an explicit guard in the asset, not something the job gives you: no partition
-    means the incremental lookback, exactly as before.
-  - **Guard on `has_partition_key` *and* `has_partition_key_range`.**
-    `has_partition_key_range` is False for a run targeting a single partition, so
-    testing it alone makes `--partition 1995` fall through to the incremental
-    branch — and it *succeeds*, having loaded the wrong window. (Verified by
-    doing it.) `context.partition_key_range` itself covers both cases; it returns
-    `start == end` for one key.
+- **`raw/wb_wdi` and `raw/om_weather_daily` take a year range as run config, not
+  partitions, and the Materialize button is why.** They were yearly partitions
+  until 2026-09, on an argument that still holds: the API takes a date range, the
+  disposition is `merge`, and the year is in the primary key, so a year is a real
+  re-runnable unit of work. That makes a partition *possible*; two things made it
+  the wrong tool.
+  - **A job takes its assets' partitions definition, and a partitioned job's
+    Materialize button is a backfill.** The dialog is a partition picker with no
+    "no partition" choice — read out of the 1.13.22 UI bundle: the default
+    selection is empty, and when the selection's root assets carry different
+    definitions it is fixed at "All partitions". Only the Launchpad runs a
+    partitioned job plain. On 2026-09-13 the button launched `full_refresh` over
+    1960–2026 as one run, cancelled after ten minutes, where the same job from
+    the Launchpad finished in 1m38s. Weather's share alone is ~42,800 units
+    against 10,000 a day, which the limiter would have paced over days.
+  - **No routine run ever filled a partition.** The schedule, the live workflows
+    and every recipe but the two backfills run the lookback with no key, so
+    partition status sat empty while `raw.wb_wdi` held the full series. A
+    partition only ever did a backfill's job, which is what run config is for.
+  - **`YearRange` is the config, on the `ingest_by_year` op.** Unset loads the
+    lookback; `first_year` (with `last_year`, which defaults to it) loads exactly
+    that closed range, bounded where the partitions sat: WDI's 1960 and the
+    current year, past which the World Bank serves projections. Validated in the
+    body, before any load. From the UI, a backfill is the Launchpad with
+    `ops: {ingest_by_year: {config: {first_year: 1990, last_year: 1995}}}`.
+  - **`dagster asset materialize` silently ignores config for an op it does not
+    know.** A stale op name in `--config-json` loads the lookback and exits 0,
+    where `dagster job execute` refuses the same config; a misspelt *field* is
+    refused by both. The justfile spells the op, so `tests/test_definitions.py`
+    holds both backfill recipes to `raw_by_year_assets.op.name`.
   - **A backfill deliberately doesn't move the WDI watermark.** The watermark
     means "everything up to here is loaded", which a run over one window can't
-    claim: partitions 2020–2025 into an empty warehouse would otherwise leave a
+    claim: a 2020–2025 backfill into an empty warehouse would otherwise leave a
     2025 watermark and the next incremental run would look back five years over
     sixty years that were never fetched.
-  - **`end_offset=1`, or the current year isn't a partition.** A yearly window
-    only closes on 1 January, so the newest partition would be last year — the
-    one you actually want to re-run wouldn't exist.
+  - **One range is one run, whichever source.** WDI asks `&date=lo:hi`, so
+    1990–2025 is 11 requests, one per indicator, not 396 — what
+    `BackfillPolicy.single_run()` bought when this was a partition. Weather
+    chunks by year inside the resource either way, to pace its budget, and
+    refuses a range over a day's allowance before any request (`weather-models`).
+  - **Taking the partitions off also fixed `just materialize-select
+    'raw/wb_wdi*'`**, which the README advertised while the CLI refused it with
+    "Asset has partitions, but no '--partition' option was provided" (measured
+    against `main` at `46d0ebd`). An unpartitioned asset needs no key.
+  - **`tests/test_definitions.py` asserts `full_refresh` and `publish_site` have
+    no `partitions_def`**, because one partitioned asset joining either
+    selection brings the picker back with nothing else red.
+- **Merging is not what earns a window, and `ecb_fx_rates` is the near-miss that
+  proves it.** It is incremental *and* its API takes a date range — but its
+  entire 27-year series is one three-second request, so it takes no window at
+  all. The blocks split on `YEAR_RANGE_RESOURCES` and `PARTITIONED_RESOURCES`
+  (in `ingest/pipeline.py`), not on the disposition, and `UNWINDOWED_RESOURCES`
+  in `orchestration/assets.py` is derived as everything else. **Once there were
+  two tuples and the WDI block was built from `INCREMENTAL_RESOURCES`
+  directly** — adding a second merge resource to that constant would silently
+  have given it yearly partitions. `load_groups` still owns the refresh/merge
+  split; the blocks only decide who gets a window. `tests/test_ingest.py` holds
+  the tuples to the source.
+- **`raw/retail_invoice_lines` is the one partitioned asset, and stays one
+  because every partition together is routine-sized.** A month is real work
+  (converting it), the cached download makes every partition one fetch, and
+  `invoice_month` comes from the partition key's timestamp, so re-running a
+  month replaces exactly that month. Materializing all 25 months is one run over
+  the one workbook — 17s on 2026-09-09 — so its button's backfill costs what a
+  routine load does. It still has to stay out of `full_refresh`, or that job
+  becomes month-partitioned (below).
+  - **The asset has two paths and the unpartitioned one has to keep working.**
+    The justfile and all four workflows execute `load_retail` with no partition
+    key. A partitioned asset in an unpartitioned run doesn't fail at plan time —
+    it fails *inside the body*, at the first touch of `context.partition_key`. So
+    the fallback is an explicit guard in the asset, not something the job gives
+    you: no partition means the whole workbook.
+  - **Guard on `has_partition_key` *and* `has_partition_key_range`.**
+    `has_partition_key_range` is False for a run targeting a single partition, so
+    testing it alone falls through to the unpartitioned branch — and it
+    *succeeds*, having loaded the wrong window. Verified by doing it with
+    `--partition 1995` while WDI was partitioned; `--partition 2010-03` would load
+    the whole workbook the same way. `context.partition_key_range` itself covers
+    both cases; it returns `start == end` for one key.
   - **`end` is exclusive, and the retail partitions were short a month because of
     it.** `TimeWindowPartitionsDefinition(start=RETAIL_FIRST_MONTH,
     end=RETAIL_LAST_MONTH)` reads like a closed interval and is not one: it
@@ -102,18 +140,14 @@ for this repo, not a supplement to a vendor one.
     loads the whole workbook — so the only symptom was a per-partition backfill
     quietly stopping a month early. `_month_after(RETAIL_LAST_MONTH)` is the
     fix, keeping the constant meaning the data's last month, and
-    `tests/test_definitions.py` now pins both ends and the key count.
-    `end_offset=1` above solves the same off-by-one for the open-ended source;
-    this is the closed-archive half of it.
-  - `BackfillPolicy.single_run()` (which a `TimeWindowPartitionsDefinition` also
-    defaults to) is what makes a range one request per indicator instead of one
-    per year: 1990–2025 is 11 requests, not 396. It also means the CLI's
-    `--partition-range` refuses any selection that reaches the *unpartitioned*
-    downstream models, so `just backfill-wdi` targets `raw/wb_wdi` alone and you
-    rebuild after it.
-  - Partition status starts empty even though `raw.wb_wdi` holds the full series:
-    the rows came from unpartitioned runs. That's cosmetic — the merge key, not
-    Dagster's partition record, is what makes a re-run idempotent.
+    `tests/test_definitions.py` now pins both ends and the key count. The yearly
+    partitions needed `end_offset=1` for the open-ended half of the same
+    off-by-one: a year's window only closes on 1 January, so without it the
+    current year was not a partition.
+  - `BackfillPolicy.single_run()` makes a month range one run, not one per
+    month. It also means the CLI's `--partition-range` refuses any selection that
+    reaches the *unpartitioned* downstream models, so a retail backfill targets
+    the raw asset alone and you rebuild after it.
 
 ## Registration, and the three jobs
 
@@ -139,20 +173,21 @@ for this repo, not a supplement to a vendor one.
     `isinstance` chain that tests the parent first swallows every check into the
     asset branch, where `.keys` is empty — the check half of the test then
     measures nothing and is green forever.
-- **An asset job may not span two partitions definitions, which is why there are
-  three jobs.** `raw/wb_wdi` is yearly and `raw/retail_invoice_lines` is monthly;
-  `define_asset_job` resolves its selection to a single `partitions_def` or
-  raises. There is no opt-out — `allow_different_partitions_defs` is hardcoded
-  `False` for named asset jobs and `True` only for Dagster's own implicit global
-  job. So `load_retail` carries the retail ingest alone, `full_refresh` is
+- **A job takes its assets' partitions definition, which is why there are three
+  jobs.** `define_asset_job` resolves a selection to a single `partitions_def`,
+  and raises on two — `allow_different_partitions_defs` is hardcoded `False` for
+  named asset jobs and `True` only for Dagster's own implicit global job. With
+  `raw/retail_invoice_lines` inside it, `full_refresh` would be month-partitioned
+  (built and checked: `TimeWindowPartitionsDefinition`) and its Materialize
+  button a backfill. So `load_retail` carries the retail ingest alone, `full_refresh` is
   `AssetSelection.all() - site - retail_ingest`, and **`load_retail` has to run
   first** because dbt reads the table it lands. The justfile recipes and all four
   workflows pair them; running `full_refresh` by itself against a fresh warehouse
   reproduces the catalog error above.
   - `dagster asset materialize --select '*'` is not a way round it: the CLI
-    refuses a partitioned asset without `--partition` ("Asset has partitions, but
-    no '--partition' option was provided"), so the unpartitioned whole-graph run
-    only exists as a job.
+    refuses the partitioned retail asset without `--partition` ("Asset has
+    partitions, but no '--partition' option was provided"), so the unpartitioned
+    whole-graph run only exists as a job.
   - **A job shares a namespace with the ops**, so the job is `load_retail` and
     not `ingest_retail` — `@dlt_assets(name="ingest_retail")` already holds that
     name, and the collision reports as `Conflicting definitions found in
@@ -200,11 +235,11 @@ for this repo, not a supplement to a vendor one.
     fixed time-based execution" to schedules and reserves DA for partition-aware
     and graph-state-dependent triggering; `ScheduleDefinition` raises no
     deprecation warning on 1.13, so this is not a legacy path being tolerated.
-    - **The partition angle is the near-miss.** Two assets here *are*
-      partitioned, which is DA's stated niche — but backfills are deliberately
-      manual (`just backfill-wdi`, "an explicit act with a key you can point
-      at"), so DA would automate precisely what this project chose to keep
-      explicit.
+    - **The partition angle is the near-miss.** One asset here *is* partitioned
+      (two more were until 2026-09), which is DA's stated niche — but backfills
+      are deliberately manual (`just backfill-wdi`, "an explicit act with a
+      window you can point at"), so DA would automate precisely what this
+      project chose to keep explicit.
     - **What would change it is circumstance, not taste**: a long-running daemon
       *and* cadences that diverge — FX is daily, OWID annual, retail a closed
       archive. Today everything moves together on one cron, so there is nothing
@@ -215,7 +250,7 @@ for this repo, not a supplement to a vendor one.
   - **The skill's depth and this repo's content are close to disjoint**, which is
     the part worth knowing before reaching for it. Grepping its 172 reference
     files for what `assets.py` actually calls: `FreshnessPolicy` 1 (in a
-    components file, dead here), `BackfillPolicy` 0, `end_offset` 0,
+    components file, dead here), `BackfillPolicy` 0,
     `asset_check` 1 (in passing), against `AutomationCondition` 10 — which this
     project uses nowhere. It is worth loading for **asset selection syntax** and
     the **dagster-dbt/dlt integration pages**, and not for anything else here.

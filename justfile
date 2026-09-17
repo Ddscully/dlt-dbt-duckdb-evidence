@@ -205,9 +205,9 @@ dagster:
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster dev
 
-# Two jobs because an asset job takes one partitions definition and retail's is
-# monthly where wb_wdi's is yearly. `load_retail` first: dbt reads its table.
-# See orchestration/definitions.py.
+# Two jobs because retail is partitioned by month, and a job holding it would be
+# too — its Materialize button in the UI a backfill. `load_retail` first: dbt
+# reads its table. See orchestration/definitions.py.
 # Full pipeline ordered by the asset graph, minus the Evidence site
 materialize: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
@@ -237,34 +237,44 @@ materialize-preview selection: dbt-parse
         -m orchestration.definitions --select '{{ selection }}'
 
 # `just backfill-wdi 1995` or `just backfill-wdi 1990 1995`. Merges, so re-runs
-# are idempotent. Only the raw asset is partitioned and the CLI rejects a range
-# over unpartitioned ones, so follow with `just dbt-build` or `just materialize`.
+# are idempotent. Loads the raw asset alone, so follow with `just dbt-build` or
+# `just materialize`.
+#
+# The years are run config for the `ingest_by_year` op, not partitions: a
+# partitioned asset makes the UI's Materialize button a backfill of every year
+# (`YearRange` in orchestration/assets.py). `asset materialize` silently ignores
+# config addressed to an op it does not know, so a stale name in either recipe
+# would load the lookback and succeed; `tests/test_definitions.py` holds both to
+# the op.
 # Re-load WDI for one year or a range of years
 backfill-wdi start end='': where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "$DAGSTER_HOME"
     end="{{ end }}"
+    config=$(printf '{"ops": {"ingest_by_year": {"config": {"first_year": %d, "last_year": %d}}}}' \
+        "{{ start }}" "${end:-{{ start }}}")
     uv run --group orchestration dagster asset materialize \
-        -m orchestration.definitions --select 'raw/wb_wdi' \
-        --partition-range "{{ start }}...${end:-{{ start }}}"
+        -m orchestration.definitions --select 'raw/wb_wdi' --config-json "$config"
 
 # Routine loads fetch WEATHER_COLD_START_YEARS; this deepens the archive, back to
-# 1960 (the partitions' floor). Slow on purpose: the resource paces itself
-# against Open-Meteo's minute, hour and day budgets, and a year of 41 capitals
-# costs ~641 of the 10,000 daily units, so fifteen years is the most one run can
-# hold. A longer range does not fail — it sleeps, silently, until the daily
-# window drains — so split it across days. The rows are carried into the next
-# release (`publish/restore_history.py`). Follow with `just dbt-build`.
+# 1960 (WDI's floor, which the year range shares). Slow on purpose: the resource
+# paces itself against Open-Meteo's minute, hour and day budgets, and a year of 41
+# capitals costs ~641 of the 10,000 daily units, so fifteen years is the most one
+# run can hold. A longer range is refused before any request — the limiter would
+# otherwise sleep, silently, until the daily window drained — so split it across
+# days. The rows are carried into the next release (`publish/restore_history.py`).
+# Follow with `just dbt-build`.
 # Deepen the capital-city weather archive, e.g. `just backfill-weather 2012 2026`
 backfill-weather start end='': where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "$DAGSTER_HOME"
     end="{{ end }}"
+    config=$(printf '{"ops": {"ingest_by_year": {"config": {"first_year": %d, "last_year": %d}}}}' \
+        "{{ start }}" "${end:-{{ start }}}")
     uv run --group orchestration dagster asset materialize \
-        -m orchestration.definitions --select 'raw/om_weather_daily' \
-        --partition-range "{{ start }}...${end:-{{ start }}}"
+        -m orchestration.definitions --select 'raw/om_weather_daily' --config-json "$config"
 
 # Read-only unless `write`, so a session cannot change anything by accident.
 # Either mode blocks a build while it is open: DuckDB allows one writer or many

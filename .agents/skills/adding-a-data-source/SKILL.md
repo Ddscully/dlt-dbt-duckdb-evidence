@@ -35,9 +35,11 @@ both is extracted by nothing; `tests/test_ingest.py` asserts they cover the
 source exactly.
 
 **The four coordination tuples stay in `ingest/pipeline.py` and are deliberately
-not per-source metadata.** `PARTITIONED_RESOURCES` carries a comment arguing the
-rule across all four candidates at once — why `ecb_fx_rates` merges and is still
-not partitioned, why retail's *load* narrows when its fetch cannot. Scattering
+not per-source metadata.** `YEAR_RANGE_RESOURCES` and `PARTITIONED_RESOURCES`
+share a comment arguing the rule across all four candidates at once — why
+`ecb_fx_rates` merges and still takes no window, why retail's *load* narrows when
+its fetch cannot, and why WDI and weather take a year range rather than a
+partition. Scattering
 those onto six modules would file each half of a comparison somewhere it cannot
 be read against the other half.
 

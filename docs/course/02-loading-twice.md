@@ -471,33 +471,45 @@ would be pure loss. `just ingest-wdi-full` is the escape hatch that buys the
 guarantee back on demand.
 </details>
 
-**(c)** `ecb_fx_rates` merges, and its API takes a date range: the same two
-properties that earn `wb_wdi` a Dagster partition. It is deliberately **not**
-partitioned. What is the actual rule, then?
+**(c)** `wb_wdi` and `om_weather_daily` have every property that should earn a
+Dagster partition: an API that takes a date range, a `merge`, and the year in the
+primary key. Neither is partitioned — a backfill passes its years as run config.
+`retail_invoice_lines`, which has no request to narrow at all, *is* partitioned
+by month. What is the actual rule?
 
 <details>
 <summary>Reveal</summary>
 
 The rule is not "the API takes a range" and never was "the disposition is merge".
-It is whether **a partition is a re-runnable unit of *work* that maps cleanly
-onto a slice of the destination**, and whether that unit is big enough to be
-worth having.
+A partition has to be a re-runnable unit of *work* that maps cleanly onto a slice
+of the destination, and a WDI year is one. But that only makes a partition
+*possible*. What decides it is what a partition does to everything around it, and
+in Dagster the largest effect is on the UI's **Materialize** button.
 
-The ECB's entire 27-year series is one three-second request. Partitioning it
-daily would create roughly 7,000 Dagster partitions to stand in for a single
-request: all the bookkeeping and none of the benefit.
+A job takes its assets' partitions definition, and a partitioned job's
+Materialize button opens a partition picker with no "no partition" choice: only
+the Launchpad runs it plain. Until September 2026 WDI and weather *were* yearly
+partitions, and on 2026-09-13 the button launched `full_refresh` over 1960–2026 as
+one run. Weather's share of that is ~42,800 units against Open-Meteo's 10,000 a
+day, and the rate limiter honours a daily budget by *sleeping*, so nothing failed:
+the run was cancelled by hand after ten minutes, where the same job launched from
+the Launchpad finished in 1m38s. Meanwhile no routine run had ever filled a
+partition, because every one of them loads a lookback.
 
-The third resource is what proves the rule, because it breaks both of the naive
-tests: `retail_invoice_lines` has **no request to narrow at all** (the source is
-one static 45 MB workbook) and it is still partitioned by month. What narrows
-there is the *load*: reading and converting a month is real work, the cached
-download means twenty-five partitions are still one fetch, and `invoice_month` is
-derived from the same timestamp the partition key uses, so re-running one month
-replaces exactly that month.
+Retail keeps its partitions by the same rule applied the other way. Reading and
+converting a month is real work, the cached download means twenty-five partitions
+are still one fetch, and `invoice_month` comes from the same timestamp the
+partition key uses, so re-running one month replaces exactly that month — and
+every month together is one run over the one workbook, so the backfill its button
+launches costs what a routine load does. `ecb_fx_rates`, which merges and takes a
+date range, is the plainest case: its entire 27-year series is one three-second
+request, so it takes no window at all.
 
-Hence `PARTITIONED_RESOURCES` is its own constant rather than being derived from
-`INCREMENTAL_RESOURCES`. It was derived once, and adding a second merge resource
-would have silently given it yearly partitions.
+So: **partition where materializing every partition is a routine-sized run;
+otherwise pass the window as config.** Hence `YEAR_RANGE_RESOURCES` and
+`PARTITIONED_RESOURCES` in `ingest/pipeline.py`, neither derived from
+`INCREMENTAL_RESOURCES`. The partitioned tuple was derived from it once, and
+adding a second merge resource would have silently given it yearly partitions.
 </details>
 
 ---
