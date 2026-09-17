@@ -9,8 +9,12 @@
 # loads (`set dotenv-load`), so one file configures both. `just compose-up`
 # starts it; `just compose-down volumes` destroys the data.
 #
-# Every port is bound to 127.0.0.1: neither service authenticates well enough to
-# face a network, and both hold the whole landing zone.
+# Three of the four ports are bound to 127.0.0.1, and the exception is the
+# point: Postgres and SeaweedFS hold the whole landing zone, and Dagster's
+# webserver has no authentication at all, so none of them may face a network.
+# `site` is the static Evidence build served by nginx, which opens no database
+# and is the one thing here meant to be looked at — it binds every interface,
+# exactly as `just serve` does (docs/RUNNING_AS_A_SERVICE.md §6).
 #
 # Image tags are pinned exactly. Dependabot's `docker-compose` ecosystem watches
 # the ones here and its `docker` ecosystem watches the `Dockerfile`'s: two

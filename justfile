@@ -69,11 +69,14 @@ extensions:
 deploy-deps:
     uv sync --group dev --group orchestration --group deploy
 
-# Postgres (the DuckLake catalog, and Dagster's storage under `deploy/`) and SeaweedFS
-# (S3-compatible storage for the Parquet). Nothing here is needed to use this
-# repo: with LAKEHOUSE_CATALOG and LAKEHOUSE_DATA_PATH unset the landing zone is
-# entirely on disk. See .env.example and compose.yaml.
-# Start the backing services and wait for them to be healthy
+# The whole stack: Postgres (the DuckLake catalog, and Dagster's storage under
+# `deploy/`), SeaweedFS (S3-compatible storage for the Parquet), the graph, and
+# nginx serving the dashboard. Nothing here is needed to use this repo: with
+# LAKEHOUSE_CATALOG and LAKEHOUSE_DATA_PATH unset the landing zone is entirely on
+# disk and none of this runs. `just compose-build` first. Dagster is then on
+# :3000 and the dashboard on :8081. See .env.example, compose.yaml and
+# docs/RUNNING_AS_A_SERVICE.md.
+# Start the stack and wait for it to be healthy
 compose-up:
     docker compose up -d --wait
 
@@ -96,7 +99,7 @@ compose-test-pipeline:
 # `just compose-down volumes` also deletes the named volumes — which destroys
 # the catalog and the bucket, and is the only way to make the Postgres init
 # script run again (the entrypoint runs it on an empty data directory alone).
-# Stop the backing services
+# Stop the stack
 compose-down mode="keep":
     #!/usr/bin/env bash
     set -euo pipefail

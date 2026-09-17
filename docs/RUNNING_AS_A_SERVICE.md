@@ -961,6 +961,10 @@ Verified end to end on 2026-09-17:
   without a single failed request.
 - Two runs launched ten seconds apart: one run container, one `QUEUED` row, the
   second starting only when the first finished, and no exited containers left.
+- Compute logs survived their containers: each run's `compute_logs/` directory
+  was on the `mds_dagster` volume and readable from the service afterwards
+  (5,293 bytes of stderr from a run whose container `auto_remove` had already
+  deleted). That is the whole reason those two storages stay on a filesystem.
 - `dagster definitions validate` inside the image with `--network none`: passes,
   which is what proves the manifest and `dbt_packages/` are baked rather than
   fetched.
@@ -968,6 +972,11 @@ Verified end to end on 2026-09-17:
   the ten-second grace and with no orphaned run container. `init: true` is what
   buys that — `just` is PID 1 and forks four children, and without an init to
   reap them the stop waits out the full grace period and exits 137.
+
+And in CI, first run, 2026-09-17: the `container` job — cold image build,
+services up, `just test-pipeline` inside it — took **2 m 14 s** end to end on a
+`ubuntu-latest` runner. No layer caching was added, because the whole job is
+faster than the threshold that would have justified one.
 
 **Still unmeasured**, and §9's list should be read with these added: a
 `publish_site` *run container* writing the volume (the copy was measured from
