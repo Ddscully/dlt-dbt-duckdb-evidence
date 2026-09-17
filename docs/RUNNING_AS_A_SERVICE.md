@@ -487,10 +487,15 @@ this one the second stayed `QUEUED` until the first finished. The file is read
 at process start, so the live service reported the new value only after a
 restart.
 
-**The queue governs what enters it, and `just materialize` does not.** The UI,
-the schedule and backfills submit to it; `dagster job execute`, which every
-`materialize*` recipe runs, executes in the calling process. The two directions
-differ, and the same throwaway instance measured both:
+**The queue governs what enters it, and no recipe that materialises enters it.**
+The UI, its backfills included, and the schedule submit to it. `dagster job
+execute` (`just materialize`, `materialize-site`) and `dagster asset materialize`
+(`materialize-select` and both `backfill-*` recipes) execute in the calling
+process: on the same throwaway instance, two overlapping `dagster asset
+materialize` runs both started at once, and neither was ever enqueued. So
+`just backfill-weather`, paced at about an hour a decade, runs beside a scheduled
+`full_refresh` rather than behind it. The two directions differ, and the same
+instance measured both for `just materialize`:
 
 | | Result |
 |---|---|
@@ -564,9 +569,11 @@ keeps, extended with the ones only an always-on deployment meets:
   after a missed tick plus one click is two writers again (§5). Measured: an
   empty `DAGSTER_HOME` reports `max_concurrent_runs` as 10, and one holding a
   symlink to the checked-in file reports 1.
-- **`just materialize` does not queue behind the service.** Every `materialize*`
-  recipe runs `dagster job execute`, in its own process, beside whatever the
-  service is running; only the other direction waits (§5).
+- **The recipes do not queue behind the service.** `just materialize` and
+  `materialize-site` run `dagster job execute`, and `materialize-select` and both
+  `backfill-*` recipes run `dagster asset materialize`; each executes in its own
+  process, beside whatever the service is running, and only the other direction
+  waits (§5).
 - **A bare `uv sync` uninstalls Dagster.** `default-groups` is unset, so
   `uv sync` without `--group orchestration`, typed against a *running* service,
   strips 46 packages out of the venv under it. The running processes hold their

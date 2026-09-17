@@ -31,11 +31,12 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
 - **And one run at a time, which is instance config, not code.** The executor
   serialises steps *within* a run; two runs are two processes. `.dagster/dagster.yaml`
   sets `concurrency: runs: max_concurrent_runs: 1` (Dagster's default is 10), so
-  a UI launch, a schedule tick or a backfill queues behind a run in progress.
+  a UI launch, a UI backfill or a schedule tick queues behind a run in progress.
   Three edges, all measured on 1.13.22:
-  - **`dagster job execute` bypasses the queue, and every `materialize*` recipe
-    runs it.** The queue still *counts* such a run — a UI launch waits for a
-    `just materialize` to end — but `just materialize` never waits for anything.
+  - **`dagster job execute` and `dagster asset materialize` bypass the queue,
+    and every recipe that materialises runs one of them**, the `backfill-*`
+    recipes included. The queue still *counts* such a run — a UI launch waits for
+    a `just materialize` to end — but no recipe waits for anything.
   - **The file is read at process start.** Editing it changes nothing until
     `just serve` or `just dagster` restarts; `dagster instance info` prints what
     the instance loaded.
