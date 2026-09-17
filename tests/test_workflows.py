@@ -582,7 +582,8 @@ def _recipe(name: str) -> str:
     something evaluates perfectly well.
     """
     lines = (REPO_ROOT / "justfile").read_text().splitlines()
-    start = next(i for i, line in enumerate(lines) if line.startswith(f"{name}:"))
+    # `name:` or `name param:` — `course-query sql:` takes an argument.
+    start = next(i for i, line in enumerate(lines) if line.startswith((f"{name}:", f"{name} ")))
     body: list[str] = []
     for line in lines[start + 1 :]:
         if line and not line.startswith((" ", "\t", "#")):
@@ -631,3 +632,77 @@ def test_the_fixture_pipeline_isolates_every_piece_of_state_it_touches():
     # The env var alone is not enough: dbt has to be told to *write* there too,
     # or the override points at a file the build never creates.
     assert '--target-path "$DBT_TARGET_PATH"' in recipe
+
+
+# What each command a course recipe runs reads or writes, so what the recipe has
+# to point at the sandbox before running it. `dbt deps` touches none of it.
+_COURSE_STATE_BY_COMMAND = {
+    r"uv run dbt (?!deps\b)\w+": ("WAREHOUSE_PATH", "LAKEHOUSE_DIR", "DBT_TARGET_PATH"),
+    r"-m ingest\.pipeline\b": ("LAKEHOUSE_DIR",),
+    r"-m transform\.pipeline_status\b": (
+        "WAREHOUSE_PATH",
+        "LAKEHOUSE_DIR",
+        "DBT_MANIFEST_PATH",
+        "DBT_RUN_RESULTS_PATH",
+    ),
+    r"-m transform\.(?!pipeline_status\b)\w+": ("WAREHOUSE_PATH",),
+    r"\blake\.lakehouse\b": ("LAKEHOUSE_DIR",),
+}
+
+
+def test_every_course_recipe_keeps_the_sandbox_to_itself():
+    """A `course-*` recipe must point everything it runs at `data/course/`.
+
+    `just course-rebuild` exported `WAREHOUSE_PATH` alone (#65). dbt attached the
+    *real* landing zone, and every staging model is a view over it, so a drill
+    rebuilt a sandbox copy's `fct_emissions_energy` from 4,096 rows to 43,138 with
+    a green build. The same recipe, and `course-sandbox`, wrote dbt's artifacts
+    to `dbt/target/`, and a `just pipeline-status` against a copy of the real
+    warehouse then filed the sandbox build's 571 nodes as a seventh invocation
+    in `analytics.pipeline_runs`, a table every release carries.
+
+    Required variables are derived from the commands each recipe runs rather
+    than listed per recipe, so a new course recipe, or a command added to an
+    existing one, is held without editing this test. Each value must land under
+    `data/course/`, because exporting the real path is the same leak spelled out.
+    """
+    justfile = (REPO_ROOT / "justfile").read_text()
+    names = re.findall(r"^(course-[\w-]+)[^:\n]*:", justfile, re.MULTILINE)
+    assert {"course-sandbox", "course-rebuild", "course-transform", "course-query"} <= set(names)
+
+    fired: set[str] = set()
+    for name in names:
+        recipe = _recipe(name)
+        code = "\n".join(line for line in recipe.splitlines() if not line.strip().startswith("#"))
+        exports = dict(re.findall(r'^\s*export (\w+)="([^"]*)"', code, re.MULTILINE))
+        target = exports.get("DBT_TARGET_PATH", "$DBT_TARGET_PATH")
+
+        for pattern, variables in _COURSE_STATE_BY_COMMAND.items():
+            if not re.search(pattern, code):
+                continue
+            fired.add(pattern)
+            for variable in variables:
+                value = exports.get(variable, "").replace("$DBT_TARGET_PATH", target)
+                assert "/data/course/" in value, (
+                    f"`just {name}` runs something matching {pattern!r} without pointing "
+                    f"{variable} into data/course/ (it is {value or 'unset'!r}), so it "
+                    f"reads or writes the real one"
+                )
+            if "LAKEHOUSE_DIR" in variables:
+                assert "unset LAKEHOUSE_DATA_PATH" in code, (
+                    f"`just {name}` sets the course LAKEHOUSE_DIR but leaves "
+                    f"LAKEHOUSE_DATA_PATH, which outranks it and names the real bucket"
+                )
+
+        # The variable alone is not enough, as in `test-pipeline`: every dbt
+        # command that builds has to be told to write there.
+        for command in re.findall(r"uv run dbt (?!deps\b)[^&\n]*", code):
+            assert '--target-path "$DBT_TARGET_PATH"' in command, (
+                f"`just {name}` runs `{command.strip()}` without --target-path, so "
+                f"its artifacts land in dbt/target/"
+            )
+
+    assert fired == set(_COURSE_STATE_BY_COMMAND), (
+        f"no course recipe runs {sorted(set(_COURSE_STATE_BY_COMMAND) - fired)} any more, "
+        f"so that rule measures nothing — update the table"
+    )

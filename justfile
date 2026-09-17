@@ -392,11 +392,17 @@ course-sandbox: _no-dbt-dotenv
     # On disk whatever the real landing zone is on: a bucket data path would
     # outrank LAKEHOUSE_DIR and put the slice's Parquet beside the real files.
     unset LAKEHOUSE_DATA_PATH
+    # dbt writes its artifacts to dbt/target/ whichever warehouse it built, and
+    # the next `just pipeline-status` files that run_results.json in the real
+    # warehouse's carried build history. The sandbox keeps its own.
+    export DBT_TARGET_PATH="{{ justfile_directory() }}/data/course/dbt-target"
+    export DBT_MANIFEST_PATH="$DBT_TARGET_PATH/manifest.json"
+    export DBT_RUN_RESULTS_PATH="$DBT_TARGET_PATH/run_results.json"
     mkdir -p "$(dirname "$WAREHOUSE_PATH")"
     rm -f "$WAREHOUSE_PATH" "$WAREHOUSE_PATH.wal"
     echo "course sandbox: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
-    cd dbt && uv run dbt deps && uv run dbt build && cd ..
+    cd dbt && uv run dbt deps && uv run dbt build --target-path "$DBT_TARGET_PATH" && cd ..
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
@@ -408,8 +414,14 @@ course-rebuild: _no-dbt-dotenv
     #!/usr/bin/env bash
     set -euo pipefail
     export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"
+    # dbt attaches $LAKEHOUSE_DIR and every staging model is a view over it, so
+    # left at the real landing zone a drill rebuilds the sandbox's marts from the
+    # full data, and the build is green.
+    export LAKEHOUSE_DIR="{{ justfile_directory() }}/data/course/lakehouse"
+    unset LAKEHOUSE_DATA_PATH  # the sandbox is on disk (see course-sandbox)
+    export DBT_TARGET_PATH="{{ justfile_directory() }}/data/course/dbt-target"  # see course-sandbox
     test -f "$WAREHOUSE_PATH" || { echo "no sandbox yet — run: just course-sandbox" >&2; exit 1; }
-    cd dbt && uv run dbt build
+    cd dbt && uv run dbt build --target-path "$DBT_TARGET_PATH"
 
 # `course-rebuild` stops at dbt. A recipe rather than a command in the material,
 # because the raw form forgets WAREHOUSE_PATH once and rewrites the real
