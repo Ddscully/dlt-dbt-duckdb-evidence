@@ -200,6 +200,19 @@ linter, formatter and type checker those pins serve behave is
     into the past, `DeprecatedModel` exits 2; with the `flags:` block removed,
     0. 1.12 routes every warning through the `--warn-error` handler, the
     machinery that promotion rides on, and no test covers it.
+  - **Except in a checkout that had built on 1.11, which none of those runs
+    could see.** 1.12 writes a snapshot's run SQL under a directory named after
+    its file, `run/<project>/snapshots/<file>.sql/<file>.sql`, where 1.11 wrote
+    the `.sql` file itself. So a `dbt/target/` last written by 1.11 fails both
+    snapshots with `[Errno 20] Not a directory` and skips everything downstream
+    of them. It surfaced 2026-09-17, two days after the upgrade merged, when a
+    build first wrote into such a directory. CI, `just test-pipeline` and the
+    course sandbox each build into a directory 1.12 created, so none of them
+    can. Reproduced against a copy of the stale `run/`: `dbt snapshot` gave
+    `ERROR=2`, and `PASS=2` once `run/` was deleted. The fix is deleting
+    `dbt/target/run`, or `just clean`, which takes all of `dbt/target`. **A bump
+    measured only in fresh directories has not been measured in the ones
+    contributors already have.**
 - **A re-lock across an exact pin is a silent no-op unless the pinned package is
   named.** dagster-dbt, dagster-dlt, dagster-webserver and dagster-graphql pin
   `dagster==` exactly, so from 1.11's lock `uv lock --upgrade-package dbt-core`
