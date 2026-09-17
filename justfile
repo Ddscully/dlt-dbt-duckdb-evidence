@@ -77,6 +77,22 @@ deploy-deps:
 compose-up:
     docker compose up -d --wait
 
+# The image is the whole stack — both Dagster processes, every layer they call,
+# and Node for the site — and its CMD is this justfile's `serve`. Build it before
+# the first `just compose-up`, and after any change to the tree, because compose
+# does not rebuild on its own.
+# Build the mds:local image compose runs
+compose-build:
+    docker compose build
+
+# The fixture pipeline inside the image, against the compose Postgres and
+# SeaweedFS: the one command that exercises a remote catalog, a remote data path
+# and the container together. `--no-deps` because the services are already up,
+# and `--rm` because this is not the service.
+# Run the fixture pipeline inside the container (needs `just compose-up`)
+compose-test-pipeline:
+    docker compose run --rm --no-deps dagster just test-pipeline
+
 # `just compose-down volumes` also deletes the named volumes — which destroys
 # the catalog and the bucket, and is the only way to make the Postgres init
 # script run again (the entrypoint runs it on an empty data directory alone).
@@ -418,7 +434,7 @@ export SITE_ROOT := env("SITE_ROOT", justfile_directory() / "reports/build")
 #     exit as far as `Restart=on-failure` is concerned.
 # It does not start the `daily_refresh` schedule, which ships STOPPED (§10).
 # Run the graph and the dashboard as one always-on service (blocks; ctrl-c to stop)
-serve dagster_port="3000" site_port="8081": where dbt-parse
+serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "$DAGSTER_HOME"
@@ -435,14 +451,14 @@ serve dagster_port="3000" site_port="8081": where dbt-parse
     trap 'stop; exit 0' INT TERM
     trap stop EXIT
 
-    uv run --group orchestration dagster-webserver -h 127.0.0.1 -p {{ dagster_port }} &
+    uv run --group orchestration dagster-webserver -h {{ host }} -p {{ dagster_port }} &
     pids+=($!)
     uv run --group orchestration dagster-daemon run &
     pids+=($!)
     uv run --group orchestration python -m http.server {{ site_port }} --directory "$SITE_ROOT" &
     pids+=($!)
 
-    echo "dagster: http://127.0.0.1:{{ dagster_port }} (localhost)    site: http://0.0.0.0:{{ site_port }} (every interface) — $SITE_ROOT"
+    echo "dagster: http://{{ host }}:{{ dagster_port }}    site: http://0.0.0.0:{{ site_port }} (every interface) — $SITE_ROOT"
 
     status=0
     wait -n || status=$?

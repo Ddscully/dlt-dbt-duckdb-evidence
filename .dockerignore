@@ -1,0 +1,23 @@
+# What must not reach the build context. Three kinds, and the middle one is the
+# one that would be silently wrong:
+#
+# - build output that the image rebuilds anyway (`dbt/target`, `dbt_packages`,
+#   `node_modules`, `reports/build`, `.venv`, `__pycache__`) — copying it in
+#   would layer a host's artifacts under the ones the Dockerfile builds;
+# - *state* (`data/`, `.dagster/`, `.env`) — a warehouse, a landing zone or a
+#   password baked into an image that then gets pushed somewhere;
+# - noise (`.git`, `docs/sessions`).
+
+.git
+.venv
+.env
+data
+.dagster
+dbt/target
+dbt/dbt_packages
+dbt/logs
+reports/node_modules
+reports/build
+reports/.evidence
+docs/sessions
+__pycache__

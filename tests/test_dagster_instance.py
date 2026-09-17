@@ -20,6 +20,7 @@ says what there is to set.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,12 @@ yaml = pytest.importorskip("yaml")
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LAPTOP_INSTANCE = REPO_ROOT / ".dagster/dagster.yaml"
 DEPLOYED_INSTANCE = REPO_ROOT / "deploy/dagster.yaml"
+COMPOSE = REPO_ROOT / "compose.yaml"
+DOCKERFILE = REPO_ROOT / "Dockerfile"
+
+# The compose service the deployed instance runs as, and whose environment is
+# what the run launcher copies from.
+DAGSTER_SERVICE = "dagster"
 
 # What the two instances must say the same way. Not "everything but storage":
 # naming them makes adding a block a decision about both files.
@@ -126,19 +133,155 @@ def test_every_deployed_storage_value_but_the_port_comes_from_the_environment():
             )
 
 
-def test_every_variable_the_deployed_instance_reads_is_in_the_env_example():
-    """`.env.example` is this repo's list of what there is to set, and `just`
-    loads the `.env` beside it into every recipe. A variable the instance reads
-    and that file never names is one a reader can only find by reading YAML.
+def env_example_names() -> set[str]:
+    """Every variable `.env.example` assigns, commented or not.
 
-    Commented lines count: the whole file is commented, because an uncommented
+    Commented counts: the whole file is commented, because an uncommented
     `.env.example` copied to `.env` would configure a stack nobody asked for.
     """
-    example = (REPO_ROOT / ".env.example").read_text()
-    assigned = {
+    return {
         line.lstrip("#").split("=", 1)[0].strip()
-        for line in example.splitlines()
+        for line in (REPO_ROOT / ".env.example").read_text().splitlines()
         if "=" in line and line.lstrip("#").lstrip()[:1].isupper()
     }
+
+
+def compose_service(name: str) -> dict:
+    return load(COMPOSE)["services"][name]
+
+
+def dockerfile_env_names() -> set[str]:
+    """Names the image sets with `ENV`. A continuation-line form is what this
+    Dockerfile uses, so every `NAME=` on any line of such a block counts."""
+    names, in_env = set(), False
+    for raw in DOCKERFILE.read_text().splitlines():
+        line = raw.strip()
+        if line.startswith("ENV "):
+            in_env, line = True, line[4:].strip()
+        elif not in_env:
+            continue
+        for token in line.rstrip("\\").split():
+            if "=" in token and token.split("=", 1)[0].isupper():
+                names.add(token.split("=", 1)[0])
+        in_env = raw.rstrip().endswith("\\")
+    return names
+
+
+def test_every_variable_the_deployed_instance_reads_is_assigned_somewhere():
+    """A `{env: X}` the instance reads and nothing assigns is a
+    `DagsterInvalidConfigError` at startup. Loud, but the fix is to set it
+    somewhere, and these three files are where this repo says what there is to
+    set: `.env.example` for a person, `compose.yaml` for the stack, the
+    Dockerfile for what is true of the image itself."""
+    assigned = env_example_names() | set(compose_service(DAGSTER_SERVICE)["environment"])
+    assigned |= dockerfile_env_names()
     missing = sorted(env_names(load(DEPLOYED_INSTANCE)) - assigned)
-    assert not missing, f"{DEPLOYED_INSTANCE.name} reads {missing}, which .env.example never names"
+    assert not missing, f"{DEPLOYED_INSTANCE.name} reads {missing}, which nothing assigns"
+
+
+def test_every_name_the_run_launcher_copies_is_set_on_the_service():
+    """`env_vars` is a copy list: a bare `NAME` tells `DockerRunLauncher` to take
+    that variable from its *own* environment, and `parse_env_var` raises when it
+    is unset. That happens inside the daemon, when the run is dequeued — after
+    the UI has already reported it launched — so it is a red run with a stack
+    trace nowhere near the cause.
+
+    The Dockerfile counts too: `PROJECT_ROOT` and friends are `ENV` in the image,
+    which is the launcher's environment as much as compose's block is.
+    """
+    launcher = load(DEPLOYED_INSTANCE)["run_launcher"]["config"]
+    service_env = set(compose_service(DAGSTER_SERVICE)["environment"])
+    available = service_env | dockerfile_env_names()
+    copied = [name for name in launcher["env_vars"] if "=" not in name]
+    missing = sorted(set(copied) - available)
+    assert not missing, (
+        f"the run launcher copies {missing}, which the `{DAGSTER_SERVICE}` service does not set"
+    )
+
+
+def test_the_run_containers_mount_the_same_volumes_at_the_same_paths():
+    """A run container is launched by `dagster_docker`, not by compose, so its
+    volume list is written out by hand in `deploy/dagster.yaml`. Every source
+    must be a volume this file declares by `name:` — compose's
+    `<project>_<volume>` prefixing does not apply to a container it did not
+    create — and every mount must land where the service has it, or a run writes
+    a warehouse nobody reads."""
+    compose = load(COMPOSE)
+    declared = {v["name"] for v in compose["volumes"].values()}
+    service_mounts = dict(
+        m.split(":")[:2]
+        for m in compose_service(DAGSTER_SERVICE)["volumes"]
+        if not m.startswith("/")
+    )
+    for mount in load(DEPLOYED_INSTANCE)["run_launcher"]["config"]["container_kwargs"]["volumes"]:
+        source, path = mount.split(":")[:2]
+        assert source in declared, (
+            f"run containers mount `{source}`, which compose.yaml does not declare"
+        )
+        assert service_mounts.get(source) == path, (
+            f"`{source}` is at {path} in a run container and "
+            f"{service_mounts.get(source)} in the `{DAGSTER_SERVICE}` service"
+        )
+
+
+def test_the_launcher_network_is_the_compose_network():
+    """A run container off the compose network cannot resolve `postgres` or
+    `seaweedfs`, and fails at the first attach."""
+    network = load(DEPLOYED_INSTANCE)["run_launcher"]["config"]["network"]
+    assert network == load(COMPOSE)["networks"]["default"]["name"]
+
+
+def test_the_run_image_and_the_service_image_are_the_same():
+    """`DAGSTER_CURRENT_IMAGE` is what the code location reports and the
+    launcher's `image` is the fallback. Both resolve to the service's own image
+    here, so a run executes the code that launched it."""
+    service = compose_service(DAGSTER_SERVICE)
+    assert service["environment"]["DAGSTER_CURRENT_IMAGE"] == service["image"]
+
+
+def image_tags() -> list[tuple[str, str, int]]:
+    """Every image this repo names, with where it came from and how many numeric
+    components its version must have. See the test below for why those differ."""
+    tags = [
+        (s["image"], "compose.yaml", 2) for s in load(COMPOSE)["services"].values() if "image" in s
+    ]
+    tags += [
+        (line.split()[1], "Dockerfile", 3)
+        for line in DOCKERFILE.read_text().splitlines()
+        if line.startswith("FROM ")
+    ]
+    return tags
+
+
+def test_every_image_tag_is_pinned():
+    """No `latest`, no bare name, no floating alias. Dependabot watches these —
+    `docker-compose` for compose.yaml, `docker` for the Dockerfile — and a
+    moving tag is one it cannot bump, which is the "unwatched pin" that
+    `docs/RUNNING_AS_A_SERVICE.md` §2 predicted a container would add.
+
+    **The two minimums differ because upstream's release schemes do.** The
+    Dockerfile's images are language runtimes, where `X.Y.Z` is the exact tag
+    and `X.Y` is an alias that moves under you — `python:3.13-slim-bookworm`
+    silently becomes the next patch. The compose services are `postgres:17.11`
+    and `chrislusf/seaweedfs:4.47`, whose exact tags have two components, so
+    three cannot be required of them.
+
+    **What this cannot catch**, deliberately and not by oversight: a two-part
+    compose tag that upstream publishes as an alias. Nothing in a tag string
+    says whether it moves, so a new compose image wants a look at how its
+    publisher tags releases. `mds:local` is skipped — it is built here, not
+    pulled.
+    """
+    for tag, source, minimum in image_tags():
+        if tag == "mds:local":
+            continue
+        _, _, version = tag.partition(":")
+        assert version, f"`{tag}` ({source}) names no tag, so it floats with `latest`"
+        assert version != "latest", f"`{tag}` ({source}) is pinned to `latest`"
+        numeric = re.match(r"\d+(?:\.\d+)*", version)
+        assert numeric, f"`{tag}` ({source}) does not start with a version"
+        parts = len(numeric.group().split("."))
+        assert parts >= minimum, (
+            f"`{tag}` ({source}) has {parts} version component(s); {minimum} are needed for an "
+            "exact tag there — see this test's docstring"
+        )

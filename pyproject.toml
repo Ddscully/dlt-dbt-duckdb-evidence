@@ -56,6 +56,11 @@ deploy = [
     # Brings psycopg2-binary. Only `deploy/dagster.yaml` asks for it, and only
     # when DAGSTER_HOME points at that directory. See docs/RUNNING_AS_A_SERVICE.md.
     "dagster-postgres>=0.29.15",  # Dagster run/event/schedule storage in Postgres
+    # The run launcher that gives each run its own container. Only
+    # `deploy/dagster.yaml`'s `run_launcher` block asks for it, and only the
+    # compose stack sets that block's variables; the laptop's instance launches
+    # runs in a subprocess as before.
+    "dagster-docker>=0.29.15",    # DockerRunLauncher — one short-lived container per run
 ]
 
 [project.scripts]

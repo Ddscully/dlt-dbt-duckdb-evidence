@@ -46,8 +46,9 @@ in the skills, so a change to how a layer works usually needs an edit in `docs/`
   and `tests/test_documented_counts.py` covers only its test, mart and additivity
   counts; any other claim added there is kept in step by hand.
 - **[`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) mostly describes
-  what the repo has not built.** Only its §2 exists, as `just serve`, and nothing
-  checks the paths `docs/` cites.
+  what the repo has not built.** Its §2 exists as `just serve` and as the compose
+  stack built on it; §4 onward is still design, and nothing checks the paths
+  `docs/` cites.
 
 Three lessons that apply well beyond where they were learned:
 
@@ -111,6 +112,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just setup` | `uv sync --group dev --group orchestration`, then `just extensions` — ducklake, httpfs and postgres, binaries no lockfile can name |
 | `just compose-up` / `just compose-down` | the optional backing services — Postgres for the catalog, SeaweedFS for the Parquet (`compose-down volumes` destroys both) |
 | `just deploy-deps` | add the `deploy` group — Dagster's own storage in Postgres, under `DAGSTER_HOME=<repo>/deploy` |
+| `just compose-build` / `just compose-test-pipeline` | the `mds:local` image, and the fixture pipeline inside it against the compose services |
 | `just ingest` | run the dlt pipeline → `raw` in the DuckLake catalog |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state, which lives in `~/.dlt`, not the warehouse |
@@ -165,8 +167,8 @@ files outside that task:
 
 ## Dependency and action versions
 
-`.github/dependabot.yml` watches `github-actions`, `uv`, `npm` and
-`docker-compose` monthly. What pins what, and why, is the `dependency-versions`
+`.github/dependabot.yml` watches `github-actions`, `uv`, `npm`,
+`docker-compose` and `docker` monthly. What pins what, and why, is the `dependency-versions`
 skill. Python is 3.13, set in `.python-version` alone, and three versions can
 only age deliberately — `.python-version`, the sqlfluff pair and ruff — because
 no watched ecosystem covers them.

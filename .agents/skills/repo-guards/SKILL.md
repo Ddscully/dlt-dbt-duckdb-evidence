@@ -458,3 +458,39 @@ section here. The mutation method these guards were written with is in the
     against a SeaweedFS bucket left all of them unchanged.
 - **`WAREHOUSE_PATH` must be absolute**: dbt resolves paths from `dbt/`, the
   Python layers from the repo root.
+
+## The two instance configs, the image and the compose file
+
+`tests/test_dagster_instance.py` is the guard over the container stack, and
+almost all of it is one shape: **a file that asserts something about another
+file.** Dagster has no include directive and `dagster_docker` launches run
+containers outside compose, so four files have to agree by hand.
+
+- `.dagster/dagster.yaml` vs `deploy/dagster.yaml` — the shared blocks
+  (`telemetry`, `concurrency`, `retention`) compared by parsed value, plus
+  `max_concurrent_runs: 1` asserted on its own so both dropping to Dagster's
+  default of ten together still fails.
+- `deploy/dagster.yaml` vs `compose.yaml` and the `Dockerfile` — every
+  `{env: X}` and every bare `env_vars` name assigned somewhere; every
+  `container_kwargs.volumes` source declared as a compose volume `name:` and
+  mounted at the same path in the `dagster` service; the launcher's `network`
+  equal to `networks.default.name`; `DAGSTER_CURRENT_IMAGE` equal to the
+  service's `image`.
+- **Why a test and not a startup check**: an unset `env_vars` name raises inside
+  the *daemon*, dequeuing the run, after the UI has already reported it
+  launched. A wrong volume path raises nothing at all — the run writes a
+  warehouse nobody reads.
+- **The pinned-tag test takes a different minimum per file**, and the docstring
+  says why: the Dockerfile's images are language runtimes where `X.Y` is a
+  moving alias, while `postgres:17.11` and `chrislusf/seaweedfs:4.47` are exact
+  at two components. What it cannot catch — a two-part compose tag that upstream
+  publishes as an alias — is written down as a deliberate limit, because nothing
+  in a tag string says whether it moves.
+
+**A guard that reads a file must skip that file's comments.** `ci.yml`'s
+manifest-gated check scanned for `uv run pytest <args>` across the whole
+workflow, so a comment in the `container` job explaining *why that job runs no
+such command* was parsed as one, and its prose words became expected test
+filenames (2026-09-17). Fixed by dropping comment lines before the scan. The
+general form: a guard a sentence about it can break is a guard that discourages
+writing the sentence — the same defect PR #68 fixed in the course guard.

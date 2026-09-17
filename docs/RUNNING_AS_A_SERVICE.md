@@ -40,7 +40,7 @@ runs. A schedule that quietly stopped firing is supposed to show as a stale asse
 rather than as an absence somebody notices; that only happens with a daemon
 running. See [`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md#2-what-is-the-freshness-sla-and-what-happens-when-it-is-missed).
 
-## 2. `just serve`, not a container
+## 2. `just serve`, and the container built on it
 
 **Recommendation: a `just serve` recipe, supervised by systemd. Reach for a
 container only when the target demands one** (several hosts, immutable images).
@@ -72,6 +72,42 @@ Four reasons, all specific to this repo rather than to taste:
    Parquet with DuckDB-WASM. **The served site never opens
    `data/warehouse.duckdb`.** Serving it is a static file server, and there is
    nothing there to containerise.
+
+### What changed, 2026-09-17
+
+The four reasons above are kept as written, because the recommendation has not
+been reversed — **the laptop default is still the file and still `just`**. What
+changed is that "reach for a container when the target demands one" now has a
+built answer rather than a sketch: `Dockerfile`, `compose.yaml`, and a
+`DockerRunLauncher` giving each run its own container. Taking them in order:
+
+1. **Answered by the shape, not by argument.** The image's `CMD` is
+   `["just", "serve", "3000", "8081", "0.0.0.0"]`, so it restates the
+   *toolchain* — a base image, Node, uv, the DuckDB extensions, the dbt manifest
+   — and never the service. The fifth restatement the reason predicted did not
+   appear, because there was nothing to restate. What a workflow guard could not
+   cover, `tests/test_dagster_instance.py` does instead: it reads the Dockerfile
+   and `compose.yaml` as data and holds them against `deploy/dagster.yaml` —
+   every launcher `env_vars` name assigned, every run-container volume declared
+   and mounted at the same path, the network matching, the run image matching
+   the service's.
+2. **Conceded, and then answered.** It really is a new pinning surface: four
+   base and service images. `.github/dependabot.yml` gained a `docker`
+   ecosystem for the Dockerfile beside the `docker-compose` one for the compose
+   file, and the test above refuses a tag Dependabot could not bump — `latest`,
+   a bare name, or a floating `X.Y` where upstream's exact tag is `X.Y.Z`. The
+   count of versions that can only age deliberately is unchanged at three.
+3. **Largely dissolved — by §3's catalog move, not by the container.** With
+   `LAKEHOUSE_CATALOG` in Postgres and `LAKEHOUSE_DATA_PATH` in a bucket, the
+   landing zone is not a file any more, and the only thing a run container and
+   the service both open is `data/warehouse.duckdb`. "Two containers sharing a
+   volume reintroduce the lock" was measured again under that arrangement and
+   is now the narrow case the one-run queue already covers — see the
+   measurements below. The reason was right about the mechanism and was
+   answered by moving the state, which is the thing worth remembering.
+4. **Holds exactly as written.** nginx serves the `mds_site` volume read-only
+   and never opens the warehouse. It is a static file server, containerised
+   only because the rest of the stack already is.
 
 ### The recipe
 
@@ -526,10 +562,32 @@ whatever the host already terminates TLS with in front of it. The Evidence site
 is static and safe to expose; note that it ships the underlying Parquet to the
 browser, so "the site is public" means "these tables are public".
 
-**The service holds no secrets, and that is a consequence of §4 rather than a
-happy accident.** Every source it reads is public and unauthenticated, and
-`PII_SALT`, the one secret in the whole project, belongs to the export, which
-the service does not run. Its environment file is paths. If publishing is ever
+**The service held no secrets until it had backing services, and that was a
+consequence of §4 rather than a happy accident.** Every source it reads is public
+and unauthenticated, and `PII_SALT`, the one secret in the whole project, belongs
+to the export, which the service does not run.
+
+**The compose stack ends that, and adds something worse than a secret.** In
+order:
+
+- **`PGPASSWORD`** is a real credential on the host, in `.env`, read by both
+  `just` and `docker compose`. It is deliberately never in a URL — libpq reads
+  it from the environment, so it stays out of `LAKEHOUSE_CATALOG`, out of
+  `dbt/profiles.yml` and out of every process list — but it is on the machine,
+  and the `dagster` service passes it to every run container it launches.
+- **The docker socket is mounted into the `dagster` container, and that is
+  root-equivalent on the host.** `DockerRunLauncher` needs it to start run
+  containers; anything that can reach it can start a container with any mount it
+  likes. This is a larger grant than the password and is the reason the service
+  binds 127.0.0.1. A deployment that puts a reverse proxy in front of Dagster is
+  exposing a docker socket by proxy, so the authentication §6 opens with stops
+  being optional.
+- **The container runs as root**, which the socket makes close to moot: a
+  non-root user in the container that can write the socket has the host anyway.
+  Recorded rather than fixed, so the trade is visible.
+- **`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`** are credentials in the same
+  sense, though the ones in `.env.example` reach a SeaweedFS bound to localhost.
+  A real object store makes them the third real secret. Its environment file is paths. If publishing is ever
 added to the host, that stops being true immediately: the salt has to be
 **stable across runs** (a fresh one repseudonymises every customer for no change
 in the data), so it would become a long-lived secret sitting on a machine that
@@ -574,6 +632,46 @@ keeps, extended with the ones only an always-on deployment meets:
   fails to load, or loads against a stale manifest (§2).
 - **A `STOPPED` schedule survives a `.dagster/` wipe as stopped.** The service
   runs, serves an increasingly old site, and ingests nothing (§5).
+- **A run container's command is `dagster api execute_run`, not a `just`
+  recipe.** Everything else in the image reaches the venv through `uv run`, so
+  nothing in the justfile needs `/app/.venv/bin` on `PATH` — and the launcher
+  does. Without it a run dies before any Python runs, with
+  `exec: "dagster": executable file not found in $PATH`; `auto_remove` then
+  deletes the container, so the only evidence is one `ENGINE_EVENT` in the event
+  log. Measured 2026-09-17, and the reason the Dockerfile's `PATH` is what it
+  is.
+- **An `env_vars` name the launcher cannot resolve fails at *launch*, not at
+  start.** A bare name in that list means "copy this from my environment", and
+  `parse_env_var` raises when it is unset — inside the daemon, dequeuing the
+  run, after the UI has already said the run was launched. The service is
+  healthy the whole time. `tests/test_dagster_instance.py` holds every name in
+  that list against `compose.yaml`'s `dagster` environment and the Dockerfile's
+  `ENV`, because a startup check could not.
+- **Without `auto_remove`, every finished run leaves an exited container.** They
+  are invisible in `docker ps` and accumulate for as long as the service runs.
+  It is set in `deploy/dagster.yaml`; the cost is that a run container that
+  failed to *start* also disappears, taking its `docker logs` with it, which is
+  why the previous bullet's failure has to be read out of the event log.
+- **The site is down for the copy, not for the build.** `evidence build` adds to
+  its output directory rather than replacing it, so `publish/build_report.py`
+  empties that directory first — which cannot be the nginx mount point, because
+  `rmtree` on one fails with `EBUSY`. So the build happens in `reports/build`
+  and the result is copied to `SITE_ROOT` afterwards, replacing its *contents*.
+  The outage is the copy. Measured 2026-09-17 in the compose stack: `just report`
+  in the container built 11 pages / 482 files / 92 MB and copied them to the
+  volume, and **65 one-second polls of nginx through the whole build returned 200
+  every time** — the copy window did not last a second. Against the 85 s of 404s
+  the in-place build produced (§2), that is the whole point of the indirection.
+  A build that fails leaves the previous site serving, because nothing is copied
+  until it succeeds.
+- **The Postgres init script runs once, on an empty data directory.** Adding a
+  database to `deploy/postgres/init.sql` does nothing to a volume that already
+  exists — the entrypoint only runs `/docker-entrypoint-initdb.d` when it is
+  initialising. `just compose-down volumes` is the reset, and it destroys the
+  catalog and the bucket with it.
+- **A container keeps the healthcheck it was created with.** Editing
+  `compose.yaml`'s `healthcheck` and running `just compose-up` changes nothing
+  for a running container; it has to be recreated.
 - **A code location name is part of a schedule's identity, and `-m` changes
   it.** `dagster schedule start daily_refresh -m orchestration.definitions`
   prints `Started schedule daily_refresh` and writes a row the running service
@@ -627,6 +725,15 @@ keeps, extended with the ones only an always-on deployment meets:
   life.** DuckLake compares `data_path` as a *string*, so moving the volume's
   mount point refuses every attach, and the error surfaces inside `dbt build`,
   one layer below whatever chose the spelling.
+  - **A catalog remembers the data path it was created with, so one catalog
+    schema cannot serve two arrangements.** Hit for real on 2026-09-17: the
+    compose stack was pointed at a Postgres catalog that an earlier laptop run
+    had already initialised with the Parquet *on disk*, and the first run in a
+    container failed with `DATA_PATH parameter "s3://lake/modern-data-stack/"
+    does not match existing data path in the catalog "/home/…/data/lakehouse/data/"`.
+    Nothing was wrong with either side. A laptop that shares a database with the
+    compose stack wants its own `LAKEHOUSE_METADATA_SCHEMA`, or the same data
+    path as the stack.
 - **An Evidence `filename` override is joined onto the source directory.** An
   absolute path is not rejected, it is relocated (§4).
 - **DuckDB is one writer XOR many readers, across processes.** Measured on the
@@ -794,3 +901,75 @@ dlt's watermark and re-fetches everything; a moved mount point breaks every
 DuckLake attach because `data_path` is compared as a string; a `DAGSTER_HOME`
 without `dagster.yaml` lets runs overlap again. All six are §8, and none of them
 raises where you are looking.
+
+### The compose variant
+
+Everything above stands the service up on a host. This is the same service as
+four containers, and it is the **recommended** way to run it — steps 1 to 4
+collapse into two commands, because the image is the host setup and
+`compose.yaml` is the environment file.
+
+```sh
+cp .env.example .env         # set PGPASSWORD; the rest has working defaults
+just compose-build           # the image, mds:local
+just compose-up              # postgres, seaweedfs, dagster, site
+```
+
+`127.0.0.1:3000` is Dagster and `:8081` is the dashboard. Then, once:
+
+```sh
+docker compose exec dagster uv run dagster job launch -j load_retail
+docker compose exec dagster uv run dagster job launch -j full_refresh
+docker compose exec dagster uv run dagster job launch -j publish_site
+docker compose exec dagster uv run dagster schedule start daily_refresh
+```
+
+That is step 3's bootstrap and step 6, in the container. **Never pass `-m`** —
+§8 says why. `just materialize` from the *host* is still not the service's
+queue: it is a different process against a different warehouse entirely, since
+the container's lives on the `mds_data` volume.
+
+What differs from a host deployment, beyond packaging:
+
+- **Each run gets its own container**, launched by `DockerRunLauncher` from the
+  same image, and removed when it finishes. Measured 2026-09-17: about 10 s from
+  launch to a running run container, against a subprocess starting immediately.
+- **The landing zone is not on a volume at all.** The catalog is in Postgres and
+  the Parquet in SeaweedFS, so the one file a run container and the service both
+  open is `data/warehouse.duckdb` on `mds_data` — which is why §2 reason 3 is
+  largely dissolved rather than worked around.
+- **Four named volumes**, and they are named explicitly because the run
+  containers mount them by name from outside compose: `mds_data` (the warehouse
+  and the landing-zone directory), `mds_dlt` (dlt's watermarks, at
+  `DLT_DATA_DIR` rather than under `$HOME`), `mds_site` (what nginx serves), and
+  `mds_dagster` (compute logs and run artifacts). Two more back the services:
+  `mds_postgres` and `mds_seaweedfs`.
+- **`just compose-down volumes` is the full reset**, and the only way to make
+  `deploy/postgres/init.sql` run again. It destroys the catalog, the bucket, the
+  warehouse and every run this instance recorded.
+
+Verified end to end on 2026-09-17:
+
+- `just compose-build` warm: **72 s**, image **2.15 GB**.
+- `docker compose up -d --wait` on fresh volumes: healthy in **4 s**, with both
+  databases created by the init script.
+- `just compose-test-pipeline`: the whole fixture pipeline inside the image,
+  **571 dbt nodes**, against the Postgres catalog and the SeaweedFS bucket, with
+  its fixture schema created and dropped.
+- `just run` in the container from fixtures: **56 s**, then `just report`
+  built 11 pages and copied 482 files to the site volume, which nginx served
+  without a single failed request.
+- Two runs launched ten seconds apart: one run container, one `QUEUED` row, the
+  second starting only when the first finished, and no exited containers left.
+- `dagster definitions validate` inside the image with `--network none`: passes,
+  which is what proves the manifest and `dbt_packages/` are baked rather than
+  fetched.
+- `docker compose stop dagster`: **1.0 s**, exit **143** (SIGTERM), well inside
+  the ten-second grace and with no orphaned run container. `init: true` is what
+  buys that — `just` is PID 1 and forks four children, and without an init to
+  reap them the stop waits out the full grace period and exits 137.
+
+**Still unmeasured**, and §9's list should be read with these added: a
+`publish_site` *run container* writing the volume (the copy was measured from
+the service container instead), the cold-cache build time on a CI runner, and
+any of this on a host that is not this laptop.

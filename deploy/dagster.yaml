@@ -49,6 +49,55 @@ compute_logs:
     base_dir:
       env: DAGSTER_STORAGE_DIR
 
+# One short-lived container per run, from the same image this service runs.
+#
+# `image` is the fallback: a run's image comes from its code location's
+# DAGSTER_CURRENT_IMAGE, and this is what is used when that is unset. Both are
+# `mds:local` under compose, so the two paths agree.
+#
+# `env_vars` is a *copy list*, not a definition: a bare name means "take this
+# from the launcher's own environment", and `parse_env_var` raises when it is
+# unset — inside the daemon, after the UI has already said the run was launched.
+# `tests/test_dagster_instance.py` therefore holds every name here against
+# `compose.yaml`'s `dagster` environment and the Dockerfile's `ENV`.
+run_launcher:
+  module: dagster_docker
+  class: DockerRunLauncher
+  config:
+    image:
+      env: DAGSTER_CURRENT_IMAGE
+    network: mds
+    env_vars:
+      - PROJECT_ROOT
+      - WAREHOUSE_PATH
+      - LAKEHOUSE_DIR
+      - LAKEHOUSE_CATALOG
+      - LAKEHOUSE_METADATA_SCHEMA
+      - LAKEHOUSE_DATA_PATH
+      - LAKEHOUSE_S3_ENDPOINT
+      - PGPASSWORD
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_REGION
+      - DAGSTER_POSTGRES_HOST
+      - DAGSTER_POSTGRES_USER
+      - DAGSTER_POSTGRES_DB
+      - DAGSTER_STORAGE_DIR
+      - DLT_DATA_DIR
+      - INGEST_CACHE_DIR
+      - SITE_ROOT
+    container_kwargs:
+      # The same four volumes the service mounts, at the same paths: a run
+      # writes the warehouse, the landing zone, dlt's watermarks and the site,
+      # and every one of those has to outlive the container that wrote it.
+      volumes:
+        - mds_data:/app/data
+        - mds_dlt:/app/state
+        - mds_site:/srv/site
+        - mds_dagster:/dagster-storage
+      # Without this, every finished run leaves an exited container behind.
+      auto_remove: true
+
 telemetry:
   enabled: false
 

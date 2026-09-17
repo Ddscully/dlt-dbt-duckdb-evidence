@@ -12,19 +12,41 @@
 # Every port is bound to 127.0.0.1: neither service authenticates well enough to
 # face a network, and both hold the whole landing zone.
 #
-# Image tags are pinned exactly, and Dependabot's `docker-compose` ecosystem is
-# what watches them — `docker` is Dockerfiles, which this repo has none of.
+# Image tags are pinned exactly. Dependabot's `docker-compose` ecosystem watches
+# the ones here and its `docker` ecosystem watches the `Dockerfile`'s: two
+# ecosystems, because they match different files.
 name: mds
 
 networks:
   default:
     name: mds
 
+# Every volume is named explicitly, because the run containers mount them by
+# name: `dagster_docker` launches them itself, outside this file, so compose's
+# `<project>_<volume>` prefixing would leave the launcher naming volumes that do
+# not exist. `deploy/dagster.yaml`'s `container_kwargs.volumes` is the other
+# half, and a test holds the two lists together.
 volumes:
   mds_postgres:
     name: mds_postgres
   mds_seaweedfs:
     name: mds_seaweedfs
+  # The warehouse and the landing zone: `data/warehouse.duckdb` is the one file
+  # a run container and the service both write, which is why runs are queued.
+  mds_data:
+    name: mds_data
+  # dlt's state — the WDI watermark and the ECB's last fixing. Its own volume
+  # because it is the piece a deployment most easily loses: dlt resolves it from
+  # $HOME unless DLT_DATA_DIR says otherwise (docs/RUNNING_AS_A_SERVICE.md §3).
+  mds_dlt:
+    name: mds_dlt
+  # The built site, written by a run container and read by nginx.
+  mds_site:
+    name: mds_site
+  # Compute logs and run artifacts, which Dagster keeps on a filesystem even
+  # with its storage in Postgres.
+  mds_dagster:
+    name: mds_dagster
 
 services:
   # The DuckLake catalog (database `lakehouse`), and Dagster's storage
@@ -83,3 +105,74 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+
+  # The graph and the dashboard, as one long-running container. Its CMD is
+  # `just serve`, so the image restates the toolchain and not the service.
+  #
+  # Runs do *not* execute here: `deploy/dagster.yaml`'s DockerRunLauncher gives
+  # each one its own container from this same image, which is why the docker
+  # socket is mounted. That socket is root-equivalent on the host — see
+  # docs/RUNNING_AS_A_SERVICE.md §6 before exposing any of this.
+  dagster:
+    build: .
+    image: mds:local
+    # `just` is PID 1 and forks four children; without an init the container
+    # ends up reaping nothing and `docker stop` waits out its full grace period.
+    init: true
+    environment:
+      # What the launcher reads to decide a run's image. It is also the
+      # fallback in deploy/dagster.yaml, and the two must agree.
+      DAGSTER_CURRENT_IMAGE: mds:local
+      PROJECT_ROOT: /app
+      WAREHOUSE_PATH: /app/data/warehouse.duckdb
+      LAKEHOUSE_DIR: /app/data/lakehouse
+      # Both halves of the landing zone are remote here: the catalog in the
+      # Postgres beside it, the Parquet in SeaweedFS. So the only thing a run
+      # container and the service share on disk is the warehouse file.
+      LAKEHOUSE_CATALOG: postgres://mds@postgres:5432/lakehouse
+      LAKEHOUSE_METADATA_SCHEMA: lakehouse
+      PGPASSWORD: ${PGPASSWORD:?set it in .env — see .env.example}
+      LAKEHOUSE_DATA_PATH: s3://${LAKEHOUSE_S3_BUCKET:-lake}/modern-data-stack/
+      LAKEHOUSE_S3_ENDPOINT: http://seaweedfs:8333
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-testtest}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      DAGSTER_POSTGRES_HOST: postgres
+      DAGSTER_POSTGRES_USER: mds
+      DAGSTER_POSTGRES_DB: dagster
+      DAGSTER_STORAGE_DIR: /dagster-storage
+      # Explicit, because dlt resolves its state directory from $HOME and would
+      # otherwise put the watermarks inside the container's own filesystem,
+      # where they die with it. XDG_DATA_HOME does not work: it loses to an
+      # existing ~/.dlt (docs/RUNNING_AS_A_SERVICE.md §3).
+      DLT_DATA_DIR: /app/state/dlt
+      INGEST_CACHE_DIR: /app/data/cache
+      # Where the finished site is copied for nginx to serve. A mount point, so
+      # `publish/build_report.py` replaces its contents rather than the
+      # directory.
+      SITE_ROOT: /srv/site
+    volumes:
+      - mds_data:/app/data
+      - mds_dlt:/app/state
+      - mds_site:/srv/site
+      - mds_dagster:/dagster-storage
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      # Localhost only: Dagster has no authentication (§6).
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+
+  # The dashboard. Read-only on the site volume: nothing here writes it, and a
+  # static site server that can write its own document root is a liability.
+  site:
+    image: nginx:1.31.6-alpine
+    volumes:
+      - mds_site:/usr/share/nginx/html:ro
+    ports:
+      - "8081:80"
+    depends_on:
+      - dagster

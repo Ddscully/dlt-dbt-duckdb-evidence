@@ -476,6 +476,20 @@ wheels = [
 ]
 
 [[package]]
+name = "dagster-docker"
+version = "0.29.23"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dagster" },
+    { name = "docker" },
+    { name = "docker-image-py" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b5/6d/0217cef1fd451cf73fc913028ab59c9046c4616be361e6620445e50143c0/dagster_docker-0.29.23.tar.gz", hash = "sha256:d3f49c1d8fd2bffccc44e9a1940fae9aa33fe3a5ddfbf94c4fb383ad7acc589c", size = 237283, upload-time = "2026-09-16T19:51:02.056Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/42/62/437af540f5762e2b14954821142d6c52f740c4cf360007b1f448a3570df4/dagster_docker-0.29.23-py3-none-any.whl", hash = "sha256:286da9bb802440b601749196ad28b4564b0ee1c7b88f6bd7c01559d05af69504", size = 19128, upload-time = "2026-09-16T19:51:00.844Z" },
+]
+
+[[package]]
 name = "dagster-graphql"
 version = "1.13.23"
 source = { registry = "https://pypi.org/simple" }
@@ -756,6 +770,32 @@ wheels = [
 [package.optional-dependencies]
 duckdb = [
     { name = "duckdb" },
+]
+
+[[package]]
+name = "docker"
+version = "7.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/88/7f/731ff914b0255d3d065f45fd4e626d4b8c95dbcbaada049f337a6ac16410/docker-7.2.0.tar.gz", hash = "sha256:cebb93773d334f778e023a7ee352a8d6e13ab1bd3b863a4d4a59dec897df43ac", size = 118731, upload-time = "2026-07-09T14:53:46.39Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/75/23/529140fe1aab80fc6992f93a706deec709140a6397439139a054e1515c45/docker-7.2.0-py3-none-any.whl", hash = "sha256:a3f45fdeb9165e2d25d9a1d02ddf3bc70fb572cf5ebbf9b58558c22caf29b71f", size = 148775, upload-time = "2026-07-09T14:53:45.224Z" },
+]
+
+[[package]]
+name = "docker-image-py"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "regex" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d4/c9/b595f95322857b97ff471806ff14a64ea0e41bcd81a88fbbfe09a0190d28/docker_image_py-0.2.0.tar.gz", hash = "sha256:451ad5b3b656d00797e2b84e7ee2629a01012c52a83439cbcfbdeadc3ead3ae1", size = 16161, upload-time = "2026-06-29T06:57:51.096Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/ca/f1640909d860379c5ef0e7c2f94c81e654de3ce77add4a88be61674fe20c/docker_image_py-0.2.0-py3-none-any.whl", hash = "sha256:de6fa26bb4f90a1ad54be1dabc3cb0447007c37e396a5f2bfce5a4aadf15f0c9", size = 11207, upload-time = "2026-06-29T06:57:49.861Z" },
 ]
 
 [[package]]
@@ -1316,6 +1356,7 @@ dependencies = [
 
 [package.dev-dependencies]
 deploy = [
+    { name = "dagster-docker" },
     { name = "dagster-postgres" },
 ]
 dev = [
@@ -1344,7 +1385,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-deploy = [{ name = "dagster-postgres", specifier = ">=0.29.15" }]
+deploy = [
+    { name = "dagster-docker", specifier = ">=0.29.15" },
+    { name = "dagster-postgres", specifier = ">=0.29.15" },
+]
 dev = [
     { name = "coverage", specifier = ">=7.0" },
     { name = "duckdb-cli", specifier = ">=1.5.5" },

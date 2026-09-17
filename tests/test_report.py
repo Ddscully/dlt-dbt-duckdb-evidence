@@ -70,3 +70,47 @@ def test_page_routes_cover_the_pages_that_exist():
         for p in build_report.PAGES_DIR.rglob("*.md")
     }
     assert set(build_report.page_routes()) == markdown
+
+
+def test_site_root_defaults_to_the_build_directory(monkeypatch, tmp_path: Path):
+    """Unset, nothing about the build changes: `just serve` on a laptop serves
+    `reports/build` directly, and a copy of a site onto itself is the one case
+    that must not happen."""
+    monkeypatch.delenv("SITE_ROOT", raising=False)
+    build = tmp_path / "build"
+    assert build_report.site_root(build) == build
+    assert build_report.publish_to(build, build_report.site_root(build)) is False
+
+
+def test_publishing_replaces_the_contents_of_the_site_root(tmp_path: Path):
+    """The *contents*, never the directory: under compose the destination is a
+    mount point shared with nginx, and `rmtree` on one fails with EBUSY. So a
+    stale page has to go without the directory going."""
+    build = tmp_path / "build"
+    (build / "assets").mkdir(parents=True)
+    (build / "index.html").write_text("new")
+    (build / "assets" / "app.js").write_text("js")
+
+    served = tmp_path / "site"
+    served.mkdir()
+    (served / "index.html").write_text("old")
+    (served / "gone.html").write_text("a page that was deleted upstream")
+    (served / "stale").mkdir()
+    (served / "stale" / "chunk.js").write_text("orphan")
+
+    inode = served.stat().st_ino
+    assert build_report.publish_to(build, served) is True
+
+    assert served.stat().st_ino == inode, "the destination directory itself was replaced"
+    assert (served / "index.html").read_text() == "new"
+    assert (served / "assets" / "app.js").read_text() == "js"
+    assert not (served / "gone.html").exists()
+    assert not (served / "stale").exists()
+
+
+def test_site_root_reads_the_environment(monkeypatch, tmp_path: Path):
+    """Read from the environment rather than passed in, because the two things
+    that serve the site — `just serve`'s http.server and nginx under compose —
+    already agree on it there."""
+    monkeypatch.setenv("SITE_ROOT", str(tmp_path / "srv"))
+    assert build_report.site_root(tmp_path / "build") == tmp_path / "srv"

@@ -525,6 +525,10 @@ def evidence_site(context: AssetExecutionContext) -> dg.MaterializeResult:
         summary["files"],
         summary["bytes"] / 1e6,
     )
+    # Only when SITE_ROOT names somewhere else — otherwise the site is already
+    # where it is served from and nothing was copied.
+    if summary["copied_to_site_root"]:
+        context.log.info("copied the site to %s", summary["site_root"])
     return dg.MaterializeResult(
         metadata={
             "pages": summary["pages"],
@@ -532,6 +536,7 @@ def evidence_site(context: AssetExecutionContext) -> dg.MaterializeResult:
             "bytes": summary["bytes"],
             "warehouse_tables": summary["warehouse_tables"],
             "build_dir": dg.MetadataValue.path(summary["build_dir"]),
+            "site_root": dg.MetadataValue.path(summary["site_root"]),
         }
     )
 

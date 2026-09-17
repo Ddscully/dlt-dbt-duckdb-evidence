@@ -500,8 +500,13 @@ the porting decision the ordering implies, which is shorter than the mechanism:
   on one machine; what one file cannot do is have two writers, scale
   horizontally, or be restored by anything but a copy.
 
-**What to do about it, in order.** Nothing, until a second writer exists — then
-a real warehouse, and `dbt/profiles.yml` grows the targets §1 says it should.
+**What to do about it, in order.** Nothing, until a second writer exists —
+**and one measured step before a real warehouse**: put the DuckLake catalog in
+Postgres and the Parquet in a bucket (`LAKEHOUSE_CATALOG`,
+`LAKEHOUSE_DATA_PATH`, both opt-in and both exercised in CI). That leaves the
+dbt file as the only single-writer thing left, which is a much smaller problem
+than the one you started with. Then a real warehouse, and `dbt/profiles.yml`
+grows the targets §1 says it should.
 The layer that changes is the profile and the two Polars files; the models, the
 tests, the contracts, the exposures and the release all port unchanged, which is
 the argument for the shape rather than for the file.

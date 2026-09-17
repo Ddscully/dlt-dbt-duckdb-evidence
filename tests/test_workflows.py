@@ -69,6 +69,11 @@ NOT_A_SITE_INPUT = (
     # landing zone the setup action places on disk, whatever a deployment does.
     "compose.yaml",
     "deploy/**",
+    # The image, for the same reason: `pages.yml` builds the site on the runner
+    # with `just materialize-site`, never in a container. The `container` job in
+    # ci.yml is what these change, and it runs no site build.
+    "Dockerfile",
+    ".dockerignore",
 )
 
 
@@ -190,8 +195,18 @@ def re_run_after_parse() -> set[str]:
     The unit-test step is a bare `uv run pytest` with nothing after it, so it
     contributes nothing here — which is the point: that is the run where these
     files skip.
+
+    **Comment lines are dropped first**, and that is not tidiness. This scanned
+    the whole file until 2026-09-17, when a comment in the `container` job
+    explaining *why that job runs no pytest command* was read as a pytest
+    command, and its own prose words became expected test filenames. A guard
+    that a sentence about it can break is a guard that discourages writing the
+    sentence.
     """
-    named = re.findall(r"uv run pytest ([^\n]+)", CI_WORKFLOW.read_text())
+    lines = [
+        line for line in CI_WORKFLOW.read_text().splitlines() if not line.lstrip().startswith("#")
+    ]
+    named = re.findall(r"uv run pytest ([^\n]+)", "\n".join(lines))
     return {Path(arg).name for line in named for arg in line.split()}
 
 

@@ -1,7 +1,7 @@
 version: 2
 
 # Green CI says nothing about outdated versions, so something has to watch them.
-# The four ecosystems below are the ones with a pinned version in the tree.
+# The five ecosystems below are the ones with a pinned version in the tree.
 # Monthly and grouped — one open PR per ecosystem — to match the release cadence
 # rather than trickle single-dependency PRs.
 
@@ -56,12 +56,12 @@ updates:
       evidence:
         patterns: ["*"]
 
-  # The two service images in compose.yaml.
+  # The service images in compose.yaml.
   #
   # **`docker-compose`, not `docker`.** They are separate ecosystems: `docker`
-  # matches Dockerfiles, Containerfiles and Kubernetes manifests, none of which
-  # this repo has, so it would find no files and watch nothing while looking
-  # like it watched something. `docker-compose`'s own pattern is
+  # matches Dockerfiles, Containerfiles and Kubernetes manifests, and this repo
+  # now has one of those — see the entry below, which is why both are here and
+  # neither is redundant. `docker-compose`'s own pattern is
   # `(docker-)?compose(-\w+)?(\.[\w-]+)?\.ya?ml`, which the root
   # `compose.yaml` matches (dependabot-core, checked 2026-09-17).
   #
@@ -76,4 +76,23 @@ updates:
     open-pull-requests-limit: 1
     groups:
       containers:
+        patterns: ["*"]
+
+  # The three base images in the root `Dockerfile` — the Node toolchain, uv, and
+  # the Python the venv is built on. The entry above does not cover them:
+  # `docker-compose` matches compose files and `docker` matches Dockerfiles, and
+  # a `FROM` is invisible to the first.
+  #
+  # `docs/RUNNING_AS_A_SERVICE.md` §2 reason 2 predicted that a container would
+  # add pinned versions nothing watches. This entry is the concession and the
+  # answer: it is watched, so it is not one of the versions that can only age
+  # deliberately. `tests/test_dagster_instance.py` refuses a tag Dependabot
+  # could not bump.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      images:
         patterns: ["*"]

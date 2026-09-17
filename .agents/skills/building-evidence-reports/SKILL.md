@@ -365,3 +365,29 @@ filed here, because all three are about the site rather than about Dagster.
   — a message that names neither the page nor the collision. `just report-clean`
   does not help, because nothing is stale. The country explorer is
   `pages/countries.md` for exactly this reason.
+
+## `SITE_ROOT`: where the built site is served from
+
+`publish/build_report.py` builds into `reports/build/` and always has. What is
+new is that it then **copies the result to `SITE_ROOT`** when that variable names
+somewhere else, and reports `site_root` and `copied_to_site_root` in its summary
+(the `evidence_site` asset surfaces both — spelled without its `reports` asset-key
+prefix, because a backticked `reports/…` reads as a dead path to
+`tests/test_course.py`).
+
+- **Unset, nothing changes.** `SITE_ROOT` defaults to `reports/build`, the copy
+  is skipped, and `just serve` serves the build directory directly.
+- **It exists because the build directory cannot be a mount point.**
+  `evidence build` *adds* to its output rather than replacing it, so `run()`
+  empties that directory on every build — and `shutil.rmtree` on a mount point
+  fails with `EBUSY`. Under the compose stack nginx reads a volume at
+  `/srv/site`, so the site is built on the container's own filesystem and copied
+  across afterwards.
+- **The copy replaces the destination's *contents*, never the directory.** That
+  is what keeps the mount point intact, and it is also what removes a page
+  deleted upstream — the orphan-chunk problem `run()` already solves for
+  `build/`. Three pytest cases in `tests/test_report.py` hold it, including that
+  the destination's inode does not change.
+- **The dashboard is down for the copy, not for the build.** A build that takes
+  a minute and a half moves no bytes into `SITE_ROOT` until it succeeds, so a
+  failed build leaves the previous site serving.
