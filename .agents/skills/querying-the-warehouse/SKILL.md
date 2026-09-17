@@ -233,8 +233,12 @@ alias (`lake`, `ducklake`) fails them identically.
    one is invisible to the others.
 
    With `LAKEHOUSE_DATA_PATH` set, `DATA_PATH` is that URL, and a `CREATE SECRET`
-   has to come first as its own entry — the `sql` recipe in the `justfile`
-   spells out both. (Not tried in a GUI.)
+   has to come first as its own entry. With `LAKEHOUSE_CATALOG` set the attach is
+   `'ducklake:postgres:<the URL>'` with a `METADATA_SCHEMA` option, needs
+   `INSTALL postgres; LOAD postgres` before it, and takes its password from
+   `PGPASSWORD` in the client's environment rather than from the connection
+   string — the `sql` recipe in the `justfile` spells out all three.
+   (Not tried in a GUI.)
 
 Two traps, both of which look like something else:
 

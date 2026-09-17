@@ -244,13 +244,20 @@ def weather_watermark(lakehouse_dir: str | Path | None = None) -> str | None:
     ships the landing zone (`lakehouse.tar.gz`); without it every release
     cold-starts, silently.
 
-    A missing catalog means nothing loaded yet. An unreadable one raises rather
-    than falling back to a cold start.
+    A catalog with nothing in it means nothing loaded yet. An unreadable one
+    raises rather than falling back to a cold start.
+
+    **The question is `is_catalog`, never whether a file is there.** A catalog
+    file is not the only shape one comes in — `LAKEHOUSE_CATALOG` puts it in
+    Postgres, where there is no file to find and `catalog_path(...).exists()` is
+    False forever. That reads as "nothing loaded yet", and this function's None
+    is what makes the next run cold-start three years of ERA5 for every capital
+    city: a silent re-spend of days of Open-Meteo budget on every single load.
     """
-    from lake.lakehouse import LAKEHOUSE_DIR, catalog_path, read_only_connection
+    from lake.lakehouse import LAKEHOUSE_DIR, is_catalog, read_only_connection
 
     lake = Path(lakehouse_dir if lakehouse_dir is not None else LAKEHOUSE_DIR)
-    if not catalog_path(lake).exists():
+    if not is_catalog(lake):
         return None
     con = read_only_connection(lake)
     try:

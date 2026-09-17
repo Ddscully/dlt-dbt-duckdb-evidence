@@ -108,7 +108,8 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 
 | Command | What it does |
 |---------|--------------|
-| `just setup` | `uv sync --group dev --group orchestration`, then `install ducklake` — an extension binary no lockfile can name |
+| `just setup` | `uv sync --group dev --group orchestration`, then `just extensions` — ducklake, httpfs and postgres, binaries no lockfile can name |
+| `just compose-up` / `just compose-down` | the optional backing services — Postgres for the catalog, SeaweedFS for the Parquet (`compose-down volumes` destroys both) |
 | `just ingest` | run the dlt pipeline → `raw` in the DuckLake catalog |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state, which lives in `~/.dlt`, not the warehouse |
@@ -163,11 +164,11 @@ files outside that task:
 
 ## Dependency and action versions
 
-`.github/dependabot.yml` watches `github-actions`, `uv` and `npm` monthly. What
-pins what, and why, is the `dependency-versions` skill. Python is 3.13, set in
-`.python-version` alone, and three versions can only age deliberately —
-`.python-version`, the sqlfluff pair and ruff — because no watched ecosystem
-covers them.
+`.github/dependabot.yml` watches `github-actions`, `uv`, `npm` and
+`docker-compose` monthly. What pins what, and why, is the `dependency-versions`
+skill. Python is 3.13, set in `.python-version` alone, and three versions can
+only age deliberately — `.python-version`, the sqlfluff pair and ruff — because
+no watched ecosystem covers them.
 
 ## Agent skills
 
@@ -343,9 +344,11 @@ What bites outside that task:
   one directory two ways is refused inside `dbt build`, a layer downstream of the
   cause. `.github/actions/setup` is the one definition of that environment for
   the workflows.
-- **`LAKEHOUSE_DATA_PATH` puts the Parquet in an S3-compatible bucket and
-  outranks `LAKEHOUSE_DIR`.** The catalog stays local, `just where` prints the
-  data path, and the release refuses the variable (`the-lakehouse`).
+- **`LAKEHOUSE_DATA_PATH` puts the Parquet in an S3-compatible bucket, and
+  `LAKEHOUSE_CATALOG` the catalog in Postgres; both outrank `LAKEHOUSE_DIR`.**
+  They are `lakehouse.REMOTE_ENV_VARS`, `just where` prints both, the password
+  is `PGPASSWORD` and never in the URL, and the release refuses either one
+  (`the-lakehouse`).
 
 ## Publishing (`publish/export_warehouse.py`)
 
@@ -459,8 +462,8 @@ number written into prose or a review:
   copy of the warehouse and record what moves. A red set is candidates, not a
   verdict.
 - **A fixture run leaks through any state it does not override** —
-  `WAREHOUSE_PATH`, `LAKEHOUSE_DIR` (and `LAKEHOUSE_DATA_PATH`, when set) and
-  dbt's artifact paths. The fixture run
+  `WAREHOUSE_PATH`, `LAKEHOUSE_DIR` (and `LAKEHOUSE_DATA_PATH` or
+  `LAKEHOUSE_METADATA_SCHEMA`, when set) and dbt's artifact paths. The fixture run
   passes either way; the *next* command against the real warehouse is the one
   that is wrong.
 

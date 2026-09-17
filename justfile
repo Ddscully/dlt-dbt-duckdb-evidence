@@ -28,6 +28,7 @@ where: _no-dbt-dotenv
     @echo "warehouse: ${WAREHOUSE_PATH:-(unset - this repo's data/warehouse.duckdb)}"
     @echo "lakehouse: $LAKEHOUSE_DIR"
     @echo "lakehouse data: ${LAKEHOUSE_DATA_PATH:-(unset - $LAKEHOUSE_DIR/data/)}"
+    @echo "lakehouse catalog: ${LAKEHOUSE_CATALOG:-(unset - $LAKEHOUSE_DIR/catalog.duckdb)}${LAKEHOUSE_CATALOG:+ (schema ${LAKEHOUSE_METADATA_SCHEMA:-lakehouse})}"
 
 # Every recipe that writes depends on this, through `where` or directly (the ones
 # that export their own WAREHOUSE_PATH). dbt 1.12 loads a .env from its working
@@ -43,14 +44,42 @@ _no-dbt-dotenv:
         exit 1; \
     fi
 
-# DuckLake is a binary from extensions.duckdb.org that no lockfile can name.
-# DuckDB would autoload it on first use; installing it here moves the download,
-# and any network failure, out of a `dbt build` inside a Dagster op. DuckDB
-# fetches the build for its own version, so under `uv run` it matches uv.lock.
-# One-time: install runtime + dev deps into the uv-managed venv, and the DuckLake extension
+# One-time: install runtime + dev deps into the uv-managed venv, and the DuckDB extensions
 setup:
     uv sync --group dev --group orchestration
-    uv run python -c "import duckdb; duckdb.connect().execute('install ducklake')"
+    just extensions
+
+# Each is a binary from extensions.duckdb.org that no lockfile can name. DuckDB
+# would autoload them on first use; installing them here moves the download, and
+# any network failure, out of a `dbt build` inside a Dagster op — and a bare
+# `load` fails outright on a machine that has never downloaded one. DuckDB
+# fetches the build for its own version, so under `uv run` they match uv.lock.
+# ducklake is the landing zone, httpfs its Parquet in a bucket, postgres its
+# catalog in a database; the last two are inert until their variable is set.
+# Install the DuckDB extensions the lakehouse can need
+extensions:
+    uv run python -c "import duckdb; con = duckdb.connect(); [con.execute(f'install {e}') for e in ('ducklake', 'httpfs', 'postgres')]"
+
+# Postgres (the DuckLake catalog, and later Dagster's storage) and SeaweedFS
+# (S3-compatible storage for the Parquet). Nothing here is needed to use this
+# repo: with LAKEHOUSE_CATALOG and LAKEHOUSE_DATA_PATH unset the landing zone is
+# entirely on disk. See .env.example and compose.yaml.
+# Start the backing services and wait for them to be healthy
+compose-up:
+    docker compose up -d --wait
+
+# `just compose-down volumes` also deletes the named volumes — which destroys
+# the catalog and the bucket, and is the only way to make the Postgres init
+# script run again (the entrypoint runs it on an empty data directory alone).
+# Stop the backing services
+compose-down mode="keep":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{ mode }}" = "volumes" ]; then
+      docker compose down -v
+    else
+      docker compose down
+    fi
 
 # EL: pull public sources into the DuckLake landing zone
 ingest: where
@@ -160,6 +189,16 @@ test-pipeline: _no-dbt-dotenv
       export LAKEHOUSE_DATA_PATH="s3://${bucket%%/*}/test-pipeline/$(basename "$(dirname "$WAREHOUSE_PATH")")/"
       echo "fixture lakehouse data: $LAKEHOUSE_DATA_PATH"
     fi
+    # A Postgres catalog is one database shared by every lakehouse in it, so the
+    # fixture run takes a metadata schema of its own rather than a database:
+    # LAKEHOUSE_DIR alone would not separate it, and running this against the
+    # real schema would rewrite the real landing zone's catalog. Lowercased and
+    # punctuation-stripped because Postgres folds an unquoted identifier, and
+    # because `drop_fixture_schema` below will only delete `test_pipeline_[a-z0-9_]+`.
+    if [ -n "${LAKEHOUSE_CATALOG:-}" ]; then
+      export LAKEHOUSE_METADATA_SCHEMA="test_pipeline_$(basename "$(dirname "$WAREHOUSE_PATH")" | tr -c 'a-z0-9\n' _)"
+      echo "fixture lakehouse catalog schema: $LAKEHOUSE_METADATA_SCHEMA"
+    fi
     echo "fixture warehouse: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
     cd dbt && uv run dbt deps && uv run dbt build --target-path "$DBT_TARGET_PATH" && cd ..
@@ -167,6 +206,13 @@ test-pipeline: _no-dbt-dotenv
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
     uv run python -m lake.lakehouse
+    # Last, and only on success: `set -e` stops a failed run before here, leaving
+    # its schema to be inspected — the same bargain as the orphaned Parquet an S3
+    # fixture run leaves in the bucket.
+    if [ -n "${LAKEHOUSE_CATALOG:-}" ]; then
+      uv run python -c "import os; from lake.lakehouse import drop_fixture_schema; drop_fixture_schema(os.environ['LAKEHOUSE_METADATA_SCHEMA'])"
+      echo "dropped fixture schema: $LAKEHOUSE_METADATA_SCHEMA"
+    fi
 
 # The exporter refuses to run without PII_SALT. A local export gets a throwaway
 # salt, so its pseudonyms cannot pass for a release's; `release-data.yml` passes
@@ -300,7 +346,18 @@ sql mode="read":
       host="${endpoint#*://}"
       secret="install httpfs; load httpfs; create secret (type s3, key_id getenv('AWS_ACCESS_KEY_ID'), secret getenv('AWS_SECRET_ACCESS_KEY'), endpoint '${host%/}', use_ssl $ssl, region '${AWS_REGION:-us-east-1}', url_style 'path', scope '$data');"
     fi
-    attach="install ducklake; load ducklake; $secret attach 'ducklake:duckdb:$LAKEHOUSE_DIR/catalog.duckdb' as lakehouse (data_path '$data'"
+    # The catalog is a file, or Postgres. Nothing secret enters this string
+    # either way: libpq reads PGPASSWORD, which `set dotenv-load` has already put
+    # in the environment, so only the S3 keys need the `getenv` trick above.
+    catalog="ducklake:duckdb:$LAKEHOUSE_DIR/catalog.duckdb"
+    meta=", metadata_schema 'main'"
+    pg=""
+    if [ -n "${LAKEHOUSE_CATALOG:-}" ]; then
+      catalog="ducklake:postgres:$LAKEHOUSE_CATALOG"
+      meta=", metadata_schema '${LAKEHOUSE_METADATA_SCHEMA:-lakehouse}'"
+      pg="install postgres; load postgres;"
+    fi
+    attach="install ducklake; load ducklake; $pg $secret attach '$catalog' as lakehouse (data_path '$data'$meta"
     if [ "{{ mode }}" = "write" ]; then
       uv run duckdb "$warehouse" -cmd "$attach);"
     else
@@ -400,8 +457,9 @@ course-sandbox: _no-dbt-dotenv
     export WAREHOUSE_PATH="{{ justfile_directory() }}/data/course/warehouse.duckdb"
     export LAKEHOUSE_DIR="{{ justfile_directory() }}/data/course/lakehouse"
     # On disk whatever the real landing zone is on: a bucket data path would
-    # outrank LAKEHOUSE_DIR and put the slice's Parquet beside the real files.
-    unset LAKEHOUSE_DATA_PATH
+    # outrank LAKEHOUSE_DIR and put the slice's Parquet beside the real files,
+    # and a Postgres catalog would put the slice's tables in the real catalog.
+    unset LAKEHOUSE_DATA_PATH LAKEHOUSE_CATALOG
     # dbt writes its artifacts to dbt/target/ whichever warehouse it built, and
     # the next `just pipeline-status` files that run_results.json in the real
     # warehouse's carried build history. The sandbox keeps its own.
@@ -428,7 +486,7 @@ course-rebuild: _no-dbt-dotenv
     # left at the real landing zone a drill rebuilds the sandbox's marts from the
     # full data, and the build is green.
     export LAKEHOUSE_DIR="{{ justfile_directory() }}/data/course/lakehouse"
-    unset LAKEHOUSE_DATA_PATH  # the sandbox is on disk (see course-sandbox)
+    unset LAKEHOUSE_DATA_PATH LAKEHOUSE_CATALOG  # the sandbox is on disk (see course-sandbox)
     export DBT_TARGET_PATH="{{ justfile_directory() }}/data/course/dbt-target"  # see course-sandbox
     test -f "$WAREHOUSE_PATH" || { echo "no sandbox yet — run: just course-sandbox" >&2; exit 1; }
     cd dbt && uv run dbt build --target-path "$DBT_TARGET_PATH"
@@ -459,11 +517,11 @@ course-query sql:
     #!/usr/bin/env bash
     set -euo pipefail
     export LAKEHOUSE_DIR="{{ justfile_directory() }}/data/course/lakehouse"
-    unset LAKEHOUSE_DATA_PATH  # the sandbox is on disk (see course-sandbox)
+    unset LAKEHOUSE_DATA_PATH LAKEHOUSE_CATALOG  # the sandbox is on disk (see course-sandbox)
     uv run python -c "import duckdb, sys; \
-        from lake.lakehouse import LAKEHOUSE_DIR, attach, catalog_path, data_path; \
+        from lake.lakehouse import LAKEHOUSE_DIR, attach_lakehouse; \
         con = duckdb.connect('{{ justfile_directory() }}/data/course/warehouse.duckdb', read_only=True); \
-        attach(con, catalog_path(LAKEHOUSE_DIR), data_path(LAKEHOUSE_DIR), alias='lakehouse', read_only=True); \
+        attach_lakehouse(con, LAKEHOUSE_DIR, read_only=True); \
         print(con.sql(sys.argv[1]))" \
         {{ quote(sql) }}
 

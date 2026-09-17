@@ -1,6 +1,6 @@
 ---
 name: dependency-versions
-description: What pins what in this repo and why — dependabot's three ecosystems, the exact sqlfluff/ruff/setup-uv pins, the three versions nothing watches, requires-python and .python-version, the npm lockfile that cannot be re-resolved from scratch, and the dbt/dagster/Python upper bounds. Use when bumping a dependency or a GitHub action, reviewing a Dependabot PR, editing pyproject.toml, uv.lock, .pre-commit-config.yaml or reports/package.json, or when a resolution is stuck.
+description: What pins what in this repo and why — dependabot's four ecosystems, the exact sqlfluff/ruff/setup-uv pins, the three versions nothing watches, requires-python and .python-version, the npm lockfile that cannot be re-resolved from scratch, and the dbt/dagster/Python upper bounds. Use when bumping a dependency or a GitHub action, reviewing a Dependabot PR, editing pyproject.toml, uv.lock, .pre-commit-config.yaml or reports/package.json, or when a resolution is stuck.
 ---
 
 # Dependency and action versions
@@ -11,8 +11,9 @@ linter, formatter and type checker those pins serve behave is
 `linting-and-type-checking`.
 
 
-`.github/dependabot.yml` watches three ecosystems — `github-actions` (`/`), `uv`
-(`/`) and `npm` (`/reports`) — monthly, each grouped to a single PR.
+`.github/dependabot.yml` watches four ecosystems — `github-actions` (`/`), `uv`
+(`/`), `npm` (`/reports`) and `docker-compose` (`/`) — monthly, each grouped to a
+single PR.
 
 - **It exists because green CI proves nothing about versions.** Every action sat
   on a Node 20 major for months while `ci.yml` passed, until the runners started
@@ -63,6 +64,15 @@ linter, formatter and type checker those pins serve behave is
   - **Evidence itself was already current** and is easy to mistake for the
     problem: 40.1.8 *is* `latest`, with `core-components` 5.4.2 and `duckdb`
     2.0.1 likewise. There is no 41. The weight was never the framework.
+- **`docker-compose` and `docker` are different ecosystems, and picking the
+  wrong one watches nothing.** `docker` matches Dockerfiles, Containerfiles and
+  Kubernetes manifests; this repo has none, so that entry would find no files
+  while reading as coverage. The compose ecosystem's pattern is
+  `(docker-)?compose(-\w+)?(\.[\w-]+)?\.ya?ml` (dependabot-core, checked
+  2026-09-17), which the root `compose.yaml` matches. It was added 2026-09-17,
+  after a review found `compose.yaml` claiming `docker` watched its two exact
+  image tags when nothing did — the comment asserted a fact about *another*
+  file, which is the shape no test in this repo can see.
 - **Dependabot scans the moment the config lands**, not on the next scheduled
   date — expect PRs immediately after touching that file.
 - **A yanked release stays locked until something re-resolves.** `uv.lock` held

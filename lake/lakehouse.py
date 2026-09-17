@@ -25,17 +25,32 @@ with a bare `ATTACH`. The measurements are in the `the-lakehouse` skill.
 ## The Parquet in a bucket
 
 `LAKEHOUSE_DATA_PATH=s3://bucket/prefix/` puts the data files on S3-compatible
-storage; the catalog stays a local file either way. dlt, dbt and every reader
-here then need the endpoint and keys on each connection (`storage_secret`). The
-release is built from a landing zone on disk, so its two steps refuse the
-variable (`refuse_bucket_data_path`).
+storage. dlt, dbt and every reader here then need the endpoint and keys on each
+connection (`storage_secret`).
+
+## The catalog in Postgres
+
+`LAKEHOUSE_CATALOG=postgres://user@host:5432/db` puts DuckLake's own tables in
+that database instead of `catalog.duckdb`, under `LAKEHOUSE_METADATA_SCHEMA`.
+The two variables are orthogonal: file/disk, file/bucket, Postgres/disk and
+Postgres/bucket are all legal, and unset the behaviour is exactly the on-disk
+one.
+
+**The URL never carries the password.** libpq reads `PGPASSWORD`, and DuckDB's
+postgres extension is libpq — so one variable reaches Python, the DuckDB CLI,
+dbt and dlt with no secret in a URL, a rendered profile or the process list.
+
+The release is built from a landing zone on disk — both halves of it — so its
+two steps refuse either variable (`refuse_remote_lakehouse`).
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import duckdb
 
@@ -46,6 +61,7 @@ from modern_data_stack.ducklake import (
     row_count,
     set_data_path,
     snapshots,
+    sql_literal,
     table_versions,
 )
 from modern_data_stack.paths import lakehouse_dir as default_lakehouse_dir
@@ -73,6 +89,43 @@ DEFAULT_S3_REGION = "us-east-1"
 # does.
 ATTACH_ALIAS = "lakehouse"
 
+# The catalog can live in Postgres instead of a file — see the module docstring.
+# Both schemes libpq accepts, because dlt renders one and a person may type
+# either. The password is never here: it is PGPASSWORD.
+CATALOG_ENV_VAR = "LAKEHOUSE_CATALOG"
+CATALOG_SCHEMES = ("postgres://", "postgresql://")
+
+# Which schema of that database holds the `ducklake_*` tables. The default is
+# the alias, which is also dlt's, so a catalog dlt creates and one this module
+# attaches agree with neither side configured. A catalog *file* keeps them in
+# `main` and DuckLake accepts that spelled explicitly (measured 2026-09-17), so
+# one attach serves both.
+METADATA_SCHEMA_ENV_VAR = "LAKEHOUSE_METADATA_SCHEMA"
+DEFAULT_METADATA_SCHEMA = ATTACH_ALIAS
+FILE_METADATA_SCHEMA = "main"
+
+# `just test-pipeline` gives each fixture run its own metadata schema rather than
+# its own database, so the throwaway catalog is a `drop schema … cascade`.
+# `drop_fixture_schema` refuses anything not named this way. Lowercase because
+# Postgres folds an unquoted identifier and the recipe builds the name in shell.
+FIXTURE_SCHEMA_PREFIX = "test_pipeline_"
+
+# What `drop_fixture_schema` will delete, as a whole pattern rather than a prefix
+# — see its docstring.
+_FIXTURE_SCHEMA = re.compile(rf"{FIXTURE_SCHEMA_PREFIX}[a-z0-9_]+")
+
+# The alias the two functions that reach past DuckLake into the catalog database
+# attach it under. Never `lakehouse`: that is DuckLake's, and attaching the same
+# database twice under one name is refused.
+_PROBE_ALIAS = "_catalog_probe"
+
+# The two variables that put part of the landing zone somewhere other than
+# `LAKEHOUSE_DIR`, and therefore outrank it. One tuple because four places have
+# to agree on the list — the release's refusal, `tests/conftest.py`, the course
+# recipes' guard and the docs — and a fifth variable added to only some of them
+# is a fixture run leaking into the real lakehouse.
+REMOTE_ENV_VARS = (DATA_PATH_ENV_VAR, CATALOG_ENV_VAR)
+
 # dlt's per-row provenance, regenerated on every re-merge whether the data moved
 # or not — see the module docstring. Every comparison here projects them away.
 DLT_COLUMNS = ("_dlt_load_id", "_dlt_id")
@@ -92,24 +145,36 @@ PUBLISHED_TABLES = ("raw.om_weather_daily",)
 
 __all__ = [
     "ATTACH_ALIAS",
+    "CATALOG_ENV_VAR",
     "CATALOG_NAME",
+    "CATALOG_SCHEMES",
     "DATA_DIRNAME",
     "DATA_PATH_ENV_VAR",
+    "DEFAULT_METADATA_SCHEMA",
     "DEFAULT_S3_REGION",
     "DLT_COLUMNS",
+    "FILE_METADATA_SCHEMA",
+    "FIXTURE_SCHEMA_PREFIX",
     "LAKEHOUSE_DIR",
+    "METADATA_SCHEMA_ENV_VAR",
     "PUBLISHED_TABLES",
+    "REMOTE_ENV_VARS",
     "S3_ENDPOINT_ENV_VAR",
+    "attach_lakehouse",
     "carried_rows",
+    "catalog",
     "catalog_path",
     "data_path",
     "dlt_credentials",
+    "drop_fixture_schema",
     "is_catalog",
+    "is_remote_catalog",
     "main",
+    "metadata_schema",
     "preflight",
     "publish",
     "read_only_connection",
-    "refuse_bucket_data_path",
+    "refuse_remote_lakehouse",
     "restore",
     "revisions",
     "rows",
@@ -120,7 +185,59 @@ __all__ = [
 
 
 def catalog_path(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> Path:
+    """Where a catalog *file* sits. The file case only — `catalog()` decides."""
     return Path(lakehouse_dir) / CATALOG_NAME
+
+
+def catalog(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> str | Path:
+    """Where DuckLake keeps its own tables: a file beside the Parquet, or Postgres.
+
+    The mirror of `data_path()`, and it behaves the same way. `LAKEHOUSE_CATALOG`
+    is returned as the string it was given, because `Path` collapses
+    `postgres://` to `postgres:/` and DuckLake takes the URI verbatim; **the
+    variable wins over `lakehouse_dir`**, so a caller pointing at another
+    lakehouse must clear it (`just test-pipeline` and the course recipes do, and
+    so does the test suite).
+
+    **A password in the URL is refused.** It would reach the process list, dbt's
+    rendered profile and dlt's config, none of which redact it — and it is not
+    needed, because libpq reads `PGPASSWORD` and DuckDB's postgres extension is
+    libpq (measured 2026-09-17).
+    """
+    url = os.environ.get(CATALOG_ENV_VAR)
+    if not url:
+        return catalog_path(lakehouse_dir)
+    if not url.startswith(CATALOG_SCHEMES):
+        raise ValueError(
+            f"{CATALOG_ENV_VAR}={url!r} is not a {' or '.join(CATALOG_SCHEMES)} URL. It "
+            "only moves the DuckLake catalog into Postgres; unset it for a catalog file, "
+            "which LAKEHOUSE_DIR places."
+        )
+    if urlsplit(url).password:
+        raise ValueError(
+            f"{CATALOG_ENV_VAR} carries a password, which is refused: it would reach the "
+            "process list, dbt's rendered profile and dlt's config, and nothing redacts "
+            "it there. Put it in PGPASSWORD instead — libpq reads that, and DuckDB's "
+            "postgres extension is libpq."
+        )
+    return url
+
+
+def is_remote_catalog() -> bool:
+    """Whether the catalog is in Postgres rather than a file."""
+    return isinstance(catalog(), str)
+
+
+def metadata_schema() -> str:
+    """The schema of the catalog database holding the `ducklake_*` tables.
+
+    `main` for a catalog file. For Postgres, `LAKEHOUSE_METADATA_SCHEMA` or the
+    attach alias — and it is what separates one lakehouse from another in a
+    single database, which is how `just test-pipeline` isolates a fixture run.
+    """
+    if not is_remote_catalog():
+        return FILE_METADATA_SCHEMA
+    return os.environ.get(METADATA_SCHEMA_ENV_VAR) or DEFAULT_METADATA_SCHEMA
 
 
 def data_path(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> str | Path:
@@ -173,15 +290,21 @@ def _s3_secret() -> dict[str, str]:
     }
 
 
-def refuse_bucket_data_path(step: str) -> None:
-    """Stop a release step before it writes anything, if the Parquet is in a bucket.
+def refuse_remote_lakehouse(step: str) -> None:
+    """Stop a release step before it writes anything, if the landing zone is remote.
 
-    The release is built from a landing zone on disk, by decision. Allowed to
-    run, the export fails partway (measured 2026-09-17): its attaches carry no
-    secret, so DuckDB sends the access key id to AWS and gets a 403, after
-    leaving a copy of the warehouse — customer ids not yet pseudonymised — in the
-    output directory. A restore would unpack local Parquet under a catalog that
-    names the bucket.
+    The release is built from a landing zone on disk, by decision — a catalog
+    file beside its Parquet, which is what `lakehouse.tar.gz` is. Either half
+    living elsewhere breaks it, and each breaks it differently.
+
+    With the Parquet in a bucket, the export fails partway (measured
+    2026-09-17): its attaches carry no secret, so DuckDB sends the access key id
+    to AWS and gets a 403, after leaving a copy of the warehouse — customer ids
+    not yet pseudonymised — in the output directory. A restore would unpack local
+    Parquet under a catalog that names the bucket.
+
+    With the catalog in Postgres there is no file to publish at all, and a
+    restore would unpack one under a catalog that is not a file.
     """
     url = os.environ.get(DATA_PATH_ENV_VAR)
     if url:
@@ -189,6 +312,14 @@ def refuse_bucket_data_path(step: str) -> None:
             f"refusing to {step}: {DATA_PATH_ENV_VAR} puts the landing zone's Parquet "
             f"in {url}, and the release is built from a landing zone on disk. Unset "
             f"it (and point LAKEHOUSE_DIR at a local lakehouse) to {step}."
+        )
+    catalog_url = os.environ.get(CATALOG_ENV_VAR)
+    if catalog_url:
+        raise RuntimeError(
+            f"refusing to {step}: {CATALOG_ENV_VAR} puts the DuckLake catalog in "
+            f"{catalog_url}, and the release publishes a *file* catalog built beside "
+            f"the Parquet. Unset it (and point LAKEHOUSE_DIR at a local lakehouse) "
+            f"to {step}."
         )
 
 
@@ -208,6 +339,10 @@ def dlt_credentials(lakehouse_dir: str | Path = LAKEHOUSE_DIR):
     the lakehouse *is* is the one place that knows what it is called. dlt takes
     the catalog as a connection string and the storage as a URL; both are
     absolute for the reason in the module docstring.
+
+    dlt attaches through DuckDB, so a Postgres catalog needs nothing of dlt's
+    beyond the URL and the schema: the password reaches libpq from `PGPASSWORD`
+    as it does everywhere else, and dlt imports no psycopg for this.
     """
     from dlt.destinations.impl.ducklake.configuration import DuckLakeCredentials
 
@@ -241,9 +376,13 @@ def dlt_credentials(lakehouse_dir: str | Path = LAKEHOUSE_DIR):
                 s3_url_style="path",
             ),
         )
+    where = catalog(lake)
     return DuckLakeCredentials(
         ducklake_name=ATTACH_ALIAS,
-        catalog=f"duckdb:///{catalog_path(lake)}",
+        catalog=where if isinstance(where, str) else f"duckdb:///{where}",
+        # Only for a Postgres catalog: dlt renders no METADATA_SCHEMA without it,
+        # and a file catalog's is `main`, which is already DuckLake's default.
+        metadata_schema=metadata_schema() if isinstance(where, str) else None,
         storage=storage,
     )
 
@@ -257,11 +396,16 @@ def is_catalog(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> bool:
     fails with `Existing DuckLake at metadata catalog … does not exist - and
     creating a new DuckLake is explicitly disabled`. So the question is whether
     DuckLake's own metadata table is in it.
+
+    `lakehouse_dir` is ignored when the catalog is in Postgres, where the
+    question is whether the metadata *schema* holds that table.
     """
-    catalog = catalog_path(lakehouse_dir)
-    if not catalog.exists():
+    if is_remote_catalog():
+        return _postgres_holds_catalog()
+    file = catalog_path(lakehouse_dir)
+    if not file.exists():
         return False
-    con = duckdb.connect(str(catalog), read_only=True)
+    con = duckdb.connect(str(file), read_only=True)
     try:
         return bool(
             con.execute(
@@ -274,6 +418,69 @@ def is_catalog(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> bool:
         con.close()
 
 
+def _postgres_holds_catalog() -> bool:
+    """Whether the Postgres metadata schema holds DuckLake's metadata table yet.
+
+    **Only an empty schema is False; anything else raises.** The file branch can
+    answer "no catalog" from a missing file and be sure of it. Here the same
+    answer could mean the host is down, the password is wrong or the database
+    does not exist — and `ingest.sources.weather` turns a False into a cold start
+    of an archive that costs days of Open-Meteo budget. So the three are kept
+    apart: each of them fails the ATTACH with an `IO Error` naming the URL
+    (measured 2026-09-17), and only a reachable database with nothing in that
+    schema returns False.
+
+    The database itself is not created here — `deploy/postgres/init.sql` and the
+    operator do that — so a missing one is an error, not an empty lakehouse.
+    """
+    con = duckdb.connect()
+    try:
+        con.execute("install postgres")
+        con.execute("load postgres")
+        # Attached rather than queried through `postgres_query`, so the schema
+        # name goes in as a bind parameter: it comes from an environment
+        # variable, and nesting it in a SQL string inside a SQL string is how
+        # the quoting goes wrong.
+        con.execute(f"attach {sql_literal(catalog())} as {_PROBE_ALIAS} (type postgres, read_only)")
+        return bool(
+            con.execute(
+                f"""
+                select 1 from {_PROBE_ALIAS}.information_schema.tables
+                where table_schema = $schema and table_name = 'ducklake_metadata'
+                """,
+                {"schema": metadata_schema()},
+            ).fetchone()
+        )
+    finally:
+        con.close()
+
+
+def attach_lakehouse(
+    con: duckdb.DuckDBPyConnection,
+    lakehouse_dir: str | Path = LAKEHOUSE_DIR,
+    *,
+    read_only: bool = True,
+) -> None:
+    """Attach the landing zone, wherever its two halves are.
+
+    The one spelling of the ATTACH in this project. Four combinations are legal
+    — the catalog in a file or in Postgres, the Parquet on disk or in a bucket —
+    and no caller here chooses between them: the environment does, and this
+    reads it. It is one function because it was once spelled from parts in five
+    places, and a fifth combination reaching only four of them is a reader that
+    silently opens the wrong lakehouse.
+    """
+    attach(
+        con,
+        catalog(lakehouse_dir),
+        data_path(lakehouse_dir),
+        alias=ATTACH_ALIAS,
+        read_only=read_only,
+        storage_secret=storage_secret(),
+        metadata_schema=metadata_schema(),
+    )
+
+
 def read_only_connection(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> duckdb.DuckDBPyConnection:
     """An in-memory DuckDB with the lakehouse attached read-only.
 
@@ -281,15 +488,46 @@ def read_only_connection(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> duckdb.Du
     other, never with a writer — the same rule as the warehouse file.
     """
     con = duckdb.connect()
-    attach(
-        con,
-        catalog_path(lakehouse_dir),
-        data_path(lakehouse_dir),
-        alias=ATTACH_ALIAS,
-        read_only=True,
-        storage_secret=storage_secret(),
-    )
+    attach_lakehouse(con, lakehouse_dir, read_only=True)
     return con
+
+
+def drop_fixture_schema(schema: str) -> None:
+    """Drop one `test_pipeline_*` metadata schema from the Postgres catalog.
+
+    A fixture run gets its own metadata schema rather than its own database, so
+    what a throwaway catalog file gets from `mktemp -d` this gets from a
+    `drop schema … cascade` of DuckLake's tables (29 of them).
+
+    **The name is checked here, not trusted from the caller**, and against a
+    whole pattern rather than escaped. The recipe builds it in shell, and the
+    schema beside it is the real landing zone's; a name that arrived empty,
+    unexpanded or with a quote in it would otherwise reach a `cascade`. Matching
+    `test_pipeline_[a-z0-9_]+` leaves nothing to escape, which is the property
+    worth having on a statement that cannot be undone.
+
+    Dropped through the postgres extension because there is no psql on the
+    machines this runs on.
+    """
+    if not _FIXTURE_SCHEMA.fullmatch(schema):
+        raise ValueError(
+            f"refusing to drop schema {schema!r}: only a fixture run's own schema, named "
+            f"{FIXTURE_SCHEMA_PREFIX}* and nothing but lowercase, digits and underscores, "
+            f"is this function's to delete. The real landing zone's is "
+            f"{metadata_schema()!r}."
+        )
+    con = duckdb.connect()
+    try:
+        con.execute("install postgres")
+        con.execute("load postgres")
+        con.execute(f"attach {sql_literal(catalog())} as {_PROBE_ALIAS} (type postgres)")
+        # `postgres_execute` and not a DuckDB `drop schema`: the schema holds
+        # Postgres tables the scanner does not own and will not cascade.
+        con.execute(
+            f"call postgres_execute('{_PROBE_ALIAS}', 'drop schema if exists {schema} cascade')"
+        )
+    finally:
+        con.close()
 
 
 def revisions(
@@ -314,7 +552,7 @@ def versions(table: str, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> list[int]
     """Snapshots in which `table` changed, oldest first — the diffable points."""
     con = read_only_connection(lakehouse_dir)
     try:
-        return table_versions(con, ATTACH_ALIAS, table)
+        return table_versions(con, ATTACH_ALIAS, table, metadata_schema())
     finally:
         con.close()
 
@@ -376,7 +614,7 @@ def preflight(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> None:
     restore. Refuses on a data path in a bucket, on dlt local state and on a
     destination already holding carried rows.
     """
-    refuse_bucket_data_path("restore the landing zone")
+    refuse_remote_lakehouse("restore the landing zone")
     state = _local_pipeline_state()
     if state is not None:
         _refuse_warm_state(state)
@@ -400,12 +638,22 @@ def restore(source_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -
     there is no force; delete it first to replace it. dlt then merges onto the
     carried rows, because it judges a destination fresh by its own bookkeeping
     tables, which the published catalog does not carry.
+
+    Repeats `run()`'s preflight, as a public entry point must, and *before* it
+    reads `source_dir` — see the comment below.
     """
+    # **The preflight goes first, and the order is load-bearing.** `is_catalog`
+    # answers about Postgres whenever LAKEHOUSE_CATALOG is set, and ignores the
+    # directory it is given — but `source` is an unpacked release, a file
+    # catalog by construction. Asked first, an empty metadata schema would make
+    # it raise `no published lakehouse` about a directory that holds a perfectly
+    # good catalog, and an unreachable host a raw `IO Error`; either way the
+    # refusal `refuse_remote_lakehouse` exists to give never fires.
+    preflight(lakehouse_dir)
+
     source = Path(source_dir)
     if not is_catalog(source):
         raise FileNotFoundError(f"no published lakehouse at {source / CATALOG_NAME}")
-
-    preflight(lakehouse_dir)
 
     dest = Path(lakehouse_dir)
     if dest.exists():
@@ -497,7 +745,16 @@ def run(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> dict:
 def main() -> None:
     summary = run()
     snaps = summary["snapshots"]
-    print(f"{catalog_path()} — {len(snaps)} snapshots, newest {snaps[-1] if snaps else '(none)'}")
+    # This line is the only thing that says which lakehouse was read, so it has
+    # to name the whole answer. `catalog_path()` would name no Postgres one at
+    # all — and the URL alone is not enough either: one database holds many
+    # lakehouses, separated by the metadata schema, so a fixture run and the
+    # real landing zone print the same URL. The same trap `just where` exists
+    # for, one layer down.
+    where = catalog()
+    if is_remote_catalog():
+        where = f"{where} (schema {metadata_schema()})"
+    print(f"{where} — {len(snaps)} snapshots, newest {snaps[-1] if snaps else '(none)'}")
     for table, rows in summary["tables"].items():
         print(f"  {table:40} {rows:>10,} rows")
 

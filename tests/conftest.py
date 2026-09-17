@@ -7,14 +7,22 @@ from dlt.common.pipeline import PipelineContext
 
 @pytest.fixture(autouse=True)
 def _lakehouse_on_disk(monkeypatch: pytest.MonkeyPatch):
-    """Every test's landing zone is the directory it names, never a bucket.
+    """Every test's landing zone is the directory it names — never a bucket, never Postgres.
 
-    `LAKEHOUSE_DATA_PATH` outranks the `lakehouse_dir` a test passes (see
-    `lake.lakehouse.data_path`), and `just test` loads the developer's `.env`, so
-    without this a machine set up for S3 would run the suite's throwaway
-    catalogs against its real bucket. A test about the bucket case sets it back.
+    Both of `lake.lakehouse.REMOTE_ENV_VARS` outrank the `lakehouse_dir` a test
+    passes (see `data_path` and `catalog`), and `just test` loads the developer's
+    `.env`, so without this a machine set up for S3 would run the suite's
+    throwaway catalogs against its real bucket, and one set up for Postgres would
+    run them against its real catalog — writing DuckLake tables into it. A test
+    about either case sets the variable back.
+
+    The metadata schema goes too: left behind with the catalog deleted it is
+    inert, but it would be read by any test that sets the catalog itself.
     """
-    monkeypatch.delenv("LAKEHOUSE_DATA_PATH", raising=False)
+    from lake.lakehouse import METADATA_SCHEMA_ENV_VAR, REMOTE_ENV_VARS
+
+    for name in (*REMOTE_ENV_VARS, METADATA_SCHEMA_ENV_VAR):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True, scope="module")

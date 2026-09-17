@@ -413,11 +413,19 @@ section here. The mutation method these guards were written with is in the
   into the real landing zone and its weather archive) and dbt's artifact paths —
   `DBT_TARGET_PATH`, `DBT_MANIFEST_PATH`, `DBT_RUN_RESULTS_PATH` and
   `--target-path` — or the next `just pipeline-status` files the fixture's
-  timings in the real build history. With the Parquet in a bucket it also
-  overrides `LAKEHOUSE_DATA_PATH`, which outranks `LAKEHOUSE_DIR`.
-  `tests/test_workflows.py` holds all five, because each is invisible when
+  timings in the real build history. With the landing zone off the disk it also
+  overrides `LAKEHOUSE_DATA_PATH`, which outranks `LAKEHOUSE_DIR`, and
+  `LAKEHOUSE_METADATA_SCHEMA`, which is the only thing separating two lakehouses
+  inside one Postgres database — the catalog URL itself is *not* overridden,
+  because the fixture run keeps the database and takes a schema of its own.
+  `tests/test_workflows.py` holds all six, because each is invisible when
   missing: the fixture run passes and the *next* command is the one that is
   wrong.
+  - **The list of variables that outrank `LAKEHOUSE_DIR` is one tuple**,
+    `lake.lakehouse.REMOTE_ENV_VARS`, read by the release's refusal,
+    `tests/conftest.py` and the course guard. A variable added to the module and
+    not to the tuple is missing from all three at once, and each of them fails
+    silently.
   - **The course recipes are held too, by rule rather than by list.**
     `course-rebuild` shipped without the lakehouse or dbt's artifact paths (#65),
     so `test_every_course_recipe_keeps_the_sandbox_to_itself` derives what each
