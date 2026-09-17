@@ -417,7 +417,9 @@ jobs and the rest are `dagster-graph-and-jobs`. What bites outside it:
 - **Asset keys are the join between the layers.** Rename a dbt source table
   without renaming the dlt resource and the graph silently splits in two — both
   halves still run.
-- **Everything runs in one process**, because DuckDB takes one writer at a time.
+- **Everything runs in one process, and one run at a time**, because DuckDB
+  takes one writer at a time: `.dagster/dagster.yaml` queues runs, but
+  `just materialize` runs outside that queue.
 - **`load_retail` runs before `full_refresh`**: dbt reads what it lands, so
   `full_refresh` alone against a fresh warehouse fails in dbt.
 - **Every asset and check is listed by hand in `definitions.py`**, and an

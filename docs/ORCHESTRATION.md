@@ -67,7 +67,11 @@ straight off the asset graph. Three things the UI won't tell you:
   the headless recipes need the manifest to exist already.
 
 DuckDB takes one writer at a time, so don't leave `just sql write` open beside a
-run.
+run. Runs themselves go one at a time: `.dagster/dagster.yaml` sets
+`max_concurrent_runs: 1`, so a second launch from the UI, a schedule tick or a
+backfill waits in the queue. `just materialize` does not enter that queue, so
+don't start it beside a run the UI launched
+([`RUNNING_AS_A_SERVICE.md`](./RUNNING_AS_A_SERVICE.md#missed-ticks-and-one-run-at-a-time--measured)).
 
 ## Three jobs, and why
 
@@ -95,7 +99,9 @@ pair them.
 
 A `daily_refresh` schedule (06:00 UTC) is defined but ships **stopped**. Opening
 the UI shouldn't start hammering public APIs on a timer; start it yourself if you
-want it running.
+want it running. Once it is running, a daemon that was down at 06:00 UTC launches
+that tick's `full_refresh` as soon as it starts again — the latest missed tick
+only.
 
 Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile).
 Only `dagster.yaml` is checked in. [AGENTS.md](../AGENTS.md#orchestration-orchestration)

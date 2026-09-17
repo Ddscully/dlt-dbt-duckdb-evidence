@@ -28,6 +28,21 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
 - **Everything runs in one process** (`in_process_executor`, and the `replace`
   resources in a single op): DuckDB takes one writer at a time, so parallel steps
   would fight over the lock.
+- **And one run at a time, which is instance config, not code.** The executor
+  serialises steps *within* a run; two runs are two processes. `.dagster/dagster.yaml`
+  sets `concurrency: runs: max_concurrent_runs: 1` (Dagster's default is 10), so
+  a UI launch, a UI backfill or a schedule tick queues behind a run in progress.
+  Three edges, all measured on 1.13.22:
+  - **`dagster job execute` and `dagster asset materialize` bypass the queue,
+    and every recipe that materialises runs one of them**, the `backfill-*`
+    recipes included. The queue still *counts* such a run — a UI launch waits for
+    a `just materialize` to end — but no recipe waits for anything.
+  - **The file is read at process start.** Editing it changes nothing until
+    `just serve` or `just dagster` restarts; `dagster instance info` prints what
+    the instance loaded.
+  - **A `DAGSTER_HOME` without it falls back to ten**, with one startup notice. A
+    symlink to the checked-in file works
+    ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §5, §8).
 - **The Evidence site is an asset, excluded from `full_refresh` because it needs
   Node.** The `evidence_site` asset shells out to npm; `ci.yml`, `nightly.yml` and
   `release-data.yml` run `full_refresh` with no Node, and `pages.yml` runs
@@ -41,6 +56,10 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   that has loaded WDI. `tests/conftest.py` deactivates it on teardown.
 - The `daily_refresh` schedule ships `STOPPED`, so opening the UI does not start
   hammering public APIs. It targets `full_refresh`, so it never builds the site.
+  **Once started, a daemon that comes up after a missed 06:00 UTC tick launches
+  it within seconds** — only the latest, because a schedule with no partition set
+  does not catch up — which is why a click on Materialize just after
+  `just serve` starts is the case the one-run queue exists for.
 - Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile);
   only `dagster.yaml` is checked in.
 

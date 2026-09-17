@@ -4,6 +4,16 @@
 telemetry:
   enabled: false
 
+# One run at a time, because DuckDB takes one writer at a time. The executor
+# serialises steps *within* a run; this serialises runs, which otherwise start
+# ten at once (Dagster's default) and contend for the lock. It governs only
+# runs submitted to it — UI launches and backfills, the schedule — and not the
+# in-process `dagster job execute` or `dagster asset materialize`, one of which
+# every recipe that materialises runs, the `backfill-*` recipes included.
+concurrency:
+  runs:
+    max_concurrent_runs: 1
+
 # Keep the local run history from growing without bound.
 retention:
   schedule:

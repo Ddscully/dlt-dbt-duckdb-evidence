@@ -276,6 +276,20 @@ shows up as absurd percentages:
 grep -rho '"[0-9]\{3,\}%"\|[0-9]\{1,\},[0-9]\{3\}%' reports/build/
 ```
 
+**One warning in `evidence sources`' output is the expected state, not a fault:**
+`Warning: Column "last_revised_at" (type Date) contains only null values so it
+has been cast to Float64`, once after `co2_estimate_versions` and once after
+`grid_emission_factors`. Both models compute the column as
+`case when count(*) > 1 then max(dbt_valid_from) end`, so it stays null until a
+snapshot closes a version, which needs a later run to find a different number.
+Seen on 2026-09-17, when neither snapshot had closed one since it began
+(`snap_co2_estimates` on 2026-07-30, `snap_grid_emission_factors` on
+2026-08-09). Both pages render that state on purpose — `restatements.md` and
+`scope2.md` put their revision tables inside `{#if … .length > 0}` — so the build
+passes `--strict` and every page renders. It stops once either snapshot records a
+revision. The same warning on a column that *should* hold values is the empty
+extract it describes.
+
 ### Text dumps can't tell working from broken
 
 **`Loading...` in the built HTML is normal.** Evidence prerenders the page shell
