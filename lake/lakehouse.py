@@ -226,13 +226,17 @@ def dlt_credentials(lakehouse_dir: str | Path = LAKEHOUSE_DIR):
 
         # dlt builds its DuckDB secret from these: `http://` in the endpoint
         # turns TLS off. It needs no s3fs, which it uses for local storage only.
+        # The URL is rebuilt from the secret, not read from the variable, because
+        # dlt strips only the scheme: a trailing slash would reach its secret and
+        # no other.
         secret = _s3_secret()
+        scheme = "https" if secret["use_ssl"] == "true" else "http"
         storage = FilesystemConfiguration(
             bucket_url=data,
             credentials=AwsCredentials(
                 aws_access_key_id=secret["key_id"],
                 aws_secret_access_key=secret["secret"],
-                endpoint_url=os.environ[S3_ENDPOINT_ENV_VAR],
+                endpoint_url=f"{scheme}://{secret['endpoint']}",
                 region_name=secret["region"],
                 s3_url_style="path",
             ),

@@ -249,6 +249,10 @@ behaviour is exactly the on-disk one. The how-to is `docs/WAREHOUSE.md`. Measure
   unpacked into `AwsCredentials` for dlt, which builds its own and needs no
   s3fs), the `secrets:` block in `dbt/profiles.yml`, and `just sql`, which reads
   the keys through the CLI's `getenv` so they stay out of the process list.
+  Each strips a trailing slash from the endpoint. dlt's `endpoint_url` is
+  rebuilt from `storage_secret()`'s parts rather than read from the variable,
+  because dlt removes only the scheme: `http://host:8333/` reached its secret as
+  `host:8333/` and every other as `host:8333`.
 - **`Path()` breaks a URL**: `Path("s3://b/")` is `s3:/b`, so `attach()` keeps a
   `://` path as a string.
 - **The variable outranks `lakehouse_dir`**, which makes it the fifth piece of
