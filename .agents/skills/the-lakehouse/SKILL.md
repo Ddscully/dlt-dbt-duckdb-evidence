@@ -258,6 +258,13 @@ behaviour is exactly the on-disk one. The how-to is `docs/WAREHOUSE.md`. Measure
   wrong key.
 - **`Path()` breaks a URL**: `Path("s3://b/")` is `s3:/b`, so `attach()` keeps a
   `://` path as a string.
+- **The secret needs httpfs installed, not just loaded.** Any machine that has
+  run dbt has it, because the profile lists it, so a bare `load httpfs` passes
+  everywhere but a fresh one — where `attach()` and `just sql` failed with
+  `Extension "httpfs" … not found` (the template's first CI run, 2026-09-17;
+  reproduced with an empty `HOME`). Both install it first, and
+  `tests/test_lakehouse.py` holds the order, since no unit test can make a
+  machine without it short of downloading it.
 - **The variable outranks `lakehouse_dir`**, which makes it the fifth piece of
   state a redirected run must override. `just test-pipeline` rewrites it to
   `s3://<bucket>/test-pipeline/<tmp>/`; the course recipes that point at the
