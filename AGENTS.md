@@ -491,7 +491,11 @@ Every PR here is **squash-merged**, so `main` is linear with one commit per PR.
   message survives on `main`, so group work by what makes one writable summary
   ("a body of testing plus the defect it uncovered"), not one PR per branch.
 - **Stacked PRs need a rebase after the one below merges**: squashing rewrites the
-  base's identity, so `git rebase --onto origin/main <old-base> <branch>`. What
+  base's identity, so `git rebase --onto origin/main <old-base> <branch>`.
+  **Retarget first, with `gh pr edit <n> --base main`**: merging the PR below with
+  `--delete-branch` deletes the stacked PR's base, which closes it, and GitHub will
+  not reopen it (#61, 2026-09-16). The flag deletes the local branch too, so
+  `<old-base>` has to be a SHA from the stacked branch's log. What
   conflicts is whatever both sides touch — here, the running totals in
   `AGENTS.md` and `docs/DATA_QUALITY.md`. **A derived total written into prose
   behaves like a lock**: no two commits touching it can be reordered or
