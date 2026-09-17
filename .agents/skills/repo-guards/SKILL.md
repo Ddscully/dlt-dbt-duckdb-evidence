@@ -418,6 +418,11 @@ section here. The mutation method these guards were written with is in the
   `tests/test_workflows.py` holds all five, because each is invisible when
   missing: the fixture run passes and the *next* command is the one that is
   wrong.
+  - **The course recipes are held too, by rule rather than by list.**
+    `course-rebuild` shipped without the lakehouse or dbt's artifact paths (#65),
+    so `test_every_course_recipe_keeps_the_sandbox_to_itself` derives what each
+    `course-*` recipe must point into `data/course/` from the commands it runs
+    (`authoring-course-modules` has the measurements).
   - **A live run isolated by hand needs two more, and no recipe or test holds
     either.** Nothing isolates `just ingest` or `just materialize`, so pointing
     one at a scratch warehouse means exporting the five above yourself, plus:

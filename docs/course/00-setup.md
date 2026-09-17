@@ -67,10 +67,15 @@ and they fail differently — `Catalog "lakehouse" does not exist!` for staging,
 > `data/warehouse.duckdb`: your real warehouse, the one with 43,138 mart rows
 > and months of snapshot history in it. A drill that breaks a model and then runs
 > the wrong recipe writes the broken model into the warehouse you care about.
-> The course recipes set `WAREHOUSE_PATH` **and** `LAKEHOUSE_DIR` for you;
-> nothing else does. Both matter: the first keeps a broken model out of your
-> warehouse, the second keeps a re-ingest from merging the 17-country slice into
-> your real landing zone, which is where the weather archive lives.
+> The course recipes set `WAREHOUSE_PATH`, `LAKEHOUSE_DIR` **and** dbt's
+> artifact directory for you; nothing else does. All three matter:
+>
+> - the first keeps a broken model out of your warehouse
+> - the second keeps the sandbox building from the 17-country slice, not from
+>   your real landing zone, and keeps a re-ingest from merging the slice into it,
+>   which is where the weather archive lives
+> - the third keeps a drill's build out of the history `just pipeline-status`
+>   records in your real warehouse
 
 ---
 

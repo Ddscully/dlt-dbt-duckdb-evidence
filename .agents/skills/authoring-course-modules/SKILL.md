@@ -26,9 +26,26 @@ loop) and `course-query` (one read-only query).
 **`just dbt-build` is the trap**: it targets the real warehouse, so a drill run
 through the wrong recipe writes a deliberately broken model into
 `data/warehouse.duckdb`. The course says so in 00 and the recipes set
-`WAREHOUSE_PATH` *and* `LAKEHOUSE_DIR` themselves — the second keeps a drill's
-re-ingest from merging the 17-country slice into the real landing zone, which is
-where the weather archive lives.
+`WAREHOUSE_PATH`, `LAKEHOUSE_DIR` and dbt's artifact paths themselves — the
+second keeps a drill's re-ingest from merging the 17-country slice into the real
+landing zone, which is where the weather archive lives.
+
+**`course-rebuild` set only the first until #65, and nothing went red.** dbt
+attaches `LAKEHOUSE_DIR` and every staging model is a view over it, so the drill
+inner loop rebuilt the sandbox's marts from the *real* landing zone:
+`fct_emissions_energy` went from 4,096 rows to 43,138 on a copy, with a green
+build, while `course-query` still showed the slice under `lakehouse.raw`. Both
+build recipes also wrote dbt's artifacts to `dbt/target/`, and module 03 has the
+learner run `just pipeline-status` against the real warehouse. Measured on a
+copy on 2026-09-17, that filed the sandbox build as a seventh invocation in
+`analytics.pipeline_runs`, which every release carries. The sandbox keeps them
+in `data/course/dbt-target/` now.
+- **The guard derives what to redirect from what a recipe runs**, not from a
+  list per recipe: `test_every_course_recipe_keeps_the_sandbox_to_itself` maps
+  each command (`dbt`, the ingest, `pipeline_status`, the transforms,
+  `lake.lakehouse`) to the state it reads or writes. So a new `course-*` recipe
+  is held without editing the test. Ten mutations fail it, including `main`'s
+  recipes as the issue found them and a recipe the test had never seen.
 
 **`course-query` attaches the sandbox lakehouse, and had to be taught to.** When
 `raw` moved into DuckLake the recipe kept opening the warehouse file alone, and
