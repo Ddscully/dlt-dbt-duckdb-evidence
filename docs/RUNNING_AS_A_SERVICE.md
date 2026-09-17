@@ -62,7 +62,8 @@ Four reasons, all specific to this repo rather than to taste:
    single-writer lock is a property of *the file plus a process*, not of the
    host. Two containers sharing a volume reintroduce it across a filesystem
    boundary, strictly worse than one process tree, where `in_process_executor`
-   already serialises every write.
+   serialises a run's steps and the instance's one-run queue serialises the runs
+   (§5).
 4. **The serving half needs no runtime at all.** `evidence sources` extracts the
    warehouse tables to Parquet under `reports/.evidence/`, `evidence build`
    renders static HTML into `reports/build/`, and the browser queries that
@@ -100,9 +101,14 @@ text is the justfile's, and it is the only copy.
 `publish/build_report.py` writes to, because §4's `current` symlink is not
 built. That is the one place the recipe is smaller than the design, and it costs
 what §4 says it costs: the site is *down* for the length of a rebuild, because
-that module clears its output directory on every run, `--clean` or not. The
-recipe refuses to start if the directory is not there at all, naming
-`just report`, rather than serving 404s that look like a broken build.
+that module clears its output directory on every run, `--clean` or not.
+**Measured on 2026-09-17**, polling two pages every 2 s through a `publish_site`
+launched from the UI: both served 404 for 85 s, the whole of the 86 s
+`reports/evidence_site` step, and came back together when it finished. It is a
+404 from a server that is still up, not a refused connection, so a probe on the
+port reports a healthy site through the whole outage. The recipe refuses to
+start if the directory is not there at all, naming `just report`, rather than
+serving 404s that look like a broken build.
 
 Cold start on a warm venv is **17 s** from `just serve` to both ports answering,
 `dbt deps` and `dbt parse` included — the dependency below is most of it.
@@ -206,6 +212,40 @@ Three corrections came out of that, and the first one matters most:
   systemd reaches the same verdict by the other route, which is why those rows
   are 130 and 143 rather than 0.
 
+### Reading its log — measured
+
+`just serve`'s output interleaves the three processes with every run's own
+output, dbt's and Evidence's included. Watched through a scheduled
+`full_refresh`, one launched from the UI, `load_retail` and `publish_site` on
+2026-09-17 (Dagster 1.13.22), it carries three lines that look like faults:
+
+- **`dagster.code_server - WARNING - No heartbeat received in 20 seconds,
+  shutting down`, about once a minute whether or not anything is running.** The
+  daemon reloads its workspace every 60 s (`RELOAD_WORKSPACE_INTERVAL` in
+  `dagster/_daemon/controller.py`) by starting a fresh code server, and the one
+  it replaced stops receiving heartbeats and logs this 20 s later. What the
+  warning sets is `_shutdown_once_executions_finish_event`
+  (`dagster/_grpc/server.py`), so a retired server outlives the runs it launched.
+  That was watched, not only read: a server retired 41 s before a `full_refresh`
+  finished — by the reload timings, the one current when that run was launched —
+  and the run completed. Of the
+  code servers `pgrep` shows, the ones with `--heartbeat-timeout 20` are the
+  daemon's, one current and one draining; the webserver's has 45 and lives as
+  long as the webserver.
+- **`QueuedRunCoordinatorDaemon - INFO - 1 runs are currently in progress.
+  Maximum is 1, won't launch more.`, every 5 s for the length of every run**,
+  whether or not anything is queued. It is §5's one-run limit being checked, not
+  a run being refused.
+- **dlt's `UserWarning: XDG_DATA_HOME is set to … but ~/.dlt already exists.
+  Using ~/.dlt`**, at every code load and ingest. On a laptop it is noise. **On a
+  service host it is the line to act on:** it says §10's `XDG_DATA_HOME` is being
+  ignored because the service user has a `~/.dlt`, so the watermark lives there
+  rather than on the volume step 2 named (§3).
+
+`publish_site` adds a fourth from Evidence, `Column "last_revised_at" … contains
+only null values so it has been cast to Float64`, which means no snapshot has
+recorded a revision yet (`building-evidence-reports`).
+
 ### The supervisor
 
 `just serve` dies with the SSH session. That is a systemd unit's job, not a
@@ -243,7 +283,7 @@ Everything below has to be on durable storage, and each row fails differently:
 | `data/lakehouse/` | dlt's landing zone, and the only copy of every raw table | the weather archive cold-starts at three years: days of Open-Meteo budget, gone silently |
 | `data/warehouse.duckdb` | the `history` schema only; every other schema is derived | the revision log, permanently. No rebuild invents a version upstream has overwritten |
 | dlt's data dir | the WDI watermark and the ECB's last fixing | a silent full re-fetch, or a five-year window into a warehouse with no history |
-| `.dagster/` | run and event storage (SQLite), plus **schedule on/off state** | run history, and a service that looks running and ingests nothing (§5) |
+| `.dagster/` | run and event storage (SQLite), plus **schedule on/off state**; its `dagster.yaml` is config, checked in, and has to be carried to any other `DAGSTER_HOME` | run history, and a service that looks running and ingests nothing (§5); without `dagster.yaml`, runs no longer queue behind each other (§5) |
 | `data/cache/` | the retail workbook | a download, never data |
 
 **The dlt row is the one a service gets wrong**, and the reason is written into
@@ -424,6 +464,45 @@ from a fixed `reports/build/` that only a manual `just report` rewrites, so the
 dashboard ages while the warehouse behind it does not. All three are survivable
 on an internal deployment; only the third needs somebody to remember.
 
+### Missed ticks, and one run at a time — measured
+
+**A daemon that starts after a missed tick launches it at once.** Measured on
+2026-09-17, with `daily_refresh` `RUNNING` in this instance and the service down
+across more than one 06:00 UTC tick: `just serve` started at 11:52 UTC, and
+within 16 s the daemon logged `daily_refresh has no partition set, so not trying
+to catch up` and launched a `full_refresh` for that morning's tick. Only the
+latest missed tick runs — `dagster/_scheduler/scheduler.py` drops the rest for a
+schedule with no partition set. A restart eighteen minutes later launched
+nothing, because that tick was already recorded. So a host rebooted, or
+restarted by systemd after a crash, any time after 06:00 UTC starts a full build
+while whoever restarted it is opening the UI, and a Materialize click in that
+window used to be a second writer against a file DuckDB lets one process write
+(§8).
+
+**`.dagster/dagster.yaml` now holds the instance to one run in progress**
+(`concurrency: runs: max_concurrent_runs: 1`; Dagster's default is 10). Measured
+against a throwaway instance whose only job sleeps, so no warehouse was involved:
+under the previous file two launches were both `STARTED` within 5 s, and under
+this one the second stayed `QUEUED` until the first finished. The file is read
+at process start, so the live service reported the new value only after a
+restart.
+
+**The queue governs what enters it, and `just materialize` does not.** The UI,
+the schedule and backfills submit to it; `dagster job execute`, which every
+`materialize*` recipe runs, executes in the calling process. The two directions
+differ, and the same throwaway instance measured both:
+
+| | Result |
+|---|---|
+| launched from the UI while `just materialize` runs | **waits.** The queue counts every in-progress run in its instance however it started (`2 runs are currently in progress. Maximum is 1`), and launched the queued run 4 s after the in-process one ended, 14 s after the other queued run had |
+| `just materialize` while a UI or scheduled run is going | **starts at once**, beside it |
+
+So on a service host, start work from the UI rather than from the recipes. And
+the queue only sees runs recorded in its own `DAGSTER_HOME`: the justfile
+defaults that to the checkout's `.dagster/`, so a recipe typed in a shell that
+has not loaded §10's environment file is invisible to the service's queue in both
+directions.
+
 ## 6. Exposure
 
 **Dagster's webserver has no authentication.** Bind it to localhost and put
@@ -479,6 +558,15 @@ keeps, extended with the ones only an always-on deployment meets:
   fails to load, or loads against a stale manifest (§2).
 - **A `STOPPED` schedule survives a `.dagster/` wipe as stopped.** The service
   runs, serves an increasingly old site, and ingests nothing (§5).
+- **A `DAGSTER_HOME` outside the checkout has no `dagster.yaml`.** §10 puts it on
+  the durable volume, where Dagster finds no config, prints one notice at start
+  and falls back to its defaults — ten runs at once rather than one, so a restart
+  after a missed tick plus one click is two writers again (§5). Measured: an
+  empty `DAGSTER_HOME` reports `max_concurrent_runs` as 10, and one holding a
+  symlink to the checked-in file reports 1.
+- **`just materialize` does not queue behind the service.** Every `materialize*`
+  recipe runs `dagster job execute`, in its own process, beside whatever the
+  service is running; only the other direction waits (§5).
 - **A bare `uv sync` uninstalls Dagster.** `default-groups` is unset, so
   `uv sync` without `--group orchestration`, typed against a *running* service,
   strips 46 packages out of the venv under it. The running processes hold their
@@ -549,6 +637,15 @@ SITE_ROOT=/srv/mds/state/sites/current
 served file instead and the graph builds in place, which is the smaller starting
 point §5 describes.
 
+`DAGSTER_HOME` on the volume starts without the checked-in instance config, and
+with it the one-run limit (§8). Link it rather than copy it, so it follows the
+repo:
+
+```sh
+mkdir -p /srv/mds/state/dagster
+ln -s /srv/mds/repo/.dagster/dagster.yaml /srv/mds/state/dagster/dagster.yaml
+```
+
 **3. Bootstrap, by hand, before the service exists.** This is the step that
 differs from steady state, and it differs because `daily_refresh` targets
 `full_refresh`, which excludes `load_retail`:
@@ -606,12 +703,22 @@ systemctl start mds
 
 **Stopping first is not caution, it is required.** `evidence sources` opens the
 warehouse to extract its Parquet, which is a reader against a file a scheduled
-build may be writing: one writer XOR many readers, across processes. Only §4
-avoids it.
+build may be writing: one writer XOR many readers, across processes. `just
+report` is not a Dagster run, so the queue cannot hold it back. Only §4 avoids
+it.
+
+**The route that needs no stop is `publish_site` from the UI.** It enters the
+one-run queue, so it waits for a scheduled run instead of reading beside it, and
+its Evidence step reads the warehouse only after its own build has finished. It
+costs a second full ingest and build — 174 s on 2026-09-17, against 91 s for
+`full_refresh` alone — and the 85 s of 404s §2 measured.
 
 **7. Verify, and prefer the checks that fail loudly.** `dagster schedule list`
-shows it RUNNING. After the first scheduled run, the useful assertions are the
-ones the repo already computes rather than a glance at the dashboard:
+shows it RUNNING, and `dagster instance info` run with the service's
+`DAGSTER_HOME` prints a `concurrency:` block with `max_concurrent_runs: 1`; no
+block at all means step 2's link is missing. After the first scheduled run, the
+useful assertions are the ones the repo already computes rather than a glance at
+the dashboard:
 `analytics.pipeline_sources` for per-source load times and row counts,
 `analytics.pipeline_tests` for anything failing, and the freshness policies in
 the UI, which are the reason §1 calls the daemon the thing that makes the SLA
@@ -623,5 +730,6 @@ a wiped `DAGSTER_HOME` leaves the schedule stopped and the service serving an
 ageing site for the other reason; a stray bare `uv sync` strips Dagster out of
 the venv while it is running; a `$HOME` change moves
 dlt's watermark and re-fetches everything; a moved mount point breaks every
-DuckLake attach because `data_path` is compared as a string. All five are §8,
-and none of them raises where you are looking.
+DuckLake attach because `data_path` is compared as a string; a `DAGSTER_HOME`
+without `dagster.yaml` lets runs overlap again. All six are §8, and none of them
+raises where you are looking.
