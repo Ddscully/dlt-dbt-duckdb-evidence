@@ -111,9 +111,7 @@ time series.
 
 - **The transcription is faithful, defects included, and the mart is where they
   are handled** ([`docs/decisions/0009-cbam-annex-transcribed-faithfully.md`](../../../docs/decisions/0009-cbam-annex-transcribed-faithfully.md)).
-  The annex is a legal instrument; cleaning it in the seed would put this
-  project's judgement between the regulation and a euro figure. What the handling
-  still shapes:
+  What the handling still shapes:
   - **The fallback is a row-level rule, not a column-level one.** A per-column
     `coalesce` pairs one country's tonnage with the fallback's mark-up and
     produces rates that exist nowhere in the regulation, so direct, indirect and
@@ -270,40 +268,18 @@ mutation in this table:
   of the annex in July 2026. The mutation is therefore *completely* invisible:
   not one figure in the warehouse changes. Same category as `dim_date`'s eleven
   unbuilt fiscal policies.
-- **`markup_2026_pct` cannot be asserted at all.** It is a ratio of two doubles
-  and the warehouse holds three distinct values that all print as `10.0`
-  (9.99999999999998578915, 10.00000000000000888178, 10.00000000000003197442).
-  A column with no exact value can carry a range test and nothing else — which is
-  the real cost of the correction forcing the schedule from measured to asserted.
-  The fixtures therefore use totals that *are* float-exact under the mark-up:
-  2.5, 5, 10, 20, 40 and 80 for the 10/20/30% groups, and **50 and almost nothing
-  else** for the fertilisers' 1%. Mali's hydrogen total is `0.0`, which is the one
+- **`markup_2026_pct` cannot be asserted exactly**: three distinct doubles print
+  as `10.0`, so it carries a range test and the fixtures use float-exact totals
+  (`unit-testing-dbt-models`). Mali's hydrogen total is `0.0`, which is the one
   row where `nullif(total, 0)` makes the column null — the guard on real data.
-- **`production_route_code` follows the row-level rule too, and "consistent by
-  luck" is the wrong reading of a null.** Read off the country's row while the
-  tonnages come from the fallback, the *output* is null on all 755 fallen-back
-  rows, which looks harmless; the *input* is not — **202 of them take their
-  tonnages from a fallback row that carries a route**. Six rows of grey hydraulic cement state it best:
-  identical 1.28 / 0.09 / 1.37, the fallback row showing route `A` and the five
-  countries using that very number showing blank. Annex I publishes no such row.
-  The route is a property of the *value* — `_route`'s own docstring says the code
-  is what separates a 0,13 tCO2e/t semi-finished steel from an 8,21 — so it comes
-  off the row the tonnages came from.
-  - **Not one euro moved.** 202 rows gained a route; row count held at 11,665 and
-    the euro total at EUR 2,462,927.40 to the cent. That is why it survived: every
-    range and null test here is over a numeric column, and the defect lived in a
-    VARCHAR that `_compliance.yml` gave a `data_type` and no description or test.
-  - **The mutation table above could not have found it.** A mutation breaks a rule
-    that is written down; this rule was stated in the model's prose comment and
-    never implemented. Treat those comments as claims to verify.
-  - Held now by `dbt_utils.expression_is_true` on the column — 202 rows red when
-    reverted, and `store_failures` names them. Two things about how it is written:
-    `is not distinct from` rather than `=`, because 553 of the 755 correctly
-    resolve to null and `=` is unknown on a null, which `where not(...)` discards
-    so the test would pass by not looking; and the `or is_country_specific` scope
-    is in the *expression* rather than a `config: where:`, because `where` makes
-    dbt_utils wrap the model as `dbt_subquery` and the correlated subquery then
-    has to name that alias instead of the relation.
+- **`production_route_code` follows the row-level rule too.** The route is a
+  property of the *value* — `_route`'s own docstring says the code is what
+  separates a 0,13 tCO2e/t semi-finished steel from an 8,21 — so it comes off the
+  row the tonnages came from. Read off the country's row instead, 202 fallen-back
+  rows lose their route and not one euro moves, so every numeric test stays green.
+  `dbt_utils.expression_is_true` on the column holds it; why it is written with
+  `is not distinct from` and its scope in the expression, and why no mutation
+  found the defect, is `unit-testing-dbt-models`.
 - **The fallback row is `is_country_specific = true`.** All 260 of them, because
   the flag keys on "this row has a total of its own" and the fallback does.
   `is_fallback_table` is the column that identifies it. Reads oddly, so it is

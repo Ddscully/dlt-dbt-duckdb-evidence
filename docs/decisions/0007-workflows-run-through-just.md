@@ -35,14 +35,8 @@ venv, `just`, and all three paths (`WAREHOUSE_PATH`, `LAKEHOUSE_DIR`,
 
 ## Consequences
 
-- Three tests in `tests/test_workflows.py` hold it: the action must export all
-  three paths (the vacuity guard, because the other two assert an absence and
-  would pass if nothing set them), no workflow may define one itself, and every
-  workflow running the pipeline must use the action.
-- `just` reads both `LAKEHOUSE_DIR` and `DAGSTER_HOME` with `env()`, so a pre-set
-  value wins. A bare assignment agrees with CI's value only because
-  `$GITHUB_WORKSPACE` is `justfile_directory()` there, which is exactly what
-  would hide a disagreement until the day they differ.
+- Three tests in `tests/test_workflows.py` hold it, and `just` reads the paths
+  with `env()` so a pre-set value wins (`the-lakehouse` has both).
 - Moving the setup into a composite action took the exactly pinned `setup-uv`
   out of Dependabot's view, since `directory: /` scans `.github/workflows/`
   alone. Dependabot now watches every composite action that pins one, and a

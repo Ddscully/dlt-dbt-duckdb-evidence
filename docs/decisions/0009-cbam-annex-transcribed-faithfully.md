@@ -31,10 +31,8 @@ between the regulation and a euro figure.
 
 ## Consequences
 
-- **Chile's row outlived itself as a rule.** It proved the fallback is a
-  **row-level rule, not a column-level one**: a per-column `coalesce` paired
-  Chile's tonnage with the fallback's mark-up and produced a 100% implied rate,
-  a row that exists nowhere in the regulation. Direct, indirect and total still
-  have to be read off one source (`compliance-models`).
+- **Chile's row outlived itself as a rule**: it proved the fallback is
+  row-level, not column-level, which `compliance-models` states and a unit test
+  holds.
 - The goods with no value anywhere survive the correction: they are 4-digit CN
   headings whose subheadings hold the numbers, and the mart excludes them.

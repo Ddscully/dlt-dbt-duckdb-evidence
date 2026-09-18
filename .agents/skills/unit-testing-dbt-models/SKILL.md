@@ -197,18 +197,16 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     *are* exact under the mark-up (2.5, 5, 10, 20, 40, 80 for 10/20/30%; 50 and
     almost nothing else for the fertilisers' 1%) so the certificate columns can
     be compared at all.
-  - **`production_route_code` did not follow the row-level fallback rule, and
-    "consistent by luck" was the wrong reading of it.** It was read off the
-    country's row while direct, indirect and total came from the fallback — the
-    exact split the rule exists to forbid. The *output* was uniformly null on
-    all 755 fallen-back rows, which is what made it look benign; the *input* was
-    not. 202 of those rows took their tonnages from a fallback row that carries
-    a route, and the mart discarded it. The clearest statement of it was six
-    rows of grey hydraulic cement holding an identical 1.28 / 0.09 / 1.37: the
-    fallback row showed route `A` and the five countries using that same number
-    showed blank. "1.37 tCO2e/t with no production route" is a row Annex I does
-    not publish. Fixed 2026-08-24; the route now comes off the row the tonnages
-    came from.
+  - **`production_route_code` has to follow the row-level fallback rule, and
+    "consistent by luck" is the wrong reading of a null.** Read off the
+    country's row while direct, indirect and total come from the fallback — the
+    exact split the rule exists to forbid — the *output* is uniformly null on
+    all 755 fallen-back rows, which looks benign; the *input* is not. 202 of
+    those rows take their tonnages from a fallback row that carries a route, and
+    the mart discards it: six rows of grey hydraulic cement hold an identical
+    1.28 / 0.09 / 1.37, the fallback row showing route `A` and the five countries
+    using that same number showing blank. "1.37 tCO2e/t with no production route" is a row Annex I does
+    not publish. The route comes off the row the tonnages came from.
     - **Nothing moved but the metadata**, which is why it survived. 202 rows
       gained a route, the row count held at 11,665 and the euro total held at
       EUR 2,462,927.40 to the cent. Every `accepted_range` and `not_null` on
@@ -480,11 +478,9 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   of `fct_country_weather_year`'s data tests pass**, with DEU 2022 reading
   2170.55 for 2177.70.
   - **The ordering it asserted is false, so the "obvious" fix reddens the
-    build.** Over the full archive — 656 rows, 41 capitals x 16 years —
-    `hdd_minmax_total` is the *larger* in 253 rows (38.6%) and the smaller in
-    403, gaps running -153.0 to +96.2. Whether the midpoint sits above or below
-    the true daily mean depends on the day's diurnal shape and both directions
-    occur. Encoding the comment as an expression is the one repair to avoid.
+    build**: the midpoint total is the larger in 38.6% of the archive's rows
+    (`weather-models` has the measurement). Encoding the comment as an
+    expression is the one repair to avoid.
   - **So the fixture puts a country on each side of it.** AAA's midpoint total
     lands above its mean-based one, BBB's below, which pins that the columns are
     distinguishable *without* asserting an order between them. This is the
