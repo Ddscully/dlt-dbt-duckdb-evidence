@@ -932,6 +932,13 @@ the container's lives on the `mds_data` volume.
 
 What differs from a host deployment, beyond packaging:
 
+- **`restart: unless-stopped` is the supervisor.** It does what the §2 unit's
+  `Restart=on-failure` and `WantedBy` do: a service whose `just serve` exits 1
+  comes back, and all four return when the Docker daemon starts after a reboot
+  — provided the daemon itself is enabled at boot. `docker compose stop` still
+  stops them for good. It reaches only the four services; a run's container is
+  the launcher's, not compose's, and is removed when it exits. The logging the
+  unit supplied is `docker compose logs`.
 - **Each run gets its own container**, launched by `DockerRunLauncher` from the
   same image, and removed when it finishes. Measured 2026-09-17: about 10 s from
   launch to a running run container, against a subprocess starting immediately.

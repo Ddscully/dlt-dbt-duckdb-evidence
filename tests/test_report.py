@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from publish import build_report
 
 
@@ -106,6 +108,24 @@ def test_publishing_replaces_the_contents_of_the_site_root(tmp_path: Path):
     assert (served / "assets" / "app.js").read_text() == "js"
     assert not (served / "gone.html").exists()
     assert not (served / "stale").exists()
+
+
+def test_publishing_refuses_a_site_root_that_contains_the_build(tmp_path: Path):
+    """`SITE_ROOT=/app/reports` names the build's parent. Emptying it would
+    delete the pages and source queries the site is built from, so the refusal
+    has to come before anything is removed."""
+    reports = tmp_path / "reports"
+    build = reports / "build"
+    build.mkdir(parents=True)
+    (build / "index.html").write_text("site")
+    (reports / "pages").mkdir()
+    (reports / "pages" / "index.md").write_text("# a page")
+
+    with pytest.raises(ValueError, match="contain one another"):
+        build_report.publish_to(build, reports)
+    assert (reports / "pages" / "index.md").exists()
+    with pytest.raises(ValueError, match="contain one another"):
+        build_report.publish_to(build, build / "served")
 
 
 def test_site_root_reads_the_environment(monkeypatch, tmp_path: Path):

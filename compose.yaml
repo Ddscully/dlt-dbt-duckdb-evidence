@@ -57,6 +57,7 @@ services:
   # (database `dagster`, created by the init script).
   postgres:
     image: postgres:17.11
+    restart: unless-stopped
     environment:
       POSTGRES_USER: mds
       # `:?` rather than a default: an unset password would start a database
@@ -92,6 +93,7 @@ services:
   # `mini` is SeaweedFS's all-in-one: master, volume, filer and S3 gateway.
   seaweedfs:
     image: chrislusf/seaweedfs:4.47
+    restart: unless-stopped
     command: mini -dir=/data
     environment:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
@@ -120,6 +122,13 @@ services:
   dagster:
     build: .
     image: mds:local
+    # `just serve` exits 1 when any of its children dies, so that something
+    # restarts it — systemd's `Restart=on-failure` on a host, this line here.
+    # Without it one crashed daemon stops the container and it stays down, as
+    # does the whole stack after a reboot. It reaches only the four services:
+    # a run's container is created by the launcher, not by compose, and is
+    # `auto_remove`d when it exits.
+    restart: unless-stopped
     # `just` is PID 1 and forks four children; without an init the container
     # ends up reaping nothing and `docker stop` waits out its full grace period.
     init: true
@@ -174,6 +183,7 @@ services:
   # static site server that can write its own document root is a liability.
   site:
     image: nginx:1.31.6-alpine
+    restart: unless-stopped
     volumes:
       - mds_site:/usr/share/nginx/html:ro
     ports:

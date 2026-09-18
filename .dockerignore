@@ -3,7 +3,10 @@
 #
 # - build output that the image rebuilds anyway (`dbt/target`, `dbt_packages`,
 #   `node_modules`, `reports/build`, `.venv`, `__pycache__`) — copying it in
-#   would layer a host's artifacts under the ones the Dockerfile builds;
+#   would layer a host's artifacts under the ones the Dockerfile builds, and
+#   invalidate `COPY . .` and every layer after it whenever the host recompiles.
+#   Patterns are anchored at the context root, so a directory that can appear
+#   at any depth needs `**/`: a bare `__pycache__` matched the root alone;
 # - *state* (`data/`, `.dagster/`, `.env`) — a warehouse, a landing zone or a
 #   password baked into an image that then gets pushed somewhere;
 # - noise (`.git`, `docs/sessions`).
@@ -20,4 +23,6 @@ reports/node_modules
 reports/build
 reports/.evidence
 docs/sessions
-__pycache__
+**/__pycache__
+.pytest_cache
+.ruff_cache

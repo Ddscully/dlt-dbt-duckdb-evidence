@@ -241,12 +241,28 @@ def publish_to(build_dir: Path, destination: Path) -> bool:
     to that directory rather than replacing it.
 
     The site is therefore down for this copy and not for the whole build.
+
+    Refuses, before deleting anything, when either directory contains the
+    other. `SITE_ROOT=/app/reports` would otherwise empty `pages/` and
+    `sources/` along with `build/`, and a destination inside the build would
+    be copied into itself. A symlink in the destination is unlinked, never
+    followed: `is_dir()` is true of a link to a directory, and `rmtree` refuses
+    one.
     """
-    if destination.resolve() == build_dir.resolve():
+    build, served = build_dir.resolve(), destination.resolve()
+    if served == build:
         return False
+    if build.is_relative_to(served) or served.is_relative_to(build):
+        raise ValueError(
+            f"SITE_ROOT {destination} and the build directory {build_dir} "
+            "contain one another; publishing would delete the site's own sources"
+        )
     destination.mkdir(parents=True, exist_ok=True)
     for existing in destination.iterdir():
-        shutil.rmtree(existing) if existing.is_dir() else existing.unlink()
+        if existing.is_dir() and not existing.is_symlink():
+            shutil.rmtree(existing)
+        else:
+            existing.unlink()
     shutil.copytree(build_dir, destination, dirs_exist_ok=True)
     return True
 

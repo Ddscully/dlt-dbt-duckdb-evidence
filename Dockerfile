@@ -49,7 +49,7 @@ ENV UV_NO_SYNC=1 \
     UV_PYTHON_DOWNLOADS=never \
     PROJECT_ROOT=/app \
     DAGSTER_HOME=/app/deploy \
-    PATH=/app/.venv/bin:/root/.local/bin:$PATH
+    PATH=/app/.venv/bin:$PATH
 
 WORKDIR /app
 
@@ -63,11 +63,11 @@ WORKDIR /app
 # with `failed to open file /app/README.md` without it.
 COPY pyproject.toml uv.lock .python-version README.md ./
 COPY src/ ./src/
+# That includes `just`, the interface to every layer: the `deploy` group
+# carries it, so `uv.lock` pins it like everything else and `/app/.venv/bin`
+# on PATH finds it. A `uv tool install` here would take whatever was newest on
+# each build, which is the one version in the image nothing watched.
 RUN uv sync --frozen --no-dev --group orchestration --group deploy
-
-# `just` is the interface to every layer, so the image needs it. `uv tool
-# install` puts it on PATH without touching the project venv.
-RUN uv tool install rust-just
 
 COPY reports/package.json reports/package-lock.json ./reports/
 # `npm ci` and never `install`: it installs the lockfile exactly and never

@@ -61,6 +61,10 @@ deploy = [
     # compose stack sets that block's variables; the laptop's instance launches
     # runs in a subprocess as before.
     "dagster-docker>=0.29.15",    # DockerRunLauncher — one short-lived container per run
+    # The image's `just`, here so `uv.lock` pins it and Dependabot's `uv`
+    # ecosystem bumps it. `CMD` is `just serve`, and a `uv tool install` in the
+    # Dockerfile took whatever was newest on each build of the same commit.
+    "rust-just>=1.56.0",          # the `just` command runner, inside the image
 ]
 
 [project.scripts]
