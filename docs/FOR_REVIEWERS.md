@@ -133,24 +133,15 @@ Measured on this machine against the live APIs, per stage, on 2026-09-09:
 Artifacts: a 282 MB DuckDB file, a 111 MiB DuckLake landing zone and a 165 MiB
 Evidence site.
 
-**Every figure in that table was stale, and one row described a stage that no
-longer exists.** It read `just lake` at 3.2 s producing "793 Parquet files, ~60
-MB" — the hand-rolled hive archive DuckLake replaced on 2026-08-27. The recipe
-has not existed since; `just lakehouse` *reports* the landing zone rather than
-building one, and it is not part of `just run` at all. `data/lake/` is still
-60 MB on any machine that predates the move, which is why `just clean` now takes
-it: `lake/lakehouse.py`'s docstring has said "`data/lake/` is gone with it" for
-a fortnight while it sat there.
-
-Two of the timings moved in opposite directions and both are informative.
-Ingest halved, 61.0 s → 29.6 s, because the earlier figure was taken with a cold
-workbook cache. `dbt-build` went 23.5 s → 24.5 s of dbt's own time while the
-wall clock reached 31.4 s — the gap is `dbt deps` and startup, which is why both
-are quoted now rather than one number that silently means either.
+**Two things move these figures without the pipeline changing.** A cold
+workbook cache adds its download and parse to ingest, so the table says which it
+measured. And
+`dbt-build` quotes both dbt's own time and the wall clock, because the gap is
+`dbt deps` and startup, and one number would silently mean either.
 
 **A run also costs disk, and nothing reclaims it.** The DuckLake landing zone
 went 72 → 111 MiB across the single ingest above, because DuckLake retains a
-snapshot per write and the catalog now holds **51** of them. Nothing in this
+snapshot per write and the catalog then held **51** of them. Nothing in this
 repo calls `ducklake_expire_snapshots` or `ducklake_cleanup_old_files`, so the
 landing zone grows monotonically — about 39 MiB per full ingest at today's
 volumes. That is the honest answer to "what does a run cost" on a stack with no
@@ -275,11 +266,8 @@ number before.
 
 What *doesn't* break, which is the more interesting half: dlt already merges
 incrementally on a real primary key with year-range backfills behind it, and the
-fixtures keep CI offline and constant-time. This list used to add the lake's
-small-file anti-pattern (275 partitions averaging 47 kB) as a problem that
-fixes itself at 1000×. That was the hand-written hive archive, which DuckLake
-replaced. What grows with the landing zone now is the Parquet that §3's
-retained snapshots keep alive: on 2026-09-18, 318 MiB of data files, of which
+fixtures keep CI offline and constant-time. What grows with the landing zone is
+the Parquet that §3's retained snapshots keep alive: on 2026-09-18, 318 MiB of data files, of which
 55 MiB were live.
 
 ## 5. What would I do differently?

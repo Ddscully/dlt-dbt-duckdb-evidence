@@ -327,10 +327,7 @@ anything built this way:
 - **`WAREHOUSE_PATH` must be absolute.** dbt resolves it from `dbt/`, the Python
   layers from the project root. A relative override gives you two different
   warehouses and no error. Every layer here gets the answer from
-  `modern_data_stack.paths` so they can't disagree. It used to come from a
-  `REPO_ROOT` in `ingest/pipeline.py` that meant "the parent of `ingest/`", which
-  made the landing zone and the exporter depend on where the *ingestion* layer
-  sat.
+  `modern_data_stack.paths` so they can't disagree.
 - **`dbt deps` before `dbt build`, `dbt parse` *or* `sqlfluff`.** `dbt_packages/`
   and `target/` are gitignored, and `prepare_if_dev()` only fires under
   `dagster dev`. Every workflow has to run it explicitly.
