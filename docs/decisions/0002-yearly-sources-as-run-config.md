@@ -35,15 +35,15 @@ partition together is one read of one file.
 
 ## Rejected
 
-- **Keeping the partitions and teaching people to use the Launchpad.** The
-  button that looks like the routine load would still be a backfill of every
-  year since 1960, and days of the weather budget.
-- **`BackfillPolicy.single_run()` as the reason to keep them.** It made a range
-  of partitions one request per WDI indicator; run config does the same, since
-  WDI asks `&date=lo:hi` either way.
+- **Keeping the partitions, with the Launchpad as the way to run the routine
+  load.** It was the only way, and the button that looks like the routine load
+  would still be a backfill of every year since 1960, and days of the weather
+  budget.
 
 ## Consequences
 
+- Nothing `BackfillPolicy.single_run()` gave the partitions is lost: WDI asks
+  `&date=lo:hi`, so a range is still one request per indicator.
 - `just materialize-select 'raw/wb_wdi*'` works. With the partitions, the CLI
   refused it with "Asset has partitions, but no '--partition' option was
   provided", while the README advertised it.

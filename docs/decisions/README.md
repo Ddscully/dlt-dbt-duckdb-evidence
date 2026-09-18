@@ -50,3 +50,5 @@ Status: accepted YYYY-MM-DD (#PR) | superseded by NNNN
 | [0002](0002-yearly-sources-as-run-config.md) | WDI and weather take their backfill years as run config, not partitions | accepted 2026-09-17 |
 | [0003](0003-coverage-py-over-pytest-cov.md) | Coverage runs as `coverage run -m pytest`, not through pytest-cov | accepted 2026-08-26 |
 | [0004](0004-agent-plugins-kept-by-measured-use.md) | A vendor agent plugin stays enabled only while it is measurably used | accepted 2026-09-02 |
+| [0005](0005-just-serve-first-container-second.md) | The service is `just serve`; the container stack runs the same recipe | accepted 2026-09-18 |
+| [0006](0006-runs-launch-from-the-service-image-id.md) | A run container starts from the service's image ID, not the `mds:local` tag | accepted 2026-09-18 |

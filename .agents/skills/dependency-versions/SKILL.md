@@ -77,8 +77,9 @@ each grouped to a single PR.
   can see. `docker` followed with the `Dockerfile`, which made the claim true
   for the first time.
   - **Between them they are why the container added no unwatched pin.**
-    `docs/RUNNING_AS_A_SERVICE.md` §2 reason 2 predicted an image would add
-    versions nothing watches; the answer is these two entries plus
+    An image looked like versions nothing watches
+    ([`docs/decisions/0005-just-serve-first-container-second.md`](../../../docs/decisions/0005-just-serve-first-container-second.md));
+    the answer is these two entries plus
     `tests/test_dagster_instance.py`, which refuses a tag Dependabot could not
     bump (`latest`, a bare name, or a floating `X.Y` where upstream's exact tag
     is `X.Y.Z`). The three that can still only age deliberately are unchanged.

@@ -96,9 +96,8 @@ updates:
   # `docker-compose` matches compose files and `docker` matches Dockerfiles, and
   # a `FROM` is invisible to the first.
   #
-  # `docs/RUNNING_AS_A_SERVICE.md` §2 reason 2 predicted that a container would
-  # add pinned versions nothing watches. This entry is the concession and the
-  # answer: it is watched, so it is not one of the versions that can only age
+  # A container looked like pinned versions nothing watches (docs/decisions/0005).
+  # This entry is the answer: it is watched, so it is not one of the versions that can only age
   # deliberately. `tests/test_dagster_instance.py` refuses a tag Dependabot
   # could not bump.
   #

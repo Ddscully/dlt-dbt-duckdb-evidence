@@ -6,10 +6,9 @@
 > Dagster's code servers are counted, and a measured answer for what happens to
 > all of them when one dies. `deploy/dagster.yaml` is likewise real: run, event
 > and schedule storage in Postgres, run through a restart rather than argued
-> about. What does not exist is everything around them: no unit file, no
-> container, no swap asset (§4), and no host anybody has stood this up on. The pipeline still runs from `just` recipes on a laptop and
-> from four GitHub workflows on cron, and that is the whole of what runs
-> unattended today. Read §2 as instructions and the rest as a plan.
+> about, and so is the compose stack built on them (§10). What does not exist is
+> the systemd unit, the swap asset (§4), and a host anybody has stood this up
+> on. Read §2 and §10 as instructions and the rest as a plan.
 
 Today the pipeline has two homes and neither is a service. Locally it is
 `just run` or `just materialize`, invoked by a person. In CI it is four
@@ -42,72 +41,34 @@ running. See [`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md#2-what-is-the-freshnes
 
 ## 2. `just serve`, and the container built on it
 
-**Recommendation: a `just serve` recipe, supervised by systemd. Reach for a
-container only when the target demands one** (several hosts, immutable images).
-Even then its `CMD` should be `just serve`, so it inherits the definition rather
-than restating it.
+**`just serve` is the one definition of the service**: systemd supervises it on
+a host, and the container stack runs it too, so the laptop default is still the
+file and still `just`. What was weighed, including the case against a container
+that the container then answered, is
+[decision 0005](decisions/0005-just-serve-first-container-second.md). Four facts
+hold it together:
 
-Four reasons, all specific to this repo rather than to taste:
-
-1. **The justfile is already the single definition of the environment.**
-   [`.github/actions/setup`](../.github/actions/setup/action.yml) exists
-   *because* four workflows each restated that environment and two restated it
-   wrongly. A Dockerfile is a fifth restatement of the same facts (a base
-   image, an OS package set, a Node install, an env block), and
-   `tests/test_workflows.py`, which is what stops the other four drifting,
-   cannot guard it, because it is not a workflow.
-2. **A base image is a new pinning surface nothing watches.** Three versions
-   here can only age deliberately (`.python-version`, the sqlfluff pair, ruff)
-   because no Dependabot ecosystem covers them. A base image tag would be a
-   fourth thing somebody has to remember, for no functional gain on one host.
-3. **A container does not solve the constraint that actually binds.** The
-   single-writer lock is a property of *the file plus a process*, not of the
-   host. Two containers sharing a volume reintroduce it across a filesystem
-   boundary, strictly worse than one process tree, where `in_process_executor`
-   serialises a run's steps and the instance's one-run queue serialises the runs
-   (§5).
-4. **The serving half needs no runtime at all.** `evidence sources` extracts the
+1. **The image restates the toolchain, never the service.** Its `CMD` is
+   `["just", "serve", "3000", "8081", "0.0.0.0"]`; the Dockerfile carries a base
+   image, Node, uv, the DuckDB extensions and the dbt manifest.
+   `tests/test_dagster_instance.py` reads the Dockerfile and `compose.yaml` as
+   data and holds them against `deploy/dagster.yaml`: every launcher `env_vars`
+   name assigned, every run-container volume declared and mounted at the same
+   path, the network matching, and the launcher being the one that runs every
+   run from the service's own image (§10).
+2. **The images are a pinning surface, and Dependabot watches it**: a `docker`
+   ecosystem for the Dockerfile and `docker-compose` for the compose file. The
+   instance test refuses a tag Dependabot could not bump — `latest`, a bare
+   name, or a floating `X.Y` where upstream's exact tag is `X.Y.Z`.
+3. **The single-writer lock belongs to the file, not the host.** With the
+   catalog in Postgres and the Parquet in a bucket (§3), the only file a run
+   container and the service both open is `data/warehouse.duckdb`, and the
+   one-run queue serialises that (§5).
+4. **The serving half needs no runtime.** `evidence sources` extracts the
    warehouse tables to Parquet under `reports/.evidence/`, `evidence build`
    renders static HTML into `reports/build/`, and the browser queries that
    Parquet with DuckDB-WASM. **The served site never opens
-   `data/warehouse.duckdb`.** Serving it is a static file server, and there is
-   nothing there to containerise.
-
-### What changed, 2026-09-17
-
-The four reasons above are kept as written, because the recommendation has not
-been reversed — **the laptop default is still the file and still `just`**. What
-changed is that "reach for a container when the target demands one" now has a
-built answer rather than a sketch: `Dockerfile`, `compose.yaml`, and a
-`DockerRunLauncher` giving each run its own container. Taking them in order:
-
-1. **Answered by the shape, not by argument.** The image's `CMD` is
-   `["just", "serve", "3000", "8081", "0.0.0.0"]`, so it restates the
-   *toolchain* — a base image, Node, uv, the DuckDB extensions, the dbt manifest
-   — and never the service. The fifth restatement the reason predicted did not
-   appear, because there was nothing to restate. What a workflow guard could not
-   cover, `tests/test_dagster_instance.py` does instead: it reads the Dockerfile
-   and `compose.yaml` as data and holds them against `deploy/dagster.yaml` —
-   every launcher `env_vars` name assigned, every run-container volume declared
-   and mounted at the same path, the network matching, and the launcher being
-   the one that runs every run from the service's own image (below).
-2. **Conceded, and then answered.** It really is a new pinning surface: four
-   base and service images. `.github/dependabot.yml` gained a `docker`
-   ecosystem for the Dockerfile beside the `docker-compose` one for the compose
-   file, and the test above refuses a tag Dependabot could not bump — `latest`,
-   a bare name, or a floating `X.Y` where upstream's exact tag is `X.Y.Z`. The
-   count of versions that can only age deliberately is unchanged at three.
-3. **Largely dissolved — by §3's catalog move, not by the container.** With
-   `LAKEHOUSE_CATALOG` in Postgres and `LAKEHOUSE_DATA_PATH` in a bucket, the
-   landing zone is not a file any more, and the only thing a run container and
-   the service both open is `data/warehouse.duckdb`. "Two containers sharing a
-   volume reintroduce the lock" was measured again under that arrangement and
-   is now the narrow case the one-run queue already covers — see the
-   measurements below. The reason was right about the mechanism and was
-   answered by moving the state, which is the thing worth remembering.
-4. **Holds exactly as written.** nginx serves the `mds_site` volume read-only
-   and never opens the warehouse. It is a static file server, containerised
-   only because the rest of the stack already is.
+   `data/warehouse.duckdb`**, and nginx serves it read-only.
 
 ### The recipe
 
@@ -201,16 +162,14 @@ Four things in that block are load-bearing:
   memory while everything they *fork later* dies — the grpc code servers, and the
   run worker forked per schedule tick. The ports answer, `wait -n` never returns,
   and nothing materialises: §2's own failure mode, arriving through the
-  dependency resolver. §8 records it. (An earlier version of this section blamed
-  `uv run`, on the evidence of that `uv sync` dry run.)
+  dependency resolver. §8 records it.
 - **The port collision.** `just dagster` uses 3000 and so does `evidence dev`.
   The site here is static, so it is served by anything; give it its own port and
   do not reach for `evidence dev`, which is a hot-reloading dev server.
 
 ### Stopping it — measured
 
-`trap 'kill 0' EXIT` and a bare `wait` are what this section proposed, and
-building it corrected both. The tree is also bigger than the recipe starts:
+The tree is bigger than the recipe starts:
 **twelve processes, not three**, because the webserver and the daemon each spawn
 a `dagster api grpc` code server, which spawns a multiprocessing resource tracker
 of its own. Whether the cleanup reaches all of that is a question rather than a
@@ -224,7 +183,7 @@ formality, so it was run — five ways of stopping it, against the real graph:
 | SIGTERM to the recipe's shell alone | 12 | **0** | 0 |
 | **one child killed** (`kill -9` on the site server) | 12 | **0** | **1** |
 
-Three corrections came out of that, and the first one matters most:
+Three rules came out of that, and the first one matters most:
 
 - **`kill` the recorded PIDs, not `kill 0`.** Measured separately: `uv run`
   forwards SIGTERM to the process it spawned, and the cascade carries on down to
@@ -232,8 +191,8 @@ Three corrections came out of that, and the first one matters most:
   signals the whole group *including the recipe's own shell*, which would then
   die **by SIGTERM** — and `man systemd.service`, read on the systemd this was
   measured against (259), lists SIGHUP, SIGINT, SIGTERM and SIGPIPE as
-  *successful* termination alongside exit 0. So the proposed line would have quietly disabled the
-  `Restart=on-failure` written four paragraphs below it: the unit would exit
+  *successful* termination alongside exit 0. So `kill 0` would quietly disable the
+  `Restart=on-failure` written four paragraphs below: the unit would exit
   looking clean and never come back.
 - **`wait -n`, not `wait`.** Plain `wait` returns only once *every* child has
   exited, so a dead webserver leaves the recipe running, systemd seeing a healthy
@@ -406,8 +365,7 @@ new one, and the next cycle is not held hostage by whoever forgot to close a
 session. That last row is §8's lock nuisance genuinely dissolving rather than
 merely being avoided.
 
-**Re-running this needs separate processes, and the first attempt got it
-wrong.** DuckDB's Python client caches an instance per path within a process, so
+**Re-running this needs separate processes.** DuckDB's Python client caches an instance per path within a process, so
 asking it for a "new" connection to the swapped path returned the *old* one,
 reporting `v1` after the swap, and then refused a writer with `Can't open a
 connection to same database file with a different configuration`. Both answers
@@ -476,14 +434,12 @@ running and is not:
   that instance wrote a `RUNNING` row to `instigators` and left every file under
   `.dagster/` byte-identical. The failure mode is unchanged, only relocated: drop
   the database and the service comes back up ingesting nothing.
-- **It targets `full_refresh` only, which excludes two things, and the second
-  one only started mattering when §2 became real.** It excludes `load_retail`:
+- **It targets `full_refresh` only, which excludes two things.** It excludes `load_retail`:
   correct forever on an established lakehouse (retail is a closed archive whose
   partitions are replayed by hand), and a failure on a fresh one, inside
   `stg_retail_lines`, with `Catalog Error: Table with name retail_invoice_lines
-  does not exist!`. **It also excludes `reports/evidence_site`.** That cost
-  nothing while the site was a Pages deploy on its own workflow; with `just
-  serve` in front of it, only `publish_site` builds the site and *nothing
+  does not exist!`. **It also excludes `reports/evidence_site`.** Under `just
+  serve`, only `publish_site` builds the site and *nothing
   schedules `publish_site`*, so a scheduled service keeps the warehouse current
   and leaves the dashboard exactly where the last `just report` left it — no
   error, no log line, a page that simply stops moving. The exclusion is
@@ -503,10 +459,10 @@ adopting §4 changes is one environment variable (`WAREHOUSE_PATH` points at the
 build file rather than the served one) and one asset on the end of the graph.
 
 **Without §4 the schedule still works**, materialising into the served warehouse
-in place. That is the smaller starting point and it costs three things. Two were
-here from the start and neither is silent: a reader lockout for the length of a
-build (§8), and a half-written file where the good one was if the build goes
-red. **The third arrived with `just serve` and is silent** — the site is served
+in place. That is the smaller starting point and it costs three things. Two are
+not silent: a reader lockout for the length of a build (§8), and a half-written
+file where the good one was if the build goes red. **The third is silent** — the
+site is served
 from a fixed `reports/build/` that only a manual `just report` rewrites, so the
 dashboard ages while the warehouse behind it does not. All three are survivable
 on an internal deployment; only the third needs somebody to remember.
@@ -522,17 +478,16 @@ latest missed tick runs — `dagster/_scheduler/scheduler.py` drops the rest for
 schedule with no partition set. A restart eighteen minutes later launched
 nothing, because that tick was already recorded. So a host rebooted, or
 restarted by systemd after a crash, any time after 06:00 UTC starts a full build
-while whoever restarted it is opening the UI, and a Materialize click in that
-window used to be a second writer against a file DuckDB lets one process write
-(§8).
+while whoever restarted it is opening the UI, and without the limit below a
+Materialize click in that window would be a second writer against a file DuckDB
+lets one process write (§8).
 
-**`.dagster/dagster.yaml` now holds the instance to one run in progress**
+**`.dagster/dagster.yaml` holds the instance to one run in progress**
 (`concurrency: runs: max_concurrent_runs: 1`; Dagster's default is 10). Measured
 against a throwaway instance whose only job sleeps, so no warehouse was involved:
-under the previous file two launches were both `STARTED` within 5 s, and under
-this one the second stayed `QUEUED` until the first finished. The file is read
-at process start, so the live service reported the new value only after a
-restart.
+under Dagster's default two launches were both `STARTED` within 5 s, and under
+this file the second stayed `QUEUED` until the first finished. The file is read
+at process start, so a change to it takes a restart.
 
 **The queue governs what enters it, and no recipe that materialises enters it.**
 The UI, its backfills included, and the schedule submit to it. `dagster job
@@ -562,12 +517,17 @@ whatever the host already terminates TLS with in front of it. The Evidence site
 is static and safe to expose; note that it ships the underlying Parquet to the
 browser, so "the site is public" means "these tables are public".
 
-**The service held no secrets until it had backing services, and that was a
-consequence of §4 rather than a happy accident.** Every source it reads is public
-and unauthenticated, and `PII_SALT`, the one secret in the whole project, belongs
-to the export, which the service does not run.
+**On its own the service holds no secrets.** Every source it reads is public
+and unauthenticated, its environment file is paths, and `PII_SALT`, the one
+secret in the export, belongs to a step the service does not run (§4). If
+publishing is ever added to the host, that stops being true immediately: the
+salt has to be **stable across runs** (a fresh one repseudonymises every
+customer for no change in the data), so it would become a long-lived secret
+sitting on a machine that also serves traffic. That is the trade to weigh, and
+it is the reason releases are left on GitHub here.
+[`docs/DATA_PROTECTION.md`](./DATA_PROTECTION.md) has the reasoning.
 
-**The compose stack ends that, and adds something worse than a secret.** In
+**The compose stack brings secrets, and something worse than a secret.** In
 order:
 
 - **`PGPASSWORD`** is a real credential on the host, in `.env`, read by both
@@ -587,19 +547,12 @@ order:
   Recorded rather than fixed, so the trade is visible.
 - **`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`** are credentials in the same
   sense, though the ones in `.env.example` reach a SeaweedFS bound to localhost.
-  A real object store makes them the third real secret. Its environment file is paths. If publishing is ever
-added to the host, that stops being true immediately: the salt has to be
-**stable across runs** (a fresh one repseudonymises every customer for no change
-in the data), so it would become a long-lived secret sitting on a machine that
-also serves traffic. That is the trade to weigh, and it is the reason releases
-are left on GitHub here. [`docs/DATA_PROTECTION.md`](./DATA_PROTECTION.md) has
-the reasoning.
+  A real object store makes them the third real secret.
 
 **The pseudonymisation happens at the export and nowhere else**, so the
 warehouse the service builds and serves from holds `customer_id` in the clear,
 exactly as a local build does. The *site* is fine: the retail source queries
-were pruned during the classification work and now only aggregate over that
-column (`count(distinct …)`, `… is null`), so no Parquet reaching a browser
+only aggregate over that column (`count(distinct …)`, `… is null`), so no Parquet reaching a browser
 carries an identifier. The exposure is therefore the **file**, not the pages: do
 not serve `data/warehouse.duckdb` itself, and treat a shell on the host as access
 to the personal column. A deployment that wants to hand the database out needs
@@ -759,9 +712,9 @@ building the design first:
 ## 10. Standing it up
 
 The ordered version of everything above. Written as a runbook because §5's two
-facts are only dangerous out of order. `just serve` is real now, so steps 1, 3,
-5 and 6 are things you can type; step 2's environment file and step 4's unit are
-still to be written, and the whole of it assumes §4's swap asset has not been
+facts are only dangerous out of order. Steps 1, 3, 5 and 6 are things you can
+type; step 2's environment file and step 4's unit are still to be written, and
+the whole of it assumes §4's swap asset has not been
 built — which is the smaller starting point §5 describes, not a blocker.
 
 **1. The host, once.** Clone, then `just setup`, which syncs the venv and
@@ -852,7 +805,7 @@ in `DAGSTER_HOME`, not code, so it is also the step to repeat if that directory
 is ever wiped:
 
 ```sh
-uv run dagster schedule start -m orchestration.definitions daily_refresh
+uv run dagster schedule start daily_refresh    # never with -m (§8)
 ```
 
 The UI toggle is the same action against the same instance; use either. What is
@@ -945,9 +898,9 @@ What differs from a host deployment, beyond packaging:
 - **"The same image" means the service's image ID, not `mds:local`.** Stock
   `DockerRunLauncher` launches by name, and `just compose-build` moves the tag
   at once while the service keeps its old image until `just compose-up`
-  recreates it. In between, a scheduled run executed code the service was not
-  running; seen 2026-09-18, the service on `230076f0ab43` and the tag on
-  `fc7ff551e654`. `modern_data_stack.docker_launcher` asks Docker for the
+  recreates it, so a run launched in between would execute code the service is
+  not running ([decision 0006](decisions/0006-runs-launch-from-the-service-image-id.md)).
+  `modern_data_stack.docker_launcher` asks Docker for the
   launching container's own image instead. The daemon launches every queued
   run, so a build changes nothing until the service is recreated, and
   `compose-build` then `compose-up` is the deploy. It finds itself by hostname,
@@ -955,8 +908,7 @@ What differs from a host deployment, beyond packaging:
   asserts.
 - **The landing zone is not on a volume at all.** The catalog is in Postgres and
   the Parquet in SeaweedFS, so the one file a run container and the service both
-  open is `data/warehouse.duckdb` on `mds_data` — which is why §2 reason 3 is
-  largely dissolved rather than worked around.
+  open is `data/warehouse.duckdb` on `mds_data` (§2, fact 3).
 - **Four named volumes**, and they are named explicitly because the run
   containers mount them by name from outside compose: `mds_data` (the warehouse
   and the landing-zone directory), `mds_dlt` (dlt's watermarks, at
