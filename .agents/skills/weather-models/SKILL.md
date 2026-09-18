@@ -205,8 +205,8 @@ its first source with a *finite budget*.
     unit test now — `weather_year_keeps_the_two_degree_day_conventions_apart`,
     whose fixture deliberately puts one country on each side of the gap. See
     `unit-testing-dbt-models`.
-- **The payoff is a negative result, which is the kind this warehouse could not
-  previously reach.** Heating degree days for six EU capitals, 2021 against 2022:
+- **The payoff is a negative result, which only weather lets this warehouse
+  reach.** Heating degree days for six EU capitals, 2021 against 2022:
   every one milder, inside a 6.5-point band (Germany -13.5%, Spain -10.2%,
   France -16.5%, Italy -12.0%, Netherlands -13.8%, Poland -10.0%) while
   electricity prices spread 81.8 points in both directions. Weather explains

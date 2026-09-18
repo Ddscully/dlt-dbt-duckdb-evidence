@@ -259,13 +259,11 @@ section here. The mutation method these guards were written with is in the
     line on "10 unit" and starts the next with "tests.". A per-line scan missed
     3 of 31 claims and passed a mutated unit-test count; it was a mutation that
     found that, not review.
-  - **Per-model counts are scoped to their own model, and were not at first.**
-    Folding them into one allowed set put `fct_retail_returns`' 10 and
-    `fct_fx_rates_daily`' 14 into the *project-wide* set — and 10 had been the
-    project-wide unit-test total one commit earlier, so a sentence still
-    claiming that old total became legal anywhere, and the guard silently
-    reopened the staleness it exists to catch. (Writing the example out here
-    fails the guard, which is the bullet above demonstrating itself.) A count is now accepted only where the nearest *preceding* model
+  - **Per-model counts are scoped to their own model.** Folded into the
+    project-wide set, a model's count becomes legal anywhere — including in a
+    sentence still claiming an old project-wide total that happens to equal it —
+    and the guard silently reopens the staleness it exists to catch. A count is
+    accepted only where the nearest *preceding* model
     mention owns it, which is how these documents establish context: a heading,
     then prose about that model. Adding a model to `CITED_MODELS` is therefore
     cheap — but a model whose count is cited and *not* listed is unguarded
@@ -366,14 +364,13 @@ section here. The mutation method these guards were written with is in the
     cannot disagree; a test there would assert what the code makes impossible.
 - **dlt wraps anything a resource generator raises** in `ResourceExtractionError`,
   so tests asserting on ingest errors match that, not the underlying exception.
-- **The retail workbook cache is keyed on the archive's content, and had to be.**
-  `retail_workbook()` unzips a 45 MB workbook into `data/cache/{fixtures,live}/`
-  and used to key that on the directory alone — if the `.xlsx` was there, it was
-  returned. Nothing could then notice that the zip *underneath* it had changed,
-  so `just record-fixtures` rewriting `retail_online_retail_ii.zip` left the
-  previous slice in place and every fixture test went on passing against data the
-  repo no longer contained — a re-recording that looks like a no-op is the worst
-  possible shape for this. A sha256 prefix in the path makes a re-record a cache
+- **The retail workbook cache is keyed on the archive's content.**
+  `retail_workbook()` unzips a 45 MB workbook into `data/cache/{fixtures,live}/`.
+  Keyed on the directory alone, nothing could notice that the zip *underneath*
+  had changed, so `just record-fixtures` rewriting `retail_online_retail_ii.zip`
+  would leave the previous slice in place and every fixture test passing against
+  data the repo no longer contains — a re-recording that looks like a no-op is
+  the worst possible shape for this. A sha256 prefix in the path makes a re-record a cache
   miss. This is the same failure as the `fixtures`/`live` split one level in, and
   the same family as the `_fixtures` dlt pipeline-name suffix: a cache whose key
   doesn't include everything the value depends on. Stale digest directories are
@@ -427,8 +424,9 @@ section here. The mutation method these guards were written with is in the
     not to the tuple is missing from all three at once, and each of them fails
     silently.
   - **The course recipes are held too, by rule rather than by list.**
-    `course-rebuild` shipped without the lakehouse or dbt's artifact paths (#65),
-    so `test_every_course_recipe_keeps_the_sandbox_to_itself` derives what each
+    A course recipe that misses the lakehouse or dbt's artifact paths writes
+    into the real ones with a green build, so
+    `test_every_course_recipe_keeps_the_sandbox_to_itself` derives what each
     `course-*` recipe must point into `data/course/` from the commands it runs
     (`authoring-course-modules` has the measurements).
   - **A live run isolated by hand needs two more, and no recipe or test holds

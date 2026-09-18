@@ -260,7 +260,7 @@ CLI this project does not install
     and graph-state-dependent triggering; `ScheduleDefinition` raises no
     deprecation warning on 1.13, so this is not a legacy path being tolerated.
     - **The partition angle is the near-miss.** One asset here *is* partitioned
-      (two more were until 2026-09), which is DA's stated niche — but backfills
+      (the yearly sources take run config instead), which is DA's stated niche — but backfills
       are deliberately manual (`just backfill-wdi`, "an explicit act with a
       window you can point at"), so DA would automate precisely what this
       project chose to keep explicit.

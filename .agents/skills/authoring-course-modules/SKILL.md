@@ -30,16 +30,16 @@ through the wrong recipe writes a deliberately broken model into
 second keeps a drill's re-ingest from merging the 17-country slice into the real
 landing zone, which is where the weather archive lives.
 
-**`course-rebuild` set only the first until #65, and nothing went red.** dbt
-attaches `LAKEHOUSE_DIR` and every staging model is a view over it, so the drill
-inner loop rebuilt the sandbox's marts from the *real* landing zone:
-`fct_emissions_energy` went from 4,096 rows to 43,138 on a copy, with a green
-build, while `course-query` still showed the slice under `lakehouse.raw`. Both
-build recipes also wrote dbt's artifacts to `dbt/target/`, and module 03 has the
-learner run `just pipeline-status` against the real warehouse. Measured on a
-copy on 2026-09-17, that filed the sandbox build as a seventh invocation in
-`analytics.pipeline_runs`, which every release carries. The sandbox keeps them
-in `data/course/dbt-target/` now.
+**Setting `WAREHOUSE_PATH` alone is not enough, and nothing goes red.** dbt
+attaches `LAKEHOUSE_DIR` and every staging model is a view over it, so a recipe
+that sets only the warehouse rebuilds the sandbox's marts from the *real*
+landing zone: on a copy, `fct_emissions_energy` went from 4,096 rows to 43,138
+with a green build, while `course-query` still showed the slice under
+`lakehouse.raw`. dbt's artifacts are the third path: written to `dbt/target/`,
+module 03's `just pipeline-status` against the real warehouse filed the sandbox
+build as a seventh invocation in `analytics.pipeline_runs`, which every release
+carries (measured on a copy, 2026-09-17). The sandbox keeps them in
+`data/course/dbt-target/`.
 - **The guard derives what to redirect from what a recipe runs**, not from a
   list per recipe: `test_every_course_recipe_keeps_the_sandbox_to_itself` maps
   each command (`dbt`, the ingest, `pipeline_status`, the transforms,
@@ -100,12 +100,13 @@ without seeding it — the whole claim of the course is that the verdict doesn't
 move.
 
 **A drill's `sed` is a citation, and `sed -i` exits 0 when it matches nothing.**
-This is the sharpest failure mode in the material and nothing used to catch it:
+This is the sharpest failure mode in the material, and only running the `sed`
+catches it:
 `ingest/pipeline.py` was split into `ingest/sources/`, both of module 02's
 drills went on naming the old file, and the paths they cite still exist — so
 `test_every_path_a_module_cites_exists` stayed green while the drills seeded no
 bug at all and sent the learner hunting one. `test_every_drill_sed_still_changes_the_file_it_targets`
-now copies the target and runs the real `sed` against it, because sed scripts are
+copies the target and runs the real `sed` against it, because sed scripts are
 POSIX BRE and reimplementing that dialect to check it is how the checker acquires
 its own bugs. Its partner, `test_every_drill_checks_out_the_file_it_edited`,
 holds the seed and the fix to the same file within one `##` section: restoring a
@@ -213,16 +214,14 @@ grain does not depend on how many input rows feed it. Nine of eleven columns go
 to 100% null at a constant row count, so the obvious sanity check is structurally
 blind to it. `dbt build` reports `PASS=561 ERROR=0` either way.
 
-The second correction is the one worth carrying: the reveal used to say a single
-indicator survived, `NY.GDP.PCAP.CD`, "which won the collision by arriving
-first". Re-running the drill (2026-09-12) lands **two** — 392 rows of
+**Do not explain a mechanism the drill only demonstrates.** A reveal saying a
+single indicator survived, "by arriving first", was wrong. Re-running the drill (2026-09-12) lands **two** — 392 rows of
 `EG.ELC.RNEW.ZS` and 184 of `AG.LND.FRST.ZS`, reproducibly across three
 rebuilds, and neither is the first or the last code in `WB_WDI_INDICATORS`. All
 eleven indicators cover the identical 16 x 36 grid in the fixture, so every key
 collides and dlt's merge picks a winner per key on grounds nothing in this repo
-determines. **Do not explain a mechanism the drill only demonstrates**: a stable
-number invites a causal story, and the story was wrong for as long as nobody
-re-ran it.
+determines. A stable number invites a causal story, and the story stays wrong
+for as long as nobody re-runs it.
 
 **`.arrow()` no longer reproduces the 1,000,000-row truncation as written.** In
 DuckDB 1.5.5 `.arrow(n)` returns a `RecordBatchReader` (the same object as
