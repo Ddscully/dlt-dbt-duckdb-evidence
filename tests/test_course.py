@@ -217,6 +217,21 @@ def test_the_index_lists_every_module_that_exists():
     )
 
 
+DECISIONS_DIR = project_root() / "docs" / "decisions"
+_DECISION_LINK = re.compile(r"\]\(([0-9]{4}-[a-z0-9-]+\.md)\)")
+
+
+def test_the_decision_index_lists_every_record():
+    """A record the index does not list is one nobody checks before undoing it."""
+    on_disk = {p.name for p in DECISIONS_DIR.glob("[0-9][0-9][0-9][0-9]-*.md")}
+    linked = set(_DECISION_LINK.findall((DECISIONS_DIR / "README.md").read_text()))
+    assert on_disk, "docs/decisions/ holds no records — the glob has stopped matching"
+    assert on_disk == linked, (
+        f"records the index doesn't list: {sorted(on_disk - linked)}; "
+        f"index rows with no record: {sorted(linked - on_disk)}"
+    )
+
+
 # A cross-file markdown anchor, e.g. [AGENTS.md](../AGENTS.md#agent-skills). Only
 # links carrying a `#fragment` — a bare link to a file is already covered by the
 # citation test above, and a same-file `#anchor` cannot survive a rename anyway.

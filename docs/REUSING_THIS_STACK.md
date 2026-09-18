@@ -429,14 +429,10 @@ Each step leaves the repo runnable, so a failure has one plausible cause.
 ## 7. What to drop if you want less
 
 Four layers are optional, and independent of each other. **The landing zone
-(`lake/`) is no longer one of them.** It used to be a hive-partitioned Parquet
-archive written *beside* the warehouse, droppable for anyone who did not want
-cross-run diffability, and it is now the DuckLake catalog `raw` actually lives
-in. dbt attaches it and every staging model reads through it, so dropping it is
-a decision about where dlt lands rather than a layer you leave out. The
-diffability argument went with the old format too: DuckLake content-addresses
-its files, so a diff of the *files* no longer means anything and `revisions()`
-compares two snapshots instead.
+(`lake/`) is not one of them**: it is the DuckLake catalog `raw` lives in, dbt
+attaches it and every staging model reads through it, so dropping it is a
+decision about where dlt lands rather than a layer you leave out
+([decision 0001](decisions/0001-ducklake-over-hive-parquet.md)).
 
 - **Snapshots** (`dbt/snapshots/`, `publish/restore_history.py`) — only if your
   publishers restate. If they don't, this layer records nothing.

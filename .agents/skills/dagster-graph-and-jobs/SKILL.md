@@ -98,24 +98,10 @@ for this repo, not a supplement to a vendor one.
 ## Backfill windows, and the one partition
 
 - **`raw/wb_wdi` and `raw/om_weather_daily` take a year range as run config, not
-  partitions, and the Materialize button is why.** They were yearly partitions
-  until 2026-09, on an argument that still holds: the API takes a date range, the
-  disposition is `merge`, and the year is in the primary key, so a year is a real
-  re-runnable unit of work. That makes a partition *possible*; two things made it
-  the wrong tool.
-  - **A job takes its assets' partitions definition, and a partitioned job's
-    Materialize button is a backfill.** The dialog is a partition picker with no
-    "no partition" choice — read out of the 1.13.22 UI bundle: the default
-    selection is empty, and when the selection's root assets carry different
-    definitions it is fixed at "All partitions". Only the Launchpad runs a
-    partitioned job plain. On 2026-09-13 the button launched `full_refresh` over
-    1960–2026 as one run, cancelled after ten minutes, where the same job from
-    the Launchpad finished in 1m38s. Weather's share alone is ~42,800 units
-    against 10,000 a day, which the limiter would have paced over days.
-  - **No routine run ever filled a partition.** The schedule, the live workflows
-    and every recipe but the two backfills run the lookback with no key, so
-    partition status sat empty while `raw.wb_wdi` held the full series. A
-    partition only ever did a backfill's job, which is what run config is for.
+  partitions, and the Materialize button is why**: a job takes its assets'
+  partitions definition, and a partitioned job's Materialize button is a
+  backfill of every year since 1960. The measurements, and what was weighed, are
+  [`docs/decisions/0002-yearly-sources-as-run-config.md`](../../../docs/decisions/0002-yearly-sources-as-run-config.md).
   - **`YearRange` is the config, on the `ingest_by_year` op.** Unset loads the
     lookback; `first_year` (with `last_year`, which defaults to it) loads exactly
     that closed range, bounded where the partitions sat: WDI's 1960 and the
@@ -133,14 +119,9 @@ for this repo, not a supplement to a vendor one.
     2025 watermark and the next incremental run would look back five years over
     sixty years that were never fetched.
   - **One range is one run, whichever source.** WDI asks `&date=lo:hi`, so
-    1990–2025 is 11 requests, one per indicator, not 396 — what
-    `BackfillPolicy.single_run()` bought when this was a partition. Weather
+    1990–2025 is 11 requests, one per indicator, not 396. Weather
     chunks by year inside the resource either way, to pace its budget, and
     refuses a range over a day's allowance before any request (`weather-models`).
-  - **Taking the partitions off also fixed `just materialize-select
-    'raw/wb_wdi*'`**, which the README advertised while the CLI refused it with
-    "Asset has partitions, but no '--partition' option was provided" (measured
-    against `main` at `46d0ebd`). An unpartitioned asset needs no key.
   - **`tests/test_definitions.py` asserts `full_refresh` and `publish_site` have
     no `partitions_def`**, because one partitioned asset joining either
     selection brings the picker back with nothing else red.

@@ -154,14 +154,11 @@ its first source with a *finite budget*.
   Copernicus supersedes it with final ERA5 two to three months later. FX's ten
   days would freeze preliminary numbers *permanently* here, because rows outside
   the window are carried forward rather than refetched.
-- **A backfill over more than a day's allowance is refused before any request,
-  and the Dagster UI is what proved it had to be.** The same shape as the cold
-  start below, on the path that never had a total bound: weather was a yearly
-  *partition* until 2026-09, and a partitioned job's Materialize button is a
-  backfill. On 2026-09-13 it asked for 1960–2026 — ~42,800 units, over four
-  days of allowance, which the limiter honours by sleeping — and the run was
-  cancelled after ten minutes with nothing red. (That step also fetched WDI's
-  whole series, so the ten minutes are not all weather's.)
+- **A backfill over more than a day's allowance is refused before any request.**
+  The same shape as the cold start below: 1960–2026 is ~42,800 units, over four
+  days of allowance, which the limiter would honour by sleeping for days with
+  nothing red (measured when a partition picker launched exactly that:
+  [`docs/decisions/0002-yearly-sources-as-run-config.md`](../../../docs/decisions/0002-yearly-sources-as-run-config.md)).
   `check_weather_range_is_affordable` sums `weather_windows` for every capital
   and raises past 10,000, naming a split that fits: fifteen years a run, sized
   against leap years. The resource calls it first thing, and

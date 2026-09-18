@@ -294,6 +294,7 @@ The README is the tour. The detail lives here:
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
 | [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | what is and is not finished, the SLA, run cost, what breaks at 1000×, and what I'd do differently |
 | [`docs/REUSING_THIS_STACK.md`](./docs/REUSING_THIS_STACK.md) | what carries over to a different dataset, and the decisions that are expensive to revisit |
+| [`docs/decisions/`](./docs/decisions/README.md) | why the repo works the way it does: each choice, and what was rejected |
 | [`docs/RUNNING_AS_A_SERVICE.md`](./docs/RUNNING_AS_A_SERVICE.md) | `just serve` — the graph and the dashboard as one always-on service, why it is a `just` recipe and the container built on it, and the publish-and-swap design still to be built |
 
 And [`docs/course/`](./docs/course/) teaches the same warehouse as material for

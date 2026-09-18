@@ -15,14 +15,9 @@ snapshot lineage and the weather archive, which is days of Open-Meteo budget.
 The one-liners that must not depend on this skill loading are in `AGENTS.md`'s
 *The lakehouse* section — this file is the rest.
 
-**The hive archive is gone with it** — `archive.py` under `lake/`, `data/lake/`,
-`ARCHIVED_TABLES`, the `parquet_archive` asset and `lake_matches_warehouse`.
-It was a second copy of the warehouse written by hand, and DuckLake writes the
-same Parquet with a catalog on top. Two of its lessons died with it and are worth
-knowing were once true: the archive's output was byte-identical run to run (so a
-diff of the *files* was meaningful), and its 275 partitions averaging ~47 kB were
-the repo's worked example of partitions far too small for a real lake. Neither
-survives a format that content-addresses its files and prunes on statistics.
+There is no second Parquet copy beside the catalog, and a diff of its *files*
+means nothing because DuckLake content-addresses them
+([`docs/decisions/0001-ducklake-over-hive-parquet.md`](../../../docs/decisions/0001-ducklake-over-hive-parquet.md)).
 
 ## What the catalog can and cannot tell you
 

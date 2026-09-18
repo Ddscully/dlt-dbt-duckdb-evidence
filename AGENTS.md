@@ -40,7 +40,9 @@ topic** — [`WAREHOUSE.md`](docs/WAREHOUSE.md),
 [`DASHBOARD.md`](docs/DASHBOARD.md) and
 [`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). What it cost to learn sits here and
 in the skills, so a change to how a layer works usually needs an edit in `docs/`
-**and** in one of those.
+**and** in one of those. **Docs describe the present;** why a rejected approach
+stays rejected is [`docs/decisions/`](docs/decisions/README.md) — check it
+before undoing a choice, and move history there rather than into a doc.
 
 - **[`PRACTICES.md`](docs/PRACTICES.md) restates figures from five other files**,
   and `tests/test_documented_counts.py` covers only its test, mart and additivity
@@ -61,8 +63,7 @@ Three lessons that apply well beyond where they were learned:
   read that works mid-build (`querying-the-warehouse`).
 - **`uv sync` strips the venv; `uv run` does not.** A bare `uv sync` installs
   `dev` alone and removes the `orchestration` group from under any running
-  service. This file once said the opposite, citing a dry run of the other
-  command: **a measurement of one command is not evidence about another.**
+  service. **A measurement of one command is not evidence about another.**
 
 ## The layers, and what each directory is for
 
@@ -501,7 +502,7 @@ Every PR here is **squash-merged**, so `main` is linear with one commit per PR.
   base's identity, so `git rebase --onto origin/main <old-base> <branch>`.
   **Retarget first, with `gh pr edit <n> --base main`**: merging the PR below with
   `--delete-branch` deletes the stacked PR's base, which closes it, and GitHub will
-  not reopen it (#61, 2026-09-16). The flag deletes the local branch too, so
+  not reopen it. The flag deletes the local branch too, so
   `<old-base>` has to be a SHA from the stacked branch's log. What
   conflicts is whatever both sides touch — here, the running totals in
   `AGENTS.md` and `docs/DATA_QUALITY.md`. **A derived total written into prose
