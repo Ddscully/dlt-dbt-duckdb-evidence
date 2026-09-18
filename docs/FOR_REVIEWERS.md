@@ -55,7 +55,7 @@ findings page:
 - **Scope 2 disclosure.** `carbon_intensity_elec_g_kwh` *is* the location-based
   grid emission factor, the figure a multi-site company multiplies its metered
   kWh by to produce the electricity line in a CSRD, SECR or CDP filing. Across
-  the largest grids it runs 30 g/kWh (Norway) to 717 g/kWh (South Africa), so the
+  the largest grids in 2024 it runs 30 g/kWh (Norway) to 717 g/kWh (South Africa), so the
   same 100 GWh site reports ~3 kt CO₂e or ~72 kt depending only on where it sits.
 - **Energy cost exposure.** EU household electricity prices at their *published*
   half-year grain, not flattened to an annual average, because the annual
@@ -73,13 +73,16 @@ findings page:
   columns ship. Converted at the average, EU household electricity rose 35%
   between 2021-S1 and 2022-S2 in euros and 13.5% in dollars.
 
-**What it deliberately is not.** There is no entity below the country: no
-customer, supplier, site, product or order anywhere in the warehouse. So this
-demonstrates modelling at national grain and says nothing about entity
-resolution, cohort analysis or transactional dedup. That's the honest boundary,
-and closing it is the top of the roadmap: a company-entity grain (SEC XBRL) and
-a transactional one. The currency and date dimensions any money-denominated fact
-needs are now in place, which is what makes those a join rather than a project.
+**What it deliberately is not.** Below the country there is exactly one grain,
+and it is one retailer's: UCI's Online Retail II gives customers, products and
+invoice lines from December 2009 to December 2011, enough to show cohorts,
+returns inference and RFM segmentation. It says nothing about entity resolution,
+because one source has nothing to resolve against. There is no company or
+supplier anywhere (the Scope 2 example's sites are invented), so the sourcing
+and Scope 2 decisions above stop at the country. That's the honest boundary,
+and §5's last item is what closes it. The currency and date dimensions the
+retail fact needed on the day it landed are what make the next entity a join
+rather than a project.
 
 ## 2. What is the freshness SLA, and what happens when it is missed?
 
@@ -152,7 +155,8 @@ landing zone grows monotonically — about 39 MiB per full ingest at today's
 volumes. That is the honest answer to "what does a run cost" on a stack with no
 invoice: not money, but a directory that only goes one way until somebody
 decides on a retention policy. It is not urgent at 111 MiB and it is the kind of
-thing that is embarrassing at 111 GiB.
+thing that is embarrassing at 111 GiB. By 2026-09-18 it was 330 MiB across 234
+snapshots, and only 55 MiB of the Parquet was still live.
 
 Warehouse contents: 1,647,099 staging rows and 1,959,307 mart rows — of which
 1,067,371 are the retail order lines, 667,809 the three FX tables and 43,138 the
@@ -257,7 +261,7 @@ number before.
    one model where the argument reverses:
    `fct_fx_rates_published` is `incremental`, because a published ECB fixing
    never changes and the table grows ~30 rows a day forever. At 43M rows the
-   question is which of the other 18 table models join it, and the cost of each
+   question is which of the 19 table models join it, and the cost of each
    is the tension
    WDI's lookback window already documents: a restated year needs a full refresh,
    so "incremental" and "picks up restatements" are in conflict and you have to
@@ -269,11 +273,12 @@ number before.
    serving layer.
 
 What *doesn't* break, which is the more interesting half: dlt already merges
-incrementally on a real primary key with year-range backfills behind it; the fixtures
-keep CI offline and constant-time; and the lake's documented small-file
-anti-pattern (275 partitions averaging 47 kB, when ~100 MB is the rule of thumb)
-actually *fixes itself* at 1000×: the partition sizes become right and the file
-count doesn't move.
+incrementally on a real primary key with year-range backfills behind it, and the
+fixtures keep CI offline and constant-time. This list used to add the lake's
+small-file anti-pattern (275 partitions averaging 47 kB) as a problem that
+fixes itself at 1000×. That was the hand-written hive archive, which DuckLake
+replaced. What grows with the landing zone now is §3's retained snapshots, not
+its file count.
 
 ## 5. What would I do differently?
 
@@ -407,8 +412,9 @@ eight tables each feeding a named model. Of the rest:
   824,364 clear customer ids before anyone looked. It was found and closed, but
   it was found late, which is the sin's exact shape.
 - **Technology worship (Idolatry)** — the one to keep watching, and the defence
-  is on the record rather than asserted: `dg` costed and refused, two vendor
-  plugin sets removed after measuring zero invocations across 211 transcripts,
+  is on the record rather than asserted: `dg` costed and refused, four vendor
+  plugins retired on a count of zero invocations (two across 187 session
+  transcripts, two more across 211),
   `pytest-cov` added and dropped the same day for buying nothing, and a semantic
   layer still unbuilt because eleven pages written by one person do not have the
   coordination problem it solves.
