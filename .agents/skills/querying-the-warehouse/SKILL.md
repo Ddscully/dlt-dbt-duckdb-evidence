@@ -60,7 +60,7 @@ is the one read that genuinely does work alongside one.
 
 **The second half of that rule is not "one writer *plus* many readers", and
 DuckDB refuses to mix the two modes even inside a single process.** Measured
-2026-09-10 on the same DuckDB 1.5.5. An instance is cached per file and
+on the same DuckDB 1.5.5. An instance is cached per file and
 `read_only` is part of its *configuration*, so a second `connect()` in one
 process asking for the other mode fails in both orders:
 
@@ -91,7 +91,7 @@ produces it.
 **`read_only_connection()` works because of *which file* is locked, not because
 DuckLake is more permissive.** The catalog is an ordinary DuckDB file under the
 identical rule; a `dbt build` simply is not writing it, because dlt has already
-finished. Measured 2026-09-10 with a read-write stand-in holding
+finished. Measured with a read-write stand-in holding
 `data/lakehouse/catalog.duckdb` and no DML — the file was byte-identical
 afterwards — the call is refused, so it fails during `just ingest` exactly as a
 warehouse read fails during a build. Worth recognising because it does not read
@@ -130,7 +130,7 @@ read_only_connection().sql(\"select table_name, column_name, data_type from info
 ```
 
 **The same query against `data/warehouse.duckdb` returns zero rows and no error**
-(measured 2026-09-15: 0 there, 296 columns in the catalog), which reads as an
+(measured: 0 there, 296 columns in the catalog), which reads as an
 answer. This skill and `adding-a-data-source` both gave that query for weeks after
 the landing zone moved.
 
@@ -207,8 +207,8 @@ print(len(revisions(WEATHER_TABLE, v[-2], v[-1])), 'rows genuinely restated') if
 
 Any JDBC client meets the lock and the catalog attach, without `just sql` to
 handle either. What follows was measured with DBeaver and its DuckDB JDBC driver
-1.5.5.1 on 2026-09-09; the `ATTACH` rules were re-measured on the pinned DuckDB
-1.5.5 through the Python client on 2026-09-15.
+1.5.5.1; the `ATTACH` rules were re-measured on the pinned DuckDB 1.5.5
+through the Python client.
 
 **Why it fails out of the box.** The `staging` views store SQL that names the
 catalog literally (`select * from lakehouse.raw.owid_co2`), and DuckDB resolves

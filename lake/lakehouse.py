@@ -98,7 +98,7 @@ CATALOG_SCHEMES = ("postgres://", "postgresql://")
 # Which schema of that database holds the `ducklake_*` tables. The default is
 # the alias, which is also dlt's, so a catalog dlt creates and one this module
 # attaches agree with neither side configured. A catalog *file* keeps them in
-# `main` and DuckLake accepts that spelled explicitly (measured 2026-09-17), so
+# `main` and DuckLake accepts that spelled explicitly (measured), so
 # one attach serves both.
 METADATA_SCHEMA_ENV_VAR = "LAKEHOUSE_METADATA_SCHEMA"
 DEFAULT_METADATA_SCHEMA = ATTACH_ALIAS
@@ -202,7 +202,7 @@ def catalog(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> str | Path:
     **A password in the URL is refused.** It would reach the process list, dbt's
     rendered profile and dlt's config, none of which redact it — and it is not
     needed, because libpq reads `PGPASSWORD` and DuckDB's postgres extension is
-    libpq (measured 2026-09-17).
+    libpq (measured).
     """
     url = os.environ.get(CATALOG_ENV_VAR)
     if not url:
@@ -297,8 +297,8 @@ def refuse_remote_lakehouse(step: str) -> None:
     file beside its Parquet, which is what `lakehouse.tar.gz` is. Either half
     living elsewhere breaks it, and each breaks it differently.
 
-    With the Parquet in a bucket, the export fails partway (measured
-    2026-09-17): its attaches carry no secret, so DuckDB sends the access key id
+    With the Parquet in a bucket, the export fails partway
+    (measured): its attaches carry no secret, so DuckDB sends the access key id
     to AWS and gets a 403, after leaving a copy of the warehouse — customer ids
     not yet pseudonymised — in the output directory. A restore would unpack local
     Parquet under a catalog that names the bucket.
@@ -427,7 +427,7 @@ def _postgres_holds_catalog() -> bool:
     does not exist — and `ingest.sources.weather` turns a False into a cold start
     of an archive that costs days of Open-Meteo budget. So the three are kept
     apart: each of them fails the ATTACH with an `IO Error` naming the URL
-    (measured 2026-09-17), and only a reachable database with nothing in that
+    (measured), and only a reachable database with nothing in that
     schema returns False.
 
     The database itself is not created here — `deploy/postgres/init.sql` and the

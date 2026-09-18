@@ -127,8 +127,8 @@ carries it forward is `publishing-a-release`.
 - **World Bank region names are padded** — `'Sub-Saharan Africa '` and
   `'Latin America & Caribbean '` come back with a trailing space. `stg_country`
   trims them, so join and group on the trimmed values.
-- **WDI is not only observations, and `stg_wdi` cuts it back to them.** On
-  2026-09-07 the World Bank began serving `SP.POP.TOTL` out to **2050** — 155
+- **WDI is not only observations, and `stg_wdi` cuts it back to them.** The
+  World Bank once served `SP.POP.TOTL` out to **2050** — 155
   countries, 2026-2050, every other indicator null on those rows — and it broke
   the nightly, the dashboard deploy and (had it run) the monthly release, because
   `stg_wdi.year` carried a literal `max_value: 2030`. Three things worth keeping:
@@ -148,8 +148,8 @@ carries it forward is `publishing-a-release`.
     span from `raw` and `pipeline_tables` takes `stg_wdi`'s from `staging`, so a
     publisher who does it again shows up on the Pipeline page as the two
     disagreeing — which is why no `severity: warn` guard was added for it.
-  The API served the projections for at most ~28 hours and was back to
-  1960-2025 by 2026-09-08 14:00 UTC; the recorded fixtures never held them, so
+  The API served the projections for at most ~28 hours before going back
+  to 1960-2025; the recorded fixtures never held them, so
   nothing needed re-recording.
 
 - **"Latest year" is per column, not per table.** `max(year)` on the mart is
@@ -193,8 +193,8 @@ carries it forward is `publishing-a-release`.
   series. **The same failure is now measurable rather than narrated** — see the
   Currency section: the EU household electricity price rose 35% or 13.5% between
   2021-S1 and 2022-S2 depending only on whether you counted in euros or dollars.
-  - **The yen figure was wrong here and in `transform/co2_intensity.py` until
-    2026-08-24, and it was wrong in the way a plausible number is.** It said the
+  - **The yen figure was wrong here and in `transform/co2_intensity.py` once,
+    and it was wrong in the way a plausible number is.** It said the
     yen "fell 28% against the dollar"; 28% is Japan's *current-dollar GDP* fall
     (5.812 → 4.190 tn), i.e. the effect written down as the cause. The yen went
     **87.7 → 151.4 JPY/USD** on ECB annual averages — it lost **42%** of its

@@ -27,7 +27,7 @@ on:
 
 permissions:
   contents: write # creates the tag, the release and its assets
-  # Required, reason unknown: from 2026-07-30 `gh release create` returned 403
+  # Required, reason unknown: `gh release create` returned 403
   # "Resource not accessible by integration" with `contents: write` alone, and
   # succeeded with these two added (the release is not immutable). The two were
   # never isolated, so both stay.

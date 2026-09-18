@@ -120,7 +120,7 @@ then checks, which is why it's a `just` recipe rather than a workflow step.
 
 ## 3. What does a run cost, and how long does it take?
 
-Measured on this machine against the live APIs, per stage, on 2026-09-09:
+Measured on this machine against the live APIs, per stage:
 
 | Stage | Time | Notes |
 |-------|------|-------|
@@ -147,7 +147,7 @@ landing zone grows monotonically — about 39 MiB per full ingest at today's
 volumes. That is the honest answer to "what does a run cost" on a stack with no
 invoice: not money, but a directory that only goes one way until somebody
 decides on a retention policy. It is not urgent at 111 MiB and it is the kind of
-thing that is embarrassing at 111 GiB. By 2026-09-18 it was 330 MiB across 234
+thing that is embarrassing at 111 GiB. It has since grown to 330 MiB across 234
 snapshots, and only 55 MiB of the Parquet was still live.
 
 Warehouse contents: 1,647,099 staging rows and 1,959,307 mart rows — of which
@@ -156,7 +156,7 @@ wide country-year fact — plus 9,821 snapshot rows across the two `history`
 tables.
 
 CI, from the repo's own run history, as the median of the successful runs in the
-last 40, re-measured 2026-09-09:
+last 40:
 
 | Workflow | Median | Range | n | What it does |
 |----------|--------|-------|---|--------------|
@@ -166,7 +166,7 @@ last 40, re-measured 2026-09-09:
 | `release-data` | **171 s** | 109–247 | 6 | live build + export + a dated GitHub release |
 
 **`ci` has now gone stale twice in this table, which is the point of keeping
-it.** It read 92 s until 2026-09-01 — measured before the retail source, the
+it.** It first read 92 s — measured before the retail source, the
 weather source and the DuckLake move, so 66% low. Corrected to 153 s, it is
 191 s eight days later: in that window the offline graph gained a mart, a seed
 and the tests that came with them. The two live workflows barely moved, because their cost is the
@@ -211,7 +211,7 @@ number before.
    lazy is the shape of the work: a dense rank over each (income group, year),
    quintile break points over whole columns, a final sort, and a frame
    collected in full before `db.write_frames` hands it back. The next step is
-   `collect(engine="streaming")`. On 2026-09-18 it first broke `retail_rfm`'s
+   `collect(engine="streaming")`. Its first run broke `retail_rfm`'s
    sort ties in a different order. Both sorts now end on a unique key, and
    after that change it matched the default engine row for row, five runs
    each. Past that, the window belongs in dbt SQL. The layer exists to demonstrate heavy Python transforms, and these
@@ -269,7 +269,7 @@ number before.
 What *doesn't* break, which is the more interesting half: dlt already merges
 incrementally on a real primary key with year-range backfills behind it, and the
 fixtures keep CI offline and constant-time. What grows with the landing zone is
-the Parquet that §3's retained snapshots keep alive: on 2026-09-18, 318 MiB of data files, of which
+the Parquet that §3's retained snapshots keep alive: 318 MiB of data files, of which
 55 MiB were live.
 
 ## 5. What would I do differently?

@@ -178,7 +178,7 @@ def test_the_routine_jobs_are_not_partitioned():
     backfill, and its dialog has no "no partition" choice: only the Launchpad
     runs the job plain.
 
-    Measured on 2026-09-13, while WDI and weather were yearly partitions: the
+    Measured while WDI and weather were yearly partitions: the
     button launched `full_refresh` over 1960-2026 as one run, cancelled after ten
     minutes with days of Open-Meteo's budget still to pace; the same job from
     the Launchpad finished in 1m38s. A job takes its partitions

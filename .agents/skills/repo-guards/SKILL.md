@@ -147,7 +147,7 @@ section here. The mutation method these guards were written with is in the
     real test and the scan returns empty rather than raising, to make its
     message the one a reader sees.
 - **The eight `@dg.asset_check` bodies are unit tested in
-  `tests/test_asset_checks.py`, and were not before 2026-08-25.**
+  `tests/test_asset_checks.py`.**
   `tests/test_definitions.py` proved each check was *registered* — that it would
   run at all. Nothing proved any of them would *notice*: the bodies were only
   ever executed by a full materialize, so `just test` could not tell a working
@@ -451,8 +451,8 @@ section here. The mutation method these guards were written with is in the
     relative (`building-evidence-reports`).
   - **Prove the isolation with the real files, not the exit code.** Record
     `find … -printf '%T@ %s %p'` over the real warehouse, catalog, dlt state,
-    `dbt/target/` and `.dagster/storage` before, and diff after. Measured
-    2026-09-17: `just ingest`, `just test-pipeline` and `just materialize`
+    `dbt/target/` and `.dagster/storage` before, and diff after. Measured:
+    `just ingest`, `just test-pipeline` and `just materialize`
     against a SeaweedFS bucket left all of them unchanged.
 - **`WAREHOUSE_PATH` must be absolute**: dbt resolves paths from `dbt/`, the
   Python layers from the repo root.
@@ -493,6 +493,6 @@ containers outside compose, so four files have to agree by hand.
 manifest-gated check scanned for `uv run pytest <args>` across the whole
 workflow, so a comment in the `container` job explaining *why that job runs no
 such command* was parsed as one, and its prose words became expected test
-filenames (2026-09-17). Fixed by dropping comment lines before the scan. The
+filenames. Fixed by dropping comment lines before the scan. The
 general form: a guard a sentence about it can break is a guard that discourages
 writing the sentence — the same defect PR #68 fixed in the course guard.

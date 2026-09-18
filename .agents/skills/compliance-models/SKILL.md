@@ -163,7 +163,7 @@ time series.
 
 - **The seeds are Annex I as corrected by IR 2026/1740** (adopted 20 July 2026,
   in force 3 August, applying retroactively from 1 January 2026), which replaced
-  Annexes I and IV in full. Migrated 2026-08-18. The amendment path paid for
+  Annexes I and IV in full. The amendment path paid for
   itself — re-running `build_cbam_seeds.py` was most of the work — but four
   things about it are worth keeping, because none are visible in the values:
   - **The Commission republishes at the same URL.** There is no versioned link;
@@ -285,8 +285,8 @@ mutation in this table:
   `is_fallback_table` is the column that identifies it. Reads oddly, so it is
   pinned rather than left to be rediscovered.
 - **A fallen-back row is indistinguishable from a country's own value unless the
-  page says so, and 2026-09-05 is when it started saying so.**
-  `reports/pages/cbam.md` selected `is_country_specific` and rendered every other
+  page says so, and `reports/pages/cbam.md` now does.**
+  It once selected `is_country_specific` and rendered every other
   column but that one, so 221 of the 10,785 rows the dropdown can reach — over 40
   of its 252 goods — showed a tonnage, a cost and (on 36 of them) a production
   route that belong to the catch-all. Grey hydraulic cements is the clearest

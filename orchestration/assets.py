@@ -187,8 +187,8 @@ class YearRange(dg.Config):
     Run config and not a partitions definition, deliberately. Every routine run —
     the schedule, the live workflows, `just materialize` — loads the lookback, so
     a partition was only ever filled by a backfill. And a job holding a
-    partitioned asset gets a partitioned Materialize button in the Dagster UI: on
-    2026-09-13 it launched 1960-2026 as one run, cancelled after ten minutes
+    partitioned asset gets a partitioned Materialize button in the Dagster UI, which
+    once launched 1960-2026 as one run, cancelled after ten minutes
     with days of Open-Meteo's budget still to pace, where the same job with no
     partition finished in 1m38s. Unset, the button loads the lookback; a
     backfill is `just backfill-wdi`, `just backfill-weather`, or this config in

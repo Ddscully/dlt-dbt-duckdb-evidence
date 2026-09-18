@@ -1019,7 +1019,7 @@ def test_a_cold_start_fits_inside_the_hourly_budget():
 def test_a_backfill_over_a_days_allowance_is_refused_before_any_request(monkeypatch):
     """The limiter honours the daily window by sleeping, so an unaffordable range
     is a hang measured in days rather than a failure. The Dagster UI launched
-    exactly that on 2026-09-13 — 1960-2026, ~42,800 units — while WDI and
+    exactly that — 1960-2026, ~42,800 units — while WDI and
     weather were yearly partitions, and it was cancelled by hand, not failed.
     Refusing up front is the only loud signal left.
     """

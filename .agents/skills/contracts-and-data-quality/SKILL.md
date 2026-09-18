@@ -50,7 +50,7 @@ account of the same ground is `docs/DATA_QUALITY.md`.
   has the fixture that brings that to 1.1%.
 - **Unit tests stay inside `dbt build`.** dbt Labs' advice to exclude them is
   about warehouse spend; here they cost seconds (~5s of dbt's own time, ~11s wall
-  for `just dbt-unit-test`, 2026-09-09), and a broken fiscal calendar should stop
+  for `just dbt-unit-test`), and a broken fiscal calendar should stop
   the release.
 - **Source freshness measures our load, not the publisher's.** It is
   tautologically green in CI, so it is a recipe, not a workflow step.

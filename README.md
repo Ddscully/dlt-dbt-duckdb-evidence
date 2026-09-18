@@ -129,10 +129,10 @@ just report     # build the Evidence dashboard (needs Node ≥ 18)
 
 No credentials at any point; every source is a public endpoint. uv reads
 `.python-version` and fetches CPython 3.13 itself if you haven't got it. The
-whole asset graph *including* the site took **3 minutes** here from a cold cache
-(2026-08-25), and `just run` alone ≈ 65 s (2026-09-09, per stage in
+whole asset graph *including* the site took **3 minutes** here from a cold cache,
+and `just run` alone ≈ 65 s (per stage in
 [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) §3). Budget **~2.6 GB** on disk
-once built, venv and `node_modules` included (2026-09-15), all of it gitignored
+once built, venv and `node_modules` included, all of it gitignored
 and regenerable (`just clean`, or `just clean deep` to drop `node_modules` too).
 
 Offline, or would rather not hit the public endpoints? `just test-pipeline` runs
@@ -236,8 +236,8 @@ just coverage       # the same, with line + branch coverage; gates nothing, ~58 
 just test-pipeline  # the whole pipeline against recorded fixtures, ~46 s
 ```
 
-(Timed here on 2026-09-15. Nothing checks a timing, so the date is how to tell
-whether it still holds.)
+(Nothing checks a timing; `git log -S '<figure>'` finds the commit that
+measured it.)
 
 CI on a pull request runs both, plus the Dagster asset graph and the asset
 checks, entirely offline — so a red build means *this repo* broke, not that a

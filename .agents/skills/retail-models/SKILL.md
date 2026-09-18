@@ -28,8 +28,8 @@ one; the page is `retail.md`.
     negative *prices* in the file.
   - **A returned quantity is positive everywhere, and for a while it wasn't.**
     `fct_retail_returns` negates the source's sign on purpose (4 reads better
-    than −4); `dim_retail_product.units_returned` kept the raw negative until
-    2026-08-18, so the two models disagreed about which way a return points.
+    than −4); `dim_retail_product.units_returned` once kept the raw
+    negative, so the two models disagreed about which way a return points.
     Nothing failed — the column had a `data_type` and no description — but the
     one place a reader would put them together, `units_returned / units_sold`,
     came out negative, and a bar of returns per product drew below the axis. It
@@ -57,8 +57,8 @@ one; the page is `retail.md`.
   the data being absent. Reported per row instead of tuned into one headline; the
   median return comes back in 10 days, which is the evidence the rule isn't
   latching onto arbitrary sales.
-- **`fct_retail_returns` was not reproducible between builds until
-  2026-08-24.** An `asof join` picks arbitrarily among rows tied on its
+- **`fct_retail_returns` was once not reproducible between
+  builds.** An `asof join` picks arbitrarily among rows tied on its
   inequality key, and a customer buying the same product twice in one instant is
   common enough here that `matched` and `sum(original_quantity)` both moved
   between builds against byte-identical sources. `int_retail_return_matches`

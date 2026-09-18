@@ -51,7 +51,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
     `tests/test_dagster_instance.py` holds the copies in step — a laptop
     measurement is only evidence about a deployment while it does.
   - **The limit survives the container boundary, measured.** Two runs launched
-    ten seconds apart against the compose stack (2026-09-17) gave one run
+    ten seconds apart against the compose stack gave one run
     container and one `QUEUED` row; the second started only when the first
     finished, and `auto_remove` left no exited containers. So `DockerRunLauncher`
     changes where a run executes and not how many execute.
@@ -80,13 +80,13 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   exposes via `uv run` is not on a run container's `PATH`. The Dockerfile puts
   `/app/.venv/bin` there for exactly this; without it a run fails with
   `exec: "dagster": executable file not found in $PATH` and `auto_remove` deletes
-  the evidence (measured 2026-09-17).
+  the evidence (measured).
 - **Against a running service, never pass `-m` to the CLI.** A schedule's
   identity includes the code location *name*, which `-m orchestration.definitions`
   sets to the module while `[tool.dagster]` sets it to `modern_data_stack`, so
   `dagster schedule start -m …` prints success and flips a row the daemon does
   not read, and `dagster job launch -m …` returns 0 and then fails the run with
-  `DagsterCodeLocationNotFoundError`. Both measured 2026-09-17
+  `DagsterCodeLocationNotFoundError`. Both measured
   ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §8).
 
 **This file is the Dagster knowledge for this repo**, not a supplement to a
@@ -140,7 +140,7 @@ CLI this project does not install
   (converting it), the cached download makes every partition one fetch, and
   `invoice_month` comes from the partition key's timestamp, so re-running a
   month replaces exactly that month. Materializing all 25 months is one run over
-  the one workbook — 17s on 2026-09-09 — so its button's backfill costs what a
+  the one workbook — 17s — so its button's backfill costs what a
   routine load does. It still has to stay out of `full_refresh`, or that job
   becomes month-partitioned (below).
   - **The asset has two paths and the unpartitioned one has to keep working.**
@@ -224,7 +224,7 @@ CLI this project does not install
   decision are separable.** `create-dagster` scaffolds a `defs/` tree that
   autoloads, a `[tool.dg.project]` block and YAML components; `dagster-expert`,
   the vendor skill, was written around the `dg` CLI and assumed all of it.
-  Costed 2026-08-25 rather than assumed:
+  Costed rather than assumed:
   - **The autoloading half is already here and free.** `dagster.components` and
     `dagster.load_from_defs_folder` ship in `dagster` core — no extra package.
     What it would buy is deleting `tests/test_definitions.py`, because an

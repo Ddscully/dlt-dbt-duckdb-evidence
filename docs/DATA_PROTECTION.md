@@ -4,7 +4,7 @@ One column in this warehouse identifies a person: `customer_id`, the pseudonym a
 UK gift wholesaler's till assigned to a shopper between December 2009 and
 December 2011. No name, no address, nothing to contact anyone with. It's still
 personal data (pseudonymised data explicitly is, under GDPR Recital 26), and
-until 2026-08-19 nothing in this project said so, nothing masked it, and every
+at first nothing in this project said so, nothing masked it, and every
 published release shipped it in the clear from five different schemas.
 
 This page is what was done about that, written to be read in the order the work
