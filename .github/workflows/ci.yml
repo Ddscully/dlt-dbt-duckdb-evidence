@@ -20,9 +20,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # `deploy` too, for `tests/test_docker_launcher.py`: it imports
+      # `dagster-docker` and skips without it, which on a laptop is the right
+      # answer and here would be a test that never runs.
       - uses: ./.github/actions/setup
         with:
-          groups: --group dev --group orchestration
+          groups: --group dev --group orchestration --group deploy
 
       # Mocked-payload unit tests over the parsing logic: retry/raise, WDI
       # pagination, the Eurostat stride walk, the Polars transform.

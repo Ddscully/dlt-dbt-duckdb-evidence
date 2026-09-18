@@ -49,11 +49,13 @@ compute_logs:
     base_dir:
       env: DAGSTER_STORAGE_DIR
 
-# One short-lived container per run, from the same image this service runs.
-#
-# `image` is the fallback: a run's image comes from its code location's
-# DAGSTER_CURRENT_IMAGE, and this is what is used when that is unset. Both are
-# `mds:local` under compose, so the two paths agree.
+# One short-lived container per run, from the same image this service runs:
+# the *image ID* of the container the launcher is in, looked up at launch time
+# (`modern_data_stack.docker_launcher`). Stock `DockerRunLauncher` takes a name,
+# `mds:local`, which `just compose-build` moves at once while the service keeps
+# its old image until `just compose-up` recreates it; in between, runs executed
+# code the service was not running. So there is no `image` here, and no
+# DAGSTER_CURRENT_IMAGE in compose.yaml: the subclass reads neither.
 #
 # `env_vars` is a *copy list*, not a definition: a bare name means "take this
 # from the launcher's own environment", and `parse_env_var` raises when it is
@@ -61,11 +63,9 @@ compute_logs:
 # `tests/test_dagster_instance.py` therefore holds every name here against
 # `compose.yaml`'s `dagster` environment and the Dockerfile's `ENV`.
 run_launcher:
-  module: dagster_docker
-  class: DockerRunLauncher
+  module: modern_data_stack.docker_launcher
+  class: ServiceImageDockerRunLauncher
   config:
-    image:
-      env: DAGSTER_CURRENT_IMAGE
     network: mds
     env_vars:
       - PROJECT_ROOT
