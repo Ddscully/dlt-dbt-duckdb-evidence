@@ -1,0 +1,70 @@
+# The *deployed* instance's config, selected by DAGSTER_HOME=<repo>/deploy.
+#
+# `.dagster/dagster.yaml` is the laptop's: run, event and schedule storage are
+# SQLite files beside it, which is why this demo needs no services. This one
+# puts those three in Postgres, so the history survives a container that is
+# replaced rather than restarted, and so a run launched in one container is
+# visible to the daemon in another.
+#
+# Dagster has no include directive, so the three blocks below the storage are
+# *copies* of the laptop file's, and `tests/test_dagster_instance.py` holds the
+# two in agreement — a divergence here would otherwise only show up as a
+# deployment behaving unlike every measurement taken on a laptop.
+#
+# Every storage value is `{env: ...}` and none is a literal: this file is read
+# only, baked into the image, and the same for every deployment. What differs
+# is the environment, which compose.yaml supplies. See docs/RUNNING_AS_A_SERVICE.md.
+
+storage:
+  postgres:
+    postgres_db:
+      username:
+        env: DAGSTER_POSTGRES_USER
+      # libpq's variable, and the only place the password lives: the same one
+      # the DuckLake catalog attaches with, because one role owns both
+      # databases. It never appears in a URL or a process list.
+      password:
+        env: PGPASSWORD
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+      port: 5432
+
+# Compute logs and the artifacts a run writes stay on a filesystem — Dagster
+# stores neither in Postgres. Under compose this is a named volume mounted at
+# the same path in the long-running container and in every run container, so a
+# step's stdout is readable in the UI after its container is gone.
+local_artifact_storage:
+  module: dagster.core.storage.root
+  class: LocalArtifactStorage
+  config:
+    base_dir:
+      env: DAGSTER_STORAGE_DIR
+
+compute_logs:
+  module: dagster.core.storage.local_compute_log_manager
+  class: LocalComputeLogManager
+  config:
+    base_dir:
+      env: DAGSTER_STORAGE_DIR
+
+telemetry:
+  enabled: false
+
+# One run at a time, because DuckDB takes one writer at a time. The executor
+# serialises steps *within* a run; this serialises runs, which otherwise start
+# ten at once (Dagster's default) and contend for the lock. It governs only
+# runs submitted to it — UI launches and backfills, the schedule — and not the
+# in-process `dagster job execute` or `dagster asset materialize`, one of which
+# every recipe that materialises runs, the `backfill-*` recipes included.
+concurrency:
+  runs:
+    max_concurrent_runs: 1
+
+# Keep the local run history from growing without bound.
+retention:
+  schedule:
+    purge_after_days: 30
+  sensor:
+    purge_after_days: 7

@@ -104,7 +104,11 @@ that tick's `full_refresh` as soon as it starts again — the latest missed tick
 only.
 
 Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile).
-Only `dagster.yaml` is checked in. [AGENTS.md](../AGENTS.md#orchestration-orchestration)
+Only `dagster.yaml` is checked in. A deployment can point `DAGSTER_HOME` at
+`deploy/` instead and keep run, event and schedule storage in Postgres, which is
+the same instance in every other respect —
+[`docs/RUNNING_AS_A_SERVICE.md`](RUNNING_AS_A_SERVICE.md) §3 and §10, held to the
+laptop file by `tests/test_dagster_instance.py`. [AGENTS.md](../AGENTS.md#orchestration-orchestration)
 covers the traps: asset-key matching between dlt and dbt, `load_retail` running
 first, and the fact that an asset missing from
 `definitions.py` is silently absent rather than an error.

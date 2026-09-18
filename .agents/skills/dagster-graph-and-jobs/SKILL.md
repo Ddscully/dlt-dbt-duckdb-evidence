@@ -43,6 +43,12 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   - **A `DAGSTER_HOME` without it falls back to ten**, with one startup notice. A
     symlink to the checked-in file works
     ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §5, §8).
+  - **There are two instance configs, and they must agree.** `deploy/dagster.yaml`
+    is the deployed one (`DAGSTER_HOME=<repo>/deploy`), differing from
+    `.dagster/dagster.yaml` only in putting run, event and schedule storage in
+    Postgres. Dagster has no include, so the limit above is written twice, and
+    `tests/test_dagster_instance.py` holds the copies in step — a laptop
+    measurement is only evidence about a deployment while it does.
 - **The Evidence site is an asset, excluded from `full_refresh` because it needs
   Node.** The `evidence_site` asset shells out to npm; `ci.yml`, `nightly.yml` and
   `release-data.yml` run `full_refresh` with no Node, and `pages.yml` runs
@@ -61,7 +67,15 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   does not catch up — which is why a click on Materialize just after
   `just serve` starts is the case the one-run queue exists for.
 - Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile);
-  only `dagster.yaml` is checked in.
+  only `dagster.yaml` is checked in. Under `DAGSTER_HOME=<repo>/deploy` it lives
+  in Postgres instead, and `.dagster/` is never written at all.
+- **Against a running service, never pass `-m` to the CLI.** A schedule's
+  identity includes the code location *name*, which `-m orchestration.definitions`
+  sets to the module while `[tool.dagster]` sets it to `modern_data_stack`, so
+  `dagster schedule start -m …` prints success and flips a row the daemon does
+  not read, and `dagster job launch -m …` returns 0 and then fails the run with
+  `DagsterCodeLocationNotFoundError`. Both measured 2026-09-17
+  ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §8).
 
 The vendor `dagster-expert` skill overlapped this barely at all and **is no
 longer enabled** (2026-09-02, zero invocations across 211 transcripts covering 9

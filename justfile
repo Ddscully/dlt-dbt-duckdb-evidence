@@ -60,7 +60,16 @@ setup:
 extensions:
     uv run python -c "import duckdb; con = duckdb.connect(); [con.execute(f'install {e}') for e in ('ducklake', 'httpfs', 'postgres')]"
 
-# Postgres (the DuckLake catalog, and later Dagster's storage) and SeaweedFS
+# `uv sync` computes the whole venv from the groups it is given, so this names
+# all three: `--group deploy` alone would strip dev and orchestration out from
+# under whatever is running. Only needed to point DAGSTER_HOME at `deploy/`,
+# which is what the container does; `just setup` leaves the group out so a
+# laptop installs no Postgres driver for storage it does not use.
+# Add the `deploy` group (Postgres-backed Dagster storage) to the venv
+deploy-deps:
+    uv sync --group dev --group orchestration --group deploy
+
+# Postgres (the DuckLake catalog, and Dagster's storage under `deploy/`) and SeaweedFS
 # (S3-compatible storage for the Parquet). Nothing here is needed to use this
 # repo: with LAKEHOUSE_CATALOG and LAKEHOUSE_DATA_PATH unset the landing zone is
 # entirely on disk. See .env.example and compose.yaml.

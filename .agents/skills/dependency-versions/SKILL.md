@@ -170,6 +170,17 @@ single PR.
   - The lesson generalises past this package: a dependency that arrives as some
     dev tool's grand-transitive is indistinguishable from a declared one until
     the dev tool leaves.
+- **There are three dependency groups, and `deploy` is the one no recipe but its
+  own installs.** `dev` and `orchestration` are what `just setup` syncs;
+  `deploy` (`dagster-postgres`, and with it `psycopg2-binary`) exists only for
+  `DAGSTER_HOME=<repo>/deploy`, where Dagster's own storage is Postgres. Keeping
+  it out of `orchestration` is what stops a laptop clone installing a database
+  driver for storage it does not use — `just deploy-deps` is the opt-in, and it
+  names all three groups because `uv sync` computes the whole venv from the ones
+  it is given. The mirror of that: against a venv it built, a plain
+  `just setup` uninstalls both packages again (measured `--dry-run`,
+  2026-09-17), which `docs/RUNNING_AS_A_SERVICE.md` §8 records as a way to break
+  a running service.
 - **Dropping harlequin is what unblocked dbt 1.11, and the mechanism is an exact
   pin.** harlequin pins `click==8.1.8`; dbt-core 1.11 requires `click>=8.3.0`,
   so the SQL IDE in the dev group was holding the transformation engine a minor
