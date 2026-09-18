@@ -206,11 +206,18 @@ number before.
 
 43k mart rows → 43M. In the order it would actually fail:
 
-1. **The Polars step, first.** `transform/co2_intensity.py` pulls the mart into
-   memory as a DataFrame and writes it back. It's a ranked window function, so
-   the fix is either the lazy/streaming API or pushing it into dbt SQL where it
-   arguably belonged. The layer exists to demonstrate heavy Python transforms,
-   and this particular transform isn't heavy enough to need one.
+1. **The Polars step, first — narrowed, not removed.** Both transforms build a
+   lazy plan over DuckDB's scan (`.pl(lazy=True)`), so `retail_rfm` fetches
+   only the 12 of `dim_retail_customer`'s 22 columns it keeps, and
+   `co2_intensity`'s null-GDP filter runs inside DuckDB. What cannot be made
+   lazy is the shape of the work: a dense rank over each (income group, year),
+   quintile break points over whole columns, a final sort, and a frame
+   collected in full before `db.write_frames` hands it back. The next step is
+   `collect(engine="streaming")`, which on 2026-09-18 gave the same rows for
+   both transforms but broke `retail_rfm`'s sort ties in a different order, so
+   it wants a deterministic tiebreak first; past that, the window belongs in
+   dbt SQL. The layer exists to demonstrate heavy Python transforms, and these
+   are not heavy enough to need one.
 2. **The single-writer lock — and it is second here only because this list is
    ordered by *volume*.** It is not a scale limit at all: one writer xor many
    readers binds at 43k rows exactly as hard as at 43M, which is why `just
