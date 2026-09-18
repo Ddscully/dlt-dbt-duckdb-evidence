@@ -89,11 +89,10 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   `DagsterCodeLocationNotFoundError`. Both measured 2026-09-17
   ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §8).
 
-The vendor `dagster-expert` skill overlapped this barely at all and **is no
-longer enabled** (2026-09-02, zero invocations across 211 transcripts covering 9
-commits to `orchestration/`). The last bullet below is why: it is written around
-a `dg` CLI this project does not install. So this file is the Dagster knowledge
-for this repo, not a supplement to a vendor one.
+**This file is the Dagster knowledge for this repo**, not a supplement to a
+vendor skill: `dagster-expert` is not enabled, because it is written around a `dg`
+CLI this project does not install
+([`docs/decisions/0004-agent-plugins-kept-by-measured-use.md`](../../../docs/decisions/0004-agent-plugins-kept-by-measured-use.md)).
 
 ## Backfill windows, and the one partition
 
@@ -224,9 +223,8 @@ for this repo, not a supplement to a vendor one.
 - **This is deliberately not a `dg`-shaped project, and the two halves of that
   decision are separable.** `create-dagster` scaffolds a `defs/` tree that
   autoloads, a `[tool.dg.project]` block and YAML components; `dagster-expert`,
-  the vendor skill, was written around the `dg` CLI and assumed all of it —
-  which is what eventually retired it from `.claude/settings.json`, a plugin
-  arguing for a different project. Costed 2026-08-25 rather than assumed:
+  the vendor skill, was written around the `dg` CLI and assumed all of it.
+  Costed 2026-08-25 rather than assumed:
   - **The autoloading half is already here and free.** `dagster.components` and
     `dagster.load_from_defs_folder` ship in `dagster` core — no extra package.
     What it would buy is deleting `tests/test_definitions.py`, because an

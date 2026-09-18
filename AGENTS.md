@@ -207,8 +207,8 @@ globs, holding dbt Labs' skills to this repo's paths.
 | `repo-guards` | hand-maintained lists, their guards, the fixtures, the suite's traps |
 | `authoring-course-modules` | writing `docs/course/` |
 
-Fourteen of the eighteen were split out of this file, because it loads in full
-before every session. **A new section here is a question about where it belongs,
+Most were split out of this file, because it loads in full before every
+session. **A new section here is a question about where it belongs,
 not only about what it says**: it stays only if every session needs it — not
 knowing it does irreversible damage, gives a silent wrong answer outside any one
 domain, or is needed to find everything else. The file accretes in bursts behind
@@ -513,8 +513,7 @@ Every PR here is **squash-merged**, so `main` is linear with one commit per PR.
   both show a diff. **`git merge-tree --write-tree main <branch>` decides it only
   until `main` touches the branch's files again**: a tree equal to
   `git rev-parse main^{tree}` means the branch adds nothing, but a conflict proves
-  nothing — on 2026-09-15 three merged branches, three to five PRs behind, all
-  conflicted, one on `CLAUDE.md` alone. **Past that, ask GitHub what it merged**:
+  nothing: a merged branch a few PRs behind routinely conflicts. **Past that, ask GitHub what it merged**:
   `gh pr list --state merged --head <branch> --json number,headRefOid` gives the
   PR and its final commit, and `git merge-base --is-ancestor <branch> <headRefOid>`
   exiting 0 means every commit on the branch went into it. Look before `-D`.

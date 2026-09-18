@@ -10,9 +10,8 @@ imports. Miss one and the pipeline still runs — it just quietly splits into tw
 disconnected halves. Work the checklist top to bottom.
 
 The `dbt` vendor plugin covers the *how* of dbt, and is the only vendor skill
-still enabled — `dagster-expert`, `polars` and `duckdb-skills` were all retired
-on measured zero use, so the tool-level knowledge for those layers is the
-project skills and `AGENTS.md`. This skill covers the *seams between the
+enabled, so the tool-level knowledge for the other layers is the project skills
+and `AGENTS.md`. This skill covers the *seams between the
 layers*, which are specific to this repo. Naming rules live in [`docs/STYLE_GUIDE.md`](../../../docs/STYLE_GUIDE.md).
 
 ## 0. First decide whether you need a new source at all

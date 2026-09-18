@@ -49,3 +49,4 @@ Status: accepted YYYY-MM-DD (#PR) | superseded by NNNN
 | [0001](0001-ducklake-over-hive-parquet.md) | The landing zone is a DuckLake catalog, not a hive-partitioned Parquet archive | accepted 2026-08-28 |
 | [0002](0002-yearly-sources-as-run-config.md) | WDI and weather take their backfill years as run config, not partitions | accepted 2026-09-17 |
 | [0003](0003-coverage-py-over-pytest-cov.md) | Coverage runs as `coverage run -m pytest`, not through pytest-cov | accepted 2026-08-26 |
+| [0004](0004-agent-plugins-kept-by-measured-use.md) | A vendor agent plugin stays enabled only while it is measurably used | accepted 2026-09-02 |

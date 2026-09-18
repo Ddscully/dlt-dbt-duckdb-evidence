@@ -33,29 +33,12 @@ Not enabled, but worth knowing about: `dbt-migration@dbt-agent-marketplace`
 its own scaffolding, so prefer the `adding-a-data-source` skill for the pipeline
 that already exists here.
 
-**A plugin keeps its place by being used, and use is measured** — by counting
-`Skill` invocations across the session transcripts, and checking in `git log`
-that the plugin's layer was actually being worked on in the window. Four were
-retired on a count of zero: `duckdb-skills` and `astral` (187 transcripts, to
-2026-08-27), `dagster-expert` and `polars` (211 transcripts, to 2026-09-02). A
-zero count is only evidence for a skill-only plugin; an LSP's use never appears as
-a `Skill` call.
+**A plugin keeps its place by being used, and use is measured** by counting
+`Skill` invocations across the session transcripts. `duckdb-skills`, `astral`,
+`dagster-expert` and `polars` were retired on a count of zero, and
+`tests/test_plugin_settings.py` keeps three of them off; the measurements and
+why each went are [`docs/decisions/0004-agent-plugins-kept-by-measured-use.md`](docs/decisions/0004-agent-plugins-kept-by-measured-use.md).
 
-- **`dagster-expert` sells the `dg` CLI**, which this project deliberately does
-  not install, and `dagster-graph-and-jobs` covers Dagster *in this repo*.
-  `duckdb-skills` was the same shape — ad-hoc file querying, S3, spatial joins —
-  against `querying-the-warehouse`. **`polars` is the weak call**: nothing
-  replaces it, so it is the first to reconsider if `transform/` grows.
-- **`astral` could not be reached at all.** It and `ty-lsp` both declare a ty
-  language server for `.py`/`.pyi`, the first loaded wins, and `ty-lsp` has to:
-  Astral's runs `uvx ty@latest`, the newest ty on every launch, against a
-  `just typecheck` that runs `uv.lock`'s — the editor would show findings the
-  recipe cannot reproduce. With its server shadowed and its skills unused,
-  `astral` was two `[WARN]` lines in the debug log.
-  `tests/test_plugin_settings.py` asserts it stays off, with the ordering rule in
-  the failure message for whoever re-enables it. Check by hand with
-  `claude --debug -p ok` then `grep 'already handled by' ~/.claude/debug/latest`
-  — no output is the passing state.
 - **Retire a plugin by deleting its entry, never with `false`.** A `false` entry
   reads as a declaration and does nothing; the plugin test fails on one.
 - **A retired plugin's `github` marketplace stays registered** (`astral-sh`,
