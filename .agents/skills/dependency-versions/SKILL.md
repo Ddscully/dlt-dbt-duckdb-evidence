@@ -82,6 +82,14 @@ each grouped to a single PR.
     `tests/test_dagster_instance.py`, which refuses a tag Dependabot could not
     bump (`latest`, a bare name, or a floating `X.Y` where upstream's exact tag
     is `X.Y.Z`). The three that can still only age deliberately are unchanged.
+  - **A Postgres major is ignored, not watched**: the `docker-compose` entry's
+    one `ignore` rule. 17 → 18 (#73, closed 2026-09-18) moved the image's data
+    directory under the mount point, so the old mount path fails to start and
+    the new one starts an empty cluster beside the old files. The catalog and
+    Dagster's history come up blank, the health check passes, and CI, which
+    starts from an empty volume, cannot tell. A major is a migration PR:
+    change the mount, then dump and restore against a copy of a populated
+    `mds_postgres`. Patches within the major still arrive.
 - **Dependabot scans the moment the config lands**, not on the next scheduled
   date — expect PRs immediately after touching that file.
 - **A yanked release stays locked until something re-resolves.** `uv.lock` held

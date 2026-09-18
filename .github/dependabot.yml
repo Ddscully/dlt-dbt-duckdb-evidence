@@ -69,11 +69,24 @@ updates:
   # so there is no range for a patch to arrive through silently and every bump
   # is a real one. Without this entry they were the fourth and fifth versions
   # that could only age deliberately, and `compose.yaml` claimed otherwise.
+  #
+  # **Except a Postgres major, which is a migration and not a bump.** 17 -> 18
+  # (#73, closed 2026-09-18) failed twice. The 18 image refuses a volume mounted
+  # at `/var/lib/postgresql/data`, so the stack never came up, even on an
+  # empty volume. And moving the mount to `/var/lib/postgresql`, the obvious fix,
+  # starts an *empty* cluster in `18/docker/` beside the old files: the DuckLake
+  # catalog and Dagster's history then come up blank, and the health check
+  # passes. CI starts from an empty volume, so it can only ever see the first
+  # failure. Patches within 17 still arrive; a major waits for a mount change
+  # plus a dump-and-restore, tested on a copy of a populated `mds_postgres`.
   - package-ecosystem: docker-compose
     directory: /
     schedule:
       interval: monthly
     open-pull-requests-limit: 1
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
     groups:
       containers:
         patterns: ["*"]
