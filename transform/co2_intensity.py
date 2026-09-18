@@ -30,14 +30,12 @@ def build_co2_intensity(frame: pl.LazyFrame) -> pl.LazyFrame:
     OWID's column is kg per 2011 international-$ (PPP), so levels are not
     comparable, and ranking uses only the derived column.
 
-    Lazy in and out, so the caller decides when to collect. The filter is written
-    on the source columns rather than on the derived ratio so that Polars can push
-    it into the DuckDB scan: rows with no ratio are never fetched.
+    Lazy in and out, so the caller decides when to collect. `frame` holds only
+    rows with a usable ratio: `read_usable_rows` filters them in SQL.
     """
     kg_per_mt = 1e9  # co2_mt is million tonnes; 1 Mt = 1e9 kg
     return (
-        frame.filter((pl.col("gdp_constant_usd") > 0) & pl.col("co2_mt").is_not_null())
-        .with_columns(
+        frame.with_columns(
             (pl.col("co2_mt") * kg_per_mt / pl.col("gdp_constant_usd")).alias(
                 "co2_per_gdp_const_usd"
             ),
@@ -54,6 +52,20 @@ def build_co2_intensity(frame: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
+def read_usable_rows(con: duckdb.DuckDBPyConnection) -> pl.LazyFrame:
+    """The mart's rows that have a ratio, as a lazy frame.
+
+    The filter is SQL, not a Polars `filter()`. Polars hands a lazy frame's
+    predicate to DuckDB's bridge to translate, and that translation matched no
+    rows in the live Pages build while matching 10,874 everywhere else; SQL
+    leaves nothing to translate. Null, zero and negative GDP all drop out here
+    rather than producing an infinity that would win the rank.
+    """
+    return con.sql(
+        "select * from marts.fct_emissions_energy where gdp_constant_usd > 0 and co2_mt is not null"
+    ).pl(lazy=True)
+
+
 def run(duckdb_path: str = DUCKDB_PATH) -> int:
     """Read the mart, derive the metric, write `analytics.co2_intensity`.
 
@@ -61,8 +73,7 @@ def run(duckdb_path: str = DUCKDB_PATH) -> int:
     """
     con = duckdb.connect(duckdb_path)
     try:
-        mart = con.sql("select * from marts.fct_emissions_energy").pl(lazy=True)
-        out = build_co2_intensity(mart).collect()
+        out = build_co2_intensity(read_usable_rows(con)).collect()
         db.write_frames(con, {"co2_intensity": out}, "analytics")
         return out.height
     finally:

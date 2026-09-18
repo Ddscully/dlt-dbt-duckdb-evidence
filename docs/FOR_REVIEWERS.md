@@ -205,7 +205,9 @@ number before.
 1. **The Polars step, first — narrowed, not removed.** Both transforms build a
    lazy plan over DuckDB's scan (`.pl(lazy=True)`), so `retail_rfm` fetches
    only the 12 of `dim_retail_customer`'s 22 columns it keeps, and
-   `co2_intensity`'s null-GDP filter runs inside DuckDB. What cannot be made
+   `co2_intensity`'s null-GDP filter runs inside DuckDB — written in its SQL,
+   because the same filter as a Polars `filter()`, which DuckDB's bridge
+   translates, matched no rows in the live Pages build. What cannot be made
    lazy is the shape of the work: a dense rank over each (income group, year),
    quintile break points over whole columns, a final sort, and a frame
    collected in full before `db.write_frames` hands it back. The next step is

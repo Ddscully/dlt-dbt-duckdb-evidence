@@ -310,13 +310,25 @@ def _ranks(tmp_path: Path, ranks: list[int]) -> str:
             income_group varchar, year integer, co2_intensity_rank integer
         )
         """,
-        f"insert into analytics.co2_intensity values {values}",
+        *([f"insert into analytics.co2_intensity values {values}"] if ranks else []),
     )
 
 
 def test_rank_check_passes_on_a_dense_cohort(tmp_path, monkeypatch, assets):
     monkeypatch.setattr(assets, "DUCKDB_PATH", _ranks(tmp_path, [1, 2, 3]))
     assert assets.co2_intensity_rank_is_dense().passed
+
+
+def test_rank_check_fails_an_empty_table(tmp_path, monkeypatch, assets):
+    """No cohort means no cohort out of order, so the rank terms alone pass an
+    empty table — which is what the live Pages build wrote, and Evidence was the
+    first thing to notice."""
+    monkeypatch.setattr(assets, "DUCKDB_PATH", _ranks(tmp_path, []))
+
+    result = assets.co2_intensity_rank_is_dense()
+
+    assert not result.passed
+    assert _meta(result, "rows") == 0
 
 
 def test_rank_check_fails_on_a_gap(tmp_path, monkeypatch, assets):

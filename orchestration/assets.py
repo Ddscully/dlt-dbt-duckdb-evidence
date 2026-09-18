@@ -657,7 +657,10 @@ def fx_rates_reach_the_present() -> dg.AssetCheckResult:
 
 @dg.asset_check(asset=co2_intensity, blocking=True)
 def co2_intensity_rank_is_dense() -> dg.AssetCheckResult:
-    """Each (income_group, year) cohort ranks from 1 with no gaps."""
+    """Each (income_group, year) cohort ranks from 1 with no gaps, and there is
+    at least one cohort: an empty table has no cohort to fail, and one reached
+    Evidence as an unreadable Parquet file two steps later."""
+    rows = _scalar("select count(*) from analytics.co2_intensity")
     bad = _scalar(
         """
         select count(*) from (
@@ -669,7 +672,9 @@ def co2_intensity_rank_is_dense() -> dg.AssetCheckResult:
         )
         """
     )
-    return dg.AssetCheckResult(passed=bad == 0, metadata={"bad_cohorts": bad})
+    return dg.AssetCheckResult(
+        passed=rows > 0 and bad == 0, metadata={"rows": rows, "bad_cohorts": bad}
+    )
 
 
 @dg.asset_check(asset=retail_rfm, blocking=True)
