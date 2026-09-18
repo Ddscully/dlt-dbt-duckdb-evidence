@@ -167,8 +167,14 @@ def build_retail_rfm(customers: pl.LazyFrame, as_of_date: dt.date) -> pl.LazyFra
             "is_left_censored_cohort",
         )
         # Polars sorts nulls first, which would open the table with the
-        # unscored customers where the best belong.
-        .sort(["rfm_total", "monetary_gbp"], descending=True, nulls_last=True)
+        # unscored customers where the best belong. `customer_id` last makes the
+        # order total: without it, tied customers come out in whatever order the
+        # engine happens to finish, and the streaming engine picks another.
+        .sort(
+            ["rfm_total", "monetary_gbp", "customer_id"],
+            descending=[True, True, False],
+            nulls_last=True,
+        )
     )
 
 

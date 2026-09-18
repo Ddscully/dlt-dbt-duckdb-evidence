@@ -49,7 +49,8 @@ def build_co2_intensity(frame: pl.LazyFrame) -> pl.LazyFrame:
             .over(["income_group", "year"])
             .alias("co2_intensity_rank"),
         )
-        .sort(["year", "income_group", "co2_intensity_rank"])
+        # `country_iso3` last makes the order total: dense ranks tie.
+        .sort(["year", "income_group", "co2_intensity_rank", "country_iso3"])
     )
 
 

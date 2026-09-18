@@ -79,10 +79,11 @@ invoice lines from December 2009 to December 2011, enough to show cohorts,
 returns inference and RFM segmentation. It says nothing about entity resolution,
 because one source has nothing to resolve against. There is no company or
 supplier anywhere (the Scope 2 example's sites are invented), so the sourcing
-and Scope 2 decisions above stop at the country. That's the honest boundary,
-and §5's last item is what closes it. The currency and date dimensions the
-retail fact needed on the day it landed are what make the next entity a join
-rather than a project.
+and Scope 2 decisions above stop at the country. That's the honest boundary.
+Closing it takes a company-entity grain (SEC XBRL, say); §5's last item is the
+smaller step before it. The currency and date dimensions any money-denominated
+fact needs are in place, which is what makes a company's filings a join rather
+than a project.
 
 ## 2. What is the freshness SLA, and what happens when it is missed?
 
@@ -217,10 +218,10 @@ number before.
    lazy is the shape of the work: a dense rank over each (income group, year),
    quintile break points over whole columns, a final sort, and a frame
    collected in full before `db.write_frames` hands it back. The next step is
-   `collect(engine="streaming")`, which on 2026-09-18 gave the same rows for
-   both transforms but broke `retail_rfm`'s sort ties in a different order, so
-   it wants a deterministic tiebreak first; past that, the window belongs in
-   dbt SQL. The layer exists to demonstrate heavy Python transforms, and these
+   `collect(engine="streaming")`. On 2026-09-18 it first broke `retail_rfm`'s
+   sort ties in a different order. Both sorts now end on a unique key, and
+   after that change it matched the default engine row for row, five runs
+   each. Past that, the window belongs in dbt SQL. The layer exists to demonstrate heavy Python transforms, and these
    are not heavy enough to need one.
 2. **The single-writer lock — and it is second here only because this list is
    ordered by *volume*.** It is not a scale limit at all: one writer xor many
@@ -277,8 +278,9 @@ incrementally on a real primary key with year-range backfills behind it, and the
 fixtures keep CI offline and constant-time. This list used to add the lake's
 small-file anti-pattern (275 partitions averaging 47 kB) as a problem that
 fixes itself at 1000×. That was the hand-written hive archive, which DuckLake
-replaced. What grows with the landing zone now is §3's retained snapshots, not
-its file count.
+replaced. What grows with the landing zone now is the Parquet that §3's
+retained snapshots keep alive: on 2026-09-18, 318 MiB of data files, of which
+55 MiB were live.
 
 ## 5. What would I do differently?
 
