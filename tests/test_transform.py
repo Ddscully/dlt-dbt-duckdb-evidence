@@ -1,14 +1,16 @@
 """Unit tests for the Polars derived-metrics layer.
 
-`build_co2_intensity` and `build_retail_rfm` are pure frame-in/frame-out
-functions, so they're tested directly with hand-built frames — no DuckDB, no
-warehouse.
+`build_co2_intensity` and `build_retail_rfm` are pure LazyFrame-in/LazyFrame-out
+functions, so they're tested directly with hand-built frames — no warehouse. The
+two pushdown tests put those frames in an in-memory DuckDB, because what they
+check is what DuckDB is asked for.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 
+import duckdb
 import polars as pl
 import pytest
 
@@ -34,14 +36,14 @@ def _row(iso3: str, year: int, income_group: str, co2_mt: float, gdp: float | No
     }
 
 
-def _frame(rows: list[dict]) -> pl.DataFrame:
-    return pl.DataFrame(rows, schema=SCHEMA)
+def _frame(rows: list[dict]) -> pl.LazyFrame:
+    return pl.LazyFrame(rows, schema=SCHEMA)
 
 
 def test_intensity_converts_megatonnes_to_kilograms():
     """co2_mt is million tonnes and the metric is kg per dollar, so the
     numerator carries a 1e9 factor. 1 Mt over $1bn is exactly 1 kg/$."""
-    out = build_co2_intensity(_frame([_row("AAA", 2020, "High income", 1.0, 1e9)]))
+    out = build_co2_intensity(_frame([_row("AAA", 2020, "High income", 1.0, 1e9)])).collect()
     assert out["co2_per_gdp_const_usd"][0] == pytest.approx(1.0)
 
 
@@ -55,7 +57,7 @@ def test_intensity_uses_constant_price_gdp():
     df = _frame([_row("JPN", 2024, "High income", 2.0, 4e9)]).with_columns(
         pl.lit(1e9).alias("gdp_usd")
     )
-    assert build_co2_intensity(df)["co2_per_gdp_const_usd"][0] == pytest.approx(0.5)
+    assert build_co2_intensity(df).collect()["co2_per_gdp_const_usd"][0] == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize("gdp", [None, 0.0, -1.0])
@@ -69,7 +71,7 @@ def test_rows_without_usable_gdp_are_dropped(gdp):
                 _row("BBB", 2020, "Low income", 1.0, 1e9),
             ]
         )
-    )
+    ).collect()
     assert out["country_iso3"].to_list() == ["BBB"]
 
 
@@ -89,12 +91,41 @@ def test_rank_is_dense_and_per_cohort():
                 _row("EEE", 2021, "High income", 9.0, 1e9),
             ]
         )
-    )
+    ).collect()
     ranks = dict(zip(out["country_iso3"], out["co2_intensity_rank"]))
     assert ranks["AAA"] == ranks["BBB"] == 1
     assert ranks["CCC"] == 2  # dense: the tie doesn't push this to 3
     assert ranks["DDD"] == 1  # new income group
     assert ranks["EEE"] == 1  # new year
+
+
+def _duckdb_scan(frame: pl.LazyFrame, guard_sql: str) -> pl.LazyFrame:
+    """`frame` served lazily from DuckDB, as `run()` serves the mart, plus one
+    `guard` column whose SQL calls `error()` when DuckDB computes it."""
+    con = duckdb.connect()
+    con.register("source_rows", frame.collect())
+    con.sql(f"create view source as select *, {guard_sql} as guard from source_rows")
+    return con.sql("select * from source").pl(lazy=True)
+
+
+def test_the_unusable_gdp_filter_runs_inside_duckdb():
+    """DuckDB's Polars bridge falls back to filtering in Python, silently, when
+    it cannot translate a predicate — same rows, every excluded row still
+    fetched. The guard errors on exactly the rows the filter excludes, so it
+    passes only if DuckDB applied the filter before computing the columns.
+    Filtering on the derived ratio, as this once did, fails it."""
+    scan = _duckdb_scan(
+        _frame(
+            [
+                _row("AAA", 2020, "Low income", 1.0, 1e9),
+                _row("BBB", 2020, "Low income", 1.0, 0.0),
+                _row("CCC", 2020, "Low income", 1.0, None),
+            ]
+        ),
+        "case when gdp_constant_usd > 0 and co2_mt is not null then 0"
+        " else error('fetched a row the filter excludes') end",
+    )
+    assert build_co2_intensity(scan).collect()["country_iso3"].to_list() == ["AAA"]
 
 
 # --------------------------------------------------------------------------- #
@@ -134,8 +165,15 @@ def _customer(cid: str, last_order: str, n_orders: int, revenue: float) -> dict:
     }
 
 
-def _customers(rows: list[dict]) -> pl.DataFrame:
-    return pl.DataFrame(rows, schema=CUSTOMER_SCHEMA)
+def _customers(rows: list[dict]) -> pl.LazyFrame:
+    return pl.LazyFrame(rows, schema=CUSTOMER_SCHEMA)
+
+
+def _quintiles(values: pl.Series, *, higher_is_better: bool = True) -> pl.Series:
+    """`assign_quintiles` is an expression; evaluate it over one column."""
+    return values.to_frame().select(
+        assign_quintiles(pl.col(values.name), higher_is_better=higher_is_better)
+    )[values.name]
 
 
 def test_quintiles_score_by_value_so_ties_never_split():
@@ -147,7 +185,7 @@ def test_quintiles_score_by_value_so_ties_never_split():
     value maps to exactly one score.
     """
     values = pl.Series("frequency", [1] * 6 + [2] * 3 + [9] * 3)
-    scores = assign_quintiles(values)
+    scores = _quintiles(values)
     by_value = dict(zip(values, scores))
     # one score per distinct value, and the run of six 1s is not split
     assert len({s for v, s in zip(values, scores) if v == 1}) == 1
@@ -158,8 +196,8 @@ def test_quintiles_reverse_for_recency():
     """Recency is days-since, so *small* is good and the score has to invert —
     otherwise the most engaged customers score 1 and every segment is mirrored."""
     values = pl.Series("recency_days", [0, 100, 200, 300, 400])
-    ascending = assign_quintiles(values)
-    descending = assign_quintiles(values, higher_is_better=False)
+    ascending = _quintiles(values)
+    descending = _quintiles(values, higher_is_better=False)
     assert ascending.to_list() == [1, 2, 3, 4, 5]
     assert descending.to_list() == [5, 4, 3, 2, 1]
     # and the inversion is exact, not an approximation of one
@@ -181,7 +219,7 @@ def test_no_customer_comes_out_unsegmented():
         _customer(f"C{i:03d}", f"2011-{1 + i % 12:02d}-01", 1 + i % 40, 100.0 * (1 + i % 40))
         for i in range(120)
     ]
-    out = build_retail_rfm(_customers(rows), dt.date(2011, 12, 9))
+    out = build_retail_rfm(_customers(rows), dt.date(2011, 12, 9)).collect()
     assert out["segment"].null_count() == 0
     assert set(out["segment"].unique()) <= set(SEGMENT_GRID.values())
 
@@ -194,7 +232,7 @@ def test_recency_is_measured_against_the_extract_not_today():
         _customer("A", "2011-12-09", 5, 500.0),
         _customer("B", "2011-06-09", 5, 500.0),
     ]
-    out = build_retail_rfm(_customers(rows), dt.date(2011, 12, 9)).sort("customer_id")
+    out = build_retail_rfm(_customers(rows), dt.date(2011, 12, 9)).collect().sort("customer_id")
     assert out["recency_days"].to_list() == [0, 183]
     assert out["as_of_date"].to_list() == [dt.date(2011, 12, 9)] * 2
 
@@ -206,9 +244,30 @@ def test_monetary_is_net_so_a_heavy_returner_scores_low():
         _customer("KEEPER", "2011-12-01", 10, 10_000.0),
         _customer("RETURNER", "2011-12-01", 10, -50.0),
     ]
-    out = build_retail_rfm(_customers(rows), dt.date(2011, 12, 9))
+    out = build_retail_rfm(_customers(rows), dt.date(2011, 12, 9)).collect()
     scores = dict(zip(out["customer_id"], out["monetary_score"]))
     assert scores["KEEPER"] > scores["RETURNER"]
+
+
+def test_rfm_fetches_only_the_columns_it_keeps():
+    """The final `select` is what lets Polars ask DuckDB for a subset of the
+    dimension (12 of its 22 columns, `docs/FOR_REVIEWERS.md` §4). The guard is
+    a column nothing uses, and it errors if DuckDB computes it."""
+    scan = _duckdb_scan(
+        _customers([_customer("A", "2011-12-09", 3, 300.0)]),
+        "error('fetched a column nothing uses')",
+    )
+    out = build_retail_rfm(scan, dt.date(2011, 12, 9)).collect()
+    assert "guard" not in out.columns
+
+
+def test_ties_are_broken_by_customer_id():
+    """Without a unique last key, tied customers came out in whatever order
+    the engine finished in, and the streaming engine picked a different one."""
+    rows = [_customer(cid, "2011-12-01", 5, 500.0) for cid in ("C", "A", "B")]
+    for engine in ("in-memory", "streaming"):
+        out = build_retail_rfm(_customers(rows), dt.date(2011, 12, 9)).collect(engine=engine)
+        assert out["customer_id"].to_list() == ["A", "B", "C"]
 
 
 def test_rfm_cell_is_text_and_total_is_arithmetic():
@@ -216,7 +275,7 @@ def test_rfm_cell_is_text_and_total_is_arithmetic():
     "55" — so the sortable version is a separate integer column."""
     out = build_retail_rfm(
         _customers([_customer("A", "2011-12-09", 3, 300.0)]), dt.date(2011, 12, 9)
-    )
+    ).collect()
     assert out["rfm_cell"].dtype == pl.String
     row = out.row(0, named=True)
     assert (

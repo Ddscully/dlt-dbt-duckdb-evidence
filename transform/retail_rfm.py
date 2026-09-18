@@ -77,7 +77,7 @@ def segment_frame() -> pl.DataFrame:
     )
 
 
-def assign_quintiles(values: pl.Series, *, higher_is_better: bool = True) -> pl.Series:
+def assign_quintiles(values: pl.Expr, *, higher_is_better: bool = True) -> pl.Expr:
     """Score a column 1–5 by **value**, not by rank position.
 
     `ntile(5)` fills equal-sized buckets, so it splits tied values wherever a
@@ -86,6 +86,10 @@ def assign_quintiles(values: pl.Series, *, higher_is_better: bool = True) -> pl.
     score equally and bucket sizes follow the data (frequency: 1,626 / 944 /
     1,150 / 1,033 / 1,128). `allow_duplicates` leaves a bucket empty, rather than
     failing, when ties put two break points on one value.
+
+    An expression, not a Series function, so it runs inside the lazy plan. The
+    break points are quantiles of the whole column, so this is a full-column
+    operation whichever engine runs it.
     """
     labels = [str(i) for i in range(1, len(QUINTILES) + 2)]
     scores = (
@@ -95,15 +99,20 @@ def assign_quintiles(values: pl.Series, *, higher_is_better: bool = True) -> pl.
         .cast(pl.String)
         .cast(pl.Int32)
     )
-    return scores if higher_is_better else (len(QUINTILES) + 2) - scores
+    # `name.keep`: an expression takes its leftmost operand's name, which here
+    # is the literal, so the inverted score would come out named "literal".
+    return scores if higher_is_better else ((len(QUINTILES) + 2) - scores).name.keep()
 
 
-def build_retail_rfm(customers: pl.DataFrame, as_of_date: dt.date) -> pl.DataFrame:
+def build_retail_rfm(customers: pl.LazyFrame, as_of_date: dt.date) -> pl.LazyFrame:
     """Score every customer and attach a segment.
 
     `as_of_date` has no default. Measured from today, every customer of a 2011
     extract is equally lapsed and recency loses its spread; it should be the
     extract's last observed day, and it ships as a column.
+
+    Lazy in and out: the final `select` lets Polars ask the scan for only the
+    columns it uses, so the caller should pass an unmaterialized frame.
     """
     scored = customers.with_columns(
         pl.lit(as_of_date).alias("as_of_date"),
@@ -115,13 +124,13 @@ def build_retail_rfm(customers: pl.DataFrame, as_of_date: dt.date) -> pl.DataFra
     )
 
     scored = scored.with_columns(
-        assign_quintiles(scored["recency_days"], higher_is_better=False).alias("recency_score"),
-        assign_quintiles(scored["frequency"]).alias("frequency_score"),
-        assign_quintiles(scored["monetary_gbp"]).alias("monetary_score"),
+        assign_quintiles(pl.col("recency_days"), higher_is_better=False).alias("recency_score"),
+        assign_quintiles(pl.col("frequency")).alias("frequency_score"),
+        assign_quintiles(pl.col("monetary_gbp")).alias("monetary_score"),
     )
 
     return (
-        scored.join(segment_frame(), on=["recency_score", "frequency_score"], how="left")
+        scored.join(segment_frame().lazy(), on=["recency_score", "frequency_score"], how="left")
         .with_columns(
             # The cell as text ("555"): a label, not a number. Both columns stay
             # null for the 28 customers with no revenue line (null
@@ -158,8 +167,14 @@ def build_retail_rfm(customers: pl.DataFrame, as_of_date: dt.date) -> pl.DataFra
             "is_left_censored_cohort",
         )
         # Polars sorts nulls first, which would open the table with the
-        # unscored customers where the best belong.
-        .sort(["rfm_total", "monetary_gbp"], descending=True, nulls_last=True)
+        # unscored customers where the best belong. `customer_id` last makes the
+        # order total: without it, tied customers come out in whatever order the
+        # engine happens to finish, and the streaming engine picks another.
+        .sort(
+            ["rfm_total", "monetary_gbp", "customer_id"],
+            descending=[True, True, False],
+            nulls_last=True,
+        )
     )
 
 
@@ -170,16 +185,17 @@ def run(duckdb_path: str = DUCKDB_PATH) -> int:
     """
     con = duckdb.connect(duckdb_path)
     try:
-        customers = con.sql("select * from marts.dim_retail_customer").pl()
-        # The extract's own horizon, read from the data.
-        as_of_date = customers["last_order_date"].max()
-        # `Series.max()` is None on an empty frame and typed as a wide union;
-        # name both faults here rather than inside the recency arithmetic.
+        # The extract's own horizon, read from the data. Asked of DuckDB rather
+        # than the frame, so the frame is scanned once, by the plan below.
+        as_of_date = db.scalar(con, "select max(last_order_date) from marts.dim_retail_customer")
+        # `max()` is NULL on an empty table and `scalar` is typed `Any`; name
+        # both faults here rather than inside the recency arithmetic.
         if as_of_date is None:
             raise ValueError("marts.dim_retail_customer is empty — build the mart before scoring")
         if not isinstance(as_of_date, dt.date):
             raise TypeError(f"last_order_date holds {type(as_of_date).__name__}, expected a date")
-        out = build_retail_rfm(customers, as_of_date)
+        customers = con.sql("select * from marts.dim_retail_customer").pl(lazy=True)
+        out = build_retail_rfm(customers, as_of_date).collect()
         db.write_frames(con, {"retail_rfm": out}, "analytics")
         return out.height
     finally:

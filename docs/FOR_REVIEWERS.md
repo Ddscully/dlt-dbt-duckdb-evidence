@@ -55,7 +55,7 @@ findings page:
 - **Scope 2 disclosure.** `carbon_intensity_elec_g_kwh` *is* the location-based
   grid emission factor, the figure a multi-site company multiplies its metered
   kWh by to produce the electricity line in a CSRD, SECR or CDP filing. Across
-  the largest grids it runs 30 g/kWh (Norway) to 717 g/kWh (South Africa), so the
+  the largest grids in 2024 it runs 30 g/kWh (Norway) to 717 g/kWh (South Africa), so the
   same 100 GWh site reports ~3 kt CO₂e or ~72 kt depending only on where it sits.
 - **Energy cost exposure.** EU household electricity prices at their *published*
   half-year grain, not flattened to an annual average, because the annual
@@ -73,13 +73,17 @@ findings page:
   columns ship. Converted at the average, EU household electricity rose 35%
   between 2021-S1 and 2022-S2 in euros and 13.5% in dollars.
 
-**What it deliberately is not.** There is no entity below the country: no
-customer, supplier, site, product or order anywhere in the warehouse. So this
-demonstrates modelling at national grain and says nothing about entity
-resolution, cohort analysis or transactional dedup. That's the honest boundary,
-and closing it is the top of the roadmap: a company-entity grain (SEC XBRL) and
-a transactional one. The currency and date dimensions any money-denominated fact
-needs are now in place, which is what makes those a join rather than a project.
+**What it deliberately is not.** Below the country there is exactly one grain,
+and it is one retailer's: UCI's Online Retail II gives customers, products and
+invoice lines from December 2009 to December 2011, enough to show cohorts,
+returns inference and RFM segmentation. It says nothing about entity resolution,
+because one source has nothing to resolve against. There is no company or
+supplier anywhere (the Scope 2 example's sites are invented), so the sourcing
+and Scope 2 decisions above stop at the country. That's the honest boundary.
+Closing it takes a company-entity grain (SEC XBRL, say); §5's last item is the
+smaller step before it. The currency and date dimensions any money-denominated
+fact needs are in place, which is what makes a company's filings a join rather
+than a project.
 
 ## 2. What is the freshness SLA, and what happens when it is missed?
 
@@ -152,7 +156,8 @@ landing zone grows monotonically — about 39 MiB per full ingest at today's
 volumes. That is the honest answer to "what does a run cost" on a stack with no
 invoice: not money, but a directory that only goes one way until somebody
 decides on a retention policy. It is not urgent at 111 MiB and it is the kind of
-thing that is embarrassing at 111 GiB.
+thing that is embarrassing at 111 GiB. By 2026-09-18 it was 330 MiB across 234
+snapshots, and only 55 MiB of the Parquet was still live.
 
 Warehouse contents: 1,647,099 staging rows and 1,959,307 mart rows — of which
 1,067,371 are the retail order lines, 667,809 the three FX tables and 43,138 the
@@ -206,11 +211,18 @@ number before.
 
 43k mart rows → 43M. In the order it would actually fail:
 
-1. **The Polars step, first.** `transform/co2_intensity.py` pulls the mart into
-   memory as a DataFrame and writes it back. It's a ranked window function, so
-   the fix is either the lazy/streaming API or pushing it into dbt SQL where it
-   arguably belonged. The layer exists to demonstrate heavy Python transforms,
-   and this particular transform isn't heavy enough to need one.
+1. **The Polars step, first — narrowed, not removed.** Both transforms build a
+   lazy plan over DuckDB's scan (`.pl(lazy=True)`), so `retail_rfm` fetches
+   only the 12 of `dim_retail_customer`'s 22 columns it keeps, and
+   `co2_intensity`'s null-GDP filter runs inside DuckDB. What cannot be made
+   lazy is the shape of the work: a dense rank over each (income group, year),
+   quintile break points over whole columns, a final sort, and a frame
+   collected in full before `db.write_frames` hands it back. The next step is
+   `collect(engine="streaming")`. On 2026-09-18 it first broke `retail_rfm`'s
+   sort ties in a different order. Both sorts now end on a unique key, and
+   after that change it matched the default engine row for row, five runs
+   each. Past that, the window belongs in dbt SQL. The layer exists to demonstrate heavy Python transforms, and these
+   are not heavy enough to need one.
 2. **The single-writer lock — and it is second here only because this list is
    ordered by *volume*.** It is not a scale limit at all: one writer xor many
    readers binds at 43k rows exactly as hard as at 43M, which is why `just
@@ -250,7 +262,7 @@ number before.
    one model where the argument reverses:
    `fct_fx_rates_published` is `incremental`, because a published ECB fixing
    never changes and the table grows ~30 rows a day forever. At 43M rows the
-   question is which of the other 18 table models join it, and the cost of each
+   question is which of the 19 table models join it, and the cost of each
    is the tension
    WDI's lookback window already documents: a restated year needs a full refresh,
    so "incremental" and "picks up restatements" are in conflict and you have to
@@ -262,11 +274,13 @@ number before.
    serving layer.
 
 What *doesn't* break, which is the more interesting half: dlt already merges
-incrementally on a real primary key with year-range backfills behind it; the fixtures
-keep CI offline and constant-time; and the lake's documented small-file
-anti-pattern (275 partitions averaging 47 kB, when ~100 MB is the rule of thumb)
-actually *fixes itself* at 1000×: the partition sizes become right and the file
-count doesn't move.
+incrementally on a real primary key with year-range backfills behind it, and the
+fixtures keep CI offline and constant-time. This list used to add the lake's
+small-file anti-pattern (275 partitions averaging 47 kB) as a problem that
+fixes itself at 1000×. That was the hand-written hive archive, which DuckLake
+replaced. What grows with the landing zone now is the Parquet that §3's
+retained snapshots keep alive: on 2026-09-18, 318 MiB of data files, of which
+55 MiB were live.
 
 ## 5. What would I do differently?
 
@@ -294,11 +308,16 @@ The genuine ones, not the diplomatic ones.
   three-step resolution that raises rather than falling back to the cwd, because
   the cwd fallback resolves to a path DuckDB then *creates*: a run that goes
   green against an empty database.
-- **The lake is an archive, not a landing zone**, which inverts how that layer is
-  usually drawn. I'd do it again (dlt's filesystem destination can't partition
-  by a data column, and reversing the flow would have cost schema inference and
-  the raw freshness checks), but it's a compromise and the docs say so rather
-  than implying the tidy version.
+- **Price a compromise before calling it permanent.** The lake began as an
+  archive written *from* the warehouse, the reverse of how that layer is drawn,
+  and this list defended it: dlt's filesystem destination can't partition by a
+  data column, and reversing the flow would cost schema inference and the raw
+  freshness checks. PR #26 reversed it (dlt now lands `raw` in DuckLake) and paid
+  neither: dlt's DuckLake destination infers schemas as before, and
+  `dbt source freshness` reads `_dlt_load_id` through the attached catalog. The
+  costs that did arrive were ones I had not listed: dlt's merge makes DuckLake's
+  change feed useless, and the catalog compares its `data_path` as a string, so
+  every writer has to spell it the same way.
 - **The gaps I'd close next, in order:** a second entity to join the retail
   customer to, such as a sector or industry dimension, and then something that
   forces a late-arriving-fact decision, which nothing here has yet. The three
@@ -395,8 +414,9 @@ eight tables each feeding a named model. Of the rest:
   824,364 clear customer ids before anyone looked. It was found and closed, but
   it was found late, which is the sin's exact shape.
 - **Technology worship (Idolatry)** — the one to keep watching, and the defence
-  is on the record rather than asserted: `dg` costed and refused, two vendor
-  plugin sets removed after measuring zero invocations across 211 transcripts,
+  is on the record rather than asserted: `dg` costed and refused, four vendor
+  plugins retired on a count of zero invocations (two across 187 session
+  transcripts, two more across 211),
   `pytest-cov` added and dropped the same day for buying nothing, and a semantic
   layer still unbuilt because eleven pages written by one person do not have the
   coordination problem it solves.

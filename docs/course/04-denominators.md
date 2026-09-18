@@ -252,7 +252,8 @@ denominator to recover them. More countries ranked, same column name, same row
 count.
 
 **Seed the bug.** In `transform/co2_intensity.py`, `build_co2_intensity` divides
-by `gdp_constant_usd` twice: once in the `when` guard and once in the `then`.
+by `gdp_constant_usd` twice: once in the filter that drops unusable GDP and once
+in the division.
 Change both to `gdp_usd`:
 
 ```bash

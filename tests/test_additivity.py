@@ -343,7 +343,7 @@ def test_the_polars_output_is_labelled_where_dbt_cannot_see_it():
             for i in range(10)
         ]
     )
-    built = build_retail_rfm(customers, as_of)
+    built = build_retail_rfm(customers.lazy(), as_of).collect()
     numeric_out = {column for column, dtype in built.schema.items() if dtype.is_numeric()}
     declared = {column for (relation, column) in extras() if relation == "analytics.retail_rfm"}
     assert numeric_out == declared, (

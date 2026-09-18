@@ -15,7 +15,7 @@ from modern_data_stack.paths import warehouse_path
 DUCKDB_PATH = warehouse_path()
 
 
-def build_co2_intensity(df: pl.DataFrame) -> pl.DataFrame:
+def build_co2_intensity(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Rank carbon efficiency within each (income group, year) cohort.
 
     Derived from World Bank GDP rather than taken from OWID's intensity column
@@ -29,16 +29,19 @@ def build_co2_intensity(df: pl.DataFrame) -> pl.DataFrame:
 
     OWID's column is kg per 2011 international-$ (PPP), so levels are not
     comparable, and ranking uses only the derived column.
+
+    Lazy in and out, so the caller decides when to collect. The filter is written
+    on the source columns rather than on the derived ratio so that Polars can push
+    it into the DuckDB scan: rows with no ratio are never fetched.
     """
     kg_per_mt = 1e9  # co2_mt is million tonnes; 1 Mt = 1e9 kg
     return (
-        df.with_columns(
-            pl.when(pl.col("gdp_constant_usd") > 0)
-            .then(pl.col("co2_mt") * kg_per_mt / pl.col("gdp_constant_usd"))
-            .otherwise(None)
-            .alias("co2_per_gdp_const_usd"),
+        frame.filter((pl.col("gdp_constant_usd") > 0) & pl.col("co2_mt").is_not_null())
+        .with_columns(
+            (pl.col("co2_mt") * kg_per_mt / pl.col("gdp_constant_usd")).alias(
+                "co2_per_gdp_const_usd"
+            ),
         )
-        .filter(pl.col("co2_per_gdp_const_usd").is_not_null())
         .with_columns(
             # rank carbon efficiency within each income group per year
             pl.col("co2_per_gdp_const_usd")
@@ -46,7 +49,8 @@ def build_co2_intensity(df: pl.DataFrame) -> pl.DataFrame:
             .over(["income_group", "year"])
             .alias("co2_intensity_rank"),
         )
-        .sort(["year", "income_group", "co2_intensity_rank"])
+        # `country_iso3` last makes the order total: dense ranks tie.
+        .sort(["year", "income_group", "co2_intensity_rank", "country_iso3"])
     )
 
 
@@ -57,7 +61,8 @@ def run(duckdb_path: str = DUCKDB_PATH) -> int:
     """
     con = duckdb.connect(duckdb_path)
     try:
-        out = build_co2_intensity(con.sql("select * from marts.fct_emissions_energy").pl())
+        mart = con.sql("select * from marts.fct_emissions_energy").pl(lazy=True)
+        out = build_co2_intensity(mart).collect()
         db.write_frames(con, {"co2_intensity": out}, "analytics")
         return out.height
     finally:

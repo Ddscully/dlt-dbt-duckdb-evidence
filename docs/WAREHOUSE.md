@@ -1,6 +1,6 @@
 # The warehouse
 
-What the pipeline loads, how it's laid out, and the Parquet archive beside it.
+What the pipeline loads, how it's laid out, and the DuckLake landing zone it lands in.
 The [README](../README.md) has the short version.
 
 ## Data sources

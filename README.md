@@ -286,7 +286,7 @@ The README is the tour. The detail lives here:
 | | |
 |---|---|
 | [`docs/PRACTICES.md`](./docs/PRACTICES.md) | **the practices this repo demonstrates, and where each one is in the code** |
-| [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the schemas they land in, and the Parquet lake beside them |
+| [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the DuckLake landing zone and the schemas built from it |
 | [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the Dagster asset graph, the three jobs, backfills and freshness policies |
 | [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 482 dbt tests, the mart-model contracts, and the groups, exposures and model versions around them |
 | [`docs/DASHBOARD.md`](./docs/DASHBOARD.md) | the eleven dashboard pages, what each is for, and how the site is deployed |
