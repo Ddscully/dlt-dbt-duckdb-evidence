@@ -20,8 +20,8 @@ The values here are Annex I **as corrected by [Implementing Regulation (EU)
 2026/1740](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740)**,
 which replaced Annexes I and IV in full on 3 August 2026 and applies retroactively
 from 1 January. The numbers themselves barely moved — 66 of 10,503 comparable
-rows, mostly down by a percent or two — but the table changed shape, and two of
-the defects this page used to list have been fixed at source.
+rows, mostly down by a percent or two — but the table changed shape, and most of
+the original annex's defects were fixed at source.
 
 ```sql headline
 select
@@ -350,29 +350,22 @@ which sourcing lanes are worth the effort of going to get that data.
 
 Four more limits, stated plainly because a practitioner will check them first:
 
-- **A CN code alone does not always identify a row.** It used to be reliably
-  untrue: 2523 10 00 was both white clinker and grey clinker, whose default
+- **A CN code alone does not always identify a row.** In the original annex,
+  2523 10 00 was both white clinker and grey clinker, whose default
   values differ by more than a factor of two. The correction gives those two
   10-digit TARIC codes — 2523 10 00 10 and 2523 10 00 90 — so that particular
   trap is closed, but the annex still prints 4- and 6-digit headings above the
   rows that carry the numbers, and classification to the right description
   remains the importer's problem.
-- **The annex's defects are reproduced rather than corrected**, and the
-  correction removed most of the ones there were. Albania's white Portland
-  cement used to be published with its three values shifted into the mark-up
-  columns, five cement rows for Angola and Argentina compounded the mark-up
-  instead of adding it, and Chile's line pipe was missing its 2026 cell; all
-  three are gone, the last two because the marked-up columns are gone with them.
-  The seed still transcribes the regulation as it stands, defects included. A
-  legal instrument is not this project's to tidy up — and the amendment is the
-  argument for that, since every one of those quirks was fixed by the body that
-  wrote it rather than by us.
-- **The mark-up is now asserted, not read off the annex.** Until the correction
-  the annex published each good's marked-up value for 2026, 2027 and 2028, and
-  this project derived the schedule from them. It publishes only direct,
-  indirect and total now, so the phase-in — 10 / 20 / 30% for cement, iron and
-  steel, aluminium and hydrogen, a flat 1% for fertilisers — comes from a seed
-  stating what the articles say. Same numbers, weaker provenance, and worth
+- **The annex's defects are reproduced rather than corrected.** The seed
+  transcribes the regulation as it stands, defects included. A legal instrument
+  is not this project's to tidy up, and the correction is the argument for that:
+  the original annex's quirks were fixed by the body that wrote it rather than by
+  us.
+- **The mark-up is asserted, not read off the annex.** The corrected annex
+  publishes only direct, indirect and total, so the phase-in — 10 / 20 / 30%
+  for cement, iron and steel, aluminium and hydrogen, a flat 1% for fertilisers —
+  comes from a seed stating what the articles say. Same numbers, weaker provenance, and worth
   knowing which it is.
 - **The grid factor shown elsewhere in this warehouse is not the annex's.** The
   regulation's own electricity emission factors come from IEA data under a
