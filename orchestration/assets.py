@@ -564,10 +564,15 @@ def _scalar(query: str, params: Sequence[Any] | None = None):
 
 @dg.asset_check(asset=dg.AssetKey(["raw", "wb_wdi"]), blocking=True)
 def wdi_indicators_all_present() -> dg.AssetCheckResult:
-    """Every configured indicator landed at least one row.
+    """Every configured indicator landed at least one row `stg_wdi` keeps.
 
-    The World Bank answers a bad indicator code with a 200 and an empty series,
-    which would otherwise become an all-null column in `stg_wdi`.
+    A row counts only if it passes `stg_wdi`'s own filter: a three-letter ISO
+    code, a year no later than this one, and a value. Anything less becomes an
+    all-null column there, from either of two 200 responses the World Bank has
+    served: an empty series for a bad indicator code, and a stale cached copy
+    of a real one whose every `countryiso3code` is empty. The second emptied
+    `gdp_constant_usd`, and so `analytics.co2_intensity`, while every
+    indicator still had raw rows.
 
     Reads the lakehouse, where dlt lands `raw`. The warehouse file holds only
     what dbt builds — and on a fresh checkout does not exist yet when this runs.
@@ -576,7 +581,14 @@ def wdi_indicators_all_present() -> dg.AssetCheckResult:
     try:
         found = {
             r[0]
-            for r in con.sql(f"select distinct indicator from {ATTACH_ALIAS}.raw.wb_wdi").fetchall()
+            for r in con.sql(
+                f"""
+                select distinct indicator from {ATTACH_ALIAS}.raw.wb_wdi
+                where length(country_iso3) = 3
+                    and year <= extract(year from current_date)
+                    and value is not null
+                """
+            ).fetchall()
         }
     finally:
         con.close()

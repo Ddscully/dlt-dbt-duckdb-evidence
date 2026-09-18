@@ -112,15 +112,32 @@ def _values_clause(rows: list[tuple]) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def test_wdi_check_passes_when_every_configured_indicator_landed(tmp_path, monkeypatch, assets):
-    lakehouse = _lakehouse(
-        tmp_path,
-        f"create schema {ATTACH_ALIAS}.raw",
-        f"create table {ATTACH_ALIAS}.raw.wb_wdi (indicator varchar)",
-        f"insert into {ATTACH_ALIAS}.raw.wb_wdi values "
-        "('NY.GDP.MKTP.KD'), ('NY.GDP.MKTP.KD'), ('SP.POP.TOTL')",
+def _wdi(tmp_path: Path, rows: list[tuple]) -> str:
+    """A lakehouse whose `raw.wb_wdi` holds `(indicator, country_iso3, year, value)` rows."""
+    return str(
+        _lakehouse(
+            tmp_path,
+            f"create schema {ATTACH_ALIAS}.raw",
+            f"""
+            create table {ATTACH_ALIAS}.raw.wb_wdi (
+                indicator varchar, country_iso3 varchar, year integer, value double
+            )
+            """,
+            f"insert into {ATTACH_ALIAS}.raw.wb_wdi values {_values_clause(rows)}",
+        )
     )
-    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lakehouse))
+
+
+def test_wdi_check_passes_when_every_configured_indicator_landed(tmp_path, monkeypatch, assets):
+    lakehouse = _wdi(
+        tmp_path,
+        [
+            ("NY.GDP.MKTP.KD", "JPN", 2020, 1.0),
+            ("NY.GDP.MKTP.KD", "FRA", 2020, 2.0),
+            ("SP.POP.TOTL", "JPN", 2020, 3.0),
+        ],
+    )
+    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", lakehouse)
     monkeypatch.setattr(assets, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "SP.POP.TOTL"))
 
     result = assets.wdi_indicators_all_present()
@@ -135,13 +152,8 @@ def test_wdi_check_names_the_indicator_the_world_bank_answered_empty(tmp_path, m
     The table is non-empty and every other indicator is fine, so nothing in the
     load fails — the column just arrives all-null in `stg_wdi`.
     """
-    lakehouse = _lakehouse(
-        tmp_path,
-        f"create schema {ATTACH_ALIAS}.raw",
-        f"create table {ATTACH_ALIAS}.raw.wb_wdi (indicator varchar)",
-        f"insert into {ATTACH_ALIAS}.raw.wb_wdi values ('NY.GDP.MKTP.KD')",
-    )
-    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lakehouse))
+    lakehouse = _wdi(tmp_path, [("NY.GDP.MKTP.KD", "JPN", 2020, 1.0)])
+    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", lakehouse)
     monkeypatch.setattr(assets, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "EN.ATM.CO2E.PC"))
 
     result = assets.wdi_indicators_all_present()
@@ -152,6 +164,32 @@ def test_wdi_check_names_the_indicator_the_world_bank_answered_empty(tmp_path, m
     # reads the real catalog, where `EN.ATM.CO2E.PC` is still absent and the two
     # assertions above pass unchanged. This is the one that notices.
     assert _meta(result, "indicators_loaded") == 1
+
+
+@pytest.mark.parametrize(
+    "unusable",
+    [
+        ("NY.GDP.MKTP.KD", "", 2019, 1.0),  # the stale cached copy: no ISO code
+        ("NY.GDP.MKTP.KD", "JPN", 2019, None),  # a row with no value
+        ("NY.GDP.MKTP.KD", "JPN", 2099, 1.0),  # a projection `stg_wdi` cuts
+    ],
+    ids=["no-iso3", "no-value", "future-year"],
+)
+def test_wdi_check_fails_an_indicator_whose_rows_stg_wdi_would_drop(
+    tmp_path, monkeypatch, assets, unusable
+):
+    """Rows landed, so a check on presence passes, and every one of them is
+    dropped by `stg_wdi`, so the column is all-null anyway. The World Bank's
+    CDN served exactly the first case for `NY.GDP.MKTP.KD`: 8,091 rows, every
+    `countryiso3code` empty."""
+    lakehouse = _wdi(tmp_path, [unusable, ("SP.POP.TOTL", "JPN", 2019, 3.0)])
+    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", lakehouse)
+    monkeypatch.setattr(assets, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "SP.POP.TOTL"))
+
+    result = assets.wdi_indicators_all_present()
+
+    assert not result.passed
+    assert _meta(result, "missing_indicators") == ["NY.GDP.MKTP.KD"]
 
 
 # --------------------------------------------------------------------------- #

@@ -151,6 +151,15 @@ carries it forward is `publishing-a-release`.
   The API served the projections for at most ~28 hours and was back to
   1960-2025 by 2026-09-08 14:00 UTC; the recorded fixtures never held them, so
   nothing needed re-recording.
+- **The World Bank's CDN can serve a stale copy of one URL for a day.** Cloudflare
+  cached `NY.GDP.MKTP.KD?format=json&per_page=10000&page=1` with a 2022 edition
+  of the series (`lastupdated` 2022-07-22, 1990-2020, 8,091 rows) whose every
+  `countryiso3code` is empty; any other `per_page` got the current one. The rows
+  land, `stg_wdi` drops all of them, and `gdp_constant_usd` is null everywhere —
+  which surfaced as an empty `analytics.co2_intensity` two layers down.
+  `wdi_indicators_all_present` counts only rows `stg_wdi` keeps, so it fails at
+  `raw`. To confirm a suspect series, compare `per_page` values with `curl -sD-`
+  and read `cf-cache-status`, `last-modified` and the payload's `lastupdated`.
 
 - **"Latest year" is per column, not per table.** `max(year)` on the mart is
   whichever source runs furthest ahead (Eurostat prices, a year beyond the rest),

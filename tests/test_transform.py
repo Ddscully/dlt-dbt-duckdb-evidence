@@ -13,9 +13,8 @@ import datetime as dt
 import duckdb
 import polars as pl
 import pytest
-from polars.io.plugins import register_io_source
 
-from transform.co2_intensity import build_co2_intensity, read_usable_rows
+from transform.co2_intensity import build_co2_intensity
 from transform.retail_rfm import SEGMENT_GRID, assign_quintiles, build_retail_rfm
 
 SCHEMA = {
@@ -65,15 +64,14 @@ def test_intensity_uses_constant_price_gdp():
 def test_rows_without_usable_gdp_are_dropped(gdp):
     """Null, zero and negative denominators all drop out rather than producing
     an infinity that would then win the rank."""
-    con = _mart(
+    out = build_co2_intensity(
         _frame(
             [
                 _row("AAA", 2020, "Low income", 1.0, gdp),
                 _row("BBB", 2020, "Low income", 1.0, 1e9),
             ]
         )
-    )
-    out = build_co2_intensity(read_usable_rows(con)).collect()
+    ).collect()
     assert out["country_iso3"].to_list() == ["BBB"]
 
 
@@ -101,28 +99,22 @@ def test_rank_is_dense_and_per_cohort():
     assert ranks["EEE"] == 1  # new year
 
 
-def _mart(frame: pl.LazyFrame, guard_sql: str = "0") -> duckdb.DuckDBPyConnection:
-    """An in-memory DuckDB whose `marts.fct_emissions_energy` serves `frame`,
-    plus one `guard` column whose SQL can call `error()` when DuckDB computes it."""
+def _duckdb_scan(frame: pl.LazyFrame, guard_sql: str) -> pl.LazyFrame:
+    """`frame` served lazily from DuckDB, as `run()` serves the mart, plus one
+    `guard` column whose SQL calls `error()` when DuckDB computes it."""
     con = duckdb.connect()
     con.register("source_rows", frame.collect())
-    con.sql("create schema marts")
-    con.sql(
-        f"create view marts.fct_emissions_energy as select *, {guard_sql} as guard from source_rows"
-    )
-    return con
-
-
-def _duckdb_scan(frame: pl.LazyFrame, guard_sql: str) -> pl.LazyFrame:
-    """`frame` served lazily from DuckDB with no filter, plus the `guard` column."""
-    return _mart(frame, guard_sql).sql("select * from marts.fct_emissions_energy").pl(lazy=True)
+    con.sql(f"create view source as select *, {guard_sql} as guard from source_rows")
+    return con.sql("select * from source").pl(lazy=True)
 
 
 def test_the_unusable_gdp_filter_runs_inside_duckdb():
-    """The guard errors on exactly the rows the filter excludes, so this passes
-    only if DuckDB applies the filter before computing the columns — rows with no
-    ratio are never fetched."""
-    con = _mart(
+    """DuckDB's Polars bridge falls back to filtering in Python, silently, when
+    it cannot translate a predicate — same rows, every excluded row still
+    fetched. The guard errors on exactly the rows the filter excludes, so it
+    passes only if DuckDB applied the filter before computing the columns.
+    Filtering on the derived ratio fails it."""
+    scan = _duckdb_scan(
         _frame(
             [
                 _row("AAA", 2020, "Low income", 1.0, 1e9),
@@ -133,27 +125,7 @@ def test_the_unusable_gdp_filter_runs_inside_duckdb():
         "case when gdp_constant_usd > 0 and co2_mt is not null then 0"
         " else error('fetched a row the filter excludes') end",
     )
-    assert build_co2_intensity(read_usable_rows(con)).collect()["country_iso3"].to_list() == ["AAA"]
-
-
-def test_the_plan_hands_its_source_no_predicate():
-    """The filter lives in `read_usable_rows`' SQL, never in the Polars plan.
-
-    A Polars `filter()` on a DuckDB-backed lazy frame is pushed into the source
-    as a serialized expression for DuckDB's bridge to translate, and in the live
-    Pages build that translation matched no rows, with no error. The source here
-    records what the plan pushes into it, so a filter put back into
-    `build_co2_intensity` fails this.
-    """
-    rows = _frame([_row("AAA", 2020, "Low income", 1.0, 1e9)]).collect()
-    pushed = []
-
-    def source(with_columns, predicate, n_rows, batch_size):
-        pushed.append(predicate)
-        yield rows
-
-    build_co2_intensity(register_io_source(source, schema=rows.schema)).collect()
-    assert pushed == [None]
+    assert build_co2_intensity(scan).collect()["country_iso3"].to_list() == ["AAA"]
 
 
 # --------------------------------------------------------------------------- #

@@ -208,8 +208,9 @@ Two places, both required:
    indicator/country/year) and is pivoted wide there.
 
 Then the mart column (step 5) and the report (step 6). The
-`wdi_indicators_all_present` asset check will fail if the API returns 200 with an
-empty series for the new code, which is the common failure mode.
+`wdi_indicators_all_present` asset check fails any indicator with no row that
+`stg_wdi` keeps (three-letter ISO code, a year not in the future, a value). That
+catches the common failure mode, a 200 with an empty series for a bad code.
 
 `wb_wdi` is loaded incrementally, but the watermarks are kept **per indicator**,
 so a code that isn't in the state yet is fetched in full — you get the whole
