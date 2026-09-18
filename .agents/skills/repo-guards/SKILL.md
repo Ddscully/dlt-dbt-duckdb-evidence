@@ -474,8 +474,12 @@ containers outside compose, so four files have to agree by hand.
   `{env: X}` and every bare `env_vars` name assigned somewhere; every
   `container_kwargs.volumes` source declared as a compose volume `name:` and
   mounted at the same path in the `dagster` service; the launcher's `network`
-  equal to `networks.default.name`; `DAGSTER_CURRENT_IMAGE` equal to the
-  service's `image`.
+  equal to `networks.default.name`; the launcher being
+  `ServiceImageDockerRunLauncher`, with no `image` config, no
+  `DAGSTER_CURRENT_IMAGE` and no `hostname:` on the service. The subclass's
+  behaviour, and the private `_get_docker_image` it overrides, are
+  `tests/test_docker_launcher.py`, which skips without the `deploy` group, so
+  `ci.yml`'s unit-test job syncs it.
 - **Why a test and not a startup check**: an unset `env_vars` name raises inside
   the *daemon*, dequeuing the run, after the UI has already reported it
   launched. A wrong volume path raises nothing at all — the run writes a

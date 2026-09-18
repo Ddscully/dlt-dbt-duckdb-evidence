@@ -231,12 +231,29 @@ def test_the_launcher_network_is_the_compose_network():
     assert network == load(COMPOSE)["networks"]["default"]["name"]
 
 
-def test_the_run_image_and_the_service_image_are_the_same():
-    """`DAGSTER_CURRENT_IMAGE` is what the code location reports and the
-    launcher's `image` is the fallback. Both resolve to the service's own image
-    here, so a run executes the code that launched it."""
+def test_runs_launch_from_the_service_image_and_not_a_tag():
+    """A tag moves on `just compose-build`; the service keeps its image until
+    `just compose-up`. Stock `DockerRunLauncher` launches runs by name, so in
+    between they ran code the service was not running. The subclass looks up
+    the launching container's image ID instead, which is the service's own.
+
+    Everything a name could come from is asserted absent, because the subclass
+    ignores them and a value left behind would read as if it mattered. And the
+    service must keep its default hostname: that is the container ID the
+    subclass looks itself up by.
+    """
+    launcher = load(DEPLOYED_INSTANCE)["run_launcher"]
+    assert (launcher["module"], launcher["class"]) == (
+        "modern_data_stack.docker_launcher",
+        "ServiceImageDockerRunLauncher",
+    )
+    assert "image" not in launcher["config"]
     service = compose_service(DAGSTER_SERVICE)
-    assert service["environment"]["DAGSTER_CURRENT_IMAGE"] == service["image"]
+    assert "DAGSTER_CURRENT_IMAGE" not in service["environment"]
+    assert "hostname" not in service, (
+        "a `hostname:` on the service replaces the container ID the launcher "
+        "uses to find its own image"
+    )
 
 
 def image_tags() -> list[tuple[str, str, int]]:

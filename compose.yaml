@@ -133,9 +133,6 @@ services:
     # ends up reaping nothing and `docker stop` waits out its full grace period.
     init: true
     environment:
-      # What the launcher reads to decide a run's image. It is also the
-      # fallback in deploy/dagster.yaml, and the two must agree.
-      DAGSTER_CURRENT_IMAGE: mds:local
       PROJECT_ROOT: /app
       WAREHOUSE_PATH: /app/data/warehouse.duckdb
       LAKEHOUSE_DIR: /app/data/lakehouse

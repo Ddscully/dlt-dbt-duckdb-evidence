@@ -89,8 +89,8 @@ built answer rather than a sketch: `Dockerfile`, `compose.yaml`, and a
    cover, `tests/test_dagster_instance.py` does instead: it reads the Dockerfile
    and `compose.yaml` as data and holds them against `deploy/dagster.yaml` —
    every launcher `env_vars` name assigned, every run-container volume declared
-   and mounted at the same path, the network matching, the run image matching
-   the service's.
+   and mounted at the same path, the network matching, and the launcher being
+   the one that runs every run from the service's own image (below).
 2. **Conceded, and then answered.** It really is a new pinning surface: four
    base and service images. `.github/dependabot.yml` gained a `docker`
    ecosystem for the Dockerfile beside the `docker-compose` one for the compose
@@ -939,9 +939,20 @@ What differs from a host deployment, beyond packaging:
   stops them for good. It reaches only the four services; a run's container is
   the launcher's, not compose's, and is removed when it exits. The logging the
   unit supplied is `docker compose logs`.
-- **Each run gets its own container**, launched by `DockerRunLauncher` from the
-  same image, and removed when it finishes. Measured 2026-09-17: about 10 s from
-  launch to a running run container, against a subprocess starting immediately.
+- **Each run gets its own container**, launched from the same image, and
+  removed when it finishes. Measured 2026-09-17: about 10 s from launch to a
+  running run container, against a subprocess starting immediately.
+- **"The same image" means the service's image ID, not `mds:local`.** Stock
+  `DockerRunLauncher` launches by name, and `just compose-build` moves the tag
+  at once while the service keeps its old image until `just compose-up`
+  recreates it. In between, a scheduled run executed code the service was not
+  running; seen 2026-09-18, the service on `230076f0ab43` and the tag on
+  `fc7ff551e654`. `modern_data_stack.docker_launcher` asks Docker for the
+  launching container's own image instead. The daemon launches every queued
+  run, so a build changes nothing until the service is recreated, and
+  `compose-build` then `compose-up` is the deploy. It finds itself by hostname,
+  so the `dagster` service must not set `hostname:`, which the instance test
+  asserts.
 - **The landing zone is not on a volume at all.** The catalog is in Postgres and
   the Parquet in SeaweedFS, so the one file a run container and the service both
   open is `data/warehouse.duckdb` on `mds_data` — which is why §2 reason 3 is

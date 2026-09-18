@@ -41,7 +41,7 @@ here, the export's personal-data refusal in §7, the lakehouse release check in
 
 ### The package — `src/modern_data_stack/`
 
-Eleven modules, no mention of emissions in any of them. Copy the directory, or
+Twelve modules, no mention of emissions in any of them. Copy the directory, or
 depend on it and write only the layers below.
 
 | Module | What it does | Configured by |
@@ -57,6 +57,7 @@ depend on it and write only the layers below.
 | `workbook` | read a spreadsheet source without loading it whole | a URL and a batch size |
 | `db` | single-row and scalar reads, without the `Optional` | nothing |
 | `bus_matrix` | derive the bus matrix from the manifest's uniqueness tests | a schema and the `dim_`/`fct_` prefixes |
+| `docker_launcher` | a Dagster `DockerRunLauncher` that starts each run from the launching container's own image ID, not a tag | the instance config's `run_launcher` block; needs `dagster-docker` |
 
 Each project module keeps the entry point, so `python -m lake.lakehouse`, the
 justfile recipes and the asset graph all still call the same names. Four rules
