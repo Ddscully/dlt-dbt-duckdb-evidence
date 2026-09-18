@@ -323,7 +323,7 @@ Everything below has to be on durable storage, and each row fails differently:
 | dlt's data dir | the WDI watermark and the ECB's last fixing | a silent full re-fetch, or a five-year window into a warehouse with no history |
 | `.dagster/` | the laptop instance: run and event storage (SQLite), plus **schedule on/off state**; its `dagster.yaml` is config, checked in, and has to be carried to any other `DAGSTER_HOME` | run history, and a service that looks running and ingests nothing (§5); without `dagster.yaml`, runs no longer queue behind each other (§5) |
 | the `dagster` database | the same three, when `DAGSTER_HOME` names `deploy/` instead: `deploy/dagster.yaml` puts run, event and schedule storage in Postgres, so they outlive a container that is replaced rather than restarted | the same three losses, with nothing left on a filesystem to restore them from |
-| `$DAGSTER_STORAGE_DIR` | compute logs and the artifacts a run writes, which Dagster keeps on a filesystem under *either* instance — Postgres storage does not take these | a finished run whose logs the UI shows as empty |
+| `$DAGSTER_STORAGE_DIR` | compute logs and the artifacts a run writes, under `deploy/dagster.yaml` — Postgres storage does not take these. Only that file reads the variable: the laptop instance keeps them in `.dagster/storage/`, inside the `.dagster/` row | a finished run whose logs the UI shows as empty |
 | `data/cache/` | the retail workbook | a download, never data |
 
 **The dlt row is the one a service gets wrong**, and the reason is written into
@@ -810,7 +810,8 @@ Environment=DAGSTER_HOME=/srv/mds/repo/deploy
 ```
 
 `$DAGSTER_STORAGE_DIR` still belongs on the volume: compute logs and run
-artifacts stay on a filesystem under either instance (§3). Measured 2026-09-17:
+artifacts stay on a filesystem, and this is the instance that puts them there
+(§3). Measured 2026-09-17:
 the first use of that instance created 22 tables in the `dagster` database, and
 after one `load_retail` the database was 9.3 MB.
 
