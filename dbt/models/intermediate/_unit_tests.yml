@@ -20,16 +20,13 @@ unit_tests:
       "Other countries and territories" table — so direct, indirect and total
       must all come from that one row. Picking each column from whichever source
       happens to hold it produces a line that exists nowhere in the regulation,
-      which is what a per-column `coalesce` once did to Chile's line pipe. That
-      row was corrected out of the annex in July 2026 and **no row in the current
-      source can reach this branch**: zero of the 12,540 seed rows have a null
-      total beside a non-null direct or indirect. Chile is posed here for that
-      reason. `production_route_code` follows the rule too, and the fixture is
+      which is what a per-column `coalesce` does to Chile's line pipe as the
+      original annex published it. **No row in the current source can reach this
+      branch** — zero of the 12,540 seed rows have a null total beside a non-null
+      direct or indirect — so Chile is posed here instead. `production_route_code` follows the rule too, and the fixture is
       built to prove it rather than to record it: Chile carries a route of its
       own ("B") and the fallback carries a different one ("F"), so the only way
-      to expect "F" is to read the route off the row the tonnages came from. It
-      did not follow the rule until 2026-08-24 — 202 warehouse rows showed a
-      blank route beside a tonnage whose fallback row had one.
+      to expect "F" is to read the route off the row the tonnages came from.
     given:
       - input: ref('cbam_default_values')
         rows:
@@ -108,8 +105,8 @@ unit_tests:
     model: int_retail_return_matches
     description: >
       An `asof join` with several rows tied on its inequality key picks one
-      arbitrarily, and enough of this purchase universe is tied that the model
-      was not reproducible between builds until 2026-08-24. **How much, and what
+      arbitrarily, and enough of this purchase universe is tied that picking one
+      makes the model irreproducible between builds. **How much, and what
       choosing one tied line instead of summing them costs, is measured once —
       in the comment above `match_candidates` in the model** — and deliberately
       not restated here: that set of figures was written out in four places, so
@@ -195,8 +192,7 @@ unit_tests:
   - name: return_matches_admit_a_same_instant_reversal_and_exclude_non_product_lines
     model: int_retail_return_matches
     description: >
-      Two rules about which rows reach the join at all, both of which used to be
-      checked from the mart. The POST cancellation is here to stay out: without
+      Two rules about which rows reach the join at all. The POST cancellation is here to stay out: without
       `item_type = 'product'` on the `returns` filter the warehouse gains 1,207
       rows and reports returning things nobody buys. The last pair is bought and
       returned in the same instant, which the asof condition admits because it is

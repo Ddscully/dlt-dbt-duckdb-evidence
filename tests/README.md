@@ -36,9 +36,8 @@ nothing: there is no `fail_under`, nothing in CI runs it, and pytest is run
 *under* coverage rather than loading a plugin, so there is no flag to leave
 switched on by accident. Same shape as `just typecheck`.
 
-**`pytest-cov` was tried first and dropped**, because it measured identically —
-same total, same runtime to within 0.02s — for one more package. The wrapper was
-buying a `--cov` flag; the config it reads is coverage.py's either way.
+Not `pytest-cov`, which measured identically for one more package
+([decision 0003](../docs/decisions/0003-coverage-py-over-pytest-cov.md)).
 
 **Two caveats, or the total misleads.** It measures *this* tier only, so the
 transform and lake layers read low while `just test-pipeline` exercises them end

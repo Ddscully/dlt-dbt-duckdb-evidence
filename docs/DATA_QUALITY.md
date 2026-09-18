@@ -58,9 +58,8 @@ fertiliser average from €105.76 to €115.18 a tonne — fertilisers carry a f
 food-security carve-out — with every data test on the model green, and measuring
 `excess_over_cleanest_source` against the product group instead of the good takes
 the total from 18,153 to 29,469 tonnes, also with every one green. Its join to
-`dim_grid_emission_factors` was mocked `rows: []` by every one of those tests
-until 2026-09-05, so three shipped columns were reaching the release untested:
-turning that left join inner deletes 261 rows including all 260 fallback rows,
+`dim_grid_emission_factors` needs fixture rows of its own, because a test that
+mocks it as `rows: []` leaves three shipped columns untested: turning that left join inner deletes 261 rows including all 260 fallback rows,
 and replacing `where is_latest_available` with the current year strips the
 factor off 2,584 more — **PASS=22, ERROR=0** either way, because this model has
 no row-count test and a missing factor is a legal null.

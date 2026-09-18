@@ -196,10 +196,9 @@ def re_run_after_parse() -> set[str]:
     contributes nothing here — which is the point: that is the run where these
     files skip.
 
-    **Comment lines are dropped first**, and that is not tidiness. This scanned
-    the whole file until 2026-09-17, when a comment in the `container` job
-    explaining *why that job runs no pytest command* was read as a pytest
-    command, and its own prose words became expected test filenames. A guard
+    **Comment lines are dropped first**, and that is not tidiness. Scanning the
+    whole file reads a comment explaining *why a job runs no pytest command* as
+    a pytest command, and its prose words become expected test filenames. A guard
     that a sentence about it can break is a guard that discourages writing the
     sentence.
     """
@@ -686,7 +685,8 @@ _COURSE_STATE_BY_COMMAND = {
 def test_every_course_recipe_keeps_the_sandbox_to_itself():
     """A `course-*` recipe must point everything it runs at `data/course/`.
 
-    `just course-rebuild` exported `WAREHOUSE_PATH` alone (#65). dbt attached the
+    Exporting `WAREHOUSE_PATH` alone is not enough, as measured when a
+    `course-rebuild` did exactly that: dbt attached the
     *real* landing zone, and every staging model is a view over it, so a drill
     rebuilt a sandbox copy's `fct_emissions_energy` from 4,096 rows to 43,138 with
     a green build. The same recipe, and `course-sandbox`, wrote dbt's artifacts

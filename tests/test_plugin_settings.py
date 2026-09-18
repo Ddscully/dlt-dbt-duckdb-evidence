@@ -71,8 +71,8 @@ def test_the_two_measured_removals_stay_removed():
     """`dagster-expert@dagster` and `polars@polars`, retired 2026-09-02.
 
     Retired on a measured zero `Skill` invocations across the window in which
-    both layers were being edited; CLAUDE.md's *Claude Code plugins* section has
-    the measurement and the reasoning. `polars` is the weaker call: nothing replaces
+    both layers were being edited; docs/decisions/0004 has the measurement and
+    the reasoning. `polars` is the weaker call: nothing replaces
     it, so it is the first to reconsider if `transform/` grows into a layer.
 
     Both marketplaces stay registered: removing a github marketplace

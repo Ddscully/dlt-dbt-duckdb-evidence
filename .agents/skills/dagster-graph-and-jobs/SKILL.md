@@ -89,33 +89,18 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   `DagsterCodeLocationNotFoundError`. Both measured 2026-09-17
   ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §8).
 
-The vendor `dagster-expert` skill overlapped this barely at all and **is no
-longer enabled** (2026-09-02, zero invocations across 211 transcripts covering 9
-commits to `orchestration/`). The last bullet below is why: it is written around
-a `dg` CLI this project does not install. So this file is the Dagster knowledge
-for this repo, not a supplement to a vendor one.
+**This file is the Dagster knowledge for this repo**, not a supplement to a
+vendor skill: `dagster-expert` is not enabled, because it is written around a `dg`
+CLI this project does not install
+([`docs/decisions/0004-agent-plugins-kept-by-measured-use.md`](../../../docs/decisions/0004-agent-plugins-kept-by-measured-use.md)).
 
 ## Backfill windows, and the one partition
 
 - **`raw/wb_wdi` and `raw/om_weather_daily` take a year range as run config, not
-  partitions, and the Materialize button is why.** They were yearly partitions
-  until 2026-09, on an argument that still holds: the API takes a date range, the
-  disposition is `merge`, and the year is in the primary key, so a year is a real
-  re-runnable unit of work. That makes a partition *possible*; two things made it
-  the wrong tool.
-  - **A job takes its assets' partitions definition, and a partitioned job's
-    Materialize button is a backfill.** The dialog is a partition picker with no
-    "no partition" choice — read out of the 1.13.22 UI bundle: the default
-    selection is empty, and when the selection's root assets carry different
-    definitions it is fixed at "All partitions". Only the Launchpad runs a
-    partitioned job plain. On 2026-09-13 the button launched `full_refresh` over
-    1960–2026 as one run, cancelled after ten minutes, where the same job from
-    the Launchpad finished in 1m38s. Weather's share alone is ~42,800 units
-    against 10,000 a day, which the limiter would have paced over days.
-  - **No routine run ever filled a partition.** The schedule, the live workflows
-    and every recipe but the two backfills run the lookback with no key, so
-    partition status sat empty while `raw.wb_wdi` held the full series. A
-    partition only ever did a backfill's job, which is what run config is for.
+  partitions, and the Materialize button is why**: a job takes its assets'
+  partitions definition, and a partitioned job's Materialize button is a
+  backfill of every year since 1960. The measurements, and what was weighed, are
+  [`docs/decisions/0002-yearly-sources-as-run-config.md`](../../../docs/decisions/0002-yearly-sources-as-run-config.md).
   - **`YearRange` is the config, on the `ingest_by_year` op.** Unset loads the
     lookback; `first_year` (with `last_year`, which defaults to it) loads exactly
     that closed range, bounded where the partitions sat: WDI's 1960 and the
@@ -133,14 +118,9 @@ for this repo, not a supplement to a vendor one.
     2025 watermark and the next incremental run would look back five years over
     sixty years that were never fetched.
   - **One range is one run, whichever source.** WDI asks `&date=lo:hi`, so
-    1990–2025 is 11 requests, one per indicator, not 396 — what
-    `BackfillPolicy.single_run()` bought when this was a partition. Weather
+    1990–2025 is 11 requests, one per indicator, not 396. Weather
     chunks by year inside the resource either way, to pace its budget, and
     refuses a range over a day's allowance before any request (`weather-models`).
-  - **Taking the partitions off also fixed `just materialize-select
-    'raw/wb_wdi*'`**, which the README advertised while the CLI refused it with
-    "Asset has partitions, but no '--partition' option was provided" (measured
-    against `main` at `46d0ebd`). An unpartitioned asset needs no key.
   - **`tests/test_definitions.py` asserts `full_refresh` and `publish_site` have
     no `partitions_def`**, because one partitioned asset joining either
     selection brings the picker back with nothing else red.
@@ -243,9 +223,8 @@ for this repo, not a supplement to a vendor one.
 - **This is deliberately not a `dg`-shaped project, and the two halves of that
   decision are separable.** `create-dagster` scaffolds a `defs/` tree that
   autoloads, a `[tool.dg.project]` block and YAML components; `dagster-expert`,
-  the vendor skill, was written around the `dg` CLI and assumed all of it —
-  which is what eventually retired it from `.claude/settings.json`, a plugin
-  arguing for a different project. Costed 2026-08-25 rather than assumed:
+  the vendor skill, was written around the `dg` CLI and assumed all of it.
+  Costed 2026-08-25 rather than assumed:
   - **The autoloading half is already here and free.** `dagster.components` and
     `dagster.load_from_defs_folder` ship in `dagster` core — no extra package.
     What it would buy is deleting `tests/test_definitions.py`, because an
@@ -281,7 +260,7 @@ for this repo, not a supplement to a vendor one.
     and graph-state-dependent triggering; `ScheduleDefinition` raises no
     deprecation warning on 1.13, so this is not a legacy path being tolerated.
     - **The partition angle is the near-miss.** One asset here *is* partitioned
-      (two more were until 2026-09), which is DA's stated niche — but backfills
+      (the yearly sources take run config instead), which is DA's stated niche — but backfills
       are deliberately manual (`just backfill-wdi`, "an explicit act with a
       window you can point at"), so DA would automate precisely what this
       project chose to keep explicit.

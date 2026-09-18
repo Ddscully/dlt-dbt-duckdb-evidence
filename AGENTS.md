@@ -40,7 +40,9 @@ topic** — [`WAREHOUSE.md`](docs/WAREHOUSE.md),
 [`DASHBOARD.md`](docs/DASHBOARD.md) and
 [`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). What it cost to learn sits here and
 in the skills, so a change to how a layer works usually needs an edit in `docs/`
-**and** in one of those.
+**and** in one of those. **Docs describe the present;** why a rejected approach
+stays rejected is [`docs/decisions/`](docs/decisions/README.md) — check it
+before undoing a choice, and move history there rather than into a doc.
 
 - **[`PRACTICES.md`](docs/PRACTICES.md) restates figures from five other files**,
   and `tests/test_documented_counts.py` covers only its test, mart and additivity
@@ -61,8 +63,7 @@ Three lessons that apply well beyond where they were learned:
   read that works mid-build (`querying-the-warehouse`).
 - **`uv sync` strips the venv; `uv run` does not.** A bare `uv sync` installs
   `dev` alone and removes the `orchestration` group from under any running
-  service. This file once said the opposite, citing a dry run of the other
-  command: **a measurement of one command is not evidence about another.**
+  service. **A measurement of one command is not evidence about another.**
 
 ## The layers, and what each directory is for
 
@@ -206,8 +207,8 @@ globs, holding dbt Labs' skills to this repo's paths.
 | `repo-guards` | hand-maintained lists, their guards, the fixtures, the suite's traps |
 | `authoring-course-modules` | writing `docs/course/` |
 
-Fourteen of the eighteen were split out of this file, because it loads in full
-before every session. **A new section here is a question about where it belongs,
+Most were split out of this file, because it loads in full before every
+session. **A new section here is a question about where it belongs,
 not only about what it says**: it stays only if every session needs it — not
 knowing it does irreversible damage, gives a silent wrong answer outside any one
 domain, or is needed to find everything else. The file accretes in bursts behind
@@ -501,7 +502,7 @@ Every PR here is **squash-merged**, so `main` is linear with one commit per PR.
   base's identity, so `git rebase --onto origin/main <old-base> <branch>`.
   **Retarget first, with `gh pr edit <n> --base main`**: merging the PR below with
   `--delete-branch` deletes the stacked PR's base, which closes it, and GitHub will
-  not reopen it (#61, 2026-09-16). The flag deletes the local branch too, so
+  not reopen it. The flag deletes the local branch too, so
   `<old-base>` has to be a SHA from the stacked branch's log. What
   conflicts is whatever both sides touch — here, the running totals in
   `AGENTS.md` and `docs/DATA_QUALITY.md`. **A derived total written into prose
@@ -512,8 +513,7 @@ Every PR here is **squash-merged**, so `main` is linear with one commit per PR.
   both show a diff. **`git merge-tree --write-tree main <branch>` decides it only
   until `main` touches the branch's files again**: a tree equal to
   `git rev-parse main^{tree}` means the branch adds nothing, but a conflict proves
-  nothing — on 2026-09-15 three merged branches, three to five PRs behind, all
-  conflicted, one on `CLAUDE.md` alone. **Past that, ask GitHub what it merged**:
+  nothing: a merged branch a few PRs behind routinely conflicts. **Past that, ask GitHub what it merged**:
   `gh pr list --state merged --head <branch> --json number,headRefOid` gives the
   PR and its final commit, and `git merge-base --is-ancestor <branch> <headRefOid>`
   exiting 0 means every commit on the branch went into it. Look before `-D`.

@@ -82,13 +82,8 @@ its first source with a *finite budget*.
   restores both. Verified end to end: restore a release into an empty tree and
   `weather_watermark()` reads the last day it carried, so the next ingest asks
   for a 90-day lookback rather than a three-year cold start.
-  - **Only this table is published, and the allowlist has two independent
-    reasons.** Cost — nothing else in `raw` is unreproducible within the budget.
-    Disclosure — `raw.retail_invoice_lines` and dlt's `raw_staging` copy hold
-    824,364 clear customer ids between them. And it cannot be filtered after the
-    fact: DuckLake keeps dropped tables in earlier snapshots, so `at (version =>
-    …)` still returns them (measured, with a customer id in it). The published
-    catalog is *built* from `PUBLISHED_TABLES`, never trimmed down to it.
+  - **Only this table is published**, from the `PUBLISHED_TABLES` allowlist;
+    why an allowlist, and why it is built rather than trimmed, is `the-lakehouse`.
 - **This makes `raw.om_weather_daily` the second table a rebuild cannot
   reproduce, for a new reason.** `history.snap_co2_estimates` is unreproducible
   in *principle* — a snapshot is state. This one is unreproducible within a
@@ -112,19 +107,11 @@ its first source with a *finite budget*.
   2011-12, and `raw.owid_co2` has produced zero observed revisions locally.
   Re-merging 41 x 90 = 3,690 rows in place every ingest, on the *scheduled*
   ERA5T-to-ERA5 supersession, is the one real update path here.
-  - **DuckLake's own change feed cannot report it, because of dlt.** dlt
-    regenerates `_dlt_id` *and* `_dlt_load_id` on every row it re-merges,
-    byte-identical weather or not — measured by reloading 500 identical rows,
-    which returned 500 `update_preimage`/`update_postimage` pairs. So
-    `ducklake_table_changes()` answers the same thing for a no-op reload and a
-    real restatement. `lake.lakehouse.revisions()` diffs two snapshots with
-    `EXCEPT` instead, projecting those columns away: 0 rows for the reload, 1 for
-    the change.
-  - **The failure is a plausible number, not an error.** Forget a provenance
-    column and the diff reports the whole table, which reads as a catastrophic
-    upstream restatement. `weather_revisions_are_derivable` is bounded on the
-    total for that reason, and `tests/test_lakehouse.py` asserts the zero as hard
-    as the one.
+  - **DuckLake's change feed cannot report it**, because dlt rewrites its
+    provenance columns on every re-merged row, so a no-op reload looks like a
+    full restatement. `lake.lakehouse.revisions()` diffs two snapshots instead,
+    and `weather_revisions_are_derivable` bounds its total; `the-lakehouse` has
+    the measurements and the failure mode.
 - **A cold start fetches three years, not the whole series, and getting that
   wrong is a *hang* rather than a failure.** `WEATHER_FIRST_YEAR` (2007) is the
   backfill floor; `WEATHER_COLD_START_YEARS` is what a routine load asks
@@ -154,14 +141,11 @@ its first source with a *finite budget*.
   Copernicus supersedes it with final ERA5 two to three months later. FX's ten
   days would freeze preliminary numbers *permanently* here, because rows outside
   the window are carried forward rather than refetched.
-- **A backfill over more than a day's allowance is refused before any request,
-  and the Dagster UI is what proved it had to be.** The same shape as the cold
-  start below, on the path that never had a total bound: weather was a yearly
-  *partition* until 2026-09, and a partitioned job's Materialize button is a
-  backfill. On 2026-09-13 it asked for 1960–2026 — ~42,800 units, over four
-  days of allowance, which the limiter honours by sleeping — and the run was
-  cancelled after ten minutes with nothing red. (That step also fetched WDI's
-  whole series, so the ten minutes are not all weather's.)
+- **A backfill over more than a day's allowance is refused before any request.**
+  The same shape as the cold start below: 1960–2026 is ~42,800 units, over four
+  days of allowance, which the limiter would honour by sleeping for days with
+  nothing red (measured when a partition picker launched exactly that:
+  [`docs/decisions/0002-yearly-sources-as-run-config.md`](../../../docs/decisions/0002-yearly-sources-as-run-config.md)).
   `check_weather_range_is_affordable` sums `weather_windows` for every capital
   and raises past 10,000, naming a split that fits: fifteen years a run, sized
   against leap years. The resource calls it first thing, and
@@ -191,25 +175,18 @@ its first source with a *finite budget*.
   every row, for `dim_date.fiscal_year_start_month`'s reason exactly: it is a
   policy, the warehouse builds one value of it, and every other value it claims
   to support is untested by construction.
-  - **"Disagree" is the whole of it — there is no ordering between them, and
-    `_country_stats.yml` asserted one for three weeks.** A comment there claimed
-    the midpoint convention "runs warmer than the mean-based one, never colder", by
-    construction. Measured over the full archive (656 rows, 41 capitals x 16
-    years): `hdd_minmax_total` is the **larger in 253 rows (38.6%)** and the
+  - **"Disagree" is the whole of it — there is no ordering between them.**
+    Measured over the full archive (656 rows, 41 capitals x 16 years): `hdd_minmax_total` is the **larger in 253 rows (38.6%)** and the
     smaller in 403, gaps running -153.0 to +96.2. Whether the midpoint sits
-    above or below the true daily mean depends on the day's diurnal shape. So
-    the claim is not merely unproven, it is false, and writing it into a data
-    test turns the build red on reality — do not "fix" the comment by encoding
-    it.
-  - **The two being swapped is therefore uncatchable by a data test**, which is
-    what the vacuous expression under that comment was pretending to do: swap
-    them in the mart's final SELECT and all 29 of `fct_country_weather_year`'s
-    data tests pass. It is a
-    unit test now — `weather_year_keeps_the_two_degree_day_conventions_apart`,
+    above or below the true daily mean depends on the day's diurnal shape, so a
+    data test asserting an order turns the build red on reality.
+  - **The two being swapped is therefore uncatchable by a data test**: swap them
+    in the mart's final SELECT and all 29 of `fct_country_weather_year`'s data
+    tests pass. It is a unit test — `weather_year_keeps_the_two_degree_day_conventions_apart`,
     whose fixture deliberately puts one country on each side of the gap. See
     `unit-testing-dbt-models`.
-- **The payoff is a negative result, which is the kind this warehouse could not
-  previously reach.** Heating degree days for six EU capitals, 2021 against 2022:
+- **The payoff is a negative result, which only weather lets this warehouse
+  reach.** Heating degree days for six EU capitals, 2021 against 2022:
   every one milder, inside a 6.5-point band (Germany -13.5%, Spain -10.2%,
   France -16.5%, Italy -12.0%, Netherlands -13.8%, Poland -10.0%) while
   electricity prices spread 81.8 points in both directions. Weather explains

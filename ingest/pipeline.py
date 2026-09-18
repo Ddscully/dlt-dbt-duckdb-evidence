@@ -86,10 +86,9 @@ INCREMENTAL_RESOURCES = ("wb_wdi", "ecb_fx_rates", "retail_invoice_lines", "om_w
 #     one static workbook, so the fetch cannot narrow, but the load can:
 #     `invoice_month` comes from the partition's timestamp.
 #
-# The year-range pair were yearly partitions until 2026-09. Every routine run
-# loads their lookback, so nothing but a backfill ever filled a partition, and a
-# partitioned asset makes the Dagster UI's Materialize button a backfill: every
-# year from 1960, which for weather is days of Open-Meteo's allowance. Retail
+# The year-range pair are not partitions: a partitioned asset makes the Dagster
+# UI's Materialize button a backfill of every year from 1960, which for weather
+# is days of Open-Meteo's allowance (docs/decisions/0002). Retail
 # keeps its partitions because every month together costs what the one file
 # does.
 #

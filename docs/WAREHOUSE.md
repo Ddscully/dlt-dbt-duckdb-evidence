@@ -209,10 +209,8 @@ attach 'ducklake:duckdb:data/lakehouse/catalog.duckdb' as lakehouse
 select count(*) from lakehouse.raw.om_weather_daily;
 ```
 
-There used to be a hive-partitioned archive beside this at `data/lake/`, written
-by hand from the warehouse. It is gone: it was a second copy of data DuckLake
-already stores as Parquet, and keeping both meant maintaining two answers to
-*what moved upstream?*.
+The catalog is the only Parquet copy of `raw`; why there is no second archive
+beside it is [decision 0001](decisions/0001-ducklake-over-hive-parquet.md).
 
 - **Ask what changed by diffing two snapshots, not with the change feed.**
   `ducklake_table_changes()` is the obvious tool and it does not survive dlt,

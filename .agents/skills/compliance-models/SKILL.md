@@ -110,43 +110,24 @@ time series.
 ### The transcription is faithful, defects included
 
 - **The transcription is faithful, defects included, and the mart is where they
-  are handled.** The annex is a legal instrument; cleaning it in the seed would
-  put this project's judgement between the regulation and a euro figure. **Three
-  of the four documented quirks were fixed by the 2026/1740 correction** — which
-  is the vindication of the policy, not a reason to drop it: the body that wrote
-  the instrument corrected it, and this project would have baked its guesses in.
-  Kept here because the *handling* is still the reason parts of the mart look the
-  way they do:
-  - Albania's white Portland cement used to be published with `-` for direct,
-    indirect and total and its three values sitting in the *mark-up* columns
-    instead. Clean `-` now.
-  - Five cement rows (Angola, Argentina) used to **compound** the mark-up —
-    x1.1, x1.21, x1.331 — where the other 10,926 added it. With no published
-    mark-up column there is nothing left to compound, and
-    `markup_schedule_is_irregular` went with it.
-  - Chile's line pipe had a total and a blank 2026 cell. Gone too, but it is
-    what proved the fallback is a **row-level rule, not a column-level one**: a
-    per-column `coalesce` paired Chile's tonnage with the *fallback's* mark-up
-    and produced a 100% implied rate — a row that exists nowhere in the
-    regulation. The rule outlives the row; direct/indirect/total still have to be
-    read off one source.
+  are handled** ([`docs/decisions/0009-cbam-annex-transcribed-faithfully.md`](../../../docs/decisions/0009-cbam-annex-transcribed-faithfully.md)).
+  What the handling still shapes:
+  - **The fallback is a row-level rule, not a column-level one.** A per-column
+    `coalesce` pairs one country's tonnage with the fallback's mark-up and
+    produces rates that exist nowhere in the regulation, so direct, indirect and
+    total are read off one source.
   - 23 of the goods carry no value in any country, including the fallback. They
     are 4-digit CN *headings* whose subheadings hold the numbers, and they are
-    excluded from the mart — rows that could only be priced at null. **This one
-    survives**, and it is where `see below` lives (below).
+    excluded from the mart — rows that could only be priced at null. This is
+    where `see below` lives (below).
 - **Fertilisers carry a 1% mark-up in all three years**, not 10/20/30% and not
   1/2/3%, so the mark-up is a property of the product group — hardcoding one rate
   overstates every fertiliser line by nine points in 2026 and twenty-seven in
-  2028. **The mart used to derive this and now asserts it**, which is a real loss
-  and not a refactor. The annex published each good's marked-up value for each
-  year, so `mode()` over published/total read the schedule off the data and an
-  amendment moving a rate needed no edit. 2026/1740 publishes only direct,
-  indirect and total. The schedule is the `cbam_markup_schedule` seed now —
-  a seed and not a var or a `case`, so the carve-out stays reviewable as data —
-  and it is confirmed against both the articles and the February annex's own
-  columns, where all 10,929 priced rows imply exactly those rates. The stated
-  rates are actually *cleaner* than the published ones: those carried rounding
-  noise from the OJ's three decimals, so some rows implied 9,9% or 1,1%.
+  2028. **The schedule is asserted, not derived**: 2026/1740 publishes only
+  direct, indirect and total, so it is the `cbam_markup_schedule` seed, and an
+  amendment moving a rate needs an edit there
+  ([`docs/decisions/0010-cbam-markup-schedule-is-a-seed.md`](../../../docs/decisions/0010-cbam-markup-schedule-is-a-seed.md)).
+  All 10,929 priced rows of the February annex imply exactly those rates.
   - **What replaced the mark-up tests is `direct + indirect = total`** — the only
     internal consistency the corrected source still offers, and it reaches
     **2,781 of the 12,540 rows**, which is the part worth knowing before trusting
@@ -287,41 +268,18 @@ mutation in this table:
   of the annex in July 2026. The mutation is therefore *completely* invisible:
   not one figure in the warehouse changes. Same category as `dim_date`'s eleven
   unbuilt fiscal policies.
-- **`markup_2026_pct` cannot be asserted at all.** It is a ratio of two doubles
-  and the warehouse holds three distinct values that all print as `10.0`
-  (9.99999999999998578915, 10.00000000000000888178, 10.00000000000003197442).
-  A column with no exact value can carry a range test and nothing else — which is
-  the real cost of the correction forcing the schedule from measured to asserted.
-  The fixtures therefore use totals that *are* float-exact under the mark-up:
-  2.5, 5, 10, 20, 40 and 80 for the 10/20/30% groups, and **50 and almost nothing
-  else** for the fertilisers' 1%. Mali's hydrogen total is `0.0`, which is the one
+- **`markup_2026_pct` cannot be asserted exactly**: three distinct doubles print
+  as `10.0`, so it carries a range test and the fixtures use float-exact totals
+  (`unit-testing-dbt-models`). Mali's hydrogen total is `0.0`, which is the one
   row where `nullif(total, 0)` makes the column null — the guard on real data.
-- **`production_route_code` broke the row-level rule until 2026-08-24, and
-  "consistent by luck" was the wrong reading.** It was read off the country's row
-  while the tonnages came from the fallback. The *output* was null on all 755
-  fallen-back rows, which is what made it look harmless; the *input* was not —
-  **202 of them took their tonnages from a fallback row that carries a route**,
-  and the mart threw it away. Six rows of grey hydraulic cement state it best:
-  identical 1.28 / 0.09 / 1.37, the fallback row showing route `A` and the five
-  countries using that very number showing blank. Annex I publishes no such row.
-  The route is a property of the *value* — `_route`'s own docstring says the code
-  is what separates a 0,13 tCO2e/t semi-finished steel from an 8,21 — so it comes
-  off the row the tonnages came from.
-  - **Not one euro moved.** 202 rows gained a route; row count held at 11,665 and
-    the euro total at EUR 2,462,927.40 to the cent. That is why it survived: every
-    range and null test here is over a numeric column, and the defect lived in a
-    VARCHAR that `_compliance.yml` gave a `data_type` and no description or test.
-  - **The mutation table above could not have found it.** A mutation breaks a rule
-    that is written down; this rule was stated in the model's prose comment and
-    never implemented. Treat those comments as claims to verify.
-  - Held now by `dbt_utils.expression_is_true` on the column — 202 rows red when
-    reverted, and `store_failures` names them. Two things about how it is written:
-    `is not distinct from` rather than `=`, because 553 of the 755 correctly
-    resolve to null and `=` is unknown on a null, which `where not(...)` discards
-    so the test would pass by not looking; and the `or is_country_specific` scope
-    is in the *expression* rather than a `config: where:`, because `where` makes
-    dbt_utils wrap the model as `dbt_subquery` and the correlated subquery then
-    has to name that alias instead of the relation.
+- **`production_route_code` follows the row-level rule too.** The route is a
+  property of the *value* — `_route`'s own docstring says the code is what
+  separates a 0,13 tCO2e/t semi-finished steel from an 8,21 — so it comes off the
+  row the tonnages came from. Read off the country's row instead, 202 fallen-back
+  rows lose their route and not one euro moves, so every numeric test stays green.
+  `dbt_utils.expression_is_true` on the column holds it; why it is written with
+  `is not distinct from` and its scope in the expression, and why no mutation
+  found the defect, is `unit-testing-dbt-models`.
 - **The fallback row is `is_country_specific = true`.** All 260 of them, because
   the flag keys on "this row has a total of its own" and the fallback does.
   `is_fallback_table` is the column that identifies it. Reads oddly, so it is
