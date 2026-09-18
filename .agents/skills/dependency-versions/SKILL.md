@@ -90,6 +90,15 @@ each grouped to a single PR.
     starts from an empty volume, cannot tell. A major is a migration PR:
     change the mount, then dump and restore against a copy of a populated
     `mds_postgres`. Patches within the major still arrive.
+  - **A Python minor and a Node major are ignored in the `docker` entry**,
+    because each base image has a partner pin Dependabot's `docker` updater
+    cannot see. `python:` must match `.python-version`'s minor: the image sets
+    `UV_PYTHON_DOWNLOADS=never`, so #78 (2026-09-18) moved it to 3.14 under a
+    3.13 pin and `uv sync` found no interpreter. `node:` follows `pages.yml`'s
+    `node-version`, the LTS the published site is built on. And the group is
+    one PR at a limit of one, so the broken bump held back a harmless uv patch
+    too. Move either by hand, together with its partner;
+    `test_the_base_images_match_their_other_pins` fails on a split.
 - **Dependabot scans the moment the config lands**, not on the next scheduled
   date — expect PRs immediately after touching that file.
 - **A yanked release stays locked until something re-resolves.** `uv.lock` held

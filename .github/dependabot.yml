@@ -101,11 +101,27 @@ updates:
   # answer: it is watched, so it is not one of the versions that can only age
   # deliberately. `tests/test_dagster_instance.py` refuses a tag Dependabot
   # could not bump.
+  #
+  # **Except a Python minor or a Node major, each of which has a second pin this
+  # entry cannot see.** The Python image must carry `.python-version`'s minor:
+  # the Dockerfile sets `UV_PYTHON_DOWNLOADS=never`, so `python:3.14` under a
+  # 3.13 pin fails `uv sync` with "No interpreter found" (#78, 2026-09-18). The
+  # Node image follows `pages.yml`'s `node-version`, the active LTS the published
+  # site is built on. Both move by hand, in one PR with their partner;
+  # `tests/test_dagster_instance.py` fails if they drift apart. And since the
+  # group is one PR at `open-pull-requests-limit: 1`, a bump that cannot pass
+  # also blocks every patch behind it, which is why these are ignored rather
+  # than left for review.
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: monthly
     open-pull-requests-limit: 1
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
     groups:
       images:
         patterns: ["*"]

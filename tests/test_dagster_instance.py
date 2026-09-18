@@ -32,6 +32,8 @@ LAPTOP_INSTANCE = REPO_ROOT / ".dagster/dagster.yaml"
 DEPLOYED_INSTANCE = REPO_ROOT / "deploy/dagster.yaml"
 COMPOSE = REPO_ROOT / "compose.yaml"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
+PYTHON_VERSION = REPO_ROOT / ".python-version"
+PAGES_WORKFLOW = REPO_ROOT / ".github/workflows/pages.yml"
 
 # The compose service the deployed instance runs as, and whose environment is
 # what the run launcher copies from.
@@ -302,3 +304,33 @@ def test_every_image_tag_is_pinned():
             f"`{tag}` ({source}) has {parts} version component(s); {minimum} are needed for an "
             "exact tag there — see this test's docstring"
         )
+
+
+def dockerfile_image_version(name: str) -> str:
+    """The version part of the Dockerfile's `FROM <name>:<version>…` line."""
+    for tag, source, _ in image_tags():
+        if source == "Dockerfile" and tag.partition(":")[0] == name:
+            return re.match(r"\d+(?:\.\d+)*", tag.partition(":")[2]).group()
+    raise AssertionError(f"the Dockerfile has no `FROM {name}:…` line")
+
+
+def test_the_base_images_match_their_other_pins():
+    """The Python image carries `.python-version`'s minor, and the Node image
+    `pages.yml`'s `node-version` major. Each pair is one version stated twice,
+    and Dependabot's `docker` entry ignores the bumps that would split them
+    (see its comment in `.github/dependabot.yml`), so the partner moves by hand
+    in the same PR. A split Python fails the image build at `uv sync`, since
+    `UV_PYTHON_DOWNLOADS=never`; a split Node builds the site on a runtime the
+    published site never saw."""
+    python_pin = PYTHON_VERSION.read_text().strip()
+    python_image = dockerfile_image_version("python")
+    assert python_image.split(".")[:2] == python_pin.split(".")[:2], (
+        f"the Dockerfile's `python:{python_image}` is not on `.python-version`'s {python_pin}"
+    )
+
+    node_pin = re.search(r"node-version:\s*[\"']?(\d+)", PAGES_WORKFLOW.read_text())
+    assert node_pin, "pages.yml no longer sets a `node-version` this test can read"
+    node_image = dockerfile_image_version("node")
+    assert node_image.split(".")[0] == node_pin.group(1), (
+        f"the Dockerfile's `node:{node_image}` is not on pages.yml's Node {node_pin.group(1)}"
+    )
