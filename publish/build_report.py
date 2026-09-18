@@ -23,6 +23,11 @@ regardless — see `run()`. The file count still varies by one or two between
 runs, because Evidence emits an `api/` route per query hash and the
 `pipeline_*` queries carry load timestamps.
 
+`SITE_ROOT`, when it names a directory other than `reports/build`, is where the
+finished site is copied afterwards — a served directory that is not the one
+Evidence builds into. The compose stack mounts a volume there and lets nginx read
+it; `just serve` leaves it at the default and copies nothing. See `publish_to`.
+
 It does not touch `evidence.config.yaml`. GitHub Pages serves from a subpath,
 which Evidence reads from `deployment.basePath` and no env var; `pages.yml`
 appends it before calling this, and a committed value would break `npm run dev`.
@@ -31,6 +36,7 @@ appends it before calling this, and a committed value would break `npm run dev`.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -213,6 +219,54 @@ def _tree_size(root: Path) -> tuple[int, int]:
     return len(files), sum(p.stat().st_size for p in files)
 
 
+def site_root(build_dir: Path) -> Path:
+    """Where the finished site is served from, which is not always where it is built.
+
+    `SITE_ROOT` is read here and not passed in, because the two callers that
+    matter — `just serve`'s http.server and nginx in the compose stack — already
+    agree on it through the environment. Unset, it is `build_dir`, and
+    `publish_to` below does nothing at all.
+    """
+    configured = os.environ.get("SITE_ROOT")
+    return Path(configured) if configured else build_dir
+
+
+def publish_to(build_dir: Path, destination: Path) -> bool:
+    """Replace `destination`'s *contents* with the built site. True if it copied.
+
+    The contents and never the directory: under compose `destination` is a
+    mount point shared with nginx, and `shutil.rmtree` on a mount point fails
+    with `EBUSY`. That is also why the site cannot simply be built in place —
+    `run()` below rmtrees `build/` on every run, because `evidence build` adds
+    to that directory rather than replacing it.
+
+    The site is therefore down for this copy and not for the whole build.
+
+    Refuses, before deleting anything, when either directory contains the
+    other. `SITE_ROOT=/app/reports` would otherwise empty `pages/` and
+    `sources/` along with `build/`, and a destination inside the build would
+    be copied into itself. A symlink in the destination is unlinked, never
+    followed: `is_dir()` is true of a link to a directory, and `rmtree` refuses
+    one.
+    """
+    build, served = build_dir.resolve(), destination.resolve()
+    if served == build:
+        return False
+    if build.is_relative_to(served) or served.is_relative_to(build):
+        raise ValueError(
+            f"SITE_ROOT {destination} and the build directory {build_dir} "
+            "contain one another; publishing would delete the site's own sources"
+        )
+    destination.mkdir(parents=True, exist_ok=True)
+    for existing in destination.iterdir():
+        if existing.is_dir() and not existing.is_symlink():
+            shutil.rmtree(existing)
+        else:
+            existing.unlink()
+    shutil.copytree(build_dir, destination, dirs_exist_ok=True)
+    return True
+
+
 def run(
     reports_dir: Path | str = REPORTS_DIR,
     *,
@@ -244,6 +298,8 @@ def run(
 
     routes = page_routes(reports_dir / "pages", build_dir)
     files, size = _tree_size(build_dir)
+    served_from = site_root(build_dir)
+    copied = publish_to(build_dir, served_from)
     return {
         "pages": len(routes),
         "missing_pages": sorted(slug for slug, path in routes.items() if not path.exists()),
@@ -252,6 +308,8 @@ def run(
         "files": files,
         "bytes": size,
         "build_dir": str(build_dir),
+        "site_root": str(served_from),
+        "copied_to_site_root": copied,
     }
 
 
@@ -278,6 +336,8 @@ def main() -> None:
         f"{summary['build_dir']}: {summary['pages']} pages, "
         f"{summary['files']:,} files ({summary['bytes'] / 1e6:.1f} MB)"
     )
+    if summary["copied_to_site_root"]:
+        print(f"  copied to SITE_ROOT {summary['site_root']}")
     if summary["missing_pages"]:
         print(f"  WARNING: no output for {', '.join(summary['missing_pages'])}")
 

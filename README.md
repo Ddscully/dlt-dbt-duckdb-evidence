@@ -140,6 +140,14 @@ the whole pipeline in ~46 s against recorded fixtures, into a throwaway
 warehouse. `just course-sandbox` does the same into a warehouse that persists,
 which is what the course exercises are built to break.
 
+Prefer containers? `cp .env.example .env` (set `PGPASSWORD`), then
+`just compose-build && just compose-up` runs the whole thing as four containers
+— the graph, the dashboard behind nginx, Postgres holding the DuckLake catalog,
+and SeaweedFS holding its Parquet — with each Dagster run getting its own
+container. It is the recommended way to run this unattended;
+[`docs/RUNNING_AS_A_SERVICE.md`](./docs/RUNNING_AS_A_SERVICE.md) §10 is the
+runbook. Nothing above needs it: with no `.env`, everything stays on disk.
+
 No `just`? The recipes map to plain commands; see the [`justfile`](./justfile).
 
 ## Use this stack for your own data
@@ -286,7 +294,7 @@ The README is the tour. The detail lives here:
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
 | [`docs/FOR_REVIEWERS.md`](./docs/FOR_REVIEWERS.md) | what is and is not finished, the SLA, run cost, what breaks at 1000×, and what I'd do differently |
 | [`docs/REUSING_THIS_STACK.md`](./docs/REUSING_THIS_STACK.md) | what carries over to a different dataset, and the decisions that are expensive to revisit |
-| [`docs/RUNNING_AS_A_SERVICE.md`](./docs/RUNNING_AS_A_SERVICE.md) | `just serve` — the graph and the dashboard as one always-on service, why it is a `just` recipe rather than a container, and the publish-and-swap design still to be built |
+| [`docs/RUNNING_AS_A_SERVICE.md`](./docs/RUNNING_AS_A_SERVICE.md) | `just serve` — the graph and the dashboard as one always-on service, why it is a `just` recipe and the container built on it, and the publish-and-swap design still to be built |
 
 And [`docs/course/`](./docs/course/) teaches the same warehouse as material for
 analytics engineers, built around the failures that stay green — a one-word join

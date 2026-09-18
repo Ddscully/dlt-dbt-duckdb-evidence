@@ -76,3 +76,41 @@ jobs:
       # failure to fix and the least interesting one to learn about first.
       - name: Pre-commit hooks
         run: uv run pre-commit run --all-files --show-diff-on-failure
+
+  # The same fixture pipeline as `build`, but inside the image and against the
+  # real backing services — the one place the container, a Postgres DuckLake
+  # catalog and Parquet in a bucket are exercised together. `build` proves the
+  # code; this proves the deployment shape the code runs in.
+  #
+  # It runs `just test-pipeline` and never `just materialize`: this job has no
+  # `.github/actions/setup`, so it defines none of the paths that action owns,
+  # and `tests/test_workflows.py` holds the set of workflows that materialise to
+  # the four that do. It also runs no `uv run pytest <args>`, which the same file
+  # holds to the manifest-gated list.
+  container:
+    runs-on: ubuntu-latest
+    env:
+      # Throwaway, and literal on purpose: these configure containers that live
+      # for one job and are never reachable from outside the runner. A secret
+      # here would imply the stack is the real one.
+      PGPASSWORD: ci-not-a-real-password
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: testtest
+    steps:
+      - uses: actions/checkout@v7
+
+      # No setup action and no uv: everything this job needs is in the image.
+      - name: Build the image
+        run: docker compose build
+
+      - name: Start the backing services
+        run: docker compose up -d --wait postgres seaweedfs
+
+      # `--no-deps`, because the two services it depends on are already up and
+      # `run` would otherwise start the long-running `dagster` service too.
+      - name: Fixture pipeline, in the container
+        run: docker compose run --rm --no-deps dagster just test-pipeline
+
+      - name: Service logs
+        if: failure()
+        run: docker compose logs

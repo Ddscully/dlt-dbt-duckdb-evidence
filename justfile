@@ -69,18 +69,37 @@ extensions:
 deploy-deps:
     uv sync --group dev --group orchestration --group deploy
 
-# Postgres (the DuckLake catalog, and Dagster's storage under `deploy/`) and SeaweedFS
-# (S3-compatible storage for the Parquet). Nothing here is needed to use this
-# repo: with LAKEHOUSE_CATALOG and LAKEHOUSE_DATA_PATH unset the landing zone is
-# entirely on disk. See .env.example and compose.yaml.
-# Start the backing services and wait for them to be healthy
+# The whole stack: Postgres (the DuckLake catalog, and Dagster's storage under
+# `deploy/`), SeaweedFS (S3-compatible storage for the Parquet), the graph, and
+# nginx serving the dashboard. Nothing here is needed to use this repo: with
+# LAKEHOUSE_CATALOG and LAKEHOUSE_DATA_PATH unset the landing zone is entirely on
+# disk and none of this runs. `just compose-build` first. Dagster is then on
+# :3000 and the dashboard on :8081. See .env.example, compose.yaml and
+# docs/RUNNING_AS_A_SERVICE.md.
+# Start the stack and wait for it to be healthy
 compose-up:
     docker compose up -d --wait
+
+# The image is the whole stack — both Dagster processes, every layer they call,
+# and Node for the site — and its CMD is this justfile's `serve`. Build it before
+# the first `just compose-up`, and after any change to the tree, because compose
+# does not rebuild on its own.
+# Build the mds:local image compose runs
+compose-build:
+    docker compose build
+
+# The fixture pipeline inside the image, against the compose Postgres and
+# SeaweedFS: the one command that exercises a remote catalog, a remote data path
+# and the container together. `--no-deps` because the services are already up,
+# and `--rm` because this is not the service.
+# Run the fixture pipeline inside the container (needs `just compose-up`)
+compose-test-pipeline:
+    docker compose run --rm --no-deps dagster just test-pipeline
 
 # `just compose-down volumes` also deletes the named volumes — which destroys
 # the catalog and the bucket, and is the only way to make the Postgres init
 # script run again (the entrypoint runs it on an empty data directory alone).
-# Stop the backing services
+# Stop the stack
 compose-down mode="keep":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -418,7 +437,7 @@ export SITE_ROOT := env("SITE_ROOT", justfile_directory() / "reports/build")
 #     exit as far as `Restart=on-failure` is concerned.
 # It does not start the `daily_refresh` schedule, which ships STOPPED (§10).
 # Run the graph and the dashboard as one always-on service (blocks; ctrl-c to stop)
-serve dagster_port="3000" site_port="8081": where dbt-parse
+serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "$DAGSTER_HOME"
@@ -435,14 +454,14 @@ serve dagster_port="3000" site_port="8081": where dbt-parse
     trap 'stop; exit 0' INT TERM
     trap stop EXIT
 
-    uv run --group orchestration dagster-webserver -h 127.0.0.1 -p {{ dagster_port }} &
+    uv run --group orchestration dagster-webserver -h {{ host }} -p {{ dagster_port }} &
     pids+=($!)
     uv run --group orchestration dagster-daemon run &
     pids+=($!)
     uv run --group orchestration python -m http.server {{ site_port }} --directory "$SITE_ROOT" &
     pids+=($!)
 
-    echo "dagster: http://127.0.0.1:{{ dagster_port }} (localhost)    site: http://0.0.0.0:{{ site_port }} (every interface) — $SITE_ROOT"
+    echo "dagster: http://{{ host }}:{{ dagster_port }}    site: http://0.0.0.0:{{ site_port }} (every interface) — $SITE_ROOT"
 
     status=0
     wait -n || status=$?

@@ -45,10 +45,16 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
     ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §5, §8).
   - **There are two instance configs, and they must agree.** `deploy/dagster.yaml`
     is the deployed one (`DAGSTER_HOME=<repo>/deploy`), differing from
-    `.dagster/dagster.yaml` only in putting run, event and schedule storage in
-    Postgres. Dagster has no include, so the limit above is written twice, and
+    `.dagster/dagster.yaml` in putting run, event and schedule storage in
+    Postgres and in launching each run in its own container. Dagster has no
+    include, so the limit above is written twice, and
     `tests/test_dagster_instance.py` holds the copies in step — a laptop
     measurement is only evidence about a deployment while it does.
+  - **The limit survives the container boundary, measured.** Two runs launched
+    ten seconds apart against the compose stack (2026-09-17) gave one run
+    container and one `QUEUED` row; the second started only when the first
+    finished, and `auto_remove` left no exited containers. So `DockerRunLauncher`
+    changes where a run executes and not how many execute.
 - **The Evidence site is an asset, excluded from `full_refresh` because it needs
   Node.** The `evidence_site` asset shells out to npm; `ci.yml`, `nightly.yml` and
   `release-data.yml` run `full_refresh` with no Node, and `pages.yml` runs
@@ -69,6 +75,12 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
 - Dagster state lives in `.dagster/` (`DAGSTER_HOME`, exported by the justfile);
   only `dagster.yaml` is checked in. Under `DAGSTER_HOME=<repo>/deploy` it lives
   in Postgres instead, and `.dagster/` is never written at all.
+- **A run container's command is `dagster api execute_run`, not a recipe.**
+  `DockerRunLauncher` does not go through `just`, so anything the image only
+  exposes via `uv run` is not on a run container's `PATH`. The Dockerfile puts
+  `/app/.venv/bin` there for exactly this; without it a run fails with
+  `exec: "dagster": executable file not found in $PATH` and `auto_remove` deletes
+  the evidence (measured 2026-09-17).
 - **Against a running service, never pass `-m` to the CLI.** A schedule's
   identity includes the code location *name*, which `-m orchestration.definitions`
   sets to the module while `[tool.dagster]` sets it to `modern_data_stack`, so
