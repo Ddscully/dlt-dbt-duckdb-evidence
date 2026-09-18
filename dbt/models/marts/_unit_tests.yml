@@ -149,10 +149,9 @@ unit_tests:
       schedule overstates every fertiliser line by nine points in 2026 and
       twenty-seven in 2028 — 2,457 rows of the mart — and `markup_2026_pct`'s
       `accepted_range 0-31` cannot see it, because 10 is a legal answer. The
-      model used to read this schedule off the annex's own published columns and
-      now asserts it from a seed, which is the loss the 2026/1740 correction
-      caused; this test is what stands in for the arithmetic that used to check
-      it. `eu_ets_price_eur_per_t` is overridden to 100 rather than inherited, on
+      schedule is asserted from a seed, not read off the annex
+      (docs/decisions/0010), so this test stands in for the arithmetic that
+      would otherwise check it. `eu_ets_price_eur_per_t` is overridden to 100 rather than inherited, on
       the same argument as `dim_date`'s fiscal var: the warehouse only ever
       builds 75, so nothing otherwise proves the price is wired through rather
       than baked in.
@@ -734,9 +733,7 @@ unit_tests:
       returns model and nothing else: the matching rule's own edges — the
       non-product filter and the `>=` on the asof condition — are asserted in
       `int_retail_return_matches`, against the model that decides them. Posing
-      matched rows directly is what makes the `case` the only thing under test;
-      it used to be reached through eight raw invoice lines and an inferred
-      join.
+      matched rows directly is what makes the `case` the only thing under test.
     given:
       # Three rows, and only because the model joins the calendar for
       # `date_key` — the same conformed key `fct_retail_order_line` carries at

@@ -90,7 +90,7 @@ def test_agents_md_fits_the_budget_codex_reads_by_default():
     is the bound for the deepest working directory, and it is exact while the
     root file is the only one. The budget cannot be raised from the repo, which
     is why the file is held under it rather than a notice asking each reader to
-    raise it — the notice this replaced reached only the users who read it.
+    raise it, which would reach only the users who read it.
     """
     files = subprocess.run(
         ["git", "ls-files", "AGENTS.md", "*/AGENTS.md"],

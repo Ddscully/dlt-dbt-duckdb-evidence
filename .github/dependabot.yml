@@ -67,17 +67,13 @@ updates:
   #
   # Not lockfile-only and not grouped away: the tags are exact (`postgres:17.11`),
   # so there is no range for a patch to arrive through silently and every bump
-  # is a real one. Without this entry they were the fourth and fifth versions
-  # that could only age deliberately, and `compose.yaml` claimed otherwise.
+  # is a real one. Without this entry they would be versions that can only age
+  # deliberately.
   #
-  # **Except a Postgres major, which is a migration and not a bump.** 17 -> 18
-  # (#73, closed 2026-09-18) failed twice. The 18 image refuses a volume mounted
-  # at `/var/lib/postgresql/data`, so the stack never came up, even on an
-  # empty volume. And moving the mount to `/var/lib/postgresql`, the obvious fix,
-  # starts an *empty* cluster in `18/docker/` beside the old files: the DuckLake
-  # catalog and Dagster's history then come up blank, and the health check
-  # passes. CI starts from an empty volume, so it can only ever see the first
-  # failure. Patches within 17 still arrive; a major waits for a mount change
+  # **Except a Postgres major, which is a migration and not a bump**: a major can
+  # move the image's data directory, and the stack then comes up on an empty
+  # cluster with the health check passing, which CI, starting from an empty
+  # volume, cannot see (docs/decisions/0008). Patches within 17 still arrive; a major waits for a mount change
   # plus a dump-and-restore, tested on a copy of a populated `mds_postgres`.
   - package-ecosystem: docker-compose
     directory: /
@@ -104,7 +100,7 @@ updates:
   # **Except a Python minor or a Node major, each of which has a second pin this
   # entry cannot see.** The Python image must carry `.python-version`'s minor:
   # the Dockerfile sets `UV_PYTHON_DOWNLOADS=never`, so `python:3.14` under a
-  # 3.13 pin fails `uv sync` with "No interpreter found" (#78, 2026-09-18). The
+  # 3.13 pin fails `uv sync` with "No interpreter found". The
   # Node image follows `pages.yml`'s `node-version`, the active LTS the published
   # site is built on. Both move by hand, in one PR with their partner;
   # `tests/test_dagster_instance.py` fails if they drift apart. And since the

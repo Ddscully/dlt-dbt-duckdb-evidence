@@ -113,7 +113,7 @@ def test_the_unusable_gdp_filter_runs_inside_duckdb():
     it cannot translate a predicate — same rows, every excluded row still
     fetched. The guard errors on exactly the rows the filter excludes, so it
     passes only if DuckDB applied the filter before computing the columns.
-    Filtering on the derived ratio, as this once did, fails it."""
+    Filtering on the derived ratio fails it."""
     scan = _duckdb_scan(
         _frame(
             [

@@ -156,9 +156,9 @@ unit_tests:
       holds no blank string at all. It is one cast away from holding one, which
       is why the shape is pinned here rather than left to the reader.
 
-      **All three text columns the model trims are here, and they did not always
-      agree.** `country` was `trim(country)` with no `nullif` until 2026-09-05,
-      so a blank country would have become a 44th label rather than an absence —
+      **All three text columns the model trims are here, because they must
+      agree.** A `country` trimmed without `nullif` turns a blank country into a
+      44th label rather than an absence —
       unreachable in today's 1,067,371 rows, which is precisely the condition
       under which this project writes the fixture instead of arguing about the
       clause.
