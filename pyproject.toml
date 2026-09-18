@@ -64,6 +64,7 @@ deploy = [
     # The image's `just`, here so `uv.lock` pins it and Dependabot's `uv`
     # ecosystem bumps it. `CMD` is `just serve`, and a `uv tool install` in the
     # Dockerfile took whatever was newest on each build of the same commit.
+    # CI's setup action installs this same version, read from the lock.
     "rust-just>=1.56.0",          # the `just` command runner, inside the image
 ]
 

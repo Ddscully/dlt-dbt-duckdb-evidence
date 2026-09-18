@@ -33,10 +33,20 @@ runs:
     # Every workflow runs the pipeline through a `just` recipe, and pre-commit's
     # `sqlfluff-lint` hook runs `just lint` (without `just` on PATH it fails with
     # "Executable `just` not found").
+    #
+    # The version is `uv.lock`'s, where the `deploy` group pins it for the image
+    # and Dependabot's `uv` ecosystem bumps it — so CI and the container run the
+    # same `just`, and nothing here needs editing when it moves. A bare
+    # `uv tool install rust-just` took the newest release on every run. Read from
+    # the lock rather than synced, because the workflows do not sync `deploy`
+    # and putting `.venv/bin` on PATH would change what `python` and `dbt` mean
+    # for every later step. `pipefail` so a lock without it fails here, loudly.
     - name: Install just
       shell: bash
       run: |
-        uv tool install rust-just
+        set -euo pipefail
+        just_pin=$(uv export --frozen --no-hashes --no-header --only-group deploy | grep -E '^rust-just==')
+        uv tool install "$just_pin"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     # Absolute, all three. `LAKEHOUSE_DIR` must be: DuckLake compares the
