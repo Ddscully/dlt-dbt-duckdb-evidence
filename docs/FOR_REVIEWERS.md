@@ -301,11 +301,16 @@ The genuine ones, not the diplomatic ones.
   three-step resolution that raises rather than falling back to the cwd, because
   the cwd fallback resolves to a path DuckDB then *creates*: a run that goes
   green against an empty database.
-- **The lake is an archive, not a landing zone**, which inverts how that layer is
-  usually drawn. I'd do it again (dlt's filesystem destination can't partition
-  by a data column, and reversing the flow would have cost schema inference and
-  the raw freshness checks), but it's a compromise and the docs say so rather
-  than implying the tidy version.
+- **Price a compromise before calling it permanent.** The lake began as an
+  archive written *from* the warehouse, the reverse of how that layer is drawn,
+  and this list defended it: dlt's filesystem destination can't partition by a
+  data column, and reversing the flow would cost schema inference and the raw
+  freshness checks. PR #26 reversed it (dlt now lands `raw` in DuckLake) and paid
+  neither: dlt's DuckLake destination infers schemas as before, and
+  `dbt source freshness` reads `_dlt_load_id` through the attached catalog. The
+  costs that did arrive were ones I had not listed: dlt's merge makes DuckLake's
+  change feed useless, and the catalog compares its `data_path` as a string, so
+  every writer has to spell it the same way.
 - **The gaps I'd close next, in order:** a second entity to join the retail
   customer to, such as a sector or industry dimension, and then something that
   forces a late-arriving-fact decision, which nothing here has yet. The three
