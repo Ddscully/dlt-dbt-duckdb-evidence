@@ -52,3 +52,7 @@ Status: accepted YYYY-MM-DD (#PR) | superseded by NNNN
 | [0004](0004-agent-plugins-kept-by-measured-use.md) | A vendor agent plugin stays enabled only while it is measurably used | accepted 2026-09-02 |
 | [0005](0005-just-serve-first-container-second.md) | The service is `just serve`; the container stack runs the same recipe | accepted 2026-09-18 |
 | [0006](0006-runs-launch-from-the-service-image-id.md) | A run container starts from the service's image ID, not the `mds:local` tag | accepted 2026-09-18 |
+| [0007](0007-workflows-run-through-just.md) | The workflows run the pipeline through `just` and one setup action | accepted 2026-09-01 |
+| [0008](0008-postgres-majors-are-migrations.md) | Dependabot ignores Postgres major versions, which are migrations | accepted 2026-09-18 |
+| [0009](0009-cbam-annex-transcribed-faithfully.md) | The CBAM seeds transcribe the annex faithfully, and the mart handles its defects | accepted 2026-08-09 |
+| [0010](0010-cbam-markup-schedule-is-a-seed.md) | The CBAM mark-up schedule is a seed, asserted rather than derived | accepted 2026-08-18 |

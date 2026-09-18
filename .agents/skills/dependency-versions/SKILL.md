@@ -71,11 +71,8 @@ each grouped to a single PR.
   2026-09-17), which the root `compose.yaml` matches. **This repo now needs
   both**, and they do not overlap: compose names the service images, the
   `Dockerfile` the base images, and neither ecosystem can see the other's file.
-  `docker-compose` was added 2026-09-17 after a review found `compose.yaml`
-  claiming `docker` watched its image tags when nothing did — the comment
-  asserted a fact about *another* file, which is the shape no test in this repo
-  can see. `docker` followed with the `Dockerfile`, which made the claim true
-  for the first time.
+  **A comment in one file claiming what another file's entry covers is the shape
+  no test here can see**, so say what an entry watches beside that entry.
   - **Between them they are why the container added no unwatched pin.**
     An image looked like versions nothing watches
     ([`docs/decisions/0005-just-serve-first-container-second.md`](../../../docs/decisions/0005-just-serve-first-container-second.md));
@@ -84,20 +81,20 @@ each grouped to a single PR.
     bump (`latest`, a bare name, or a floating `X.Y` where upstream's exact tag
     is `X.Y.Z`). The three that can still only age deliberately are unchanged.
   - **A Postgres major is ignored, not watched**: the `docker-compose` entry's
-    one `ignore` rule. 17 → 18 (#73, closed 2026-09-18) moved the image's data
-    directory under the mount point, so the old mount path fails to start and
-    the new one starts an empty cluster beside the old files. The catalog and
-    Dagster's history come up blank, the health check passes, and CI, which
-    starts from an empty volume, cannot tell. A major is a migration PR:
+    one `ignore` rule, because a major can move the image's data directory and
+    come up as an empty cluster with the health check passing, which CI, starting
+    from an empty volume, cannot see
+    ([`docs/decisions/0008-postgres-majors-are-migrations.md`](../../../docs/decisions/0008-postgres-majors-are-migrations.md)).
+    A major is a migration PR:
     change the mount, then dump and restore against a copy of a populated
     `mds_postgres`. Patches within the major still arrive.
   - **A Python minor and a Node major are ignored in the `docker` entry**,
     because each base image has a partner pin Dependabot's `docker` updater
     cannot see. `python:` must match `.python-version`'s minor: the image sets
-    `UV_PYTHON_DOWNLOADS=never`, so #78 (2026-09-18) moved it to 3.14 under a
-    3.13 pin and `uv sync` found no interpreter. `node:` follows `pages.yml`'s
+    `UV_PYTHON_DOWNLOADS=never`, so a 3.14 image under a 3.13 pin fails
+    `uv sync` with no interpreter. `node:` follows `pages.yml`'s
     `node-version`, the LTS the published site is built on. And the group is
-    one PR at a limit of one, so the broken bump held back a harmless uv patch
+    one PR at a limit of one, so a broken bump holds back a harmless uv patch
     too. Move either by hand, together with its partner;
     `test_the_base_images_match_their_other_pins` fails on a split.
 - **Dependabot scans the moment the config lands**, not on the next scheduled
@@ -155,7 +152,7 @@ each grouped to a single PR.
   ~400 lines of `python_full_version < '3.13'` marker branches. Lowering it
   again is a re-lock, not an edit.
 - **Three versions here can only age deliberately, and the other two are the CI
-  linters.** The `.python-version` bullet above used to claim a set of one. The mechanism is
+  linters.** The mechanism is
   different in each case, which is why none of them ever shows up as a
   Dependabot PR that failed to arrive:
 
@@ -182,18 +179,18 @@ each grouped to a single PR.
   declares `Requires-Python <3.15`, and dbt-core ships no 3.14 classifier — dbt
   Labs certifies a Python roughly a year behind. dbt 1.12 sat behind the same
   shape of ceiling, dagster-dbt's `dbt-core<1.12`, until dagster-dbt 0.29.22.
-- **`pyarrow` is a runtime dependency and was undeclared until 2026-08-25.**
+- **`pyarrow` is a declared runtime dependency that no module imports.**
   DuckDB reaches it for `to_arrow_reader()` (the retail ingest,
   `ingest/sources/retail.py`) *and* for `.pl()` — so a tree without it raises
   `ModuleNotFoundError: pyarrow` from the ingest and from **both** Polars
   transforms. `.pl()` is the surprising half: polars itself doesn't need
   pyarrow, DuckDB's bridge to it does.
-  - **It was invisible because uv installs the `dev` group by default.**
+  - **Undeclared, it goes missing invisibly, because uv installs the `dev`
+    group by default.**
     `[tool.uv] default-groups` is commented out, so uv's own default (`dev`)
     applies and every `uv sync` in the justfile and all four workflows pulled
-    harlequin — whose `textual-fastdatatable` dragged pyarrow in. The declared
-    runtime set was incomplete for as long as it was undeclared and nothing
-    could say so. `uv sync --no-default-groups` is what reproduces it.
+    harlequin — whose `textual-fastdatatable` drags pyarrow in.
+    `uv sync --no-default-groups` is what reproduces it.
   - The lesson generalises past this package: a dependency that arrives as some
     dev tool's grand-transitive is indistinguishable from a declared one until
     the dev tool leaves.

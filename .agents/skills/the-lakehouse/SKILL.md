@@ -143,32 +143,18 @@ means nothing because DuckLake content-addresses them
     catalog recording `../data/lakehouse/data/`, which `lake.lakehouse` then
     could not open — and the error names a path nobody typed. `WAREHOUSE_PATH`
     gets away with a relative default because a plain file keeps no such record.
-    - **The workflows go through `just` now, and this is the defect that made
-      them.** Until 2026-09-01 they ran `uv run dagster job execute` directly and
-      each set the paths itself — so all four needed the same new line when the
-      landing zone moved into DuckLake, and none of them got it. dlt writes the
-      catalog from the repo root and records an absolute `data_path`; dbt then
-      resolves `profiles.yml`'s relative default from `dbt/`, and DuckLake
-      compares the two **as strings** — so *the same directory under two
-      spellings* is refused with `DATA_PATH parameter
-      "../data/lakehouse/data/" does not match existing data path`. The failure
-      is in `dbt build`, one layer downstream of the layer that chose the
-      spelling, and **no recipe could reproduce it because every recipe exported
-      the variable that hid it**: a faithful run had to unset `LAKEHOUSE_DIR` and
-      work in a clone.
-      - **`.github/actions/setup` is the one definition now** — uv, the venv,
-        `just`, and all three paths absolute. `WAREHOUSE_PATH` was previously set
-        in `ci.yml` alone; it is set everywhere, which is a no-op in value and
-        removes a `paths.py` fallback from the question. Three tests in
-        `tests/test_workflows.py` hold it: the action must export all three (the
-        vacuity guard — the other two assert an *absence* and would both pass if
-        nothing set them at all), no workflow may define one itself, and every
-        workflow running the pipeline must use the action.
-      - **`just` respects a pre-set `LAKEHOUSE_DIR` and used to override
-        `DAGSTER_HOME`.** `env("LAKEHOUSE_DIR", …)` against a bare assignment —
-        the two agreed in CI, since `$GITHUB_WORKSPACE` *is* `justfile_directory()`
-        there, which is exactly what would have made a disagreement invisible
-        until the day they differed. Both take `env()` now.
+    - **The workflows go through `just` and `.github/actions/setup`**, the one
+      definition of uv, the venv, `just` and all three paths, absolute. A
+      workflow that set its own paths is how this spelling mismatch reached
+      `dbt build` with no recipe able to reproduce it ([`docs/decisions/0007-workflows-run-through-just.md`](../../../docs/decisions/0007-workflows-run-through-just.md)).
+      Three tests in `tests/test_workflows.py` hold it: the action must export
+      all three (the vacuity guard — the other two assert an *absence* and would
+      both pass if nothing set them at all), no workflow may define one itself,
+      and every workflow running the pipeline must use the action.
+    - **`just` reads `LAKEHOUSE_DIR` and `DAGSTER_HOME` with `env()`**, so a
+      pre-set value wins. A bare assignment agrees with CI only because
+      `$GITHUB_WORKSPACE` *is* `justfile_directory()` there, which would hide a
+      disagreement until the day they differed.
   - **A tarball rather than loose files**, because a GitHub release asset is a
     file and a DuckLake is a directory. One asset also means one line in
     `SHA256SUMS`, so `sha256sum -c` still covers the whole release.

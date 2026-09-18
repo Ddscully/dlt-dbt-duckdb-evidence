@@ -275,11 +275,10 @@ it cost to learn:
     what was carried in. `pages.yml` runs the same step `continue-on-error`,
     because there the snapshot is a read-only display and a missing release
     should cost one section of one page, not the deploy.
-  - **A release is two assets and a workflow that downloads one of them fails
-    silently, which `pages.yml` did until 2026-08-27.** It asked for
-    `warehouse.duckdb` alone; `restore_history` finds the lakehouse *beside* the
-    database rather than being told where it is, so it got a directory with no
-    tarball in it — which is the "restoring nothing is normal" path, not an
+  - **A release is two assets, and a workflow that downloads one of them fails
+    silently.** Ask for `warehouse.duckdb` alone and `restore_history`, which
+    finds the lakehouse *beside* the database rather than being told where it is,
+    gets a directory with no tarball in it — which is the "restoring nothing is normal" path, not an
     error. The cost lands a layer down and is a *depth*, not a failure: every
     workflow rebuilds the marts from `raw`, `raw` is in the DuckLake catalog now,
     so the published database carries no weather rows at all —

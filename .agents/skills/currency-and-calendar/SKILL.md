@@ -137,8 +137,8 @@ follows from that rather than from the numbers.
     read `is_rate_stale` — reproduces the defect.** The daily model stops
     emitting rows once a currency leaves the ECB's panel, so 17 of the 22 stale
     period-ends have no row to join to and a left join flags 5 of 22 and calls
-    the rest clean. That was measured, and it is also **how the finding was
-    originally undersized**: sizing the problem by what the two models *share*
+    the rest clean. That was measured, and it is also **how a finding like this
+    gets undersized**: sizing the problem by what the two models *share*
     (19,616 of 19,649 complete period-ends) excludes exactly the currencies that
     have the problem. The flag ages `last_rate_date` directly instead.
   - **22 complete period-ends across 7 currencies are stale, from three causes.**
@@ -190,14 +190,10 @@ follows from that rather than from the numbers.
     the var is 1.
 ### The one incremental model
 
-- **The currency key is `currency_code` everywhere from `staging` outward, and
-  it was not until 2026-09-08.** `fct_fx_rates_published` and
-  `fct_fx_rates_periods` published `quote_currency` while `dim_currency`
-  published `currency_code` and `fct_fx_rates_daily` — the sibling between
-  them — spelled it the conformed way, so the daily model carried a
-  cross-spelling join (`s.currency_code = p.quote_currency`) and the bus matrix
-  rendered `fct_fx_rates_periods` as conforming to **nothing**. The rename is a
-  single alias in `stg_fx_rates`; everything downstream inherits it.
+- **The currency key is `currency_code` everywhere from `staging` outward**, as
+  a single alias in `stg_fx_rates` that everything downstream inherits. A model
+  that spells it `quote_currency` needs a cross-spelling join, and the bus matrix
+  renders it as conforming to **nothing**.
   - **`raw.ecb_fx_rates` deliberately keeps `quote_currency`.** Renaming a
     landing column means a dlt schema drop and a re-fetch, and "the quote side
     of a pair" is the right name beside `base_currency` anyway. Staging is where

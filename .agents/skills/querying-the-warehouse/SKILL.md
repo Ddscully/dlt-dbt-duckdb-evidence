@@ -35,8 +35,7 @@ the four `replace` dlt resources in one op: parallel steps would just fight
 over the lock.
 
 For interactive poking, `just sql` opens the DuckDB CLI read-only, which is the
-right default — but **it does not let you sit alongside a build, and this skill
-said it did until 2026-09-02.** Measured on the pinned DuckDB 1.5.5 against
+right default — but **it does not let you sit alongside a build.** Measured on the pinned DuckDB 1.5.5 against
 `data/warehouse.duckdb` itself, driving the recipe rather than a library: `just
 sql` exits 1 with `Could not set lock on file … Conflicting lock is held`, and
 the Python client agrees. Both directions, across processes:
