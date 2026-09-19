@@ -282,7 +282,7 @@ has been cast to Float64`, once after `co2_estimate_versions` and once after
 `grid_emission_factors`. Both models compute the column as
 `case when count(*) > 1 then max(dbt_valid_from) end`, so it stays null until a
 snapshot closes a version, which needs a later run to find a different number.
-Seen on 2026-09-17, when neither snapshot had closed one since it began
+Seen while neither snapshot had closed one since it began
 (`snap_co2_estimates` on 2026-07-30, `snap_grid_emission_factors` on
 2026-08-09). Both pages render that state on purpose — `restatements.md` and
 `scope2.md` put their revision tables inside `{#if … .length > 0}` — so the build

@@ -18,7 +18,7 @@ fails without an error:
   the agent is shown the truncated text — the skill still loads, and a session
   whose task matched only the lost half never picks it.
 
-Sources checked 2026-09-15: code.claude.com/docs/en/memory (the import and the
+Sources checked: code.claude.com/docs/en/memory (the import and the
 symlink), and openai/codex `codex-rs/core/src/agents_md.rs` (`data.truncate`
 under a `tracing::warn!`) with `DEFAULT_PROJECT_DOC_MAX_BYTES = 32 * 1024` in
 `codex-rs/config/src/config_toml.rs`.
@@ -127,7 +127,7 @@ def test_skill_frontmatter_says_what_its_source_says(skill):
     string.
 
     `name` must match the directory: the Agent Skills specification requires it
-    (agentskills.io/specification, checked 2026-09-15).
+    (agentskills.io/specification).
     """
     lines = skill.read_text().splitlines()
     assert lines and lines[0] == "---", f"{skill.parent.name}: SKILL.md does not open with ---"

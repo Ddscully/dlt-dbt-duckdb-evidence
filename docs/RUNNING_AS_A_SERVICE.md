@@ -101,7 +101,7 @@ text is the justfile's, and it is the only copy.
 built. That is the one place the recipe is smaller than the design, and it costs
 what §4 says it costs: the site is *down* for the length of a rebuild, because
 that module clears its output directory on every run, `--clean` or not.
-**Measured on 2026-09-17**, polling two pages every 2 s through a `publish_site`
+**Measured** by polling two pages every 2 s through a `publish_site`
 launched from the UI: both served 404 for 85 s, the whole of the 86 s
 `reports/evidence_site` step, and came back together when it finished. It is a
 404 from a server that is still up, not a refused connection, so a probe on the
@@ -153,7 +153,7 @@ Four things in that block are load-bearing:
   and §10 makes it a step.
 - **`--group orchestration` on the Dagster processes; on the file server it is
   harmless.** `uv run` only ever *adds* what its groups need and never removes a
-  package (measured 2026-09-11 on uv 0.12.12: a bare `uv run` left Dagster
+  package (measured on uv 0.12.12: a bare `uv run` left Dagster
   installed). What does strip the venv under a running service is a bare
   `uv sync`: `default-groups` is deliberately unset in `pyproject.toml`, so it
   syncs to `dev` alone, and `uv sync --dry-run` on this tree would uninstall 46
@@ -214,7 +214,7 @@ Three rules came out of that, and the first one matters most:
 `just serve`'s output interleaves the three processes with every run's own
 output, dbt's and Evidence's included. Watched through a scheduled
 `full_refresh`, one launched from the UI, `load_retail` and `publish_site` on
-2026-09-17 (Dagster 1.13.22), it carries three lines that look like faults:
+Dagster 1.13.22, it carries three lines that look like faults:
 
 - **`dagster.code_server - WARNING - No heartbeat received in 20 seconds,
   shutting down`, about once a minute whether or not anything is running.** The
@@ -430,7 +430,7 @@ running and is not:
 
   Under `deploy/dagster.yaml` the schedule storage is Postgres rather than
   SQLite, so the durable thing is the `dagster` database and `DAGSTER_HOME` holds
-  no schedule state at all — measured 2026-09-17: starting the schedule against
+  no schedule state at all — measured: starting the schedule against
   that instance wrote a `RUNNING` row to `instigators` and left every file under
   `.dagster/` byte-identical. The failure mode is unchanged, only relocated: drop
   the database and the service comes back up ingesting nothing.
@@ -469,8 +469,8 @@ on an internal deployment; only the third needs somebody to remember.
 
 ### Missed ticks, and one run at a time — measured
 
-**A daemon that starts after a missed tick launches it at once.** Measured on
-2026-09-17, with `daily_refresh` `RUNNING` in this instance and the service down
+**A daemon that starts after a missed tick launches it at once.** Measured
+with `daily_refresh` `RUNNING` in this instance and the service down
 across more than one 06:00 UTC tick: `just serve` started at 11:52 UTC, and
 within 16 s the daemon logged `daily_refresh has no partition set, so not trying
 to catch up` and launched a `full_refresh` for that morning's tick. Only the
@@ -591,7 +591,7 @@ keeps, extended with the ones only an always-on deployment meets:
   does. Without it a run dies before any Python runs, with
   `exec: "dagster": executable file not found in $PATH`; `auto_remove` then
   deletes the container, so the only evidence is one `ENGINE_EVENT` in the event
-  log. Measured 2026-09-17, and the reason the Dockerfile's `PATH` is what it
+  log. Measured, and the reason the Dockerfile's `PATH` is what it
   is.
 - **An `env_vars` name the launcher cannot resolve fails at *launch*, not at
   start.** A bare name in that list means "copy this from my environment", and
@@ -610,7 +610,7 @@ keeps, extended with the ones only an always-on deployment meets:
   empties that directory first — which cannot be the nginx mount point, because
   `rmtree` on one fails with `EBUSY`. So the build happens in `reports/build`
   and the result is copied to `SITE_ROOT` afterwards, replacing its *contents*.
-  The outage is the copy. Measured 2026-09-17 in the compose stack: `just report`
+  The outage is the copy. Measured in the compose stack: `just report`
   in the container built 11 pages / 482 files / 92 MB and copied them to the
   volume, and **65 one-second polls of nginx through the whole build returned 200
   every time** — the copy window did not last a second. Against the 85 s of 404s
@@ -630,7 +630,7 @@ keeps, extended with the ones only an always-on deployment meets:
   prints `Started schedule daily_refresh` and writes a row the running service
   never reads: the instigator's selector id hashes the *code location name*, and
   `-m` names the location after the module while `pyproject.toml`'s
-  `[tool.dagster]` names it `modern_data_stack`. Measured 2026-09-17 against the
+  `[tool.dagster]` names it `modern_data_stack`. Measured against the
   deployed instance: the two spellings put **two `RUNNING` rows for one
   schedule** in `instigators`, and the bare `dagster schedule list` — which
   resolves the location the same way the webserver and daemon do — still read
@@ -648,7 +648,7 @@ keeps, extended with the ones only an always-on deployment meets:
   empty `DAGSTER_HOME` reports `max_concurrent_runs` as 10, and one holding a
   symlink to the checked-in file reports 1.
 - **`dagster instance info` prints `compute_logs: NoneType` for a configured
-  compute log manager.** Measured 2026-09-17 on `deploy/dagster.yaml`: the line
+  compute log manager.** Measured on `deploy/dagster.yaml`: the line
   says `NoneType` while the instance's manager really is a `LocalComputeLogManager`
   writing to `$DAGSTER_STORAGE_DIR`. It is a display quirk of that command and
   not a config that failed to load — read it back off the instance rather than
@@ -667,7 +667,7 @@ keeps, extended with the ones only an always-on deployment meets:
   give it its own checkout (§2). The `deploy` group is the same trap one group
   further out: against a venv built by `just deploy-deps`, a
   `uv sync --group dev --group orchestration` would uninstall `dagster-postgres`
-  and `psycopg2-binary` (measured `--dry-run`, 2026-09-17), and the next restart
+  and `psycopg2-binary` (measured with `--dry-run`), and the next restart
   of a `deploy/` instance fails on its own storage config.
 - **The schedule refreshes the warehouse and never the site.** `daily_refresh`
   targets `full_refresh`, which excludes `reports/evidence_site`; only
@@ -679,7 +679,7 @@ keeps, extended with the ones only an always-on deployment meets:
   mount point refuses every attach, and the error surfaces inside `dbt build`,
   one layer below whatever chose the spelling.
   - **A catalog remembers the data path it was created with, so one catalog
-    schema cannot serve two arrangements.** Hit for real on 2026-09-17: the
+    schema cannot serve two arrangements.** Hit for real: the
     compose stack was pointed at a Postgres catalog that an earlier laptop run
     had already initialised with the Parquet *on disk*, and the first run in a
     container failed with `DATA_PATH parameter "s3://lake/modern-data-stack/"
@@ -764,7 +764,7 @@ Environment=DAGSTER_HOME=/srv/mds/repo/deploy
 
 `$DAGSTER_STORAGE_DIR` still belongs on the volume: compute logs and run
 artifacts stay on a filesystem, and this is the instance that puts them there
-(§3). Measured 2026-09-17:
+(§3). Measured:
 the first use of that instance created 22 tables in the `dagster` database, and
 after one `load_retail` the database was 9.3 MB.
 
@@ -832,7 +832,7 @@ it.
 **The route that needs no stop is `publish_site` from the UI.** It enters the
 one-run queue, so it waits for a scheduled run instead of reading beside it, and
 its Evidence step reads the warehouse only after its own build has finished. It
-costs a second full ingest and build — 174 s on 2026-09-17, against 91 s for
+costs a second full ingest and build — 174 s, against 91 s for
 `full_refresh` alone — and the 85 s of 404s §2 measured.
 
 **7. Verify, and prefer the checks that fail loudly.** `dagster schedule list`
@@ -893,7 +893,7 @@ What differs from a host deployment, beyond packaging:
   the launcher's, not compose's, and is removed when it exits. The logging the
   unit supplied is `docker compose logs`.
 - **Each run gets its own container**, launched from the same image, and
-  removed when it finishes. Measured 2026-09-17: about 10 s from launch to a
+  removed when it finishes. Measured: about 10 s from launch to a
   running run container, against a subprocess starting immediately.
 - **"The same image" means the service's image ID, not `mds:local`.** Stock
   `DockerRunLauncher` launches by name, and `just compose-build` moves the tag
@@ -919,7 +919,7 @@ What differs from a host deployment, beyond packaging:
   `deploy/postgres/init.sql` run again. It destroys the catalog, the bucket, the
   warehouse and every run this instance recorded.
 
-Verified end to end on 2026-09-17:
+Verified end to end:
 
 - `just compose-build` warm: **72 s**, image **2.15 GB**.
 - `docker compose up -d --wait` on fresh volumes: healthy in **4 s**, with both
@@ -944,7 +944,7 @@ Verified end to end on 2026-09-17:
   buys that — `just` is PID 1 and forks four children, and without an init to
   reap them the stop waits out the full grace period and exits 137.
 
-And in CI, first run, 2026-09-17: the `container` job — cold image build,
+And in CI, on its first run, the `container` job — cold image build,
 services up, `just test-pipeline` inside it — took **2 m 14 s** end to end on a
 `ubuntu-latest` runner. No layer caching was added, because the whole job is
 faster than the threshold that would have justified one.

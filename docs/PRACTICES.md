@@ -54,7 +54,7 @@ schema away: `fct_fx_rates_periods` and `fct_fx_rates_published` carried
 `quote_currency` where `dim_currency` publishes `currency_code`, while their own
 sibling `fct_fx_rates_daily` spelled it the conformed way. No test here could see
 that, because every guard is scoped to one relation, so a key spelled two ways is
-three green models. Both were renamed on 2026-09-08, along with the `date_key`
+three green models. Both were renamed, along with the `date_key`
 `fct_retail_returns` was missing beside a sibling at the identical grain — so the
 practice above is now enforced by something rather than only asserted. Two rules keep the output honest. A uniqueness test carrying
 a `where` is not a grain (`dim_grid_emission_factors` asserts one row per country

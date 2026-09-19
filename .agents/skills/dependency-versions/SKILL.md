@@ -57,7 +57,7 @@ each grouped to a single PR.
   so the other eleven were never even loaded. The connector packages are ~1 MB
   each; the cost is what they drag behind them — `mssql → tedious →
   @azure/identity` is 72 MB and `snowflake → snowflake-sdk → @aws-sdk/client-s3`
-  another 24 MB with `@smithy`. Trimmed 2026-08-25: **931 MB → 694 MB**.
+  another 24 MB with `@smithy`. Trimmed: **931 MB → 694 MB**.
   - Three of the four `overrides` (`sqlite3`, `jsonwebtoken`, `axios`) were
     security pins on connector transitives and had nothing left to override.
     Only `trim` still resolves to a package in the tree.
@@ -67,8 +67,8 @@ each grouped to a single PR.
 - **`docker-compose` and `docker` are different ecosystems, and picking the
   wrong one watches nothing.** `docker` matches Dockerfiles, Containerfiles and
   Kubernetes manifests; the compose ecosystem's pattern is
-  `(docker-)?compose(-\w+)?(\.[\w-]+)?\.ya?ml` (dependabot-core, checked
-  2026-09-17), which the root `compose.yaml` matches. **This repo now needs
+  `(docker-)?compose(-\w+)?(\.[\w-]+)?\.ya?ml` (dependabot-core),
+  which the root `compose.yaml` matches. **This repo now needs
   both**, and they do not overlap: compose names the service images, the
   `Dockerfile` the base images, and neither ecosystem can see the other's file.
   **A comment in one file claiming what another file's entry covers is the shape
@@ -112,16 +112,16 @@ each grouped to a single PR.
   does not resolve at all. It is used in exactly one place —
   `.github/actions/setup/action.yml`, the composite action all four workflows
   call — and the comment saying so lives beside it, because the obvious tidy-up
-  is to "simplify" it back to a major. It was in four workflows until
-  2026-09-01, which is four places for a Dependabot bump to disagree with
+  is to "simplify" it back to a major. It was once in four workflows,
+  which is four places for a Dependabot bump to disagree with
   itself.
 - **`pages.yml` is the only workflow that needs Node** (24; the Evidence build).
   The other three run on a bare uv checkout — see the Orchestration section for
   why the site is excluded from `full_refresh`.
 - **`pages.yml` triggers on a path *allowlist*, and `paths-ignore` would have
   been wrong.** It is a full ingest → dbt → Polars → lake → Evidence run against
-  the **live** public APIs, and it fired on every push to `main` until
-  2026-08-26: 23 of the 94 commits on `main` have been documentation, skills or
+  the **live** public APIs, and it once fired on every push to `main`,
+  when 23 of the 94 commits on `main` had been documentation, skills or
   testing, and each one rebuilt and redeployed an identical site for the same
   Actions minutes and the same API load as a data change. The obvious
   `paths-ignore: ['**.md']` is the trap — `reports/pages/` is ten markdown files
@@ -138,8 +138,7 @@ each grouped to a single PR.
   contributor's venv all read. Nothing watches it — Dependabot covers
   `github-actions`, `uv` and `npm`, none of which see it, so the interpreter is
   one of the three versions here that can only age deliberately; the other two
-  are three bullets down. It sat on 3.12 from the initial commit to 2026-08-10
-  for no reason anyone recorded.
+  are three bullets down. It once sat on 3.12 for no reason anyone recorded.
 - **`requires-python` tracks it (`>=3.13`), and here that bound is *not* a
   minimum-supported floor** — the opposite of the dependency bounds above, so
   the exception is worth knowing. This is an application, not a library: it
@@ -202,8 +201,8 @@ each grouped to a single PR.
   driver for storage it does not use — `just deploy-deps` is the opt-in, and it
   names all three groups because `uv sync` computes the whole venv from the ones
   it is given. The mirror of that: against a venv it built, a plain
-  `just setup` uninstalls both packages again (measured `--dry-run`,
-  2026-09-17), which `docs/RUNNING_AS_A_SERVICE.md` §8 records as a way to break
+  `just setup` uninstalls both packages again (measured with
+  `--dry-run`), which `docs/RUNNING_AS_A_SERVICE.md` §8 records as a way to break
   a running service.
 - **Dropping harlequin is what unblocked dbt 1.11, and the mechanism is an exact
   pin.** harlequin pins `click==8.1.8`; dbt-core 1.11 requires `click>=8.3.0`,
@@ -227,8 +226,8 @@ each grouped to a single PR.
   - **`sqlfluff-templater-dbt` is pinned exactly at 4.3.0 and compiles 1.11 and
     1.12 alike**, but it is the thing to check first on any dbt bump: it is the
     one consumer that cannot move independently, by deliberate design.
-- **dbt 1.12 was a no-op as well, measured four ways on 2026-09-15.** It waited
-  on dagster-dbt's `dbt-core<1.12` until 0.29.22 (2026-09-11), the release of
+- **dbt 1.12 was a no-op as well, measured four ways.** It waited
+  on dagster-dbt's `dbt-core<1.12` until 0.29.22, the release of
   [dagster#34085](https://github.com/dagster-io/dagster/pull/34085), a pure
   bound relaxation. Then:
   - `dbt parse` emits zero deprecation warnings and no hints, and the manifest
@@ -250,7 +249,7 @@ each grouped to a single PR.
     its file, `run/<project>/snapshots/<file>.sql/<file>.sql`, where 1.11 wrote
     the `.sql` file itself. So a `dbt/target/` last written by 1.11 fails both
     snapshots with `[Errno 20] Not a directory` and skips everything downstream
-    of them. It surfaced 2026-09-17, two days after the upgrade merged, when a
+    of them. It surfaced two days after the upgrade merged, when a
     build first wrote into such a directory. CI, `just test-pipeline` and the
     course sandbox each build into a directory 1.12 created, so none of them
     can. Reproduced against a copy of the stale `run/`: `dbt snapshot` gave
@@ -278,7 +277,7 @@ each grouped to a single PR.
   fails with `Fusion parser command not found`. With `metricflow` (3.7 MB) and
   `rapidfuzz` (12 MB) replacing `dbt-semantic-interfaces`, 1.12 costs about
   190 MB of venv.
-  - **Its one use here is measuring the distance to v2**, and on 2026-09-15
+  - **Its one use here is measuring the distance to v2**, and
     `dbt parse --use-v2-parser` failed on 224 locations with a single code,
     `UnusedConfigKey (dbt1060)`: 219 `meta:` blocks, plus source `freshness:`
     and `loaded_at_field:`, that v2 wants under `config:`. 1.12's own parse warns
@@ -316,7 +315,7 @@ each grouped to a single PR.
     `dbt-freshness`, `dbt-docs` and `lint` depend only on `dbt-deps`, so a
     `.env` in `dbt/` still points them at another file, silently.
 - **"Lightweight" is a measured claim, and the dev tooling was most of the
-  weight.** Removing harlequin and marimo on 2026-08-25 took the tree from 198
+  weight.** Removing harlequin and marimo took the tree from 198
   packages to 153 and the venv from 1.1 GB to 736 MB — a third of it — for two
   tools that duplicated capability the stack already had: the DuckDB CLI
   replaces harlequin (`just sql`, read-only by default), and marimo cost 122 MB

@@ -68,7 +68,7 @@ def test_no_plugin_is_declared_and_switched_off():
 
 
 def test_the_two_measured_removals_stay_removed():
-    """`dagster-expert@dagster` and `polars@polars`, retired 2026-09-02.
+    """`dagster-expert@dagster` and `polars@polars`, retired.
 
     Retired on a measured zero `Skill` invocations across the window in which
     both layers were being edited; docs/decisions/0004 has the measurement and

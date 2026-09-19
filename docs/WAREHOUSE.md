@@ -151,8 +151,8 @@ those marks were the defect. On its first render `fct_fx_rates_periods`
 conformed to **nothing** and `fct_fx_rates_published` only to `dim_date`, both
 because they said `quote_currency` where `dim_currency` publishes
 `currency_code`; `fct_retail_returns` was missing `date_key` while
-`fct_retail_order_line`, at the identical grain, carried it. All three were
-closed on 2026-09-08 — the table is what found them, and an alias list would
+`fct_retail_order_line`, at the identical grain, carried it. All three are
+closed — the table is what found them, and an alias list would
 have hidden two of them permanently.
 
 Regenerate with `just bus-matrix`.
@@ -258,7 +258,7 @@ store: `LAKEHOUSE_S3_ENDPOINT` and the standard `AWS_ACCESS_KEY_ID` and
 `just where` prints the data path the recipes will use. Unset, everything above
 holds unchanged.
 
-Measured on 2026-09-17 against SeaweedFS in Docker. It is now a service in
+Measured against SeaweedFS in Docker. It is now a service in
 [`compose.yaml`](../compose.yaml), on a named volume so the bucket survives a
 restart:
 
@@ -306,7 +306,7 @@ and the Parquet each move on their own; unset, everything above holds unchanged.
 reaches Python, the DuckDB CLI, dbt and dlt, with no secret in a URL, in dbt's
 rendered profile or in the process list.
 
-Measured on 2026-09-17 against the `postgres:17.11` service in
+Measured against the `postgres:17.11` service in
 [`compose.yaml`](../compose.yaml), which also creates the `dagster` database a
 later change needs:
 

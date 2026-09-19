@@ -106,7 +106,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     `invoice_type <> 'adjustment'` has never once been the deciding term and
     nothing in the data can reach it. The unit test poses the row the source has
     not sent.
-  - **Two more of that shape were closed on 2026-09-05, and one of them was a
+  - **Two more of that shape were closed, and one of them was a
     real inconsistency rather than a dormant clause.** `country` was
     `trim(country)` while its two neighbours in the same select list were
     `nullif(trim(...), '')`, so a blank country would have survived as `''` and
@@ -299,7 +299,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   cancelled postage and fees; the asof `>` costs 2 rows; and dropping
   `quantity > 0` from `purchases` does **nothing at all**, because every stock
   write-off is anonymous and `customer_id is not null` already excludes them
-  (**PASS=16 ERROR=0** with the clause deleted, re-measured 2026-09-05). That
+  (**PASS=16 ERROR=0** with the clause deleted, re-measured). That
   put it in the same class as `stg_retail_lines`' `<> 'adjustment'` and
   `period_is_complete`'s boundary — an argument for a fixture rather than for
   deleting the clause, which is what
@@ -348,9 +348,9 @@ reasoning behind each is in `compliance-models`, `retail-models` and
       tie-break being deleted outright.** Separating the three *orderings* says
       nothing about separating "ordered" from "not ordered at all". Delete the
       `qualify` and `return_matches_break_a_tied_purchase_the_same_way_every_build`
-      passed — measured 2026-09-01, and measured at the commit *before* the test
+      passed — measured at the commit *before* the test
       moved to `int_retail_return_matches`, so it was the test's own blind spot
-      and not something the move introduced. **Fixed the same day**, and the
+      and not something the move introduced. **Fixed**, and the
       repair is worth more than the defect, because the first diagnosis was wrong.
       - **The mechanism is DuckDB's *parallel* asof join, not a deterministic
         reordering.** The first reading was that dbt's `union all` of literal

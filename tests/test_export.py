@@ -548,7 +548,7 @@ def test_an_export_refuses_a_landing_zone_in_a_bucket(
     """The release is built from a landing zone on disk. Let run with the Parquet
     in a bucket, the export copied the warehouse — customer ids still clear —
     into the output directory, then died on a 403 from AWS, where its
-    secret-less attach had sent the access key id (measured 2026-09-17). So it
+    secret-less attach had sent the access key id (measured). So it
     refuses before the first write. This warehouse needs no catalog, so without
     the refusal the export would succeed."""
     monkeypatch.setenv("PII_SALT", "a-salt-for-tests")

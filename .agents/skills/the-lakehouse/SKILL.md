@@ -209,7 +209,7 @@ means nothing because DuckLake content-addresses them
 a local DuckDB file. `LAKEHOUSE_S3_ENDPOINT`, `AWS_ACCESS_KEY_ID` and
 `AWS_SECRET_ACCESS_KEY` say how to reach the store (`.env.example`); unset, the
 behaviour is exactly the on-disk one. The how-to is `docs/WAREHOUSE.md`. Measured
-2026-09-17 against SeaweedFS in Docker (`chrislusf/seaweedfs mini`).
+against SeaweedFS in Docker (`chrislusf/seaweedfs mini`).
 
 - **The fixture pipeline, Dagster and `just sql` all run on it.** `raw` row
   counts matched a run on disk, 12 data files landed in the bucket and none on
@@ -246,7 +246,7 @@ behaviour is exactly the on-disk one. The how-to is `docs/WAREHOUSE.md`. Measure
 - **The secret needs httpfs installed, not just loaded.** Any machine that has
   run dbt has it, because the profile lists it, so a bare `load httpfs` passes
   everywhere but a fresh one — where `attach()` and `just sql` failed with
-  `Extension "httpfs" … not found` (the template's first CI run, 2026-09-17;
+  `Extension "httpfs" … not found` (the template's first CI run;
   reproduced with an empty `HOME`). Both install it first, and
   `tests/test_lakehouse.py` holds the order, since no unit test can make a
   machine without it short of downloading it.
@@ -274,7 +274,7 @@ behaviour is exactly the on-disk one. The how-to is `docs/WAREHOUSE.md`. Measure
 in that database instead of `catalog.duckdb`, under `LAKEHOUSE_METADATA_SCHEMA`
 (default `lakehouse`, which is also dlt's). It is orthogonal to the data path, so
 all four combinations are legal and unset the behaviour is exactly the on-disk
-one. The how-to is `docs/WAREHOUSE.md`. Measured 2026-09-17 against
+one. The how-to is `docs/WAREHOUSE.md`. Measured against
 `postgres:17.11` in the compose stack, DuckDB 1.5.5.
 
 - **`PGPASSWORD` reaches libpq inside DuckDB's bundled extension**, which is what

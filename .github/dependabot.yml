@@ -63,7 +63,7 @@ updates:
   # now has one of those — see the entry below, which is why both are here and
   # neither is redundant. `docker-compose`'s own pattern is
   # `(docker-)?compose(-\w+)?(\.[\w-]+)?\.ya?ml`, which the root
-  # `compose.yaml` matches (dependabot-core, checked 2026-09-17).
+  # `compose.yaml` matches (dependabot-core).
   #
   # Not lockfile-only and not grouped away: the tags are exact (`postgres:17.11`),
   # so there is no range for a patch to arrive through silently and every bump

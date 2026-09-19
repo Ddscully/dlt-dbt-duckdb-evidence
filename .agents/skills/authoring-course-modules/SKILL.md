@@ -38,7 +38,7 @@ with a green build, while `course-query` still showed the slice under
 `lakehouse.raw`. dbt's artifacts are the third path: written to `dbt/target/`,
 module 03's `just pipeline-status` against the real warehouse filed the sandbox
 build as a seventh invocation in `analytics.pipeline_runs`, which every release
-carries (measured on a copy, 2026-09-17). The sandbox keeps them in
+carries (measured on a copy). The sandbox keeps them in
 `data/course/dbt-target/`.
 - **The guard derives what to redirect from what a recipe runs**, not from a
   list per recipe: `test_every_course_recipe_keeps_the_sandbox_to_itself` maps
@@ -114,9 +114,9 @@ file you did not edit reports success and leaves the bug in the tree.
 
 **Numbers that count the reader's own history are not answers.** `dbt_test__audit`
 holds one table per test *ever run* against that warehouse, so its count measures
-how many models the reader has renamed — 518 tables and 36 orphans here on
-2026-09-12, zero orphans on a fresh build. A reveal that states one as *the*
-answer contradicts what the learner sees. Give it as a dated example and name the
+how many models the reader has renamed — 518 tables and 36 orphans in one
+measured warehouse, zero orphans on a fresh build. A reveal that states one as *the*
+answer contradicts what the learner sees. Give it as an example and name the
 invariant instead (audit tables drift above the test count; the excess is
 orphans).
 
@@ -215,13 +215,13 @@ to 100% null at a constant row count, so the obvious sanity check is structurall
 blind to it. `dbt build` reports `PASS=561 ERROR=0` either way.
 
 **Do not explain a mechanism the drill only demonstrates.** A reveal saying a
-single indicator survived, "by arriving first", was wrong. Re-running the drill (2026-09-12) lands **two** — 392 rows of
-`EG.ELC.RNEW.ZS` and 184 of `AG.LND.FRST.ZS`, reproducibly across three
-rebuilds, and neither is the first or the last code in `WB_WDI_INDICATORS`. All
-eleven indicators cover the identical 16 x 36 grid in the fixture, so every key
-collides and dlt's merge picks a winner per key on grounds nothing in this repo
-determines. A stable number invites a causal story, and the story stays wrong
-for as long as nobody re-runs it.
+single indicator survived, "by arriving first", was wrong. Re-running the drill
+lands **two** — 392 rows of `EG.ELC.RNEW.ZS` and 184 of `AG.LND.FRST.ZS`,
+reproducibly across three rebuilds, and neither is the first or the last code in
+`WB_WDI_INDICATORS`. All eleven indicators cover the identical 16 x 36 grid in
+the fixture, so every key collides and dlt's merge picks a winner per key on
+grounds nothing in this repo determines. A stable number invites a causal story,
+and the story stays wrong for as long as nobody re-runs it.
 
 **`.arrow()` no longer reproduces the 1,000,000-row truncation as written.** In
 DuckDB 1.5.5 `.arrow(n)` returns a `RecordBatchReader` (the same object as
@@ -253,9 +253,9 @@ that is never null, at 100%. 198 of the 407 `marts` columns carry any test at
 all, against every mart model under a type contract: two different guarantees, and
 worth being able to say which one you have. The audit schema is measurable too,
 but **it counts the reader's own rename history, not the project** — 518 tables
-against 482 tests, i.e. 36 orphans, on the warehouse last measured (2026-09-12),
-and zero on a freshly built one. Write that kind of figure as an example with its
-date, never as the answer, or the reveal contradicts what the learner sees.
+against 482 tests, i.e. 36 orphans, on the warehouse last measured,
+and zero on a freshly built one. Write that kind of figure as an example,
+never as the answer, or the reveal contradicts what the learner sees.
 
 **Drill 1 is the calibration trap with a second axis nobody expects.** Adding
 `max_value: 50` to `stg_co2.co2_per_capita` builds `PASS=561 WARN=0 ERROR=0` on

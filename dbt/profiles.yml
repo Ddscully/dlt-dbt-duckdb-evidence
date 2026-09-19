@@ -57,5 +57,5 @@ modern_data_stack:
             data_path: "{{ env_var('LAKEHOUSE_DATA_PATH', env_var('LAKEHOUSE_DIR', '../data/lakehouse') ~ '/data/') }}"
             # Where the ducklake_* tables sit in the catalog database. A file
             # catalog keeps them in `main`, and DuckLake accepts that spelled
-            # out (measured 2026-09-17), so this stays one entry.
+            # out (measured), so this stays one entry.
             metadata_schema: "{{ env_var('LAKEHOUSE_METADATA_SCHEMA', 'lakehouse') if env_var('LAKEHOUSE_CATALOG', '') else 'main' }}"

@@ -431,8 +431,8 @@ models:
       **The `original_*` columns are the output of a tie-break, and this file is
       where a consumer of the release finds that out.** A customer can buy the
       same product twice in one instant, and an `asof join` given several rows
-      tied on its inequality key picks among them arbitrarily — so until
-      2026-08-24 three of these columns changed between builds with no upstream
+      tied on its inequality key picks among them arbitrarily — so without a
+      tie-break three of these columns changed between builds with no upstream
       change at all, and this table ships as Parquet every month to people who
       cannot be paged. `int_retail_return_matches` settles it by keeping the
       lowest invoice then the lowest line number, and carries the measurements;
@@ -529,7 +529,7 @@ models:
           Which line of `original_invoice`, and **the column the tie-break
           decides**. Where a customer bought the same product more than once in
           the same instant this is the lowest `(invoice, line_number)` of the
-          tied group — stable between builds since 2026-08-24, arbitrary within
+          tied group — stable between builds, arbitrary within
           the group, and not a claim that the other lines are worse candidates.
           Diffing this column against an earlier release is the one place that
           choice becomes visible, so a row that moves with no upstream change is

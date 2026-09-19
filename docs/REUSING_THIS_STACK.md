@@ -27,7 +27,7 @@ That third is already separated out, so you don't have to go looking for it:
 it's `src/modern_data_stack/`, it takes its configuration as arguments, and the
 project modules that call it hold the constants.
 
-**This document was executed on 2026-09-15**, against `c054e53`: a clone
+**This document was executed** against `c054e53`: a clone
 followed it literally, with one unrelated source (monthly gold prices, a month
 grain and no country), until CI's `build` job passed. The "a third" held up for
 the code. The lists below did not, and they are corrected from that run: the
@@ -461,7 +461,7 @@ dollar figure for running it is zero — it is a file on a laptop — so the use
 question is not what it costs but which layer gives first, and the answer is not
 the one people reach for.
 
-**What it holds now**, measured 2026-09-09 alongside the figures in
+**What it holds now**, measured alongside the figures in
 `FOR_REVIEWERS.md` §3, which this agrees with by construction. 3.7M rows across
 the modelled layers in a 282 MB DuckDB file, plus a 111 MiB DuckLake landing
 zone — that one grows about 39 MiB per full ingest and nothing expires the

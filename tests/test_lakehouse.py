@@ -231,7 +231,7 @@ def test_the_attach_alias_is_the_database_dbt_declares():
 def test_a_bucket_connection_installs_httpfs_before_loading_it(tmp_path):
     """The S3 secret needs httpfs, and a bare `load httpfs` fails on a machine
     that has never downloaded it: `Extension "httpfs" … not found`. The template
-    cut from this repo hit exactly that on its first CI run (2026-09-17), and
+    cut from this repo hit exactly that on its first CI run, and
     an empty `HOME` reproduces it here.
 
     Any machine that has run dbt has httpfs, because the profile lists it, so a
@@ -324,7 +324,7 @@ def test_the_postgres_attach_carries_the_schema_and_no_password():
 def test_a_file_catalog_is_still_spelled_as_a_duckdb_path(tmp_path):
     """The file case did not move. `main` is spelled out rather than defaulted.
 
-    Measured 2026-09-17: DuckLake accepts an explicit `metadata_schema 'main'` on
+    Measured: DuckLake accepts an explicit `metadata_schema 'main'` on
     a catalog file, which is what lets `attach()` and the dbt profile keep one
     code path instead of branching on the catalog type twice.
     """
@@ -360,8 +360,8 @@ def test_a_password_in_the_catalog_url_is_refused_and_names_pgpassword(monkeypat
 
     A password in the URL would reach the process list, dbt's rendered profile
     and dlt's config, none of which redact it. It is also unnecessary: libpq
-    reads PGPASSWORD, and DuckDB's postgres extension is libpq (measured
-    2026-09-17 — unset, the attach fails with `fe_sendauth: no password
+    reads PGPASSWORD, and DuckDB's postgres extension is libpq (measured:
+    unset, the attach fails with `fe_sendauth: no password
     supplied`).
     """
     monkeypatch.setenv(
@@ -497,7 +497,7 @@ def test_the_metadata_schema_reaches_the_query_and_is_not_assumed(tmp_path):
 
     Under a Postgres catalog the `ducklake_*` tables sit in the metadata schema
     and `main` does not exist at all, so an unqualified read fails with
-    `schema "main" does not exist` (measured 2026-09-17). No unit test can reach
+    `schema "main" does not exist` (measured). No unit test can reach
     a Postgres catalog, but pointing the file case at a schema that is not there
     proves the argument is what the SQL is built from — which is the half that
     silently returned nothing when it was missing.

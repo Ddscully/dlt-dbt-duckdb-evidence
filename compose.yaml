@@ -77,8 +77,8 @@ services:
       # when nothing says otherwise. `-d` does not rescue it: that only shapes
       # the conninfo, and `pg_isready` never opens the database it names.
       #
-      # Measured on a fresh volume with a `pg_sleep(20)` init script
-      # (2026-09-17): over the socket it returned 0 at four seconds, while the
+      # Measured on a fresh volume with a `pg_sleep(20)` init script:
+      # over the socket it returned 0 at four seconds, while the
       # init was still running and TCP answered `no response`; over TCP it
       # returned 2 until the real server came up. So the socket check let
       # `compose up --wait` return before `init.sql` had created the `dagster`

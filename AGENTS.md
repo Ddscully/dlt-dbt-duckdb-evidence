@@ -452,10 +452,11 @@ The suite's own traps (asset-check wiring, CI's re-run set, fixture leaks) are
 `repo-guards`, and the mutation method is `unit-testing-dbt-models`. For any
 number written into prose or a review:
 
-- **A wall-clock figure drifts, and nothing can guard it.** Date a timing when you
-  write it, and after correcting a figure restated across files, `grep` for the
-  *old* value and expect a hit. Phrase a pytest count as "pytest cases": the
-  counts guard reads a number in front of a bare test noun as a dbt claim.
+- **A wall-clock figure drifts, and nothing can guard it.** Leave the date off:
+  `git log -S '<figure>'` finds the commit that measured it. After correcting a
+  figure restated across files, `grep` for the *old* value and expect a hit.
+  Phrase a pytest count as "pytest cases": the counts guard reads a number in
+  front of a bare test noun as a dbt claim.
 - **A join is not a census.** To ask how often two models disagree, first count
   the rows only one of them has.
 - **A correct number reused for a different claim is a wrong number**, and no

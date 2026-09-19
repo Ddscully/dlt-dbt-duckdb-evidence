@@ -27,7 +27,7 @@ the catalog.
 `attach()` takes either a path to a catalog file or a connection URI. A URI is
 kept verbatim, for the reason a bucket `data_path` is: `Path()` collapses
 `postgres://` to `postgres:/`. It carries no password — libpq reads `PGPASSWORD`,
-measured 2026-09-17 to reach the bundled extension, which fails loudly as
+measured to reach the bundled extension, which fails loudly as
 `fe_sendauth: no password supplied` when it is unset.
 
 DuckLake then keeps its `ducklake_*` tables in that database's `METADATA_SCHEMA`
@@ -93,7 +93,7 @@ def attach(
     spec, not an internal. `metadata_schema` says which schema of that database
     holds the tables; DuckLake's own default is `main`, which is where a file
     catalog keeps them, and passing `'main'` explicitly for a file catalog is
-    accepted (measured 2026-09-17) — so there is one code path, not two.
+    accepted (measured) — so there is one code path, not two.
 
     A `data_path` URL (`s3://…`) is kept as a string, because `Path` collapses
     `s3://` to `s3:/`. `storage_secret` — `key_id`, `secret`, `endpoint` (host

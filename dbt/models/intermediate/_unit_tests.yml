@@ -122,7 +122,7 @@ unit_tests:
       exists for.** Delete the `qualify` and the model still returns *a* member
       of the tie group, and the tie-break's answer is always a member of that
       group — so no fixture can make a mismatch certain, and this test can only
-      make it overwhelmingly likely. Measured 2026-09-01: DuckDB's *parallel*
+      make it overwhelmingly likely. Measured: DuckDB's *parallel*
       asof join draws a different tied row per run (at `threads=1` it is
       deterministic and takes the first row; above that it spreads), so a single
       group let the deleted tie-break through **28.7% of runs** — 287 of 1,000,

@@ -22,7 +22,7 @@ uv tool install rust-just                         # the `just` command runner
 
 just setup                    # uv sync: runtime + dev + orchestration
 uv run pre-commit install     # the hooks CI also runs
-just run                      # the whole pipeline, ≈65 s (2026-09-09), no credentials
+just run                      # the whole pipeline, ≈65 s, no credentials
 ```
 
 `just` has to stay on your `PATH` after setup, not just during it: the sqlfluff
@@ -32,8 +32,8 @@ pre-commit hook is a `local` hook whose entry is `just lint`, so a shell without
 ## Before you open a PR
 
 ```bash
-just test           # ~47 s (2026-09-15), mocked payloads, no network, no warehouse
-just test-pipeline  # ~46 s (2026-09-15), the real modules against checked-in fixtures
+just test           # ~47 s, mocked payloads, no network, no warehouse
+just test-pipeline  # ~46 s, the real modules against checked-in fixtures
 just lint           # sqlfluff over dbt/models and dbt/snapshots
 ```
 

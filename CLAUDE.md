@@ -13,7 +13,7 @@ The shared instructions are [`AGENTS.md`](AGENTS.md), which every agent reads
 and the `@AGENTS.md` line imports; this section is what only Claude Code does.
 Claude Code loads the import as a file of its own, after this one, not spliced
 in at that line — the model sees the line itself, then this section, then
-`AGENTS.md` (observed 2026-09-15 on Claude Code 2.1.272) — so nothing here may
+`AGENTS.md` (observed on Claude Code 2.1.272) — so nothing here may
 say the shared text is "above".
 
 Vendor skills for each layer are declared in [`.claude/settings.json`](.claude/settings.json),

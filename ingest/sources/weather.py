@@ -324,7 +324,7 @@ def check_weather_range_is_affordable(years: tuple[int, int], today: date | None
     The limiter honours the daily window by *sleeping*, so an oversized range
     does not fail: it waits for the window to drain, for as many days as the
     range overspends, looking exactly like a hung run. 1960-2026 is ~42,800
-    units, over four days — what the Dagster UI launched on 2026-09-13, when a
+    units, over four days — what the Dagster UI once launched, when a
     partitioned asset made "every year" its Materialize button's default. A range
     inside the allowance still takes hours, paced by the hourly window, but ends.
 
