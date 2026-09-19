@@ -251,9 +251,9 @@ handful of country-years where `gdp_usd` is populated, and switches the
 denominator to recover them. More countries ranked, same column name, same row
 count.
 
-**Seed the bug.** `transform/co2_intensity.py` names `gdp_constant_usd` twice:
-once in `read_usable_rows`' SQL filter that drops unusable GDP, and once in
-`build_co2_intensity`'s division.
+**Seed the bug.** In `transform/co2_intensity.py`, `build_co2_intensity` divides
+by `gdp_constant_usd` twice: once in the filter that drops unusable GDP and once
+in the division.
 Change both to `gdp_usd`:
 
 ```bash
