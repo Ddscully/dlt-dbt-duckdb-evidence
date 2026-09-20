@@ -89,6 +89,28 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   not read, and `dagster job launch -m …` returns 0 and then fails the run with
   `DagsterCodeLocationNotFoundError`. Both measured
   ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §8).
+- **Some commands *require* `-m`, and the two rules do not collide.** The split
+  is which click options a command carries. `dagster asset list` takes
+  `python_pointer_options` alone (`-m`, `-f`, `--package-name`), so a bare
+  `dagster asset list` exits with `Error: Invalid set of CLI arguments for
+  loading repository/job`; `dagster job list` and `dagster definitions validate`
+  take `workspace_options`, which do fall back to `[tool.dagster]`. Measured:
+
+  | Command | `-m` | `DAGSTER_HOME` |
+  |---|---|---|
+  | `dagster asset list` (`just materialize-preview`) | **required** | not read |
+  | `dagster job list` | optional — omit it | not read |
+  | `dagster definitions validate` | optional — omit it | a temp dir if unset |
+  | `dagster run list`, `dagster schedule list` | n/a | **required** |
+
+  What requires `-m` builds the definitions in a throwaway code server and
+  touches no instance state, which is why naming that location after the module
+  costs nothing there. The rule above is about the commands that *write*
+  instance state — `schedule start`/`stop`, `sensor start`/`stop`, `job launch`,
+  `run delete`, `asset wipe`. An instance command with no `DAGSTER_HOME` ends its
+  traceback with `export DAGSTER_HOME=…`, and `definitions validate` without one
+  makes a `.tmp_dagster_home_*` (gitignored) that it removes on exit; every
+  `just` recipe has it exported already.
 
 **This file is the Dagster knowledge for this repo**, not a supplement to a
 vendor skill: `dagster-expert` is not enabled, because it is written around a `dg`
