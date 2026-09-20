@@ -274,6 +274,9 @@ restore-history from: where
 record-fixtures:
     uv run python -m scripts.record_fixtures
 
+# Prints a SupersessionWarning naming `dg dev`. Every Dagster CLI command here
+# carries one, and none is on a removal clock — the dagster-graph-and-jobs skill
+# has the four and what they cost to leave.
 # Dagster UI on :3000 — asset graph, run history, freshness, checks
 dagster:
     mkdir -p "$DAGSTER_HOME"

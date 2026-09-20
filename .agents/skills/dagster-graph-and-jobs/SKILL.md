@@ -234,13 +234,41 @@ CLI this project does not install
     the framework would silently absorb (`get_all_asset_keys()` is too wide;
     `AssetChecksDefinition` subclasses `AssetsDefinition`, so an `isinstance`
     chain in the wrong order measures nothing).
-  - **The CLI half is +20 packages on a 151-package tree** — `uv pip install
-    --dry-run dagster-dg-cli` installs 24 and removes 4, pulling
-    `dagster-cloud-cli`, `github3-py`, `cryptography`, `pyjwt`, `httpx`,
-    `questionary` and `yaspin` into a project with no Dagster Plus deployment,
-    and forcing dagster 1.13.15 → 1.13.19. That is the harlequin/marimo shape
-    exactly — a dev tool that duplicates capability the stack already has is
-    weight, and it is measured in the `dependency-versions` skill.
+  - **The CLI half is +20 packages on a 159-package tree** — `uv pip install
+    --dry-run dagster-dg-cli` resolves 88 and installs 20, removing none and
+    pulling `dagster-cloud-cli`, `github3-py`, `cryptography`, `pyjwt`, `httpx`,
+    `questionary` and `yaspin` into a project with no Dagster Plus deployment.
+    It no longer moves `dagster` itself: `dagster-dg-cli` ships at the version
+    already locked. That is the harlequin/marimo shape exactly — a dev tool that
+    duplicates capability the stack already has is weight, and it is measured in
+    the `dependency-versions` skill.
+  - **Every Dagster CLI command this repo runs is `@superseded`, and a
+    supersession is not a removal clock.** All four carry
+    `emit_runtime_warning=True` in the installed `dagster/_cli/`, so each prints
+    one line before it works — `SupersessionWarning: Function dev_command is
+    superseded and its usage is discouraged. Use 'dg dev' instead.`
+
+    | Superseded | What it names instead | Where it runs here |
+    |---|---|---|
+    | `dagster dev` | `dg dev` | `just dagster` |
+    | `dagster job execute` | `dg launch --job` | `just materialize`, `just materialize-site`, and the workflows through them |
+    | `dagster asset materialize` | `dg launch --assets` | `just materialize-select`, `just backfill-wdi`, `just backfill-weather` |
+    | `dagster definitions validate` | `dg check defs` | CI, so every build log carries the warning |
+
+    **`superseded` and `deprecated` are different annotations in dagster's own
+    taxonomy, and only `deprecated` takes a `breaking_version`.** On
+    `dev_command` that second decorator is applied to the `--dagit-port` and
+    `--dagit-host` *arguments*, not to the command, so none of the four is
+    scheduled for removal at 2.0. Revisit when a `breaking_version` appears on
+    one of them, not when the warning is noticed again.
+  - **The replacements are not drop-in, which is what keeps the decision
+    standing.** `dg dev` takes no module pointer — it launches the project or
+    workspace it is *run inside* — and `dg check defs` here exits with `This
+    command must be run inside a Dagster workspace or project directory`,
+    naming `tool.dg.directory_type = "project"` in the nearest
+    `pyproject.toml`. So silencing one warning means adopting the project
+    declaration, which is the half costed above: the warning is a nag on a
+    supported path, not a migration notice.
   - **`uvx dg` is the trap, and this repo has already refused it twice.** It
     dodges the lockfile — which is the argument that lost pyright to ty
     ("an unpinned global binary no lockfile here can see") and the reason
