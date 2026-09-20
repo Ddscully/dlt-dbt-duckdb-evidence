@@ -310,7 +310,9 @@ def dockerfile_image_version(name: str) -> str:
     """The version part of the Dockerfile's `FROM <name>:<version>…` line."""
     for tag, source, _ in image_tags():
         if source == "Dockerfile" and tag.partition(":")[0] == name:
-            return re.match(r"\d+(?:\.\d+)*", tag.partition(":")[2]).group()
+            numeric = re.match(r"\d+(?:\.\d+)*", tag.partition(":")[2])
+            assert numeric, f"the Dockerfile's `FROM {tag}` does not start with a version"
+            return numeric.group()
     raise AssertionError(f"the Dockerfile has no `FROM {name}:…` line")
 
 
