@@ -112,7 +112,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 |---------|--------------|
 | `just setup` | `uv sync --group dev --group orchestration`, then `just extensions` — ducklake, httpfs and postgres, binaries no lockfile can name |
 | `just compose-up` / `just compose-down` | the optional backing services — Postgres for the catalog, SeaweedFS for the Parquet (`compose-down volumes` destroys both) |
-| `just deploy-deps` | add the `deploy` group — Dagster's own storage in Postgres, under `DAGSTER_HOME=<repo>/deploy` |
+| `just deploy-deps` | add the `deploy` group — the container stack's Postgres storage and run launcher; locally, what makes the launcher tests run |
 | `just compose-build` / `just compose-test-pipeline` | the `mds:local` image, and the fixture pipeline inside it against the compose services |
 | `just ingest` | run the dlt pipeline → `raw` in the DuckLake catalog |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |

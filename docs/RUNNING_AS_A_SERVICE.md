@@ -281,7 +281,7 @@ Everything below has to be on durable storage, and each row fails differently:
 | `data/warehouse.duckdb` | the `history` schema only; every other schema is derived | the revision log, permanently. No rebuild invents a version upstream has overwritten |
 | dlt's data dir | the WDI watermark and the ECB's last fixing | a silent full re-fetch, or a five-year window into a warehouse with no history |
 | `.dagster/` | the laptop instance: run and event storage (SQLite), plus **schedule on/off state**; its `dagster.yaml` is config, checked in, and has to be carried to any other `DAGSTER_HOME` | run history, and a service that looks running and ingests nothing (§5); without `dagster.yaml`, runs no longer queue behind each other (§5) |
-| the `dagster` database | the same three, when `DAGSTER_HOME` names `deploy/` instead: `deploy/dagster.yaml` puts run, event and schedule storage in Postgres, so they outlive a container that is replaced rather than restarted | the same three losses, with nothing left on a filesystem to restore them from |
+| the `dagster` database | the same three, for the container stack: `deploy/dagster.yaml` puts run, event and schedule storage in Postgres, so they outlive a container that is replaced rather than restarted. Its first use created 22 tables, and after one `load_retail` the database was 9.3 MB | the same three losses, with nothing left on a filesystem to restore them from |
 | `$DAGSTER_STORAGE_DIR` | compute logs and the artifacts a run writes, under `deploy/dagster.yaml` — Postgres storage does not take these. Only that file reads the variable: the laptop instance keeps them in `.dagster/storage/`, inside the `.dagster/` row | a finished run whose logs the UI shows as empty |
 | `data/cache/` | the retail workbook | a download, never data |
 
@@ -750,23 +750,21 @@ mkdir -p /srv/mds/state/dagster
 ln -s /srv/mds/repo/.dagster/dagster.yaml /srv/mds/state/dagster/dagster.yaml
 ```
 
-**Or point `DAGSTER_HOME` at `deploy/` instead**, which is the same decision
-made the other way: the config is already in the repo, so nothing is linked, and
-run, event and schedule storage go to Postgres rather than to the volume. It
-needs `just deploy-deps` for the driver, the four `DAGSTER_*` lines and
-`PGPASSWORD` from `.env.example`, and a reachable database — `just compose-up`
-starts one, and `deploy/postgres/init.sql` creates the `dagster` database beside
-the DuckLake catalog's. Then the unit's line is:
+**Not `deploy/`**, though it is the tidier-looking option and this section
+once offered it. That file is the *container's* instance: its `run_launcher`
+resolves each run's image by asking the Docker daemon what the **launching
+container** was created from, and nothing in Dagster checks whether it is
+running in one. A host pointed there starts cleanly and then fails the first
+time the daemon dequeues a run, with `no container '<hostname>' on this Docker
+daemon`. The failure is invisible to `just materialize` and the other
+in-process recipes, which run under either instance, so it shows only on a UI
+click, a schedule tick or a backfill. The measurement, and the split-config
+alternative weighed against it, are
+[decision 0011](decisions/0011-deploy-is-the-containers-instance.md).
 
-```sh
-Environment=DAGSTER_HOME=/srv/mds/repo/deploy
-```
-
-`$DAGSTER_STORAGE_DIR` still belongs on the volume: compute logs and run
-artifacts stay on a filesystem, and this is the instance that puts them there
-(§3). Measured:
-the first use of that instance created 22 tables in the `dagster` database, and
-after one `load_retail` the database was 9.3 MB.
+`$DAGSTER_STORAGE_DIR` needs nothing here either: only `deploy/dagster.yaml`
+reads it (§3), and the linked instance above keeps compute logs and run
+artifacts in `$DAGSTER_HOME/storage/`, which is already on the volume.
 
 **3. Bootstrap, by hand, before the service exists.** This is the step that
 differs from steady state, and it differs because `daily_refresh` targets

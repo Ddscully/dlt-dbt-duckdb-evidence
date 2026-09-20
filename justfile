@@ -62,10 +62,13 @@ extensions:
 
 # `uv sync` computes the whole venv from the groups it is given, so this names
 # all three: `--group deploy` alone would strip dev and orchestration out from
-# under whatever is running. Only needed to point DAGSTER_HOME at `deploy/`,
-# which is what the container does; `just setup` leaves the group out so a
-# laptop installs no Postgres driver for storage it does not use.
-# Add the `deploy` group (Postgres-backed Dagster storage) to the venv
+# under whatever is running. `just setup` leaves the group out, so a laptop
+# installs no Postgres driver for storage it does not use — and
+# `tests/test_docker_launcher.py` importorskips `dagster_docker`, so on that
+# venv it skips in silence. Running those tests locally is what this recipe is
+# for. The image syncs the group itself, and a host must not point DAGSTER_HOME
+# at `deploy/`: that is the container's instance (docs/decisions/0011).
+# Add the `deploy` group, so the run-launcher tests run instead of skipping
 deploy-deps:
     uv sync --group dev --group orchestration --group deploy
 

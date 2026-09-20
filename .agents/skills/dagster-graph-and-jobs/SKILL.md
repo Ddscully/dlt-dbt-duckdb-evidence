@@ -51,6 +51,15 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
     include, so the limit above is written twice, and
     `tests/test_dagster_instance.py` holds the copies in step — a laptop
     measurement is only evidence about a deployment while it does.
+  - **`deploy/` is the container's instance, and a host must not point at it.**
+    Nothing in Dagster checks whether it is running in a container, so a host
+    process resolves the launcher and starts cleanly, then fails when the daemon
+    dequeues a run: `no container '<hostname>' on this Docker daemon`. Behind
+    that, eleven of the launcher's eighteen copied variables are unset on such a
+    host, and no host configuration satisfies the list. In-process recipes
+    (`just materialize*`, `backfill-*`) work under either instance, so the break
+    shows only on a UI click, a schedule tick or a backfill
+    ([`docs/decisions/0011-deploy-is-the-containers-instance.md`](../../../docs/decisions/0011-deploy-is-the-containers-instance.md)).
   - **The limit survives the container boundary, measured.** Two runs launched
     ten seconds apart against the compose stack gave one run
     container and one `QUEUED` row; the second started only when the first
