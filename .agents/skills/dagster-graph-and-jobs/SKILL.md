@@ -21,7 +21,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   `raw/<resource>` by `RawSchemaDltTranslator` to match the keys dagster-dbt
   derives from `_sources.yml`. Rename a dbt source table without renaming the dlt
   resource and the graph silently splits in two — both halves still run. Check
-  with `dagster definitions validate` and a look at the graph.
+  with `just validate` and a look at the graph.
 - **`orchestration/assets.py` must not use `from __future__ import annotations`.**
   Dagster inspects the `context` parameter's annotation *object*; a stringified
   one fails with a confusing "Cannot annotate `context`".
@@ -275,7 +275,7 @@ CLI this project does not install
     | `dagster dev` | `dg dev` | `just dagster` |
     | `dagster job execute` | `dg launch --job` | `just materialize`, `just materialize-site`, and the workflows through them |
     | `dagster asset materialize` | `dg launch --assets` | `just materialize-select`, `just backfill-wdi`, `just backfill-weather` |
-    | `dagster definitions validate` | `dg check defs` | CI, so every build log carries the warning |
+    | `dagster definitions validate` | `dg check defs` | `just validate`, which CI runs, so every build log carries the warning |
 
     **`superseded` and `deprecated` are different annotations in dagster's own
     taxonomy, and only `deprecated` takes a `breaking_version`.** On

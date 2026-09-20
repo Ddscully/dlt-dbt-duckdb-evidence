@@ -313,6 +313,17 @@ materialize-preview selection: dbt-parse
     uv run --group orchestration dagster asset list \
         -m orchestration.definitions --select '{{ selection }}'
 
+# `dbt-parse` first: the code location imports the dbt project, so without a
+# manifest it fails to load rather than reporting what is unregistered. That
+# dependency is why this is not the check for "did the *running* service load its
+# location" — it repairs the precondition that question is asking about, and
+# RUNNING_AS_A_SERVICE.md §7 spells that one out separately. No `-m`, so the
+# location stays `modern_data_stack`, the name `[tool.dagster]` and the service
+# give it (§8).
+# Check the code location loads and every definition is registered
+validate: dbt-parse
+    uv run --group orchestration dagster definitions validate
+
 # `just backfill-wdi 1995` or `just backfill-wdi 1990 1995`. Merges, so re-runs
 # are idempotent. Loads the raw asset alone, so follow with `just dbt-build` or
 # `just materialize`.
