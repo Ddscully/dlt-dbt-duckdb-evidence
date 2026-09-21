@@ -1,8 +1,11 @@
 # Lightweight orchestration. `just <recipe>`; run `just` to list.
 # (Install: `uv tool install rust-just` or use your package manager.)
 #
-# `just --list` shows only the comment line directly above a recipe, so each
-# recipe's one-line summary is the last line of its comment block.
+# `just --list` shows only the last comment line before a recipe, so each
+# recipe's one-line summary ends its comment block, above the `[group]` line.
+# Every public recipe takes a group, and `default` lists them unsorted: a group
+# appears where its first recipe does, and its recipes in file order, so
+# `ingest` stays ahead of `dbt-build`. A recipe without a group lists above them all.
 
 set dotenv-load := true
 
@@ -16,14 +19,16 @@ export DAGSTER_HOME := env("DAGSTER_HOME", justfile_directory() / ".dagster")
 # attach is refused. The warehouse file needs no such care: it records no path.
 export LAKEHOUSE_DIR := env("LAKEHOUSE_DIR", justfile_directory() / "data/lakehouse")
 
+[private]
 default:
-    @just --list
+    @just --list --unsorted
 
 # dbt's log names the target (`target='dev'`, the only one) and never the file,
 # so every recipe that writes to the warehouse or the landing zone depends on
 # this. The recipes that export their own WAREHOUSE_PATH (`test-pipeline`, the
 # course ones) do not: this would print the outer value.
 # Print which warehouse file and landing zone the pipeline recipes will use
+[group('setup')]
 where: _no-dbt-dotenv
     @echo "warehouse: ${WAREHOUSE_PATH:-(unset - this repo's data/warehouse.duckdb)}"
     @echo "lakehouse: $LAKEHOUSE_DIR"
@@ -45,6 +50,7 @@ _no-dbt-dotenv:
     fi
 
 # One-time: install runtime + dev deps into the uv-managed venv, and the DuckDB extensions
+[group('setup')]
 setup:
     uv sync --group dev --group orchestration
     just extensions
@@ -57,6 +63,7 @@ setup:
 # ducklake is the landing zone, httpfs its Parquet in a bucket, postgres its
 # catalog in a database; the last two are inert until their variable is set.
 # Install the DuckDB extensions the lakehouse can need
+[group('setup')]
 extensions:
     uv run python -c "import duckdb; con = duckdb.connect(); [con.execute(f'install {e}') for e in ('ducklake', 'httpfs', 'postgres')]"
 
@@ -69,67 +76,19 @@ extensions:
 # for. The image syncs the group itself, and a host must not point DAGSTER_HOME
 # at `deploy/`: that is the container's instance (docs/decisions/0011).
 # Add the `deploy` group, so the run-launcher tests run instead of skipping
+[group('setup')]
 deploy-deps:
     uv sync --group dev --group orchestration --group deploy
 
-# The whole stack: Postgres (the DuckLake catalog, and Dagster's storage under
-# `deploy/`), SeaweedFS (S3-compatible storage for the Parquet), the graph, and
-# nginx serving the dashboard. Nothing here is needed to use this repo: with
-# LAKEHOUSE_CATALOG and LAKEHOUSE_DATA_PATH unset the landing zone is entirely on
-# disk and none of this runs. `just compose-build` first. Dagster is then on
-# :3000 and the dashboard on :8081. See .env.example, compose.yaml and
-# docs/RUNNING_AS_A_SERVICE.md.
-# Start the stack and wait for it to be healthy
-compose-up:
-    docker compose up -d --wait
-
-# The image is the whole stack — both Dagster processes, every layer they call,
-# and Node for the site — and its CMD is this justfile's `serve`. Build it before
-# the first `just compose-up`, and after any change to the tree, because compose
-# does not rebuild on its own.
-# Build the mds:local image compose runs
-compose-build:
-    docker compose build
-
-# The fixture pipeline inside the image, against the compose Postgres and
-# SeaweedFS: the one command that exercises a remote catalog, a remote data path
-# and the container together. `--no-deps` because the services are already up,
-# and `--rm` because this is not the service.
-# Run the fixture pipeline inside the container (needs `just compose-up`)
-compose-test-pipeline:
-    docker compose run --rm --no-deps dagster just test-pipeline
-
-# Queues the job on the running stack's daemon, which starts it in a run
-# container against the `mds_data` volume — so no `where`, which would name the
-# host's warehouse. It returns once the run is *queued*, so its exit code says
-# nothing about the run, which is why `materialize` and the backfill recipes stay
-# in-process. Two launches run in order, but the second does not wait for the
-# first to succeed: a failed `load_retail` is still followed by `full_refresh`.
-# No `-m` (RUNNING_AS_A_SERVICE.md §8), and run config belongs in the UI.
-# Queue a job on the compose stack's daemon (needs `just compose-up`)
-compose-launch job:
-    docker compose exec -T dagster uv run dagster job launch -j {{ job }}
-
-# `just compose-down volumes` also deletes the named volumes — which destroys
-# the catalog and the bucket, and is the only way to make the Postgres init
-# script run again (the entrypoint runs it on an empty data directory alone).
-# Stop the stack
-compose-down mode="keep":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ "{{ mode }}" = "volumes" ]; then
-      docker compose down -v
-    else
-      docker compose down
-    fi
-
 # EL: pull public sources into the DuckLake landing zone
+[group('pipeline')]
 ingest: where
     uv run python -m ingest.pipeline
 
 # For a World Bank restatement older than the lookback window, or after the raw
 # table was dropped while dlt's watermark survived.
 # Re-fetch the whole WDI series instead of the incremental window
+[group('pipeline')]
 ingest-wdi-full: where
     INGEST_WDI_FULL=1 uv run python -m ingest.pipeline
 
@@ -138,6 +97,7 @@ ingest-wdi-full: where
 # a lookback window behind its watermark. `just dlt-state
 # modern_data_stack_fixtures` reads the fixture pipeline's.
 # Show dlt's incremental state — the WDI watermark and the ECB's last fixing
+[group('inspect')]
 dlt-state pipeline="modern_data_stack":
     uv run dlt pipeline {{ pipeline }} info -v
 
@@ -145,11 +105,13 @@ dlt-state pipeline="modern_data_stack":
 # every invocation (`dbt parse` and sqlfluff's templater included), and DuckLake
 # will not create the catalog's parent directory.
 # Install dbt packages (dbt_utils) into the gitignored dbt/dbt_packages/
+[group('pipeline')]
 dbt-deps:
     mkdir -p "$LAKEHOUSE_DIR"
     cd dbt && uv run dbt deps
 
 # T: build + test dbt models
+[group('pipeline')]
 dbt-build: where dbt-deps
     cd dbt && uv run dbt build
 
@@ -157,12 +119,14 @@ dbt-build: where dbt-deps
 # gitignored, so every headless `dagster` recipe depends on this. `just dagster`
 # does not: `prepare_if_dev()` parses under the dev CLI.
 # Write dbt/target/manifest.json — the Dagster graph won't load without it
+[group('pipeline')]
 dbt-parse: dbt-deps
     cd dbt && uv run dbt parse
 
 # The models' parents must exist in the warehouse (schema only); run
 # `just dbt-build` once if they don't.
 # dbt unit tests only — mocked inputs, the inner loop for model logic
+[group('check')]
 dbt-unit-test: dbt-deps
     cd dbt && uv run dbt test --select test_type:unit
 
@@ -170,46 +134,56 @@ dbt-unit-test: dbt-deps
 # ingest, so this measures when the pipeline last ran, not when a publisher last
 # published.
 # Is the warehouse stale? `dbt source freshness` against dlt's load ids
+[group('inspect')]
 dbt-freshness: dbt-deps
     cd dbt && uv run dbt source freshness
 
 # Needs a built warehouse, or the catalog's columns come back untyped.
 # Render the dbt metadata layer to dbt/target/ — columns, contracts, groups, exposures, versions, tests
+[group('inspect')]
 dbt-docs: dbt-deps
     cd dbt && uv run dbt docs generate
 
 # Serve the dbt docs site on :8080, regenerated first (blocks; ctrl-c to stop)
+[group('inspect')]
 dbt-docs-serve: dbt-docs
     cd dbt && uv run dbt docs serve
 
 # Report what the DuckLake landing zone holds — tables, rows, snapshots (read-only)
+[group('inspect')]
 lakehouse:
     uv run python -m lake.lakehouse
 
 # Polars derived metrics
+[group('pipeline')]
 transform: where
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
 
 # Run after dbt-build: it reads dbt_test__audit and dbt's artifacts.
 # Pipeline observability tables (load times, layer inventory, dbt test failures)
+[group('pipeline')]
 pipeline-status: where
     uv run python -m transform.pipeline_status
 
 # Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
+[group('pipeline')]
 run: ingest dbt-build transform pipeline-status
 
 # Unit tests — mocked API payloads, no network, no warehouse
+[group('check')]
 test:
     uv run pytest
 
 # Two commands so a failing suite stops before a percentage is printed.
 # Line + branch coverage of `just test` — reports, gates nothing
+[group('check')]
 coverage:
     uv run coverage run -m pytest
     uv run coverage report
 
 # The whole pipeline against checked-in fixtures, into a throwaway warehouse — what CI runs
+[group('check')]
 test-pipeline: _no-dbt-dotenv
     #!/usr/bin/env bash
     set -euo pipefail
@@ -260,6 +234,7 @@ test-pipeline: _no-dbt-dotenv
 # salt, so its pseudonyms cannot pass for a release's; `release-data.yml` passes
 # the stable repository secret (docs/DATA_PROTECTION.md says why it is stable).
 # Package data/export/ for publishing: DuckDB copy, Parquet, checksums, notes
+[group('publish')]
 export-data:
     PII_SALT="${PII_SALT:-$(uv run python -c 'import secrets; print(secrets.token_hex(32))')}" \
         uv run python -m publish.export_warehouse
@@ -267,11 +242,13 @@ export-data:
 # Reads dbt/target/manifest.json (`just dbt-parse`), never the warehouse: grains
 # come from the uniqueness tests, columns from the enforced contracts.
 # Which conformed dimensions does each fact carry? -> docs/WAREHOUSE.md
+[group('publish')]
 bus-matrix:
     uv run python -m publish.bus_matrix
 
 # Reprints the table in docs/DATA_PROTECTION.md from the warehouse. Read-only.
 # How identifiable is a customer once the identifier is gone?
+[group('publish')]
 disclosure-risk:
     uv run python -m scripts.measure_disclosure_risk
 
@@ -281,10 +258,12 @@ disclosure-risk:
 #   gh release download --pattern warehouse.duckdb --dir prev
 #   just restore-history prev/warehouse.duckdb
 # Carry a published release's unreproducible tables into this warehouse
+[group('publish')]
 restore-history from: where
     uv run python -m publish.restore_history {{ from }}
 
 # Re-record the fixtures from the live APIs (hits the network; commit the diff)
+[group('check')]
 record-fixtures:
     uv run python -m scripts.record_fixtures
 
@@ -292,6 +271,7 @@ record-fixtures:
 # carries one, and none is on a removal clock — the dagster-graph-and-jobs skill
 # has the four and what they cost to leave.
 # Dagster UI on :3000 — asset graph, run history, freshness, checks
+[group('dagster')]
 dagster:
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster dev
@@ -300,6 +280,7 @@ dagster:
 # too — its Materialize button in the UI a backfill. `load_retail` first: dbt
 # reads its table. See orchestration/definitions.py.
 # Full pipeline ordered by the asset graph, minus the Evidence site
+[group('dagster')]
 materialize: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
@@ -307,6 +288,7 @@ materialize: where dbt-parse
 
 # What .github/workflows/pages.yml runs.
 # The same graph with the Evidence site on the end of it (needs Node)
+[group('dagster')]
 materialize-site: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
@@ -316,6 +298,7 @@ materialize-site: where dbt-parse
 # matches nothing and exits 0. Write `key:"marts/*"`; `group:`, `kind:`,
 # `sinks(...)` and `roots(...)` also work. Check with `just materialize-preview`.
 # Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi*'` (* = all downstream, + = one layer)
+[group('dagster')]
 materialize-select selection: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster asset materialize \
@@ -323,6 +306,7 @@ materialize-select selection: where dbt-parse
 
 # A selection matching no assets is not an error to `materialize`, so look first.
 # Print the assets a selection resolves to, without materializing any of them
+[group('dagster')]
 materialize-preview selection: dbt-parse
     uv run --group orchestration dagster asset list \
         -m orchestration.definitions --select '{{ selection }}'
@@ -335,6 +319,7 @@ materialize-preview selection: dbt-parse
 # location stays `modern_data_stack`, the name `[tool.dagster]` and the service
 # give it (§8).
 # Check the code location loads and every definition is registered
+[group('dagster')]
 validate: dbt-parse
     uv run --group orchestration dagster definitions validate
 
@@ -349,6 +334,7 @@ validate: dbt-parse
 # would load the lookback and succeed; `tests/test_definitions.py` holds both to
 # the op.
 # Re-load WDI for one year or a range of years
+[group('dagster')]
 backfill-wdi start end='': where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
@@ -368,6 +354,7 @@ backfill-wdi start end='': where dbt-parse
 # days. The rows are carried into the next release (`publish/restore_history.py`).
 # Follow with `just dbt-build`.
 # Deepen the capital-city weather archive, e.g. `just backfill-weather 2012 2026`
+[group('dagster')]
 backfill-weather start end='': where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
@@ -388,6 +375,7 @@ backfill-weather start end='': where dbt-parse
 # after `storage_secret()` and the dbt profile. The keys go in through the CLI's
 # `getenv`, so they never appear in the process list.
 # Open the warehouse in the DuckDB CLI (`just sql write` for a writer)
+[group('inspect')]
 sql mode="read":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -423,23 +411,27 @@ sql mode="read":
 # From dbt/, because the dbt templater resolves the profile's relative
 # `../data/…` default against the working directory.
 # Lint the dbt models and snapshots with sqlfluff
+[group('check')]
 lint: dbt-deps
     cd dbt && uv run sqlfluff lint models snapshots
 
 # ty is pre-1.0 and runs in neither pre-commit nor CI; `uv run` so the locked
 # version answers. Suppressions go inline as `# ty: ignore[rule]`.
 # Type-check the Python — reports, gates nothing
+[group('check')]
 typecheck:
     uv run ty check
 
 # The same module the `reports/evidence_site` asset calls.
 # Build the Evidence dashboard (requires Node; see reports/README.md)
+[group('publish')]
 report:
     uv run python -m publish.build_report
 
 # Evidence caches each source's schema and does not notice a column change, so
 # use this rather than `report` after any mart or analytics column changes.
 # Drop Evidence's schema cache, re-extract the sources, then build
+[group('publish')]
 report-clean:
     uv run python -m publish.build_report --clean
 
@@ -465,6 +457,7 @@ export SITE_ROOT := env("SITE_ROOT", justfile_directory() / "reports/build")
 #     exit as far as `Restart=on-failure` is concerned.
 # It does not start the `daily_refresh` schedule, which ships STOPPED (§10).
 # Run the graph and the dashboard as one always-on service (blocks; ctrl-c to stop)
+[group('service')]
 serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
@@ -496,6 +489,62 @@ serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
     echo "serve: a child process exited (status $status) — stopping the rest" >&2
     exit 1
 
+# The whole stack: Postgres (the DuckLake catalog, and Dagster's storage under
+# `deploy/`), SeaweedFS (S3-compatible storage for the Parquet), the graph, and
+# nginx serving the dashboard. Nothing here is needed to use this repo: with
+# LAKEHOUSE_CATALOG and LAKEHOUSE_DATA_PATH unset the landing zone is entirely on
+# disk and none of this runs. `just compose-build` first. Dagster is then on
+# :3000 and the dashboard on :8081. See .env.example, compose.yaml and
+# docs/RUNNING_AS_A_SERVICE.md.
+# Start the stack and wait for it to be healthy
+[group('service')]
+compose-up:
+    docker compose up -d --wait
+
+# The image is the whole stack — both Dagster processes, every layer they call,
+# and Node for the site — and its CMD is this justfile's `serve`. Build it before
+# the first `just compose-up`, and after any change to the tree, because compose
+# does not rebuild on its own.
+# Build the mds:local image compose runs
+[group('service')]
+compose-build:
+    docker compose build
+
+# The fixture pipeline inside the image, against the compose Postgres and
+# SeaweedFS: the one command that exercises a remote catalog, a remote data path
+# and the container together. `--no-deps` because the services are already up,
+# and `--rm` because this is not the service.
+# Run the fixture pipeline inside the container (needs `just compose-up`)
+[group('service')]
+compose-test-pipeline:
+    docker compose run --rm --no-deps dagster just test-pipeline
+
+# Queues the job on the running stack's daemon, which starts it in a run
+# container against the `mds_data` volume — so no `where`, which would name the
+# host's warehouse. It returns once the run is *queued*, so its exit code says
+# nothing about the run, which is why `materialize` and the backfill recipes stay
+# in-process. Two launches run in order, but the second does not wait for the
+# first to succeed: a failed `load_retail` is still followed by `full_refresh`.
+# No `-m` (RUNNING_AS_A_SERVICE.md §8), and run config belongs in the UI.
+# Queue a job on the compose stack's daemon (needs `just compose-up`)
+[group('service')]
+compose-launch job:
+    docker compose exec -T dagster uv run dagster job launch -j {{ job }}
+
+# `just compose-down volumes` also deletes the named volumes — which destroys
+# the catalog and the bucket, and is the only way to make the Postgres init
+# script run again (the entrypoint runs it on an empty data directory alone).
+# Stop the stack
+[group('service')]
+compose-down mode="keep":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{ mode }}" = "volumes" ]; then
+      docker compose down -v
+    else
+      docker compose down
+    fi
+
 # ---------------------------------------------------------------------------
 # Course (docs/course/) — the sandbox the exercises break on purpose
 # ---------------------------------------------------------------------------
@@ -504,6 +553,7 @@ serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
 # on the next command. It is the 17-country fixture slice; exercises that
 # investigate the data read the real warehouse instead.
 # Build the course sandbox in data/course/ (gitignored) from the fixtures
+[group('course')]
 course-sandbox: _no-dbt-dotenv
     #!/usr/bin/env bash
     set -euo pipefail
@@ -534,6 +584,7 @@ course-sandbox: _no-dbt-dotenv
 
 # No re-ingest: a broken model needs only the dbt layer rebuilt.
 # The drill inner loop: rebuild the dbt layer against the sandbox
+[group('course')]
 course-rebuild: _no-dbt-dotenv
     #!/usr/bin/env bash
     set -euo pipefail
@@ -551,6 +602,7 @@ course-rebuild: _no-dbt-dotenv
 # because the raw form forgets WAREHOUSE_PATH once and rewrites the real
 # warehouse's `analytics`.
 # Re-run the Polars derived metrics against the course sandbox
+[group('course')]
 course-transform: _no-dbt-dotenv
     #!/usr/bin/env bash
     set -euo pipefail
@@ -569,6 +621,7 @@ course-transform: _no-dbt-dotenv
 # The landing tables are then `lakehouse.raw.<table>`; a bare `raw.<table>` has
 # not resolved since the landing zone moved out of the DuckDB file.
 # Run one read-only query against the course sandbox
+[group('course')]
 course-query sql:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -586,6 +639,7 @@ course-query sql:
 # that one is its own scope and is gated. `deep` adds reports/node_modules
 # (restored by `just report`, needs Node).
 # Reclaim gitignored build output (`deep` adds node_modules; `warehouse` needs --force)
+[group('setup')]
 clean scope="safe" force="":
     #!/usr/bin/env bash
     set -euo pipefail
