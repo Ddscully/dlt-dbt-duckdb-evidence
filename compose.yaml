@@ -183,6 +183,9 @@ services:
     restart: unless-stopped
     volumes:
       - mds_site:/usr/share/nginx/html:ro
+    # Every interface, unlike the other ports, and deliberately: the site is
+    # static, and its source queries only aggregate over `customer_id`
+    # (RUNNING_AS_A_SERVICE.md §6). Public site means public tables, though.
     ports:
       - "8081:80"
     depends_on:

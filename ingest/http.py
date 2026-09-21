@@ -19,14 +19,23 @@ import requests
 
 from ingest import fixtures
 
+# Waits of 4, 8, 16 and 32 s between five attempts: a minute in all. The first
+# policy, 1.5 s then 3 s, gave up inside 4.5 s; a nightly went red on a Eurostat
+# non-JSON body that had cleared by the time anyone looked (issue #94). Only a
+# failure pays for the wait; a healthy fetch never sleeps.
+RETRIES = 5
+BACKOFF_SECONDS = 4.0
 
-def get_json(url: str, *, timeout: int = 120, retries: int = 3) -> dict | list:
-    """GET + parse JSON with a few retries — the World Bank & Eurostat APIs
+
+def get_json(url: str, *, timeout: int = 120, retries: int = RETRIES) -> dict | list:
+    """GET + parse JSON with retries — the World Bank & Eurostat APIs
     occasionally return a transient error page or non-JSON body.
 
-    A non-2xx status is retried and ultimately raised: without the
-    `raise_for_status()` an HTML/JSON error body would parse fine and be handed
-    on as if it were data.
+    A 5xx, 429, timeout, reset or unparseable body is retried with doubling
+    waits and ultimately raised: without the `raise_for_status()` an HTML/JSON
+    error body would parse fine and be handed on as if it were data. Any other
+    4xx raises at once, as in `ingest.sources.weather.get_weather_json`: the
+    request itself is wrong, and a minute of retries would get the same answer.
     """
     if fixtures.enabled():
         path = fixtures.path_for(url)
@@ -42,14 +51,19 @@ def get_json(url: str, *, timeout: int = 120, retries: int = 3) -> dict | list:
             resp = requests.get(url, timeout=timeout)
             resp.raise_for_status()
             return resp.json()
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 0
+            if 400 <= status < 500 and status != 429:
+                raise
+            last = exc
         except (requests.RequestException, ValueError) as exc:  # ValueError = JSONDecodeError
             last = exc
-            if attempt < retries - 1:
-                time.sleep(1.5 * (attempt + 1))
+        if attempt < retries - 1:
+            time.sleep(BACKOFF_SECONDS * 2**attempt)
     raise RuntimeError(f"failed to fetch JSON from {url}: {last}")
 
 
-def get_json_object(url: str, *, timeout: int = 120, retries: int = 3) -> dict:
+def get_json_object(url: str, *, timeout: int = 120, retries: int = RETRIES) -> dict:
     """`get_json` for an endpoint that documents a JSON *object*.
 
     `get_json` returns `dict | list` because the World Bank sends

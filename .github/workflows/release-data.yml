@@ -76,11 +76,19 @@ jobs:
           fi
           echo "Restoring history from $prev"
           gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
-          # `|| true`: a release cut before the asset existed has none, which `gh`
-          # reports as a failure. Safe because the verify step asserts what was
-          # carried.
-          gh release download "$prev" --pattern lakehouse.tar.gz \
-            --dir prev-release || true
+          # A release cut before the landing zone was published has no tarball,
+          # and that alone may skip it. So ask the release what it holds, rather
+          # than tolerating a failed download: `restore_history` reads a missing
+          # tarball as nothing to carry, the verify step then compares against
+          # zero, and a transient `gh` error would publish a cold-started weather
+          # archive with everything green. `pages.yml` soft-fails on purpose;
+          # this one must not.
+          assets=$(gh release view "$prev" --json assets --jq '.assets[].name')
+          if grep -qx 'lakehouse.tar.gz' <<<"$assets"; then
+            gh release download "$prev" --pattern lakehouse.tar.gz --dir prev-release
+          else
+            echo "$prev has no lakehouse.tar.gz — the weather archive cold-starts."
+          fi
           uv run python -m publish.restore_history prev-release/warehouse.duckdb
           uv run python - <<'PY' >> "$GITHUB_OUTPUT"
           import sys

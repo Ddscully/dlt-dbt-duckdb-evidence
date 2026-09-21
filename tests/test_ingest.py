@@ -35,7 +35,8 @@ class FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise requests.HTTPError(f"{self.status_code} error")
+            # `response=self`, as `requests` does: `get_json` reads the status off it.
+            raise requests.HTTPError(f"{self.status_code} error", response=self)
 
     def json(self):
         if self._body is not None:
@@ -97,16 +98,47 @@ def test_get_json_raises_on_persistent_http_error(monkeypatch):
     Without `raise_for_status()` an HTML error page parses to *something* and
     flows into the warehouse.
     """
-    seen = _mock_get(monkeypatch, [FakeResponse(status=500)] * 3)
+    seen = _mock_get(monkeypatch, [FakeResponse(status=500)] * http.RETRIES)
     with pytest.raises(RuntimeError, match="failed to fetch JSON"):
         http.get_json("https://example.test/x")
-    assert len(seen) == 3  # retried the configured number of times
+    assert len(seen) == http.RETRIES  # retried the configured number of times
 
 
 def test_get_json_raises_on_non_json_body(monkeypatch):
-    _mock_get(monkeypatch, [FakeResponse(body="<html>maintenance</html>")] * 3)
+    _mock_get(monkeypatch, [FakeResponse(body="<html>maintenance</html>")] * http.RETRIES)
     with pytest.raises(RuntimeError, match="failed to fetch JSON"):
         http.get_json("https://example.test/x")
+
+
+def test_get_json_waits_out_a_minute_long_outage(monkeypatch):
+    """The waits double, so the retries span a minute rather than 4.5 seconds.
+
+    The old 1.5 s/3 s schedule gave up inside 4.5 s, which is how a nightly went
+    red on a Eurostat error page that had cleared by the time anyone looked
+    (issue #94).
+    """
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    _mock_get(monkeypatch, [FakeResponse(status=503)] * (http.RETRIES - 1) + [FakeResponse({})])
+
+    assert http.get_json("https://example.test/x") == {}
+    assert sleeps == [4.0, 8.0, 16.0, 32.0]
+    assert sum(sleeps) >= 60
+
+
+def test_get_json_raises_a_client_error_at_once(monkeypatch):
+    """A 404 or 400 says the request is wrong; a minute of retries gets the same answer."""
+    seen = _mock_get(monkeypatch, [FakeResponse(status=404)])
+    with pytest.raises(requests.HTTPError):
+        http.get_json("https://example.test/x")
+    assert len(seen) == 1
+
+
+def test_get_json_retries_a_rate_limit(monkeypatch):
+    """429 is the one 4xx that a later identical request can pass."""
+    seen = _mock_get(monkeypatch, [FakeResponse(status=429), FakeResponse({"ok": True})])
+    assert http.get_json("https://example.test/x") == {"ok": True}
+    assert len(seen) == 2
 
 
 # --------------------------------------------------------------------------- #

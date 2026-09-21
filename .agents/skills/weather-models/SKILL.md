@@ -62,10 +62,11 @@ its first source with a *finite budget*.
   three windows want waits three orders of magnitude apart, so the reason string
   is read (`weather_retry_after`). The daily one deliberately **raises** instead
   of sleeping: waiting out 24 hours inside a run is not a backoff, it is
-  indistinguishable from a hang. `_get_json`'s 1.5s/3s escalation would burn all
-  three retries in 4.5 seconds against the shortest of them — which is exactly
-  how the first draft of `record_weather` failed, having spent the budget it
-  needed on the way.
+  indistinguishable from a hang. The generic backoff the first draft of
+  `record_weather` borrowed from `http.get_json` (then 1.5s/3s) burnt all three
+  retries in 4.5 seconds against the shortest of them, and failed having spent
+  the budget it needed on the way. A generic schedule cannot know the window, so
+  `get_weather_json` keeps its own loop.
 - **The watermark is read from the destination table, not from dlt state, and
   everything else depends on that.** `wb_wdi` and `ecb_fx_rates` keep theirs in
   `dlt.current.resource_state()`, i.e. in `~/.dlt` — a directory CI does not

@@ -8,7 +8,7 @@ name: nightly
 # Expected failure modes, all of which are worth a human looking:
 #   - a source renamed or dropped a column   -> stg_* breaks
 #   - a WDI indicator was retired            -> wdi_indicators_all_present fails
-#   - a publisher stopped updating           -> mart_covers_recent_years warns
+#   - a publisher stopped updating           -> mart_covers_recent_years, below
 #   - an endpoint moved                      -> http.get_json raises
 #
 # When it fires, fix the pipeline and re-record with `just record-fixtures`.
@@ -39,6 +39,25 @@ jobs:
       # `@dbt_assets` reads at import time.
       - name: Materialize the asset graph against live sources
         run: just materialize
+
+      # `mart_covers_recent_years` is a WARN check, and a failed WARN check does
+      # not fail the run: `just materialize` exits 0, so the issue step below
+      # never fired for a publisher that stopped updating. It stays WARN in the
+      # graph — a late publisher should not halt the release or the site — and
+      # this job, whose purpose is to notice, calls it directly.
+      - name: Fail when a source has stopped updating
+        run: |
+          uv run --group orchestration python - <<'PY'
+          import sys
+
+          from orchestration.assets import mart_covers_recent_years
+
+          result = mart_covers_recent_years()
+          behind = result.metadata["years_behind"].value
+          print(f"years behind, per source: {behind}")
+          if not result.passed:
+              sys.exit(f"a source is more than two years behind: {behind}")
+          PY
 
       # A build artifact, not a release: handy for diffing what the live sources
       # actually returned on the day the run went red. `release-data.yml` is the
