@@ -12,7 +12,7 @@
 # `tests/test_dagster_instance.py` refuses a `latest` or a bare name.
 
 FROM node:24.21.0-bookworm-slim AS node
-FROM ghcr.io/astral-sh/uv:0.12.16 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.17 AS uv
 
 FROM python:3.13.15-slim-bookworm
 
