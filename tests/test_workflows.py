@@ -290,6 +290,26 @@ def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
     )
 
 
+def test_the_release_never_tolerates_a_failed_download():
+    """A failed download in `release-data.yml` must fail the release.
+
+    `restore_history` reads a missing tarball as nothing to carry, so the verify
+    step's "published rows >= carried rows" compares against zero and passes: a
+    transient `gh` error would publish a cold-started weather archive, green.
+    `pages.yml` soft-fails the same step deliberately, and the release once copied
+    its `|| true` — the absent asset is decided by asking the release what it
+    holds, never by swallowing the error.
+    """
+    text = (WORKFLOWS_DIR / "release-data.yml").read_text()
+    commands = text.replace("\\\n", " ")  # one line per continued command
+    downloads = [line for line in commands.splitlines() if "gh release download" in line]
+
+    assert len(downloads) == 2, f"expected both assets' downloads, found {downloads}"
+    tolerated = [line.strip() for line in downloads if "||" in line]
+    assert not tolerated, f"release-data.yml tolerates a failed download: {tolerated}"
+    assert "continue-on-error" not in text, "a soft-failing step would tolerate it too"
+
+
 # --------------------------------------------------------------------------- #
 # The pipeline environment is defined once, in the setup action
 # --------------------------------------------------------------------------- #
