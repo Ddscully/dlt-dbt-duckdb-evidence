@@ -107,48 +107,11 @@ any change:
 
 ## Commands
 
-Use the `justfile` recipes (they map to plain `uv run …` commands):
-
-| Command | What it does |
-|---------|--------------|
-| `just setup` | `uv sync --group dev --group orchestration`, then `just extensions` — ducklake, httpfs and postgres, binaries no lockfile can name |
-| `just compose-up` / `just compose-down` | the optional backing services — Postgres for the catalog, SeaweedFS for the Parquet (`compose-down volumes` destroys both) |
-| `just deploy-deps` | add the `deploy` group — the container stack's Postgres storage and run launcher; locally, what makes the launcher tests run |
-| `just compose-build` / `just compose-test-pipeline` | the `mds:local` image, and the fixture pipeline inside it against the compose services |
-| `just compose-launch <job>` | queue a job on the stack's daemon — it exits once queued, so its status says nothing about the run |
-| `just ingest` | run the dlt pipeline → `raw` in the DuckLake catalog |
-| `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
-| `just dlt-state` | dlt's incremental state, which lives in `~/.dlt`, not the warehouse |
-| `just dbt-deps` | install dbt packages (`dbt_utils`) into `dbt/dbt_packages/` |
-| `just dbt-build` | `dbt deps` then `dbt build` (33 models, 2 snapshots, 8 seeds + 482 data tests + 36 unit tests) |
-| `just dbt-unit-test` | the dbt unit tests alone — the inner loop for model logic |
-| `just dbt-freshness` | `dbt source freshness` — is the warehouse stale? |
-| `just dbt-docs` / `just dbt-docs-serve` | `dbt docs generate` to `dbt/target/`, and serve it on :8080 |
-| `just transform` | Polars derived metrics → `analytics` schema |
-| `just pipeline-status` | load times, layer inventory, dbt test state → `analytics.pipeline_*` |
-| `just lakehouse` | report what the DuckLake landing zone holds — tables, rows, snapshots |
-| `just run` | ingest → dbt-build → transform → pipeline-status (shell ordering) |
-| `just dagster` | Dagster UI on :3000 — asset graph, runs, freshness, checks |
-| `just materialize` | same pipeline, ordered by the asset graph (`load_retail` then `full_refresh`, no Evidence) |
-| `just materialize-site` | the same two jobs + the Evidence site (`publish_site`; needs Node) |
-| `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
-| `just materialize-preview '<sel>'` | what a selection resolves to, materializing nothing — zero matches still exits 0 |
-| `just validate` | does the code location load, and is every definition registered |
-| `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — run config on `raw/wb_wdi`, not a partition |
-| `just backfill-weather 2012 2026` | deepen the weather archive a year at a time, paced to Open-Meteo's budget: about an hour a decade, fifteen years at most per run |
-| `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |
-| `just serve` | the graph and the dashboard as one always-on service (`docs/RUNNING_AS_A_SERVICE.md`) |
-| `just export-data` | package `data/export/`, which `release-data.yml` publishes |
-| `just restore-history prev/warehouse.duckdb` | carry a published release's unreproducible state into this build; refuses if dlt has local state |
-| `just bus-matrix` | regenerate the bus matrix block in `docs/WAREHOUSE.md` from the manifest |
-| `just disclosure-risk` | reprint the re-identification table from the warehouse |
-| `just test` / `just coverage` | `pytest`, mocked, no network; the same with line + branch coverage, gating nothing |
-| `just test-pipeline` | the whole pipeline against fixtures, into a throwaway warehouse |
-| `just record-fixtures` | re-record `tests/fixtures/ingest/` from the live APIs |
-| `just lint` / `just typecheck` | `sqlfluff lint dbt/models dbt/snapshots`; `ty check`, gating nothing |
-| `just where` | which warehouse file and landing zone the recipes will use — dbt's log names the *target*, never the file |
-| `just sql` | the warehouse in the DuckDB CLI with the lakehouse attached, read-only (`just sql write` to write) |
-| `just clean` | delete the gitignored build output (`deep` also drops `reports/node_modules`) |
+Use the `justfile` recipes; most wrap a plain `uv run …` command. **`just`
+lists them all, grouped by what they are for** — setup, pipeline, inspect,
+check, publish, dagster, service, course — with a line each, and the comment
+block above a recipe says why it exists. Start with `just setup` once, then
+`just run` for the pipeline and `just test` for the suite.
 
 Always run tools through `uv run` so they use the project venv, with
 `--group orchestration` for anything that imports Dagster. dbt commands must run
