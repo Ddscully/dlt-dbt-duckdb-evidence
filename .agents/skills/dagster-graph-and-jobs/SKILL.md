@@ -25,9 +25,10 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
 - **`orchestration/assets.py` must not use `from __future__ import annotations`.**
   Dagster inspects the `context` parameter's annotation *object*; a stringified
   one fails with a confusing "Cannot annotate `context`".
-- **Everything runs in one process** (`in_process_executor`, and the `replace`
-  resources in a single op): DuckDB takes one writer at a time, so parallel steps
-  would fight over the lock.
+- **Everything runs in one process** (`in_process_executor`, and the five
+  unwindowed resources — the four `replace` ones plus `ecb_fx_rates` — in a
+  single op): DuckDB takes one writer at a time, so parallel steps would fight
+  over the lock.
 - **And one run at a time, which is instance config, not code.** The executor
   serialises steps *within* a run; two runs are two processes. `.dagster/dagster.yaml`
   sets `concurrency: runs: max_concurrent_runs: 1` (Dagster's default is 10), so

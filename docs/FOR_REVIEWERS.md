@@ -234,11 +234,13 @@ number before.
    the engine. DuckDB has had MVCC and multi-connection transactions since day
    one, and what takes a single writer is one *process* holding the file. Open
    `data/warehouse.duckdb` from a second process and you get `Could not set
-   lock on file … Conflict`; a second connection inside the same process has
-   always been fine. The `quack` extension removes the process half: one DuckDB
-   serves the file and the others `ATTACH 'quack:…'` over its native protocol.
-   On the pinned 1.5.5, two separate processes pushed 200 rows each through
-   `quack_serve` with no failures and all 400 still in the file afterwards.
+   lock on file … Conflict`; a second connection inside the same process is
+   fine as long as it asks for the same mode, and refused with a configuration
+   error if it asks for the other one (`querying-the-warehouse`). The `quack`
+   extension removes the process half: one DuckDB serves the file and the
+   others `ATTACH 'quack:…'` over its native protocol. On the pinned 1.5.5, two
+   separate processes pushed 200 rows each through `quack_serve` with no
+   failures and all 400 still in the file afterwards.
 
    It isn't free. Writes centralise on one server process, DuckDB's own ceiling
    is a few thousand a second and a few terabytes, there's no distributed query

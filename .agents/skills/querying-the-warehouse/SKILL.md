@@ -31,8 +31,8 @@ stray Python REPL, a `just sql write` session, a Dagster run — makes the next
 `just run` fail with
 a lock error. `read_only=True` costs nothing and avoids the whole class of
 problem. This is also why the Dagster graph uses `in_process_executor` and puts
-the four `replace` dlt resources in one op: parallel steps would just fight
-over the lock.
+the five unwindowed dlt resources (the four `replace` ones plus `ecb_fx_rates`)
+in one op: parallel steps would just fight over the lock.
 
 For interactive poking, `just sql` opens the DuckDB CLI read-only, which is the
 right default — but **it does not let you sit alongside a build.** Measured on the pinned DuckDB 1.5.5 against

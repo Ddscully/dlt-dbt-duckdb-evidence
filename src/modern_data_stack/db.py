@@ -68,10 +68,11 @@ def write_frames(
 ) -> dict[str, int]:
     """Write each frame to `<schema>.<name>`, replacing it. Returns rows written.
 
-    Takes the caller's connection: DuckDB allows one writer, so reopening the
-    file would contend with it. `schema` has no default — every caller writing
-    `analytics` would make a default invisible to one that means otherwise, and
-    `create or replace` does not ask twice.
+    Takes the caller's connection, not the path: DuckDB caches one instance per
+    file, so a reopen here would either share the caller's instance or, asking for
+    the other mode, be refused outright (`querying-the-warehouse`). `schema` has no
+    default — every caller writing `analytics` would make a default invisible to one
+    that means otherwise, and `create or replace` does not ask twice.
     """
     con.sql(f"create schema if not exists {schema}")
     for name, frame in frames.items():

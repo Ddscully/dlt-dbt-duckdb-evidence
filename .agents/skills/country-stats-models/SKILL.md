@@ -151,15 +151,25 @@ carries it forward is `publishing-a-release`.
   The API served the projections for at most ~28 hours before going back
   to 1960-2025; the recorded fixtures never held them, so
   nothing needed re-recording.
-- **The World Bank's CDN can serve a stale copy of one URL for a day.** Cloudflare
-  cached `NY.GDP.MKTP.KD?format=json&per_page=10000&page=1` with a 2022 edition
-  of the series (`lastupdated` 2022-07-22, 1990-2020, 8,091 rows) whose every
+- **The World Bank's API can serve a stale copy of one URL for up to two days.**
+  `NY.GDP.MKTP.KD?format=json&per_page=10000&page=1` returned a 2022 edition of
+  the series (`lastupdated` 2022-07-22, 1990-2020, 8,091 rows) whose every
   `countryiso3code` is empty; any other `per_page` got the current one. The rows
   land, `stg_wdi` drops all of them, and `gdp_constant_usd` is null everywhere —
   which surfaced as an empty `analytics.co2_intensity` two layers down.
   `wdi_indicators_all_present` counts only rows `stg_wdi` keeps, so it fails at
-  `raw`. To confirm a suspect series, compare `per_page` values with `curl -sD-`
-  and read `cf-cache-status`, `last-modified` and the payload's `lastupdated`.
+  `raw`.
+  - **Two caches hold it, a day each.** The origin keeps a response for 24 hours
+    and sends the time it has left as `max-age`. Each Cloudflare edge then keeps
+    what it fetched for 24 hours from its own fetch, ignoring that `max-age`, so
+    an edge that fetched late in the origin's day serves the copy well into the
+    next. A runner reaches a different edge from a laptop: a fresh response here
+    says nothing about the one CI will get.
+  - **To confirm a suspect series**, compare `per_page` values with `curl -sD-`
+    and read `cf-cache-status`, `age` (seconds since this edge fetched; the copy
+    goes at 86,400), `last-modified` (when the origin made it) and the payload's
+    `lastupdated`. **Never read `expires`**: Cloudflare recomputes it on every
+    response as the time plus `max-age`, so it never says when a copy goes.
 
 - **"Latest year" is per column, not per table.** `max(year)` on the mart is
   whichever source runs furthest ahead (Eurostat prices, a year beyond the rest),
