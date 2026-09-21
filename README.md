@@ -16,6 +16,10 @@ push.*
 [Published data](#published-data) ·
 [The practices, indexed](./docs/PRACTICES.md)
 
+**518 tests** (482 data, 36 unit) · an enforced schema contract on every mart
+model · source freshness checks and Dagster freshness policies · rebuilt from
+live sources on every push
+
 Seven public feeds go in; a dashboard and a queryable copy of the warehouse come
 out. In between sit ingestion, modelling, contracts, orchestration and a
 publication boundary, and none of them is a stub. No numbers are exported by
