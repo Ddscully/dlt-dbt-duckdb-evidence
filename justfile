@@ -23,10 +23,8 @@ export LAKEHOUSE_DIR := env("LAKEHOUSE_DIR", justfile_directory() / "data/lakeho
 default:
     @just --list --unsorted
 
-# dbt's log names the target (`target='dev'`, the only one) and never the file,
-# so every recipe that writes to the warehouse or the landing zone depends on
-# this. The recipes that export their own WAREHOUSE_PATH (`test-pipeline`, the
-# course ones) do not: this would print the outer value.
+# dbt's log names the target, never the file, so every recipe that writes
+# depends on this — except those exporting their own WAREHOUSE_PATH.
 # Print which warehouse file and landing zone the pipeline recipes will use
 [group('setup')]
 where: _no-dbt-dotenv
@@ -35,13 +33,10 @@ where: _no-dbt-dotenv
     @echo "lakehouse data: ${LAKEHOUSE_DATA_PATH:-(unset - $LAKEHOUSE_DIR/data/)}"
     @echo "lakehouse catalog: ${LAKEHOUSE_CATALOG:-(unset - $LAKEHOUSE_DIR/catalog.duckdb)}${LAKEHOUSE_CATALOG:+ (schema ${LAKEHOUSE_METADATA_SCHEMA:-lakehouse})}"
 
-# Every recipe that writes depends on this, through `where` or directly (the ones
-# that export their own WAREHOUSE_PATH). dbt 1.12 loads a .env from its working
-# directory, which is dbt/ for every recipe, and a value there fills any variable
-# the shell leaves unset — WAREHOUSE_PATH in `where`'s recipes, and whatever a
-# recipe does not export in the rest — so dbt would build against a file no
-# recipe printed. The repo-root .env is safe: `dotenv-load` exports it to the
-# recipes, so `where` shows it.
+# Every writing recipe depends on this, through `where` or directly. dbt loads a
+# .env from dbt/, filling any variable the shell leaves unset, so dbt would build
+# against a file no recipe printed. The repo-root .env is exported, so `where`
+# shows it.
 _no-dbt-dotenv:
     @if [ -e "{{ justfile_directory() }}/dbt/.env" ]; then \
         echo "refusing: dbt/.env exists, and dbt reads it for any variable this recipe leaves unset." >&2; \
@@ -55,26 +50,17 @@ setup:
     uv sync --group dev --group orchestration
     just extensions
 
-# Each is a binary from extensions.duckdb.org that no lockfile can name. DuckDB
-# would autoload them on first use; installing them here moves the download, and
-# any network failure, out of a `dbt build` inside a Dagster op — and a bare
-# `load` fails outright on a machine that has never downloaded one. DuckDB
-# fetches the build for its own version, so under `uv run` they match uv.lock.
-# ducklake is the landing zone, httpfs its Parquet in a bucket, postgres its
-# catalog in a database; the last two are inert until their variable is set.
+# Binaries no lockfile can name; installing them here moves the download out of a
+# `dbt build` inside a Dagster op (the-lakehouse skill). httpfs and postgres are
+# inert until LAKEHOUSE_DATA_PATH or LAKEHOUSE_CATALOG is set.
 # Install the DuckDB extensions the lakehouse can need
 [group('setup')]
 extensions:
     uv run python -c "import duckdb; con = duckdb.connect(); [con.execute(f'install {e}') for e in ('ducklake', 'httpfs', 'postgres')]"
 
-# `uv sync` computes the whole venv from the groups it is given, so this names
-# all three: `--group deploy` alone would strip dev and orchestration out from
-# under whatever is running. `just setup` leaves the group out, so a laptop
-# installs no Postgres driver for storage it does not use — and
-# `tests/test_docker_launcher.py` importorskips `dagster_docker`, so on that
-# venv it skips in silence. Running those tests locally is what this recipe is
-# for. The image syncs the group itself, and a host must not point DAGSTER_HOME
-# at `deploy/`: that is the container's instance (docs/decisions/0011).
+# Names all three groups: `uv sync` computes the whole venv, so `--group deploy`
+# alone would strip dev and orchestration. Why `setup` leaves it out, and why a
+# host must not use `deploy/`, is docs/decisions/0011.
 # Add the `deploy` group, so the run-launcher tests run instead of skipping
 [group('setup')]
 deploy-deps:
@@ -92,10 +78,8 @@ ingest: where
 ingest-wdi-full: where
     INGEST_WDI_FULL=1 uv run python -m ingest.pipeline
 
-# The state lives in dlt's own directory, keyed on the pipeline name (see
-# `build_pipeline()`), so no warehouse query can show it. Each resource re-asks
-# a lookback window behind its watermark. `just dlt-state
-# modern_data_stack_fixtures` reads the fixture pipeline's.
+# It lives in dlt's own directory, keyed on the pipeline name, so no warehouse
+# query shows it. `just dlt-state modern_data_stack_fixtures` reads the fixtures'.
 # Show dlt's incremental state — the WDI watermark and the ECB's last fixing
 [group('inspect')]
 dlt-state pipeline="modern_data_stack":
@@ -205,12 +189,8 @@ test-pipeline: _no-dbt-dotenv
       export LAKEHOUSE_DATA_PATH="s3://${bucket%%/*}/test-pipeline/$(basename "$(dirname "$WAREHOUSE_PATH")")/"
       echo "fixture lakehouse data: $LAKEHOUSE_DATA_PATH"
     fi
-    # A Postgres catalog is one database shared by every lakehouse in it, so the
-    # fixture run takes a metadata schema of its own rather than a database:
-    # LAKEHOUSE_DIR alone would not separate it, and running this against the
-    # real schema would rewrite the real landing zone's catalog. Lowercased and
-    # punctuation-stripped because Postgres folds an unquoted identifier, and
-    # because `drop_fixture_schema` below will only delete `test_pipeline_[a-z0-9_]+`.
+    # A Postgres catalog is shared, so the fixture run takes a metadata schema of
+    # its own, in the `test_pipeline_[a-z0-9_]+` form `drop_fixture_schema` deletes.
     if [ -n "${LAKEHOUSE_CATALOG:-}" ]; then
       export LAKEHOUSE_METADATA_SCHEMA="test_pipeline_$(basename "$(dirname "$WAREHOUSE_PATH")" | tr -c 'a-z0-9\n' _)"
       echo "fixture lakehouse catalog schema: $LAKEHOUSE_METADATA_SCHEMA"
@@ -267,18 +247,14 @@ restore-history from: where
 record-fixtures:
     uv run python -m scripts.record_fixtures
 
-# Prints a SupersessionWarning naming `dg dev`. Every Dagster CLI command here
-# carries one, and none is on a removal clock — the dagster-graph-and-jobs skill
-# has the four and what they cost to leave.
+# Its SupersessionWarning is expected: the dagster-graph-and-jobs skill says why.
 # Dagster UI on :3000 — asset graph, run history, freshness, checks
 [group('dagster')]
 dagster:
     mkdir -p "$DAGSTER_HOME"
     uv run --group orchestration dagster dev
 
-# Two jobs because retail is partitioned by month, and a job holding it would be
-# too — its Materialize button in the UI a backfill. `load_retail` first: dbt
-# reads its table. See orchestration/definitions.py.
+# Two jobs, `load_retail` first because dbt reads its table (dagster-graph-and-jobs).
 # Full pipeline ordered by the asset graph, minus the Evidence site
 [group('dagster')]
 materialize: where dbt-parse
@@ -311,28 +287,17 @@ materialize-preview selection: dbt-parse
     uv run --group orchestration dagster asset list \
         -m orchestration.definitions --select '{{ selection }}'
 
-# `dbt-parse` first: the code location imports the dbt project, so without a
-# manifest it fails to load rather than reporting what is unregistered. That
-# dependency is why this is not the check for "did the *running* service load its
-# location" — it repairs the precondition that question is asking about, and
-# RUNNING_AS_A_SERVICE.md §7 spells that one out separately. No `-m`, so the
-# location stays `modern_data_stack`, the name `[tool.dagster]` and the service
-# give it (§8).
+# `dbt-parse` first, or the location fails to load instead of reporting what is
+# unregistered — which also makes this no check on a *running* service
+# (RUNNING_AS_A_SERVICE.md §7). No `-m` (§8).
 # Check the code location loads and every definition is registered
 [group('dagster')]
 validate: dbt-parse
     uv run --group orchestration dagster definitions validate
 
-# `just backfill-wdi 1995` or `just backfill-wdi 1990 1995`. Merges, so re-runs
-# are idempotent. Loads the raw asset alone, so follow with `just dbt-build` or
-# `just materialize`.
-#
-# The years are run config for the `ingest_by_year` op, not partitions: a
-# partitioned asset makes the UI's Materialize button a backfill of every year
-# (`YearRange` in orchestration/assets.py). `asset materialize` silently ignores
-# config addressed to an op it does not know, so a stale name in either recipe
-# would load the lookback and succeed; `tests/test_definitions.py` holds both to
-# the op.
+# `just backfill-wdi 1995` or `just backfill-wdi 1990 1995`; merges, then follow
+# with `just dbt-build`. The years are run config, not partitions
+# (docs/decisions/0002), and `tests/test_definitions.py` holds the op name.
 # Re-load WDI for one year or a range of years
 [group('dagster')]
 backfill-wdi start end='': where dbt-parse
@@ -345,13 +310,8 @@ backfill-wdi start end='': where dbt-parse
     uv run --group orchestration dagster asset materialize \
         -m orchestration.definitions --select 'raw/wb_wdi' --config-json "$config"
 
-# Routine loads fetch WEATHER_COLD_START_YEARS; this deepens the archive, back to
-# 1960 (WDI's floor, which the year range shares). Slow on purpose: the resource
-# paces itself against Open-Meteo's minute, hour and day budgets, and a year of 41
-# capitals costs ~641 of the 10,000 daily units, so fifteen years is the most one
-# run can hold. A longer range is refused before any request — the limiter would
-# otherwise sleep, silently, until the daily window drained — so split it across
-# days. The rows are carried into the next release (`publish/restore_history.py`).
+# Back to 1960, paced to Open-Meteo's budget: fifteen years is the most one run
+# can hold, and a longer range is refused before any request (weather-models).
 # Follow with `just dbt-build`.
 # Deepen the capital-city weather archive, e.g. `just backfill-weather 2012 2026`
 [group('dagster')]
@@ -365,15 +325,9 @@ backfill-weather start end='': where dbt-parse
     uv run --group orchestration dagster asset materialize \
         -m orchestration.definitions --select 'raw/om_weather_daily' --config-json "$config"
 
-# Read-only unless `write`, so a session cannot change anything by accident.
-# Either mode blocks a build while it is open: DuckDB allows one writer or many
-# readers, never both. The lakehouse is attached in the same mode because the
-# staging views read `lakehouse.raw`; without it they fail with `Catalog
-# "lakehouse" does not exist!`. The CLI is the `duckdb-cli` dev dependency.
-#
-# With LAKEHOUSE_DATA_PATH set it needs the S3 secret too — the third spelling,
-# after `storage_secret()` and the dbt profile. The keys go in through the CLI's
-# `getenv`, so they never appear in the process list.
+# Either mode blocks a build while open (querying-the-warehouse). It attaches the
+# lakehouse, which the staging views read, and any S3 secret via `getenv`, keeping
+# the keys out of the process list (the-lakehouse).
 # Open the warehouse in the DuckDB CLI (`just sql write` for a writer)
 [group('inspect')]
 sql mode="read":
@@ -444,18 +398,9 @@ report-clean:
 # §4 of the design swaps a symlink instead.
 export SITE_ROOT := env("SITE_ROOT", justfile_directory() / "reports/build")
 
-# The reasoning is §2 of docs/RUNNING_AS_A_SERVICE.md; the constraints it sets:
-#   - webserver + daemon rather than `dagster dev`, so a supervisor can restart them;
-#   - `dbt-parse`, because outside the dev CLI nothing writes the manifest and the
-#     webserver still answers HTTP with a dead code location;
-#   - `--group orchestration` on the Dagster processes (the file server carries
-#     it too, harmlessly): `uv run` only ever adds packages, and it is a bare
-#     `uv sync` that would strip Dagster from under a running service (§10);
-#   - Dagster binds localhost (no auth); the site binds every interface (§6);
-#   - `wait -n`, so one dead child ends the unit, and `kill` of the recorded
-#     PIDs rather than `kill 0`, which would end this shell by SIGTERM — a clean
-#     exit as far as `Restart=on-failure` is concerned.
-# It does not start the `daily_refresh` schedule, which ships STOPPED (§10).
+# Every choice here — no `dagster dev`, `dbt-parse`, the bind addresses, `wait -n`,
+# killing recorded PIDs — is §2 of docs/RUNNING_AS_A_SERVICE.md. The
+# `daily_refresh` schedule ships STOPPED (§10).
 # Run the graph and the dashboard as one always-on service (blocks; ctrl-c to stop)
 [group('service')]
 serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
@@ -489,43 +434,31 @@ serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
     echo "serve: a child process exited (status $status) — stopping the rest" >&2
     exit 1
 
-# The whole stack: Postgres (the DuckLake catalog, and Dagster's storage under
-# `deploy/`), SeaweedFS (S3-compatible storage for the Parquet), the graph, and
-# nginx serving the dashboard. Nothing here is needed to use this repo: with
-# LAKEHOUSE_CATALOG and LAKEHOUSE_DATA_PATH unset the landing zone is entirely on
-# disk and none of this runs. `just compose-build` first. Dagster is then on
-# :3000 and the dashboard on :8081. See .env.example, compose.yaml and
-# docs/RUNNING_AS_A_SERVICE.md.
+# Postgres, SeaweedFS, the graph and nginx — optional: with LAKEHOUSE_CATALOG and
+# LAKEHOUSE_DATA_PATH unset, none of it runs. `just compose-build` first; Dagster
+# is then on :3000, the dashboard on :8081 (docs/RUNNING_AS_A_SERVICE.md).
 # Start the stack and wait for it to be healthy
 [group('service')]
 compose-up:
     docker compose up -d --wait
 
-# The image is the whole stack — both Dagster processes, every layer they call,
-# and Node for the site — and its CMD is this justfile's `serve`. Build it before
-# the first `just compose-up`, and after any change to the tree, because compose
-# does not rebuild on its own.
+# Its CMD is `serve`. Compose does not rebuild, so build after any change to the tree.
 # Build the mds:local image compose runs
 [group('service')]
 compose-build:
     docker compose build
 
-# The fixture pipeline inside the image, against the compose Postgres and
-# SeaweedFS: the one command that exercises a remote catalog, a remote data path
-# and the container together. `--no-deps` because the services are already up,
-# and `--rm` because this is not the service.
+# The one command that exercises a remote catalog, a remote data path and the
+# container together.
 # Run the fixture pipeline inside the container (needs `just compose-up`)
 [group('service')]
 compose-test-pipeline:
     docker compose run --rm --no-deps dagster just test-pipeline
 
-# Queues the job on the running stack's daemon, which starts it in a run
-# container against the `mds_data` volume — so no `where`, which would name the
-# host's warehouse. It returns once the run is *queued*, so its exit code says
-# nothing about the run, which is why `materialize` and the backfill recipes stay
-# in-process. Two launches run in order, but the second does not wait for the
-# first to succeed: a failed `load_retail` is still followed by `full_refresh`.
-# No `-m` (RUNNING_AS_A_SERVICE.md §8), and run config belongs in the UI.
+# Returns once the run is *queued*: its exit code says nothing about the run, and
+# a second launch does not wait for the first to succeed (RUNNING_AS_A_SERVICE.md
+# §10). No `where`: the run uses the `mds_data` volume, not the host's warehouse.
+# No `-m` (§8).
 # Queue a job on the compose stack's daemon (needs `just compose-up`)
 [group('service')]
 compose-launch job:
@@ -611,15 +544,10 @@ course-transform: _no-dbt-dotenv
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
 
-# One query and exit, so no open session holds the file when the next
-# `course-rebuild` needs it:
+# One query and exit, so no session holds the file when `course-rebuild` needs it:
 #   just course-query 'select count(*) from marts.dim_country_year'
-#
-# It attaches the sandbox lakehouse for the reason `just sql` attaches the real
-# one: `staging` is views over `lakehouse.raw`, so without it every
-# `select … from staging.…` fails with `Catalog "lakehouse" does not exist!`.
-# The landing tables are then `lakehouse.raw.<table>`; a bare `raw.<table>` has
-# not resolved since the landing zone moved out of the DuckDB file.
+# It attaches the sandbox lakehouse as `just sql` does; landing tables are
+# `lakehouse.raw.<table>`.
 # Run one read-only query against the course sandbox
 [group('course')]
 course-query sql:
