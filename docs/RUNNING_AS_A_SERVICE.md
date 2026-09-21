@@ -883,7 +883,7 @@ once the run is queued, and the queue does not wait for the run ahead to
 **Never pass `-m`** — §8 says why.
 
 **Until the last line runs, the stack is up and ingests nothing.** `just
-compose-up` reports four healthy services and the daemon is running, but
+compose-up` reports four running services and the daemon is running, but
 `daily_refresh` ships `STOPPED` (§5) and its on/off state is a row in the
 `dagster` database, so nothing in the image or `compose.yaml` can turn it on.
 Nothing warns, either: the one sign is an empty `instigators` table, or
