@@ -272,8 +272,10 @@ models:
       One row per identified customer (5,881 of the 5,942 ids that appear; the
       other 61 never made a purchase). Covers 86.2% of net revenue — the rest is
       anonymous and structurally cannot be attributed, which every per-customer
-      figure downstream inherits and which the Evidence page states rather than
-      implies.
+      figure downstream (cohorts, RFM, average order value) inherits and which
+      the Evidence page states rather than implies. The 243,007 anonymous lines
+      are 22.8% of lines but 13.8% of revenue: quote the share you mean.
+      `fct_retail_order_line` keeps every line.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments: {combination_of_columns: [customer_id]}
@@ -297,11 +299,18 @@ models:
           rollup can be grouped by `region` or `income_group`. Taken with
           `max_by` rather than `max`, so that for the 13 customers who transact
           from two countries the code is the one belonging to the label this row
-          shows rather than an independent pick.
+          shows rather than an independent pick. Wrapped in a struct because
+          `max_by` skips null values and three seed labels map to no code
+          (`Unspecified`, `West Indies`, `European Community`): a customer seen in
+          `United Kingdom` and `Unspecified` would otherwise pair `Unspecified`
+          with `GBR`. Latent on current data; a unit test guards it.
         data_type: VARCHAR
         meta:
           pii: quasi_identifier
       - name: n_countries
+        description: >
+          Almost always 1 (13 customers have two). Ships beside the label so a
+          Type-1 overwrite of a moved customer's history is visible.
         data_type: BIGINT
         meta:
           additivity: non_additive
@@ -380,7 +389,8 @@ models:
           393 customers bought twice on the day they arrived, and `n_orders`
           counts invoices. Null for the 47 whose first invoice held no product
           line (a `Manual` adjustment, the test SKU); zero would read as a free
-          order rather than as an unpriced one.
+          order rather than as an unpriced one; 28 of them have a null
+          `net_revenue_gbp` for the same reason.
         # Part of the same quasi-identifying set as `net_revenue_gbp`, and the
         # sharper half of it: `(country, first_order_date, first_order_gbp)` is
         # unique for about 99.5% of the 5,881 customers.

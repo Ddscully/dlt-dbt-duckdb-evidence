@@ -312,6 +312,12 @@ models:
         data_type: VARCHAR
       - name: country_display_name
         data_type: VARCHAR
+        description: >
+          For charts. `country_or_territory` is the annex's legal label, taken
+          from Excel sheet names capped at 31 characters ("North Korea
+          (Democratic People’"); this is `dim_country`'s name where there is one,
+          and the annex label for the fallback table and territories the dimension
+          lacks.
       - name: region
         data_type: VARCHAR
       - name: income_group

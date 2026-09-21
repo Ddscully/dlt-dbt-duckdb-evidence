@@ -1,16 +1,6 @@
--- Every product return line, joined to the sale it most likely reverses.
--- Grain: one row per product return line (a negative-quantity product line on a
--- cancellation invoice), matched or not.
---
--- The source has no link between a return and its order, so the join is
--- inferred — a separate step from the reporting on it: `fct_retail_returns`
--- classifies the result and measures how often it failed.
---
--- The rule: the same customer's most recent prior purchase of the same product,
--- as an `asof join`. It cannot reach two kinds of line, and both are kept with a
--- null match rather than dropped, which would flatter the match rate: returns
--- with no customer id, and returns of goods bought before the extract opens
--- (2009-12-01) — left-censoring, not a defect.
+-- Every product return line, joined to the sale it most likely reverses, matched
+-- or not. The rule, what it cannot reach and the tie-break's cost are the
+-- description in _intermediate.yml.
 with lines as (
     select * from {{ ref('stg_retail_lines') }}
 ),
@@ -40,13 +30,8 @@ returns as (
         and quantity < 0
 ),
 
--- Every line a return could point back at: a product sale, positive quantity,
--- named customer — 802,716 lines.
---
--- `quantity > 0` excludes stock write-offs (negative quantities on sale
--- invoices). Every write-off today is anonymous, so the clause moves no row, but
--- a write-off with a customer would otherwise become a return's "purchase". The
--- unit test `return_matches_never_point_at_a_stock_write_off` is its only guard.
+-- Every line a return could point back at. `quantity > 0` excludes stock
+-- write-offs; it moves no row today, so a unit test is its only guard.
 purchases as (
     select
         invoice,
@@ -66,27 +51,8 @@ purchases as (
         and customer_id is not null
 ),
 
--- One candidate per (customer, product, instant). An `asof join` over rows tied
--- on its inequality key picks one arbitrarily — DuckDB's parallel join draws a
--- different one per run — and 33,518 groups here are tied, covering 70,174 of
--- the 802,716 purchase lines; 604 return lines land on one. Without this the
--- model was not reproducible between builds.
---
--- A separate CTE because it is a separate population: 766,060 lines, one per
--- tie group, so 36,656 purchase lines (4.6%) are not here. A `purchases` CTE
--- quietly meaning "some of the purchases" would short any count or denominator
--- later computed from it.
---
--- The tie-break (lowest invoice, then line number; lexicographic) is arbitrary
--- but fixed — it does not claim to pick the better match. One line, not the
--- tied lines' sum: summing would redefine `original_quantity` and leave
--- `original_line_number` pointing at nothing. The cost: of the 604 tied matches,
--- 63 are flagged 'matched, quantity exceeds purchase' and 56 would be plain
--- matches if the tied lines were summed, so that bucket (366 rows) is an upper
--- bound on the rule picking the wrong sale.
---
--- This comment is the one copy of these figures; `_retail.yml`, the unit tests
--- and the `retail-models` and `unit-testing-dbt-models` skills cite it.
+-- One candidate per (customer, product, instant): an `asof join` picks among
+-- ties arbitrarily, per run. A separate CTE because it is a separate population.
 match_candidates as (
     select * from purchases
     qualify row_number() over (
