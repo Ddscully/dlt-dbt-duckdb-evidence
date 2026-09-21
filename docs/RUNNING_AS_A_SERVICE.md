@@ -870,14 +870,26 @@ just compose-up              # postgres, seaweedfs, dagster, site
 `127.0.0.1:3000` is Dagster and `:8081` is the dashboard. Then, once:
 
 ```sh
-docker compose exec dagster uv run dagster job launch -j load_retail
-docker compose exec dagster uv run dagster job launch -j full_refresh
-docker compose exec dagster uv run dagster job launch -j publish_site
+just compose-launch load_retail
+just compose-launch full_refresh
+just compose-launch publish_site
 docker compose exec dagster uv run dagster schedule start daily_refresh
 ```
 
-That is step 3's bootstrap and step 6, in the container. **Never pass `-m`** —
-§8 says why. `just materialize` from the *host* is still not the service's
+That is step 3's bootstrap and step 6, in the container. `compose-launch` is
+`docker compose exec -T dagster uv run dagster job launch -j <job>`. It returns
+once the run is queued, and the queue does not wait for the run ahead to
+*succeed*, so check `load_retail` in the UI before trusting `full_refresh`.
+**Never pass `-m`** — §8 says why.
+
+**Until the last line runs, the stack is up and ingests nothing.** `just
+compose-up` reports four running services and the daemon is running, but
+`daily_refresh` ships `STOPPED` (§5) and its on/off state is a row in the
+`dagster` database, so nothing in the image or `compose.yaml` can turn it on.
+Nothing warns, either: the one sign is an empty `instigators` table, or
+`dagster schedule list` inside the container printing `[STOPPED]`. A
+`compose-down volumes` empties that database, so the reset needs this line
+again, like step 5 after a wiped `DAGSTER_HOME`. `just materialize` from the *host* is still not the service's
 queue: it is a different process against a different warehouse entirely, since
 the container's lives on the `mds_data` volume.
 
@@ -904,6 +916,17 @@ What differs from a host deployment, beyond packaging:
   `compose-build` then `compose-up` is the deploy. It finds itself by hostname,
   so the `dagster` service must not set `hostname:`, which the instance test
   asserts.
+- **Every start needs the dbt hub, though the image does not.** `serve`
+  depends on `dbt-parse`, which depends on `dbt-deps`, so the container runs
+  `dbt deps` on each start although `dbt_packages/` and the manifest are baked
+  in. Measured with `--network none`: the image's own `CMD` exits in about
+  8 s with `Failed to resolve 'hub.getdbt.com'`, in `dbt-deps`, before either
+  port opens; with a network the same step takes about 3 s. `restart:
+  unless-stopped` then restarts it, and a hub outage becomes a service that
+  cannot come back up, where the image would have been fine. The dependency is
+  the price of [decision 0005](decisions/0005-just-serve-first-container-second.md)'s
+  one recipe for a laptop and the container, and it is left as it is; the
+  fix would be a second path through `serve`, which is what 0005 rejects.
 - **The landing zone is not on a volume at all.** The catalog is in Postgres and
   the Parquet in SeaweedFS, so the one file a run container and the service both
   open is `data/warehouse.duckdb` on `mds_data` (§2, fact 3).

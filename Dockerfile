@@ -96,5 +96,8 @@ RUN LAKEHOUSE_DIR=/tmp/lh WAREHOUSE_PATH=/tmp/lh/warehouse.duckdb just dbt-parse
 
 # Dagster on 3000 and the site on 8081, bound to every interface because the
 # only thing that can reach them is the compose network — `compose.yaml`
-# publishes 3000 on 127.0.0.1 and puts the site behind nginx.
+# publishes 3000 on 127.0.0.1 and puts the site behind nginx. So the site is
+# served twice: `serve`'s file server on 8081 is unpublished and unused, and is
+# left running because `serve` is the same recipe on a host, where it is the
+# only server (decision 0005).
 CMD ["just", "serve", "3000", "8081", "0.0.0.0"]

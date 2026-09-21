@@ -7,7 +7,8 @@
 #   invalidate `COPY . .` and every layer after it whenever the host recompiles.
 #   Patterns are anchored at the context root, so a directory that can appear
 #   at any depth needs `**/`: a bare `__pycache__` matched the root alone;
-# - *state* (`data/`, `.dagster/`, `.env`) — a warehouse, a landing zone or a
+# - *state* (`data/`, `.dagster/`, what Dagster writes beside
+#   `deploy/dagster.yaml`, `.env`) — a warehouse, a landing zone or a
 #   password baked into an image that then gets pushed somewhere;
 # - noise (`.git`, `docs/sessions`).
 
@@ -16,6 +17,9 @@
 .env
 data
 .dagster
+deploy/*
+!deploy/dagster.yaml
+!deploy/postgres
 dbt/target
 dbt/dbt_packages
 dbt/logs

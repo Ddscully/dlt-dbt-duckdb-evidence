@@ -99,6 +99,17 @@ compose-build:
 compose-test-pipeline:
     docker compose run --rm --no-deps dagster just test-pipeline
 
+# Queues the job on the running stack's daemon, which starts it in a run
+# container against the `mds_data` volume — so no `where`, which would name the
+# host's warehouse. It returns once the run is *queued*, so its exit code says
+# nothing about the run, which is why `materialize` and the backfill recipes stay
+# in-process. Two launches run in order, but the second does not wait for the
+# first to succeed: a failed `load_retail` is still followed by `full_refresh`.
+# No `-m` (RUNNING_AS_A_SERVICE.md §8), and run config belongs in the UI.
+# Queue a job on the compose stack's daemon (needs `just compose-up`)
+compose-launch job:
+    docker compose exec -T dagster uv run dagster job launch -j {{ job }}
+
 # `just compose-down volumes` also deletes the named volumes — which destroys
 # the catalog and the bucket, and is the only way to make the Postgres init
 # script run again (the entrypoint runs it on an empty data directory alone).
