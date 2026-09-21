@@ -195,13 +195,18 @@ each grouped to a single PR.
     the dev tool leaves.
 - **There are three dependency groups, and `deploy` is the one no recipe but its
   own installs.** `dev` and `orchestration` are what `just setup` syncs;
-  `deploy` (`dagster-postgres`, and with it `psycopg2-binary`) exists only for
-  `DAGSTER_HOME=<repo>/deploy`, where Dagster's own storage is Postgres. Keeping
+  `deploy` (`dagster-postgres` and `dagster-docker`, and with them
+  `psycopg2-binary`) exists for the *container* stack, whose `DAGSTER_HOME` is
+  `deploy/` and whose Dagster storage is Postgres; a host must not point at that
+  instance
+  ([`docs/decisions/0011-deploy-is-the-containers-instance.md`](../../../docs/decisions/0011-deploy-is-the-containers-instance.md)). Keeping
   it out of `orchestration` is what stops a laptop clone installing a database
   driver for storage it does not use — `just deploy-deps` is the opt-in, and it
   names all three groups because `uv sync` computes the whole venv from the ones
-  it is given. The mirror of that: against a venv it built, a plain
-  `just setup` uninstalls both packages again (measured with
+  it is given. On a laptop what the group buys is
+  `tests/test_docker_launcher.py`, which importorskips `dagster_docker` and
+  otherwise skips in silence. The mirror of that: against a venv it built, a plain
+  `just setup` uninstalls those packages again (measured with
   `--dry-run`), which `docs/RUNNING_AS_A_SERVICE.md` §8 records as a way to break
   a running service.
 - **Dropping harlequin is what unblocked dbt 1.11, and the mechanism is an exact

@@ -54,7 +54,8 @@ orchestration = [
 # needs no driver. `just deploy-deps` and the container image sync this group.
 deploy = [
     # Brings psycopg2-binary. Only `deploy/dagster.yaml` asks for it, and only
-    # when DAGSTER_HOME points at that directory. See docs/RUNNING_AS_A_SERVICE.md.
+    # the container points DAGSTER_HOME at that directory — a host must not
+    # (docs/decisions/0011-deploy-is-the-containers-instance.md).
     "dagster-postgres>=0.29.15",  # Dagster run/event/schedule storage in Postgres
     # The run launcher that gives each run its own container. Only
     # `deploy/dagster.yaml`'s `run_launcher` block asks for it, and only the

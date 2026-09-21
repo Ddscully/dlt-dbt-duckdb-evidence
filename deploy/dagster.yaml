@@ -1,5 +1,12 @@
 # The *deployed* instance's config, selected by DAGSTER_HOME=<repo>/deploy.
 #
+# It is the container's, and only the container's. The run_launcher below
+# resolves a run's image by asking the Docker daemon what the *launching
+# container* was created from, and nothing in Dagster checks whether it is
+# running in one — so a host pointed here starts cleanly and fails when the
+# daemon dequeues a run. Measured, with eleven of the eighteen copied variables
+# unset there as well: docs/decisions/0011-deploy-is-the-containers-instance.md.
+#
 # `.dagster/dagster.yaml` is the laptop's: run, event and schedule storage are
 # SQLite files beside it, which is why this demo needs no services. This one
 # puts those three in Postgres, so the history survives a container that is
