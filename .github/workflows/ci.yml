@@ -42,8 +42,7 @@ jobs:
       # `test_definitions.py` can.
       - name: Validate Dagster definitions
         run: |
-          just dbt-parse
-          uv run dagster definitions validate -m orchestration.definitions
+          just validate
           uv run pytest tests/test_definitions.py tests/test_asset_checks.py tests/test_documented_counts.py tests/test_additivity.py tests/test_bus_matrix.py
 
       # Runs ingest -> dbt build + test -> Polars in asset-graph order, and

@@ -21,7 +21,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   `raw/<resource>` by `RawSchemaDltTranslator` to match the keys dagster-dbt
   derives from `_sources.yml`. Rename a dbt source table without renaming the dlt
   resource and the graph silently splits in two — both halves still run. Check
-  with `dagster definitions validate` and a look at the graph.
+  with `just validate` and a look at the graph.
 - **`orchestration/assets.py` must not use `from __future__ import annotations`.**
   Dagster inspects the `context` parameter's annotation *object*; a stringified
   one fails with a confusing "Cannot annotate `context`".
@@ -89,6 +89,28 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   not read, and `dagster job launch -m …` returns 0 and then fails the run with
   `DagsterCodeLocationNotFoundError`. Both measured
   ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §8).
+- **Some commands *require* `-m`, and the two rules do not collide.** The split
+  is which click options a command carries. `dagster asset list` takes
+  `python_pointer_options` alone (`-m`, `-f`, `--package-name`), so a bare
+  `dagster asset list` exits with `Error: Invalid set of CLI arguments for
+  loading repository/job`; `dagster job list` and `dagster definitions validate`
+  take `workspace_options`, which do fall back to `[tool.dagster]`. Measured:
+
+  | Command | `-m` | `DAGSTER_HOME` |
+  |---|---|---|
+  | `dagster asset list` (`just materialize-preview`) | **required** | not read |
+  | `dagster job list` | optional — omit it | not read |
+  | `dagster definitions validate` | optional — omit it | a temp dir if unset |
+  | `dagster run list`, `dagster schedule list` | n/a | **required** |
+
+  What requires `-m` builds the definitions in a throwaway code server and
+  touches no instance state, which is why naming that location after the module
+  costs nothing there. The rule above is about the commands that *write*
+  instance state — `schedule start`/`stop`, `sensor start`/`stop`, `job launch`,
+  `run delete`, `asset wipe`. An instance command with no `DAGSTER_HOME` ends its
+  traceback with `export DAGSTER_HOME=…`, and `definitions validate` without one
+  makes a `.tmp_dagster_home_*` (gitignored) that it removes on exit; every
+  `just` recipe has it exported already.
 
 **This file is the Dagster knowledge for this repo**, not a supplement to a
 vendor skill: `dagster-expert` is not enabled, because it is written around a `dg`
@@ -234,13 +256,41 @@ CLI this project does not install
     the framework would silently absorb (`get_all_asset_keys()` is too wide;
     `AssetChecksDefinition` subclasses `AssetsDefinition`, so an `isinstance`
     chain in the wrong order measures nothing).
-  - **The CLI half is +20 packages on a 151-package tree** — `uv pip install
-    --dry-run dagster-dg-cli` installs 24 and removes 4, pulling
-    `dagster-cloud-cli`, `github3-py`, `cryptography`, `pyjwt`, `httpx`,
-    `questionary` and `yaspin` into a project with no Dagster Plus deployment,
-    and forcing dagster 1.13.15 → 1.13.19. That is the harlequin/marimo shape
-    exactly — a dev tool that duplicates capability the stack already has is
-    weight, and it is measured in the `dependency-versions` skill.
+  - **The CLI half is +20 packages on a 159-package tree** — `uv pip install
+    --dry-run dagster-dg-cli` resolves 88 and installs 20, removing none and
+    pulling `dagster-cloud-cli`, `github3-py`, `cryptography`, `pyjwt`, `httpx`,
+    `questionary` and `yaspin` into a project with no Dagster Plus deployment.
+    It no longer moves `dagster` itself: `dagster-dg-cli` ships at the version
+    already locked. That is the harlequin/marimo shape exactly — a dev tool that
+    duplicates capability the stack already has is weight, and it is measured in
+    the `dependency-versions` skill.
+  - **Every Dagster CLI command this repo runs is `@superseded`, and a
+    supersession is not a removal clock.** All four carry
+    `emit_runtime_warning=True` in the installed `dagster/_cli/`, so each prints
+    one line before it works — `SupersessionWarning: Function dev_command is
+    superseded and its usage is discouraged. Use 'dg dev' instead.`
+
+    | Superseded | What it names instead | Where it runs here |
+    |---|---|---|
+    | `dagster dev` | `dg dev` | `just dagster` |
+    | `dagster job execute` | `dg launch --job` | `just materialize`, `just materialize-site`, and the workflows through them |
+    | `dagster asset materialize` | `dg launch --assets` | `just materialize-select`, `just backfill-wdi`, `just backfill-weather` |
+    | `dagster definitions validate` | `dg check defs` | `just validate`, which CI runs, so every build log carries the warning |
+
+    **`superseded` and `deprecated` are different annotations in dagster's own
+    taxonomy, and only `deprecated` takes a `breaking_version`.** On
+    `dev_command` that second decorator is applied to the `--dagit-port` and
+    `--dagit-host` *arguments*, not to the command, so none of the four is
+    scheduled for removal at 2.0. Revisit when a `breaking_version` appears on
+    one of them, not when the warning is noticed again.
+  - **The replacements are not drop-in, which is what keeps the decision
+    standing.** `dg dev` takes no module pointer — it launches the project or
+    workspace it is *run inside* — and `dg check defs` here exits with `This
+    command must be run inside a Dagster workspace or project directory`,
+    naming `tool.dg.directory_type = "project"` in the nearest
+    `pyproject.toml`. So silencing one warning means adopting the project
+    declaration, which is the half costed above: the warning is a nag on a
+    supported path, not a migration notice.
   - **`uvx dg` is the trap, and this repo has already refused it twice.** It
     dodges the lockfile — which is the argument that lost pyright to ty
     ("an unpinned global binary no lockfile here can see") and the reason

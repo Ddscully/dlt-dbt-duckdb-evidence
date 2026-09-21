@@ -131,6 +131,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just materialize-site` | the same two jobs + the Evidence site (`publish_site`; needs Node) |
 | `just materialize-select 'raw/wb_wdi*'` | one asset + everything downstream (`*` all, `+` one layer) |
 | `just materialize-preview '<sel>'` | what a selection resolves to, materializing nothing — zero matches still exits 0 |
+| `just validate` | does the code location load, and is every definition registered |
 | `just backfill-wdi 1990 1995` | re-load WDI for one year or a range — run config on `raw/wb_wdi`, not a partition |
 | `just backfill-weather 2012 2026` | deepen the weather archive a year at a time, paced to Open-Meteo's budget: about an hour a decade, fifteen years at most per run |
 | `just report` / `just report-clean` | build the Evidence site (`--clean` drops the schema cache) |

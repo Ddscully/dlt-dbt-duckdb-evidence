@@ -274,6 +274,9 @@ restore-history from: where
 record-fixtures:
     uv run python -m scripts.record_fixtures
 
+# Prints a SupersessionWarning naming `dg dev`. Every Dagster CLI command here
+# carries one, and none is on a removal clock — the dagster-graph-and-jobs skill
+# has the four and what they cost to leave.
 # Dagster UI on :3000 — asset graph, run history, freshness, checks
 dagster:
     mkdir -p "$DAGSTER_HOME"
@@ -309,6 +312,17 @@ materialize-select selection: where dbt-parse
 materialize-preview selection: dbt-parse
     uv run --group orchestration dagster asset list \
         -m orchestration.definitions --select '{{ selection }}'
+
+# `dbt-parse` first: the code location imports the dbt project, so without a
+# manifest it fails to load rather than reporting what is unregistered. That
+# dependency is why this is not the check for "did the *running* service load its
+# location" — it repairs the precondition that question is asking about, and
+# RUNNING_AS_A_SERVICE.md §7 spells that one out separately. No `-m`, so the
+# location stays `modern_data_stack`, the name `[tool.dagster]` and the service
+# give it (§8).
+# Check the code location loads and every definition is registered
+validate: dbt-parse
+    uv run --group orchestration dagster definitions validate
 
 # `just backfill-wdi 1995` or `just backfill-wdi 1990 1995`. Merges, so re-runs
 # are idempotent. Loads the raw asset alone, so follow with `just dbt-build` or

@@ -144,7 +144,7 @@ itself.** If they don't, both halves still materialize — unconnected — and n
 error is raised. Always verify:
 
 ```bash
-uv run --group orchestration dagster definitions validate
+just validate
 ```
 
 then open `just dagster` and confirm the new asset has an edge into `staging`.
