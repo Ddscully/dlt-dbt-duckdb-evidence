@@ -1,25 +1,6 @@
--- UCI Online Retail II order lines, cleaned and classified.
--- Grain: one row per (invoice, line_number) — unchanged from the source.
---
--- No rows added or removed, and no money computed: this names distinctions the
--- source encodes and never documents, each a place a naive read goes wrong.
---
---   * **Three invoice prefixes.** 45,330 invoices are sales, 8,292 carry `C`
---     (cancellation) and 6 carry `A` — bad-debt adjustments worth -GBP 147,614,
---     and the only negative prices.
---   * **A negative quantity is not always a return.** 3,457 negative-quantity
---     lines on *sale* invoices, all zero-priced and anonymous, are inventory
---     write-offs posted through the transaction table.
---   * **`stock_code` is not only products.** Postage, fees, vouchers, samples,
---     manual adjustments and `TEST001` share the column (AMAZONFEE alone is
---     -GBP 260,764), so `item_type` says which a revenue figure includes.
---
--- `is_revenue_line` is the one opinion: a product sale or return a customer was
--- charged for. Everything else stays, flagged.
---
--- It also resolves the country label to `country_iso3` through the
--- `retail_country_map` seed, since 9 of the 43 labels differ from the
--- dimension's names and a join on name would silently lose them.
+-- UCI Online Retail II order lines, cleaned and classified, at (invoice,
+-- line_number). No rows added or removed: it names what the source never
+-- documents, and each column's description in _staging.yml says what.
 with source as (
     select * from {{ source('raw', 'retail_invoice_lines') }}
 ),
@@ -32,19 +13,15 @@ renamed as (
     select
         invoice,
         line_number,
-        -- Upper-cased: many codes differ only by case (`M` and `m` are one
-        -- manual adjustment), and would otherwise be separate products.
         upper(trim(stock_code)) as stock_code,
         -- Nulls kept (4,382); `dim_retail_product` picks one label per code.
         nullif(trim(description), '') as description,
         quantity,
         unit_price,
-        -- A blank customer (22.8% of lines) is a real, signed-out sale, nulled
-        -- so it joins as an absence rather than an empty-string customer.
+        -- A blank customer is a signed-out sale: an absence, not a customer.
         nullif(trim(customer_id), '') as customer_id,
-        -- Unreachable today (the workbook read yields NULL for an empty cell),
-        -- but an empty string would join to the seed as an unknown 44th label.
-        -- A unit test in `_unit_tests.yml` pins it.
+        -- Unreachable today, but an empty string would join the seed as a 44th
+        -- label; a unit test pins it.
         nullif(trim(country), '') as country,
         invoice_ts,
         cast(invoice_ts as date) as invoice_date,
@@ -75,11 +52,8 @@ classified as (
     from renamed
 ),
 
--- **A left join, never inner.** A null code means one of the three non-country
--- labels (`European Community`, `West Indies`, `Unspecified`) or a label the
--- seed has never seen, which the `relationships` test in `_staging.yml` names.
--- An inner join would delete those rows and that test would then pass. The unit
--- test `..._keeps_a_line_whose_country_the_map_has_never_seen` guards it.
+-- **A left join, never inner**: an inner join deletes the unmapped labels before
+-- the `relationships` test on `country` can name them (retail-models skill).
 resolved as (
     select
         c.*,
@@ -97,21 +71,14 @@ select
     description,
     quantity,
     unit_price,
-    -- Signed, so net revenue is a single `sum`.
     quantity * unit_price as line_amount_gbp,
     customer_id,
     country,
-    -- The conformed key, beside the source's label: the 871 lines (GBP 11,515)
-    -- whose label is an aggregate or an absence resolve to no code.
     country_iso3,
     invoice_ts,
     invoice_date,
     invoice_month,
-    -- Negative quantity on a sale invoice. `_staging.yml` tests that none
-    -- carries a price, so a priced one fails rather than being booked.
     invoice_type = 'sale' and quantity < 0 as is_stock_write_off,
-    -- Products only, sales and cancellations, no write-offs or adjustments:
-    -- sums to revenue net of returns.
     item_type = 'product'
     and not (invoice_type = 'sale' and quantity < 0)
     and invoice_type <> 'adjustment' as is_revenue_line

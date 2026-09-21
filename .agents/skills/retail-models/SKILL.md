@@ -68,8 +68,9 @@ one; the page is `retail.md`.
   float-aggregation instability on `net_revenue_gbp` — that is `sum()` over
   doubles, this is row selection.
   - **How many groups are tied, how many returns land on one, and what
-    choosing one line instead of summing them costs are measured in the comment
-    above `match_candidates`, and only there.** That set of figures was written
+    choosing one line instead of summing them costs are measured in
+    `int_retail_return_matches`'s description in `_intermediate.yml`, and only
+    there.** That set of figures was written
     out in four places once, so a single re-measurement took four edits and the
     first one to be missed would have been indistinguishable from the rest.
     Quote it from the model.

@@ -366,6 +366,12 @@ models:
       a station series reports because it is what a max/min thermometer records.
       Neither is more correct; they disagree on asymmetric days, and shipping
       both is what lets a downstream model state which one it used.
+
+      One ERA5 grid cell at the capital stands in for national heating demand:
+      defensible for comparing a country with itself across years, weak for
+      comparing countries, and `grid_distance_km` shows the approximation. The
+      last 90 days are preliminary ERA5T, re-fetched until final ERA5 replaces
+      them, so they can change between builds.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -665,7 +671,10 @@ models:
           `ingest/pipeline.py`.
         data_tests: [not_null]
       - name: invoice_type
-        description: sale (45,330 invoices), cancellation (8,292) or adjustment (6).
+        description: >
+          sale (45,330 invoices), cancellation (8,292, prefix `C`) or adjustment
+          (6, prefix `A`: bad-debt write-downs worth -GBP 147,614, and the only
+          negative prices).
         data_tests:
           - not_null
           - accepted_values:
@@ -722,7 +731,9 @@ models:
       - name: country_iso3
         description: >
           The conformed country key, resolved from `country` through
-          `retail_country_map`. Null on 871 lines (0.08%) whose label is an
+          `retail_country_map`, because 9 of the 43 labels differ from
+          `dim_country`'s names and a join on name would lose them. Null on 871
+          lines (0.08%, GBP 11,515) whose label is an
           aggregate or an absence rather than a place; deliberately *not*
           `not_null` for that reason, and the seed test pins which rows may do
           it.
@@ -752,6 +763,7 @@ models:
       - name: is_revenue_line
         description: >
           The model's one opinion: a product sale or genuine return that a
-          customer was charged for. Sums to GBP 19,384,356 against GBP 19,287,251
+          customer was charged for — products only, no write-offs or
+          adjustments. Sums to GBP 19,384,356 against GBP 19,287,251
           for every line in the table.
         data_tests: [not_null]
