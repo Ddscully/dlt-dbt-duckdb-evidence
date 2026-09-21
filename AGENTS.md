@@ -60,7 +60,8 @@ Three lessons that apply well beyond where they were learned:
 - **The DuckDB lock is one writer XOR many readers**, across processes: a
   read-only connection fails while a build holds the file, and a build fails
   while anyone is reading it. `lake.lakehouse.read_only_connection()` is the one
-  read that works mid-build (`querying-the-warehouse`).
+  read that works mid-build, and it opens `raw` alone, never the warehouse
+  (`querying-the-warehouse`).
 - **`uv sync` strips the venv; `uv run` does not.** A bare `uv sync` installs
   `dev` alone and removes the `orchestration` group from under any running
   service. **A measurement of one command is not evidence about another.**
@@ -114,6 +115,7 @@ Use the `justfile` recipes (they map to plain `uv run …` commands):
 | `just compose-up` / `just compose-down` | the optional backing services — Postgres for the catalog, SeaweedFS for the Parquet (`compose-down volumes` destroys both) |
 | `just deploy-deps` | add the `deploy` group — the container stack's Postgres storage and run launcher; locally, what makes the launcher tests run |
 | `just compose-build` / `just compose-test-pipeline` | the `mds:local` image, and the fixture pipeline inside it against the compose services |
+| `just compose-launch <job>` | queue a job on the stack's daemon — it exits once queued, so its status says nothing about the run |
 | `just ingest` | run the dlt pipeline → `raw` in the DuckLake catalog |
 | `just ingest-wdi-full` | same, ignoring WDI's incremental watermark (full re-fetch) |
 | `just dlt-state` | dlt's incremental state, which lives in `~/.dlt`, not the warehouse |
