@@ -442,6 +442,10 @@ def _postgres_holds_catalog() -> bool:
         # variable, and nesting it in a SQL string inside a SQL string is how
         # the quoting goes wrong.
         con.execute(f"attach {sql_literal(catalog())} as {_PROBE_ALIAS} (type postgres, read_only)")
+        # `information_schema` resolves here only because the remote is
+        # Postgres and DuckDB forwards the name: against a DuckDB-attached
+        # catalog the same query raises `schema "information_schema" does not
+        # exist`, so another catalog backend needs another probe.
         return bool(
             con.execute(
                 f"""

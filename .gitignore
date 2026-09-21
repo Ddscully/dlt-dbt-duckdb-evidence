@@ -66,6 +66,11 @@ dbt/package-lock.concurrent-update-lock
 .dagster/*
 !.dagster/dagster.yaml
 .tmp_dagster_home_*/
+# The container's instance (`deploy/`) is the same split: Dagster writes its
+# state under whatever DAGSTER_HOME it is given.
+deploy/*
+!deploy/dagster.yaml
+!deploy/postgres/
 
 # Evidence
 reports/.evidence/
