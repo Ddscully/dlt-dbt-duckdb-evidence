@@ -870,14 +870,17 @@ just compose-up              # postgres, seaweedfs, dagster, site
 `127.0.0.1:3000` is Dagster and `:8081` is the dashboard. Then, once:
 
 ```sh
-docker compose exec dagster uv run dagster job launch -j load_retail
-docker compose exec dagster uv run dagster job launch -j full_refresh
-docker compose exec dagster uv run dagster job launch -j publish_site
+just compose-launch load_retail
+just compose-launch full_refresh
+just compose-launch publish_site
 docker compose exec dagster uv run dagster schedule start daily_refresh
 ```
 
-That is step 3's bootstrap and step 6, in the container. **Never pass `-m`** —
-§8 says why.
+That is step 3's bootstrap and step 6, in the container. `compose-launch` is
+`docker compose exec -T dagster uv run dagster job launch -j <job>`. It returns
+once the run is queued, and the queue does not wait for the run ahead to
+*succeed*, so check `load_retail` in the UI before trusting `full_refresh`.
+**Never pass `-m`** — §8 says why.
 
 **Until the last line runs, the stack is up and ingests nothing.** `just
 compose-up` reports four healthy services and the daemon is running, but
