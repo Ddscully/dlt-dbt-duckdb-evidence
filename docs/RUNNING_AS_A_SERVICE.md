@@ -10,9 +10,9 @@
 > the systemd unit, the swap asset (§4), and a host anybody has stood this up
 > on. Read §2 and §10 as instructions and the rest as a plan.
 
-Today the pipeline has two homes and neither is a service. Locally it is
-`just run` or `just materialize`, invoked by a person. In CI it is four
-workflows on GitHub's cron. The `daily_refresh` schedule in
+Without `just serve`, the pipeline has two homes and neither is a service.
+Locally it is `just run` or `just materialize`, invoked by a person. On GitHub
+it is four workflows, triggered by a pull request, a push or a cron. The `daily_refresh` schedule in
 [`orchestration/definitions.py`](../orchestration/definitions.py) exists and
 ships `STOPPED`, so nothing evaluates it.
 
@@ -34,8 +34,8 @@ this shape stops scaling, and none of that changes.
 **The gain is not parity, it is that the SLA starts being enforced.** The
 freshness policies in [`orchestration/assets.py`](../orchestration/assets.py)
 (warn at two days without a load for `raw/*`, fail at seven; the modelled layers
-rebuilt by 08:00 UTC) are declared today and **evaluated by nothing** between CI
-runs. A schedule that quietly stopped firing is supposed to show as a stale asset
+rebuilt by 08:00 UTC) are declared in code and **evaluated by nothing** unless a
+daemon is running. A schedule that quietly stopped firing is supposed to show as a stale asset
 rather than as an absence somebody notices; that only happens with a daemon
 running. See [`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md#2-what-is-the-freshness-sla-and-what-happens-when-it-is-missed).
 
@@ -77,12 +77,12 @@ below in its comments. What follows is the **shape, abridged** — not a second
 copy to drift against, and **not runnable as it stands**:
 
 ```just
-serve dagster_port="3000" site_port="8081": where dbt-parse
+serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
     # … refuse to start if $SITE_ROOT holds no site …
     # … traps, so a signal exits 0 and a dead child exits 1 …
-    uv run --group orchestration dagster-webserver -h 127.0.0.1 -p {{ dagster_port }} &
+    uv run --group orchestration dagster-webserver -h {{ host }} -p {{ dagster_port }} &
     uv run --group orchestration dagster-daemon run &
     uv run --group orchestration python -m http.server {{ site_port }} --directory "$SITE_ROOT" &
     # … record each PID, then `wait -n` …
@@ -116,7 +116,7 @@ Four things in that block are load-bearing:
 
 - **`dagster-webserver` and `dagster-daemon`, not `dagster dev`.** Checked
   upstream rather than assumed, and in two places. The help text shipped with
-  the pinned Dagster (1.13.19) describes the command as starting "a **local**
+  Dagster 1.13.19 describes the command as starting "a **local**
   deployment of Dagster, including dagster-webserver running on localhost and
   the dagster-daemon running in the background": local, and both in one
   invocation. The docs go further, listing what dev mode does not give you:
@@ -365,8 +365,8 @@ new one, and the next cycle is not held hostage by whoever forgot to close a
 session. That last row is §8's lock nuisance genuinely dissolving rather than
 merely being avoided.
 
-**Re-running this needs separate processes.** DuckDB's Python client caches an instance per path within a process, so
-asking it for a "new" connection to the swapped path returned the *old* one,
+**Re-running this needs separate processes.** DuckDB's Python client caches an
+instance per path within a process, so asking it for a "new" connection to the swapped path returned the *old* one,
 reporting `v1` after the swap, and then refused a writer with `Can't open a
 connection to same database file with a different configuration`. Both answers
 looked like filesystem findings and neither touched the filesystem. Open the
@@ -434,8 +434,8 @@ running and is not:
   that instance wrote a `RUNNING` row to `instigators` and left every file under
   `.dagster/` byte-identical. The failure mode is unchanged, only relocated: drop
   the database and the service comes back up ingesting nothing.
-- **It targets `full_refresh` only, which excludes two things.** It excludes `load_retail`:
-  correct forever on an established lakehouse (retail is a closed archive whose
+- **It targets `full_refresh` only, which excludes two things.** It excludes
+  `load_retail`: correct forever on an established lakehouse (retail is a closed archive whose
   partitions are replayed by hand), and a failure on a fresh one, inside
   `stg_retail_lines`, with `Catalog Error: Table with name retail_invoice_lines
   does not exist!`. **It also excludes `reports/evidence_site`.** Under `just
@@ -462,8 +462,7 @@ build file rather than the served one) and one asset on the end of the graph.
 in place. That is the smaller starting point and it costs three things. Two are
 not silent: a reader lockout for the length of a build (§8), and a half-written
 file where the good one was if the build goes red. **The third is silent** — the
-site is served
-from a fixed `reports/build/` that only a manual `just report` rewrites, so the
+site is served from a fixed `reports/build/` that only a manual `just report` rewrites, so the
 dashboard ages while the warehouse behind it does not. All three are survivable
 on an internal deployment; only the third needs somebody to remember.
 
@@ -552,8 +551,8 @@ order:
 **The pseudonymisation happens at the export and nowhere else**, so the
 warehouse the service builds and serves from holds `customer_id` in the clear,
 exactly as a local build does. The *site* is fine: the retail source queries
-only aggregate over that column (`count(distinct …)`, `… is null`), so no Parquet reaching a browser
-carries an identifier. The exposure is therefore the **file**, not the pages: do
+only aggregate over that column (`count(distinct …)`, `… is null`), so no
+Parquet reaching a browser carries an identifier. The exposure is therefore the **file**, not the pages: do
 not serve `data/warehouse.duckdb` itself, and treat a shell on the host as access
 to the personal column. A deployment that wants to hand the database out needs
 the export path, and with it the salt.
@@ -591,8 +590,7 @@ keeps, extended with the ones only an always-on deployment meets:
   does. Without it a run dies before any Python runs, with
   `exec: "dagster": executable file not found in $PATH`; `auto_remove` then
   deletes the container, so the only evidence is one `ENGINE_EVENT` in the event
-  log. Measured, and the reason the Dockerfile's `PATH` is what it
-  is.
+  log. Measured, and the reason the Dockerfile's `PATH` is what it is.
 - **An `env_vars` name the launcher cannot resolve fails at *launch*, not at
   start.** A bare name in that list means "copy this from my environment", and
   `parse_env_var` raises when it is unset — inside the daemon, dequeuing the
@@ -679,9 +677,9 @@ keeps, extended with the ones only an always-on deployment meets:
   mount point refuses every attach, and the error surfaces inside `dbt build`,
   one layer below whatever chose the spelling.
   - **A catalog remembers the data path it was created with, so one catalog
-    schema cannot serve two arrangements.** Hit for real: the
-    compose stack was pointed at a Postgres catalog that an earlier laptop run
-    had already initialised with the Parquet *on disk*, and the first run in a
+    schema cannot serve two arrangements.** Hit for real: the compose stack was
+    pointed at a Postgres catalog that an earlier laptop run had already
+    initialised with the Parquet *on disk*, and the first run in a
     container failed with `DATA_PATH parameter "s3://lake/modern-data-stack/"
     does not match existing data path in the catalog "/home/…/data/lakehouse/data/"`.
     Nothing was wrong with either side. A laptop that shares a database with the
@@ -702,10 +700,10 @@ The standard this repo holds itself to is that a claim in the docs was measured.
 One thing here was not, and it is the one that cannot be measured without
 building the design first:
 
-- **A full swap cycle end to end**, timed against the ≈94 s stage baseline in
+- **A full swap cycle end to end**, timed against the ≈65 s stage baseline in
   [`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md#3-what-does-a-run-cost-and-how-long-does-it-take).
-  The swap adds a restore, a verify and two renames to a run that is 65%
-  network, so the expectation is that it disappears into the noise. But the
+  The swap adds a restore, a verify and two renames to a run whose largest stage
+  is ingest, mostly network, so the expectation is that it disappears into the noise. But the
   restore copies `history` and the weather archive, which is real I/O, and
   nobody has timed it.
 
@@ -717,9 +715,9 @@ type; step 2's environment file and step 4's unit are still to be written, and
 the whole of it assumes §4's swap asset has not been
 built — which is the smaller starting point §5 describes, not a blocker.
 
-**1. The host, once.** Clone, then `just setup`, which syncs the venv and
-fetches the DuckLake extension, the one dependency no lockfile can name. Install
-`just` itself (`uv tool install rust-just`). **Node is required**, because
+**1. The host, once.** Install `just` (`uv tool install rust-just`), clone, then
+`just setup`, which syncs the venv and fetches the DuckDB extensions (`ducklake`,
+`httpfs`, `postgres`), the dependencies no lockfile can name. **Node is required**, because
 `just serve` serves the Evidence site and refuses to start without a built one —
 the graph itself still does not touch it, so this is a cost of serving rather
 than of running.
@@ -848,8 +846,8 @@ real.
 the dashboard ages against a warehouse that does not, with nothing red anywhere;
 a wiped `DAGSTER_HOME` leaves the schedule stopped and the service serving an
 ageing site for the other reason; a stray bare `uv sync` strips Dagster out of
-the venv while it is running; a `$HOME` change moves
-dlt's watermark and re-fetches everything; a moved mount point breaks every
+the venv while it is running; a `$HOME` change moves dlt's watermark and
+re-fetches everything; a moved mount point breaks every
 DuckLake attach because `data_path` is compared as a string; a `DAGSTER_HOME`
 without `dagster.yaml` lets runs overlap again. All six are §8, and none of them
 raises where you are looking.
@@ -889,8 +887,8 @@ compose-up` reports four running services and the daemon is running, but
 Nothing warns, either: the one sign is an empty `instigators` table, or
 `dagster schedule list` inside the container printing `[STOPPED]`. A
 `compose-down volumes` empties that database, so the reset needs this line
-again, like step 5 after a wiped `DAGSTER_HOME`. `just materialize` from the *host* is still not the service's
-queue: it is a different process against a different warehouse entirely, since
+again, like step 5 after a wiped `DAGSTER_HOME`. `just materialize` from the
+*host* is still not the service's queue: it is a different process against a different warehouse entirely, since
 the container's lives on the `mds_data` volume.
 
 What differs from a host deployment, beyond packaging:
