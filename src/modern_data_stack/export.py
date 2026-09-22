@@ -261,11 +261,8 @@ def export(
             prepared = prepare_copy(writable) or {}
         finally:
             writable.close()
-        # Copy again rather than `CHECKPOINT`: DuckDB never returns freed blocks
-        # to the filesystem, so after rewriting a large column a checkpointed file
-        # is larger than before; only `COPY FROM DATABASE` compacts. Into a
-        # directory, because a sibling file would need a different stem — and the
-        # stem is the catalog name the views were compiled against.
+        # Copied, because only `COPY FROM DATABASE` compacts; into a directory,
+        # because the stem is the catalog name the views were compiled against.
         staging_dir = dest_dir / ".compacting"
         staging_dir.mkdir(exist_ok=True)
         compacted = staging_dir / warehouse_copy.name
@@ -277,8 +274,7 @@ def export(
 
     # Measured on the finished copy, the file that is uploaded.
     published_storage = storage_version(warehouse_copy)
-    # `>`: publishing at the ceiling is the ordinary case. Raised before the
-    # Parquet, manifest and notes are written; the copy is left for inspection.
+    # At the ceiling is ordinary. Raised before anything else is written.
     if max_storage_version is not None and published_storage > max_storage_version:
         raise ValueError(
             f"refusing to publish {warehouse_copy.name}: storage version "
@@ -320,9 +316,8 @@ def export(
     (dest_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (dest_dir / "ATTRIBUTION.md").write_text(attribution)
     (dest_dir / "RELEASE_NOTES.md").write_text(release_notes(manifest, repo or repo_slug(), tag))
-    # Walk the directory rather than list what was written, so anything an
-    # `extra_artifacts` hook added is covered too. The four excluded files
-    # describe the release and cannot checksum themselves.
+    # Walked, so an `extra_artifacts` file is covered; the excluded files describe
+    # the release.
     described = {"SHA256SUMS", "manifest.json", "RELEASE_NOTES.md", "ATTRIBUTION.md"}
     sums = [
         f"{sha256(path)}  {path.relative_to(dest_dir).as_posix()}"

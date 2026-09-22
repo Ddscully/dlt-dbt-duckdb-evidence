@@ -93,9 +93,7 @@ COUNTRIES = [
     "TWN",  # absent from the World Bank entirely — the overrides seed's reason to exist
 ]
 
-# WDI before 1990 is mostly nulls for these indicators and tripled the fixture
-# size for nothing. The OWID CSVs keep their full history — they gzip well, and
-# the emissions series is interesting back to the 19th century.
+# WDI before 1990 is mostly nulls; OWID keeps its full history, which gzips well.
 WDI_MIN_YEAR = 1990
 
 
@@ -264,9 +262,8 @@ def record_retail() -> None:
     print(f"  {'':<28} {kept:>9,} of {total:,} rows ({100 * kept / total:.1f}%)")
 
 
-# One CTE per shape the staging taxonomy handles, each capped. `monthly_topup`
-# guarantees all 25 months: a month missing from the fixture would be a
-# partition that loads nothing, indistinguishable from one that failed.
+# One capped CTE per shape the staging taxonomy handles. `monthly_topup` keeps
+# every month, since an empty partition looks like a failed one.
 RETAIL_FIXTURE_SELECTION = """
 create or replace table kept_invoices as
 with special_codes as (          -- POST, DOT, M, D, S, BANK CHARGES, AMAZONFEE, TEST001…

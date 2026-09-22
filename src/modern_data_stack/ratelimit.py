@@ -25,10 +25,8 @@ from collections.abc import Callable, Sequence
 
 __all__ = ["WeightedWindowLimiter"]
 
-# Slack on `_window_delay`'s "drained enough?" comparison. Summing charges and
-# subtracting them back in floating point need not reach zero (`(0.1 + 0.2) -
-# 0.1 - 0.2` is 4.16e-17), and a miss there falls through to "spend it now".
-# Far below any real charge (~0.4 at the smallest), far above the residual.
+# Slack for float residue in `_window_delay` (`(0.1 + 0.2) - 0.1 - 0.2` is not
+# 0), far below any real charge.
 _DRAIN_TOLERANCE = 1e-9
 
 
@@ -51,9 +49,7 @@ class WeightedWindowLimiter:
         self._limits = tuple(limits)
         self._clock = clock
         self._sleep = sleep
-        # (charged_at, units), oldest first. Trimmed against the widest window,
-        # so it stays bounded by the number of calls in that window rather than
-        # by the length of the run.
+        # (charged_at, units), oldest first, trimmed to the widest window.
         self._spent: deque[tuple[float, float]] = deque()
 
     @property
@@ -97,9 +93,7 @@ class WeightedWindowLimiter:
         # Negative would be meaningless, so an oversized request asks for empty.
         target = max(0.0, budget - units)
 
-        # Walk oldest-first: each entry releases its units at `when + window`, so
-        # the first expiry that brings the outstanding total down to `target` is
-        # the moment the spend becomes legal.
+        # The first expiry that brings the outstanding total to `target`.
         outstanding = spent
         for when, charged in self._spent:
             if now - when >= window:

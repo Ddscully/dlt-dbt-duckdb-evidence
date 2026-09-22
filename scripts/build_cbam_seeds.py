@@ -46,12 +46,9 @@ ANNEX_XLSX_URL = (
 
 SEED_DIR = project_root() / "dbt" / "seeds"
 
-# The annex's countries, resolved to ISO3 at transcription time so the mapping is
-# a reviewable diff rather than a fuzzy join. An unmapped sheet stops the script,
-# naming it, instead of writing a blank ISO3 the mart's join would drop. In sheet
-# order, to read against the workbook. Some needed a human: Excel truncates sheet
-# names at 31 characters ("North Korea (Democratic People’"), and publishers
-# differ ("Egypt" here, "Egypt, Arab Rep." at the World Bank).
+# Resolved by hand, in sheet order, so the mapping is a reviewable diff: Excel
+# truncates sheet names at 31 characters, and publishers name countries
+# differently. An unmapped sheet stops the script rather than writing a blank ISO3.
 SHEET_TO_ISO3 = {
     "Albania": "ALB",
     "Algeria": "DZA",
@@ -176,15 +173,10 @@ SHEET_TO_ISO3 = {
     "Zimbabwe": "ZWE",
 }
 
-# Column positions on a country sheet. They have moved once (the 2026/1740
-# correction dropped three mark-up columns, moving `route` from 8 to 5), so
-# `_check_layout` and the row-width check refuse any other layout.
+# They moved once, with the 2026/1740 correction, so any other layout is refused.
 COLUMNS = {"cn_code": 0, "description": 1, "direct": 2, "indirect": 3, "total": 4, "route": 5}
 
-# What each of those columns must say it is, checked once per sheet by
-# `_check_layout`. Lowercased substrings of the Commission's own headings, so the
-# units and parentheses around them can be reworded without breaking the check,
-# but a column that *moves* cannot pass.
+# Substrings of each column's heading: a reworded unit passes, a moved column fails.
 HEADER_KEYWORDS = {
     "cn_code": "cn code",
     "description": "description",
@@ -194,23 +186,17 @@ HEADER_KEYWORDS = {
     "route": "production route",
 }
 
-# The annex's catch-all table. It is not a country and gets no ISO3: it is the
-# value an importer uses when the sourcing country is unlisted, or is listed with
-# a `–` for that good. `fct_cbam_exposure` resolves both cases against it.
+# The catch-all table, for an unlisted country or a `–` for the good; no ISO3.
 FALLBACK_SHEET = "_Other Countries and Territorie"
 FALLBACK_LABEL = "Other countries and territories"
 
-# The annex's ways of writing "no value", which `fct_cbam_exposure` prices from
-# the fallback table. `see below` is prose on the 4-digit headings 3102 and 3105,
-# whose values sit in the subheading rows; listed explicitly so its null is a
-# decision, and matched case-insensitively.
+# The annex's spellings of "no value", priced from the fallback table. `see below`
+# (headings 3102 and 3105) is a phrase, matched case-insensitively.
 NO_VALUE = {"", "-", "–", "—", "_", "N/A", "n/a", "None"}
 NO_VALUE_PHRASES = {"see below"}
 
-# Annex IV (the highest default per good, with no country) is not transcribed:
-# when a declarant must use it is set by the regulation's articles, which were
-# not confirmed from a primary source. (Annexes II and III are excluded on
-# licence — see `publish/export_warehouse.ATTRIBUTION`.)
+# Annex IV: when it applies was not confirmed from a primary source. Annexes II
+# and III are excluded on licence (`publish/export_warehouse.ATTRIBUTION`).
 SKIP_SHEETS = {"Overview", "Version History", "Annex IV"}
 
 
@@ -260,8 +246,7 @@ def _cn_code(cell: object) -> str:
         digits = re.sub(r"\s+", "", raw)
         if not digits.isdigit():
             return raw
-    # The annex prints 4- and 6-digit headings for whole subheadings alongside
-    # the 8-digit CN codes and the 10-digit TARIC ones; all four stay as they are.
+    # 4-, 6-, 8- and 10-digit codes all stay as printed.
     if len(digits) == 10:
         return f"{digits[:4]} {digits[4:6]} {digits[6:8]} {digits[8:]}"
     if len(digits) == 8:

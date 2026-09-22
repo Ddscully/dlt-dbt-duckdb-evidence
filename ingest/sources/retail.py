@@ -38,45 +38,32 @@ def _download(url: str, dest: Path, *, timeout: int = 300, chunk: int = 1 << 20)
     return dest
 
 
-# UCI Online Retail II — a UK online gift retailer's transactions, 2009-12 to
-# 2011-12, CC BY 4.0. https://archive.ics.uci.edu/dataset/502/online+retail+ii
-# One 45 MB zip holding one two-sheet workbook, static unless the curator revises
-# it — hence the cache, the workbook reader and load-time partitions.
+# UCI Online Retail II, CC BY 4.0: one static zip of one workbook, hence the
+# cache and load-time partitions. https://archive.ics.uci.edu/dataset/502/online+retail+ii
 RETAIL_ARCHIVE = "https://archive.ics.uci.edu/static/public/502/online+retail+ii.zip"
 RETAIL_WORKBOOK_NAME = "online_retail_II.xlsx"
 
-# First and last transaction month. Constants because the partitions are defined
-# before any data is loaded, and safe because the archive is closed (the study
-# ended 2011-12-09). `tests/test_ingest.py` checks them against the fixture.
+# Constants, because partitions are defined before any load and the archive is
+# closed; `tests/test_ingest.py` checks them against the fixture.
 RETAIL_FIRST_MONTH = "2009-12"
 RETAIL_LAST_MONTH = "2011-12"
 
-# (invoice, line_number). The source has no line identifier at all, so this is
-# assigned from file position — see `retail_sql` for why content can't do it and
-# what that costs.
+# `line_number` is file position: the source has no line id (`retail_sql`).
 RETAIL_PRIMARY_KEY = ("invoice", "line_number")
 
-# Rows per Arrow batch handed to dlt. Small enough that peak memory is flat over
-# a full 1.07M-row load, large enough that the per-batch overhead disappears.
+# Keeps peak memory flat over a full load without per-batch overhead.
 RETAIL_BATCH_ROWS = 100_000
 
-# Declared because a merge resource keeps dlt's widen-only schema: a partition of
-# whole prices would infer bigint for `unit_price` and send the next 1.25 into a
-# `unit_price__v_double` variant. `customer_id` is text: an identifier that looks
-# numeric.
-#
-# No `nullable: False` on the keys: `primary_key` already makes them NOT NULL.
-# Every load logs a hint-mismatch warning for them (Arrow fields are nullable),
-# with or without explicit hints; it is harmless.
+# Declared: a merge keeps dlt's widen-only schema, so whole prices would infer
+# bigint. `primary_key` makes the keys NOT NULL; the hint-mismatch warning every
+# load logs for them is harmless.
 RETAIL_COLUMNS: dict[str, TColumnSchema] = {
     "invoice": {"data_type": "text"},
     "line_number": {"data_type": "bigint"},
     "stock_code": {"data_type": "text"},
     "description": {"data_type": "text"},
     "quantity": {"data_type": "bigint"},
-    # `timezone: False`: dlt's default is TIMESTAMP WITH TIME ZONE, which renders
-    # a naive 07:45 till time as 08:45+01:00 on a CET machine and 07:45 in CI.
-    # These are zoneless shop wall-clock times.
+    # Zoneless till times; dlt's default zone shifts them by the machine's offset.
     "invoice_ts": {"data_type": "timestamp", "timezone": False},
     "invoice_month": {"data_type": "text"},
     "unit_price": {"data_type": "double"},

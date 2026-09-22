@@ -29,11 +29,8 @@ DUCKDB_PATH = warehouse_path()
 # The quintile cut points — five buckets by convention.
 QUINTILES = (0.2, 0.4, 0.6, 0.8)
 
-# The (recency score, frequency score) -> segment grid, written out in full. The
-# common rule-list form ("Champions: R>=4 and F>=4", "Loyal: R>=3 and F>=3")
-# overlaps, so a label depends on rule order; twenty-five cells named once
-# cannot. Monetary is carried as a score but kept out of the grid: R and F say
-# what the relationship is doing, M what it is worth.
+# Every (R, F) cell named once, because the usual overlapping rule list makes a
+# label depend on rule order. M stays out: it is what the relationship is worth.
 SEGMENT_GRID: dict[tuple[int, int], str] = {
     # R=5 — bought most recently
     (5, 1): "New Customers",
@@ -132,10 +129,8 @@ def build_retail_rfm(customers: pl.LazyFrame, as_of_date: dt.date) -> pl.LazyFra
     return (
         scored.join(segment_frame().lazy(), on=["recency_score", "frequency_score"], how="left")
         .with_columns(
-            # The cell as text ("555"): a label, not a number. Both columns stay
-            # null for the 28 customers with no revenue line (null
-            # `net_revenue_gbp`); coalescing to 0 would score "nothing to measure"
-            # as "worth nothing". `segment` is unaffected — the grid is R and F.
+            # A label, not a number. Null with no revenue line: 0 would score
+            # "nothing to measure" as "worth nothing".
             pl.concat_str(
                 pl.col("recency_score"), pl.col("frequency_score"), pl.col("monetary_score")
             ).alias("rfm_cell"),
@@ -166,10 +161,8 @@ def build_retail_rfm(customers: pl.LazyFrame, as_of_date: dt.date) -> pl.LazyFra
             "return_rate_pct",
             "is_left_censored_cohort",
         )
-        # Polars sorts nulls first, which would open the table with the
-        # unscored customers where the best belong. `customer_id` last makes the
-        # order total: without it, tied customers come out in whatever order the
-        # engine happens to finish, and the streaming engine picks another.
+        # Nulls last, or the unscored open the table; `customer_id` makes the
+        # order total, so ties do not come out in engine order.
         .sort(
             ["rfm_total", "monetary_gbp", "customer_id"],
             descending=[True, True, False],
@@ -185,8 +178,7 @@ def run(duckdb_path: str = DUCKDB_PATH) -> int:
     """
     con = duckdb.connect(duckdb_path)
     try:
-        # The extract's own horizon, read from the data. Asked of DuckDB rather
-        # than the frame, so the frame is scanned once, by the plan below.
+        # Asked of DuckDB, so the frame is scanned once, by the plan below.
         as_of_date = db.scalar(con, "select max(last_order_date) from marts.dim_retail_customer")
         # `max()` is NULL on an empty table and `scalar` is typed `Any`; name
         # both faults here rather than inside the recency arithmetic.

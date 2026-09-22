@@ -24,19 +24,15 @@ FX_BASE_CURRENCY = "EUR"
 # The first reference-rate day. Earlier dates return an empty `rates` object.
 FX_FIRST_DATE = "1999-01-04"
 
-# How far back an incremental run re-asks. Short, because the ECB does not
-# restate fixings the way the World Bank restates years: ten days closes a hole
-# left by a failed run or a rare correction, and the merge key makes it free.
+# Short, because the ECB does not restate: it only closes a failed run's hole.
 FX_LOOKBACK_DAYS = 10
 
-# One watermark for the table, unlike WDI's per-indicator ones: every currency
-# arrives in the same request, so a newly listed currency is already covered.
+# One watermark, because every currency arrives in the same request.
 FX_WATERMARK_KEY = "max_rate_date"
 
 FX_PRIMARY_KEY = ("rate_date", "quote_currency")
 
-# Declared because a merge resource keeps dlt's widen-only schema, and `rate`
-# must be a double however the first window happens to look.
+# Declared: a merge keeps dlt's widen-only schema, and `rate` must be a double.
 FX_COLUMNS: dict[str, TColumnSchema] = {
     "rate_date": {"data_type": "date", "nullable": False},
     "base_currency": {"data_type": "text", "nullable": False},
@@ -92,9 +88,7 @@ def ecb_fx_rates():
     payload = http.get_json_object(fx_url(fx_start_date(state.get(FX_WATERMARK_KEY))))
     rates: dict[str, dict[str, float]] = payload.get("rates") or {}
 
-    # ISO dates sort lexicographically, so `max` is the newest day. Only on a
-    # non-empty response — a weekend-only window legitimately returns nothing —
-    # and dlt commits the state only if the load succeeds.
+    # ISO dates sort as text. Skipped on a weekend-only window, which is empty.
     if rates:
         state[FX_WATERMARK_KEY] = max(rates)
 

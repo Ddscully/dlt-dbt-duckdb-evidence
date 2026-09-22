@@ -46,27 +46,18 @@ from modern_data_stack.paths import project_root
 
 REPORTS_DIR = project_root() / "reports"
 
-# Evidence's own layout, not ours: `pages/x.md` renders to `build/x/index.html`
-# (and `pages/index.md` to `build/index.html`), sources live in `sources/<source>/`,
-# and the extracted parquet lands in `.evidence/`. These are the defaults; `run()`
-# takes the reports directory, so the tests can point the parsers at a temp tree.
+# Evidence's layout: `pages/x.md` renders to `build/x/index.html`. Defaults only;
+# `run()` takes the reports directory, so the tests can use a temp tree.
 PAGES_DIR = REPORTS_DIR / "pages"
 SOURCES_DIR = REPORTS_DIR / "sources"
 BUILD_DIR = REPORTS_DIR / "build"
 
-# Schemas a source query can legitimately read. Used to pull the warehouse
-# dependencies out of the SQL — see `source_tables`.
+# What `source_tables` looks for in the SQL.
 WAREHOUSE_SCHEMAS = ("raw", "staging", "marts", "analytics", "history")
 
-# What writes each table the source queries read; `orchestration/assets.py` turns
-# these into the Evidence asset's deps. dbt models go by model name (their asset
-# keys come from the manifest), Polars outputs by asset key — the four
-# `pipeline_*` tables share one, written by a single op. No page reads
-# `history.snap_*` directly; the snapshots reach the site through the marts that
-# summarise them.
-#
-# Here rather than beside the asset so `tests/test_report.py` can check them
-# against the SQL without Dagster, whose dbt manifest `just test` does not have.
+# What writes each table the source queries read: the Evidence asset's deps. dbt
+# models by name, Polars outputs by asset key. Here rather than beside the asset,
+# so `tests/test_report.py` checks them against the SQL without Dagster.
 TABLE_TO_DBT_MODEL = {
     "marts.dim_country_year": "dim_country_year",
     "marts.dim_currency": "dim_currency",
@@ -101,10 +92,8 @@ _TABLE_REF = re.compile(
     re.IGNORECASE,
 )
 _SQL_COMMENT = re.compile(r"--[^\n]*")
-# A page reads `from warehouse.<query>` — Evidence's own spelling, where the
-# prefix is the directory under `sources/`. Matched loosely and filtered against
-# the source names that exist, so `from warehouse.typo` is an error rather than
-# something quietly skipped.
+# `from warehouse.<query>`, matched loosely and then checked against the sources
+# that exist, so a typo is an error rather than skipped.
 _QUERY_REF = re.compile(r"\b(?:from|join)\s+([a-z_][a-z_0-9]*\.[a-z_][a-z_0-9]*)", re.IGNORECASE)
 
 
@@ -282,8 +271,7 @@ def run(
     reports_dir = Path(reports_dir)
     build_dir = reports_dir / "build"
 
-    # `evidence build` adds to `build/` rather than replacing it, so without this
-    # orphaned chunks accumulate and a renamed or deleted page keeps serving.
+    # `evidence build` adds to `build/`, so a deleted page would keep serving.
     if build_dir.exists():
         shutil.rmtree(build_dir)
     # `.evidence/` holds the extracted parquet, so it only goes when asked.

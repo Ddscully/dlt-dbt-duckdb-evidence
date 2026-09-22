@@ -45,28 +45,19 @@ HISTORY_SCHEMA = "history"
 RAW_SCHEMA = "raw"
 ANALYTICS_SCHEMA = "analytics"
 
-# The run-history table and the two columns that prove a relation is one. Both
-# are needed: `invocation_id` alone would match anything keyed on a run, and
-# `execution_time_s` is what makes it a *timing* record rather than a log.
+# `invocation_id` alone would match anything keyed on a run; the timing column
+# makes it this table.
 RUNS_TABLE = "pipeline_runs"
 RUN_COLUMNS = ("invocation_id", "execution_time_s")
 
-# The published landing zone, as it is named in the release.
-# `publish/export_warehouse.LAKEHOUSE_ASSET` is the other half; a test holds them
-# together, because a rename here would make the restore silently find nothing
-# and cold-start the weather archive with nothing going red.
+# The same name as `publish/export_warehouse.LAKEHOUSE_ASSET`, which a test holds.
 LAKEHOUSE_ASSET = "lakehouse.tar.gz"
 
-# What this warehouse cannot rebuild, and the columns that prove each relation is
-# what it claims to be (see `Carry`). `history` is carried whole, since everything
-# in it is a snapshot, so a new snapshot needs no edit here. The landing zone is
-# not a rule: it lives outside the DuckDB file, and `_restore_lakehouse` copies it.
+# What this warehouse cannot rebuild (see `Carry`). `history` goes whole, so a new
+# snapshot needs no edit; the landing zone is outside the file (`_restore_lakehouse`).
 CARRIED: tuple[Carry, ...] = (
     Carry(schema=HISTORY_SCHEMA, kind="dbt snapshot", required_columns=SCD2_COLUMNS),
-    # The dbt run history: the invocation is over and `run_results.json` holds
-    # only the latest. Named rather than the whole schema, because the other
-    # `analytics` tables are rebuilt every run and carrying them would restore
-    # last month's.
+    # Only this table: the rest of `analytics` is rebuilt every run.
     Carry(
         schema=ANALYTICS_SCHEMA,
         kind="dbt run history",
@@ -167,10 +158,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # The two refusals — history already in the destination, dlt holding local
-    # state — carry messages written to be acted on, the second naming its `rm`.
-    # `run()` keeps raising them for its callers and tests; only the command line
-    # trades the traceback that buried them for the message and a non-zero exit.
+    # The refusals' messages are the instructions, so the command line prints them
+    # without the traceback that buried them.
     try:
         summary = run(args.source, args.warehouse, args.force)
     except (ValueError, RuntimeError) as exc:

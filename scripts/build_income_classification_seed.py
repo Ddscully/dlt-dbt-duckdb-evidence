@@ -63,18 +63,14 @@ OGHIST_XLSX_URL = (
 SEED_DIR = project_root() / "dbt" / "seeds"
 SHEET = "Country Analytical History"
 
-# Where the header and the body sit. Row indices are 0-based into the sheet as
-# read; they are constants rather than a search because the layout is a
-# publisher's fixed template, and a search for "the row that looks like years"
-# would silently re-anchor if the template changed rather than stopping.
+# 0-based. Constants, not a search: a search would re-anchor silently on a
+# changed template instead of stopping.
 FISCAL_YEAR_ROW = 4
 DATA_YEAR_ROW = 5
 FIRST_COUNTRY_ROW = 11
 
-# The publisher's codes. `..` is "not classified that year" and is dropped rather
-# than carried as a group: an economy the World Bank had not yet rated is a
-# different fact from one it rated as low income, and a row here would make the
-# two indistinguishable downstream.
+# `..` ("not classified that year") is dropped, not a group: unrated is a
+# different fact from low income.
 CODE_TO_GROUP = {
     "L": "Low income",
     "LM": "Lower middle income",
@@ -83,9 +79,8 @@ CODE_TO_GROUP = {
 }
 UNCLASSIFIED = ".."
 
-# `LM*` is Yemen in 1987 and 1988, footnoted for the then-separate Yemen Arab
-# Republic and PDR: lower middle income with a footnote, not a fifth group. Any
-# other starred code fails the guard below, so a person reads its footnote.
+# Yemen in 1987-88, footnoted for the then two Yemens; any other starred code
+# fails the guard below, so a person reads its footnote.
 CODE_ALIASES = {"LM*": "LM"}
 
 
