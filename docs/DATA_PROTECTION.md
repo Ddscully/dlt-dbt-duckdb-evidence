@@ -64,10 +64,9 @@ what a uniqueness count is made of. The share is stable to a tenth of a point;
 the count moves by single digits. Anything quoting the count as a fact is
 quoting one build.
 
-(The lake is unaffected, and the boundary is worth knowing precisely: it
-archives `fct_retail_order_line`, whose money columns are per-row arithmetic
-rather than aggregates, so its "byte-identical run to run" property still holds.
-It's aggregation over floats that's unstable, not floats.)
+(The boundary is worth knowing precisely: `fct_retail_order_line`'s money
+columns are per-row arithmetic rather than aggregates, so they are identical
+between builds. It's aggregation over floats that's unstable, not floats.)
 
 **A near-continuous money column at person grain is an identifier whatever it's
 called.** Deleting `customer_id` from an extract moves the number from 100% to
@@ -130,18 +129,21 @@ would hash a hash, so it is refused. `tests/test_privacy.py` builds the shape
 
 ## The columns nobody would have declared
 
-`customer_id` appears in **51 relations** in this warehouse. Six are declared.
-The policy therefore expands the declared set **by column name** across every
-schema in the copy before rewriting, and the difference isn't academic:
+`customer_id` appears in **53 relations** across five schemas of the
+`data-2026-09-01` release. Six are declared. The policy therefore expands the
+declared set **by column name** across every schema in the copy before
+rewriting, and the difference isn't academic:
 
-* **`raw_staging.retail_invoice_lines`**, dlt's merge scratch. A full copy of
-  the landing table that no yml describes and nothing downstream reads. Every
-  release published before this work shipped it with 1,067,371 rows, 824,364 of
-  them carrying a clear id.
-* **44 `dbt_test__audit` tables.** `store_failures` is on project-wide, so every
+* **47 `dbt_test__audit` tables.** `store_failures` is on project-wide, so every
   failing row of every retail test is written to a table the published database
   then carries. They're empty today because the tests pass, meaning this leak
   opens on the day something goes wrong and closes again before anyone looks.
+* **dlt's merge scratch, when `raw` still lived in the file.**
+  `raw_staging.retail_invoice_lines` was a full copy of the landing table that no
+  yml describes and nothing downstream reads, and every release before this work
+  shipped it with 1,067,371 rows, 824,364 of them carrying a clear id. `raw` now
+  lands in the DuckLake catalog and never reaches the file, but the sweep is what
+  made that leak fail closed at the time, and it would again.
 
 Declaring the column is still the contract; the sweep is what makes forgetting it
 fail closed rather than ship. The export **verifies** after it rewrites. Every
@@ -169,7 +171,7 @@ its masking policy too, applied to the extract rather than to the query.
 Every finding here ends in one.
 
 * **The identifier is pseudonymised in the release.** Salted, stable, verified
-  after the fact, covering all 50 columns that carry it across five schemas.
+  after the fact, covering every copy of the column in the file.
 * **The quasi-identifiers ship unchanged**, and the 98.6% above says what that
   means. They're publishable because the source is already public: UCI
   redistributes the whole transaction log under CC BY 4.0, ids included, so

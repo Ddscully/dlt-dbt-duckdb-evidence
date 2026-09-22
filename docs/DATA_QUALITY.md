@@ -174,7 +174,8 @@ which yml declares a model, so the boundary had to be chosen — and choosing th
 one dbt already enforces means the file a model is declared in and the group it
 answers to cannot drift apart.
 
-Each dashboard page and the monthly data release are declared as `exposures`, so
+Each dashboard page that reads a model, and the monthly data release, are
+declared as `exposures`, so
 `dbt ls --select +exposure:evidence_retail` answers "what breaks if I change
 this". A test fails if a page starts reading a model its exposure does not name.
 

@@ -8,7 +8,7 @@ actually populate from
 [`reports/sources/warehouse/latest_years.sql`](../reports/sources/warehouse/latest_years.sql),
 because coverage does not end in the same year for all of them.
 
-Each page is declared as a dbt exposure in
+Each page that reads a model is declared as a dbt exposure in
 [`dbt/models/_exposures.yml`](../dbt/models/_exposures.yml), so
 `dbt ls --select +exposure:<name>` answers "what breaks if I change this" for one
 page. Building the site locally is [`reports/README.md`](../reports/README.md);

@@ -62,9 +62,10 @@ it cost to learn:
   clear ids in `staging` beside hashed marts, with matching row counts and no
   error.
 - **The declared set is expanded by column name across every schema**, because
-  copies of the identifier appear where nobody would classify them by hand —
-  `dbt_test__audit` tables, and dlt's `raw_staging` merge scratch, a full copy of
-  the landing table. The export then verifies what it rewrote against
+  copies of the identifier appear where nobody would classify them by hand — 47
+  of the 53 relations carrying it in `data-2026-09-01` are `dbt_test__audit`
+  tables, and dlt's `raw_staging` merge scratch shipped 824,364 clear ids when
+  `raw` still lived in the file. The export then verifies what it rewrote against
   `^[0-9a-f]{16}$`, which a five-digit id cannot match.
 - **`||`, never `concat()`.** `concat` ignores NULLs, so all 243,007 anonymous
   rows would hash the bare salt onto one pseudonym indistinguishable from a real
