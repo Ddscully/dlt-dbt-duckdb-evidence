@@ -84,8 +84,8 @@ section here. The mutation method these guards were written with is in the
     invites the edit.
     **The dangerous drift is the one where both sides agree on the keys**: swap
     `NY.GDP.MKTP.CD` for `.KD` and current-dollar GDP lands in
-    `gdp_constant_usd`, which every intensity figure divides by. `stg_wdi`
-    carries fourteen data tests, every one an `accepted_range`, and both series
+    `gdp_constant_usd`, which every intensity figure divides by. every data
+    test on `stg_wdi` is an `accepted_range`, and both series
     are non-negative USD, so nothing goes red — and per the GDP bullets in
     `AGENTS.md` that substitution flips the decarbonisation *sign* for 30 countries. A guard
     written as `set(a) == set(b)`, the obvious form, passes it.
@@ -205,92 +205,33 @@ section here. The mutation method these guards were written with is in the
   figures you happen to doubt. The tell was internal inconsistency, not
   implausibility: two mutations that move the identical row set were written
   down with different deltas.
-- **`dbt build --select <model>` does not report that model's test count, and
-  five places in this repo said it did.** Its PASS total counts the model node
-  itself, plus anything eagerly selected — so `stg_retail_lines` was written
-  down as 22 where it has 19, and `fct_fx_rates_daily`, `fct_fx_rates_periods`,
-  `fct_retail_returns` and `dim_date` were each written down as one more than
-  they have. The `dim_date` one shipped in the PR that added its unit tests and
-  survived until a scanner went looking. The count that means "tests attached to
-  this model" is the manifest's, filtered on `attached_node`; nothing printed by
-  a build is it.
 - **A count cited in prose is an untested assertion, and this repo produced
-  about forty stale ones.** `tests/test_documented_counts.py` scans tracked
-  markdown and the two `_unit_tests.yml` headers for any integer in front of a
-  test-noun and requires it to be one the manifest actually produces. It exists
-  because adding a single data test moved 368 to 369 in two files and left it
-  wrong in fourteen — including `README.md` labelling `docs/DATA_QUALITY.md`
-  with a count of 368 while linking to a file that already said 369. `lint`,
-  `pytest` and `dbt build` were green through all of it.
-  - **Three nouns, because each one broke separately.** Test counts came first;
-    mart counts were added when a stale "all N marts" survived two additions to
-    the layer; additivity counts were added when publishing `dim_country` moved
-    every label figure and left the old pair standing in four files, two of
-    them Python docstrings — which is why the scan is pointed at
-    `tests/test_additivity.py` and `publish/export_warehouse.py` as well as the
-    markdown. A docstring is prose.
-    - **Describe a stale claim, never quote it.** Each of the three additions
-      failed on its own explanatory prose first: the scanner cannot tell a
-      quotation from an assertion and should not try, so a sentence naming the
-      bug has to spell the old figure in words, or as `N`, or not at all.
-  - **The word-number list is generated to 99 rather than written out, and the
-    hand-written one stopped exactly where a real claim went.** It ended at
-    "twenty", the unit-test total moved to 30, and AGENTS.md and a skill said
-    the total in hyphenated words in three places through a whole review:
-    `twenty` cannot match a compound like twenty-something (the hyphen is not
-    `\s`) and the unit word is below the ten-and-above floor, so the scanner
-    matched nothing and reported nothing.
-    A list extended by hand every time a total crosses a decade is a guard with
-    a scheduled expiry.
-  - **An additivity figure is bound to its own label, not to a global set.**
-    There are two honest bases — 193 literal `additivity:` entries in the ymls
-    against 226 labelled columns in the manifest, the gap being
-    `fct_emissions_energy_v1`'s inherited labels — so a set holding both makes
-    either legal anywhere. A bare "N labels" is deliberately not scanned at
-    all: `docs/PRACTICES.md` writes "34 of the 43 labels" about the retail
-    country map, which is a different kind of label entirely.
-
-    The guard forbids quoting a superseded count directly in front of a
-    test-noun, which is why this bullet phrases the old figures the long way
-    round. That is the intended cost — an exemption comment would be a hole
-    someone eventually parks a real staleness in.
-  - **Scan whole-file, never line by line.** These docs are hard wrapped at ~80
-    characters and the claims straddle the wraps — `docs/DATA_QUALITY.md` ends a
-    line on "10 unit" and starts the next with "tests.". A per-line scan missed
-    3 of 31 claims and passed a mutated unit-test count; it was a mutation that
-    found that, not review.
-  - **Per-model counts are scoped to their own model.** Folded into the
-    project-wide set, a model's count becomes legal anywhere — including in a
-    sentence still claiming an old project-wide total that happens to equal it —
-    and the guard silently reopens the staleness it exists to catch. A count is
-    accepted only where the nearest *preceding* model
-    mention owns it, which is how these documents establish context: a heading,
-    then prose about that model. Adding a model to `CITED_MODELS` is therefore
-    cheap — but a model whose count is cited and *not* listed is unguarded
-    rather than wrong, which is the failure mode to watch.
-  - **The number is not always adjacent to the noun.** `of those` / `of the` may
-    sit between them (a spelled-out number, then "of those tests"), and
-    AGENTS.md writes counts as
-    words. Both are handled; words only from ten up, because below that they are
-    always local ("Two unit tests catch all five") and admitting them produced
-    nine false positives against zero finds. Anything longer than that filler is
-    deliberately out — "463 of the 482 tests" has to capture 464, not 462. What
-    still escapes is a number with no test-noun after it at all ("pass all 14:"),
-    so phrase a count with its noun.
-    - **The uncaptured partner then goes stale, and it did — in two files, by 23
-      and by 39.** A sentence of the form "N of the M tests use the default
-      `fail_calc`" is one guarded number beside one unguarded one, so every
-      ripple bumped the total and left the partner behind: `AGENTS.md` read "438 of the 463" and
-      `docs/course/03-tests.md` "422 of the 463" when the true figure at 463 was
-      461. Both were right when written — 438 at a total of 440, 422 at 424 —
-      which is the tell, because the partner is always total-minus-two here, the
-      two `dbt_utils.equal_rowcount` tests being the only ones that override
-      `fail_calc` at all. The example sentence in this very bullet had drifted
-      the same way, quoting a total that had moved four times against a partner
-      that had not. Prefer a phrasing the guard can hold — "all but two of the
-      482 tests" — over an arithmetic pair it can only half-see.
-  - `seen > 35` is the vacuity guard. A scanner whose patterns stop matching
-    passes by not looking — the same failure `_ROUTES` reachability exists for.
+  about forty stale ones** — adding one data test once fixed a total in two files
+  and left it wrong in fourteen, with `lint`, `pytest` and `dbt build` green. So
+  counts of what dbt builds stay out of prose, and `tests/test_documented_counts.py`
+  enforces it: the prose says "every data test on the model", and three figures
+  are kept and checked against the manifest — the project's test totals (the
+  README headline), `FOR_REVIEWERS.md`'s description coverage, and the course's
+  `PASS=` verdicts. A per-model test count, a mart-model count, an additivity
+  label count or a contracted-column count fails, naming the phrasing to use.
+  - **Per-model counts went because nothing prints them.** `dbt build --select
+    <model>` reports the model node and anything eagerly selected, so five of
+    them were written down one or three high; the true one is the manifest's,
+    filtered on `attached_node`, which no reader checks by hand.
+  - **Describe a stale claim, never quote it.** The scanner cannot tell a
+    quotation from an assertion, so a sentence about a count spells it `N`.
+  - **Scan whole-file, never line by line.** The docs are hard-wrapped and a
+    claim straddles the wrap ("10 unit" / "tests."); a per-line scan once missed
+    3 of 31 claims.
+  - **Number words run from ten to ninety-nine, generated rather than listed.**
+    A hand-written list that stopped at "twenty" let a hyphenated total through
+    in three places; below ten the words are always local ("two unit tests").
+  - **A partner number is unguarded.** In "N of the M tests" the scanner reads M
+    only, and the partner went stale in two files while the total was kept
+    right. Write "all but two tests", which has nothing to go stale.
+  - The test-count scan asserts it matched something, since the README
+    headline always states one: a scanner whose pattern stops matching passes by
+    not looking. The other three scans expect nothing, so they have no floor.
 
 
 - **A markdown anchor is a citation nothing was checking, and the split of
@@ -305,8 +246,7 @@ section here. The mutation method these guards were written with is in the
   (`lake/lakehouse.py`)` anchors as `#the-lakehouse-lakelakehousepy`).
   - **The vacuity guard is non-emptiness and deliberately not a count.** There
     are four anchors in the tree and deleting one is a normal edit, so a floor
-    would go red on a correct change — the opposite trade from `seen > 35` in
-    `tests/test_documented_counts.py`, where claims only accumulate.
+    would go red on a correct change.
   - **A second assertion was written, mutated, and dropped.** It required at
     least one `../`-relative anchor, on the theory that only that form exercises
     the `doc.parent / target` join. Resolving from the repo root instead fails
@@ -394,7 +334,7 @@ section here. The mutation method these guards were written with is in the
   anchored at column 0, because a guard that reads source as text finds its own
   strings.
 - **A yml `description:` is prose**, and `tests/test_documented_counts.py` scans
-  every `dbt/models/**/_*.yml` for test and mart counts. The other numeric claims
+  every `dbt/models/**/_*.yml` for counts of tests, mart models and the contract. The other numeric claims
   there — row counts, shares — are unguarded, because checking them needs the
   full warehouse, which CI lacks. A stale claim can *move* rather than expire —
   Antarctica's null region left the facts and survives in

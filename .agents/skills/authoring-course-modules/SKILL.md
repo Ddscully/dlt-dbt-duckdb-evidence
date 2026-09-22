@@ -190,10 +190,10 @@ lesson generalises: **when prose quotes a mechanism rather than a name, the
 guard has to run the mechanism.**
 
 **Every stale figure in that audit was one no scanner could see.** The counts
-guard needs a test noun after the number, so "425 of them", "462 of the 482
-tests" and "agrees 367 times out of 369" all passed it, and a whole stale test
+guard needs a test noun after the number, so "N of them", "N of the M tests"
+(which it reads as M) and "agrees N times out of M" all passed it, and a whole stale test
 census survived inside the module about counting tests. Widening `CLAIM` is one
-answer; the cheaper one is to write a count in the shape the guard reads.
+answer; the cheaper one is to write no count: "every data test on the model".
 
 ## The thesis, and the findings that support it
 
@@ -243,7 +243,7 @@ workbook's own count instead.
 
 ### Module 03 — tests
 
-**It measured how much of the warehouse the 482 tests actually look at, and the
+**It measured how much of the warehouse the tests actually look at, and the
 answer is the module.** `dbt_utils.accepted_range` compiles to
 `where not (col >= min)`, and `not (null >= 0)` is *null*, so every range test
 silently skips its nulls. On `fct_emissions_energy` that means each of the
@@ -252,9 +252,8 @@ of 43,138) and **54%** (`co2_mt`) of the fact — except `year`, the one column
 that is never null, at 100%. 198 of the 407 `marts` columns carry any test at
 all, against every mart model under a type contract: two different guarantees, and
 worth being able to say which one you have. The audit schema is measurable too,
-but **it counts the reader's own rename history, not the project** — 518 tables
-against 482 tests, i.e. 36 orphans, on the warehouse last measured,
-and zero on a freshly built one. Write that kind of figure as an example,
+but **it counts the reader's own rename history, not the project** — 36 orphans
+on the warehouse last measured, and zero on a freshly built one. Write that kind of figure as an example,
 never as the answer, or the reveal contradicts what the learner sees.
 
 **Drill 1 is the calibration trap with a second axis nobody expects.** Adding

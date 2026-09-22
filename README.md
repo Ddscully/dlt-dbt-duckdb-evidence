@@ -208,8 +208,8 @@ just coverage       # the same, with line + branch coverage; gates nothing, ~58 
 just test-pipeline  # the whole pipeline against recorded fixtures, ~46 s
 ```
 
-`just dbt-build` runs 518 tests (482 data tests and 36 unit tests) and enforces a
-schema contract on every mart model. What each gate catches is
+`just dbt-build` runs every data test and unit test and enforces a schema
+contract on every mart model. What each gate catches is
 [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md); why the gates are shaped that
 way is [`docs/PRACTICES.md`](./docs/PRACTICES.md).
 

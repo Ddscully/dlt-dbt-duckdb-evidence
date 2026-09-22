@@ -89,8 +89,8 @@ it cost to learn:
 ## What the manifest tells a consumer they cannot see
 
 - **`manifest.json` carries an `additivity` map, and it exists because a Parquet
-  file has types and nothing else.** 288 published columns are labelled
-  `additive` / `semi_additive` / `non_additive` / `not_a_measure`, and about half
+  file has types and nothing else.** Every published numeric column is labelled
+  `additive`, `semi_additive`, `non_additive` or `not_a_measure`, and about half
   are non-additive — `sum(renewables_share_pct)` is nonsense that returns a
   number, with no error anywhere for a consumer who cannot be paged.
   `export_warehouse.additivity()` reads the labels off `meta:` in the dbt

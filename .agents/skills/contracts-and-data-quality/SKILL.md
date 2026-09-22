@@ -34,10 +34,10 @@ account of the same ground is `docs/DATA_QUALITY.md`.
   classification) and `co2_per_capita` has no ceiling (small petrostates reach
   780 t/person). Check the full distribution before tightening a bound — the
   17-country fixture slice passes thresholds the full data breaks.
-- **There are thirty-six unit tests, over twelve models, because a data test
-  cannot see a wrong answer that is a legal one.** Change `dim_date`'s
+- **The unit tests exist because a data test cannot see a wrong answer that is
+  a legal one.** Change `dim_date`'s
   `fiscal_quarter` from `/3 + 1` to `/ 4` and every fiscal quarter is wrong while
-  all 19 data tests on the model pass; its three unit tests fail. Which models,
+  every data test on the model passes; its three unit tests fail. Which models,
   what mutating each proved, and the fixture shapes are `unit-testing-dbt-models`.
 - **A unit test that mocks five inputs is telling you a model is two models.**
   The CBAM fallback rule needed a markup schedule, a country dimension and an
@@ -64,8 +64,8 @@ account of the same ground is `docs/DATA_QUALITY.md`.
   content: `stg_country` and `stg_energy` are `protected`, the only places one
   domain reads another's cleaning layer, with the reasons beside the override.
   Breaking one fails `dbt parse`, naming the consumer.
-- **Contracts are enforced on every mart model — 21 relations (20 models, one of
-  them versioned) and 407 columns, each with a `data_type`.** The column list was
+- **Contracts are enforced on every mart model, every column with a
+  `data_type`.** The column list was
   generated from `information_schema` and inserted line-wise. **Never round-trip
   these ymls through PyYAML**: it reflows every description to add a scalar.
   - The schema contract catches what the grain contract cannot — a column
@@ -76,7 +76,7 @@ account of the same ground is `docs/DATA_QUALITY.md`.
     person to decide on a `--full-refresh` of 265k rows.
 - **The marts ymls are one per dbt group**, the split dbt itself can check,
   because shared prose behaves like a merge lock (`AGENTS.md`, *Branches and
-  PRs*). `_unit_tests.yml` stays whole: it is one axis of assertion across twelve
+  PRs*). `_unit_tests.yml` stays whole: it is one axis of assertion across
   models. A test that names a yml is a list that can go quiet, so the privacy test
   globs and derives the expected set from the `.sql` files. When moving yml
   blocks, compare a manifest fingerprint before and after: a green build proves
@@ -90,19 +90,17 @@ account of the same ground is `docs/DATA_QUALITY.md`.
   release exposure is exactly the marts.
 - **Every numeric mart column declares `meta: {additivity: …}`** from a closed
   vocabulary — `additive`, `semi_additive`, `non_additive`, `not_a_measure` —
-  because neither a type nor a test says whether `sum()` means anything: 118 of
-  the 229 are non-additive. Those are manifest counts; `fct_emissions_energy_v1`
-  inherits 36 through `include: all`, so the ymls carry 193 literal
-  `additivity:` entries. `tests/test_additivity.py` holds coverage, the closed
+  because neither a type nor a test says whether `sum()` means anything, and
+  about half are non-additive. `fct_emissions_energy_v1` inherits its labels
+  through `include: all`, so the manifest counts more labels than the ymls
+  write. `tests/test_additivity.py` holds coverage, the closed
   vocabulary, numeric-only labels, and a name rule — no ratio-named column may be
   summable — which is the one check that catches a label present and *wrong*.
-  - `semi_additive` must say which direction fails, and there are 16
-    `semi_additive` columns: `population` gives person-years across years;
+  - `semi_additive` must say which direction fails: `population` gives person-years across years;
     `original_quantity` belongs to the matched purchase, so summing it counts a
     purchase once per return matched to it. `gdp_usd` is `semi_additive` and
     `gdp_constant_usd` `additive` — the constant-dollar gotcha as metadata.
-  - The labels ship in `manifest.json`'s `additivity` map (288 columns across 27
-    relations), with `analytics`' in `EXTRA_ADDITIVITY` because dbt cannot see
+  - The labels ship in `manifest.json`'s `additivity` map, with `analytics`' in `EXTRA_ADDITIVITY` because dbt cannot see
     Polars output. They are stated rather than derived from the mart, because a
     derived label fails *open* when a mart column is renamed.
   - A `meta:` block can sit below a comment or a `description:`, so a line-wise

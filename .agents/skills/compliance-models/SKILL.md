@@ -207,7 +207,7 @@ time series.
   re-price without rebuilding.
 ### What the unit tests hold
 
-Five of them, in `dbt/models/marts/_unit_tests.yml`. This model's 21 data tests
+Five of them, in `dbt/models/marts/_unit_tests.yml`. This model's data tests
 are `not_null` and generous `accepted_range`s bar two, and they cannot be much
 else:
 the numbers are transcribed from a legal instrument, so there is no independent

@@ -31,12 +31,12 @@ follows from that rather than from the numbers.
   2002 breaking of the dollar peg. Those 3,359 rows keep their place with a null
   rate and `is_rate_stale` set. An uncapped fill would have put a pre-collapse
   krona on nine years of charts.
-- **Nothing in the 14 data tests on `fct_fx_rates_daily` can see the cap, and
-  five mutations prove it.** They guard the grain, the direction of the carry
+- **No data test on `fct_fx_rates_daily` can see the cap, and five mutations
+  prove it.** They guard the grain, the direction of the carry
   (`rate_source_date <= date_day`) and positivity — all real, none sufficient,
   because a rate carried 8 days or 3,341 days is a well-formed positive number
-  with a source date in the past. All five mutations below pass all 14 data
-  tests:
+  with a source date in the past. All five mutations below pass every data
+  test:
 
   | mutation | effect on the warehouse |
   |---|---|
@@ -85,8 +85,8 @@ follows from that rather than from the numbers.
     `is_quoted` assertion: 47 rows, 46 quoted, EUR the one exception.
 ### Both directions, and spot against average
 
-- **`fct_fx_rates_periods` has 23 data tests and six of seven mutations pass
-  every one of them.** `avg_eur_per_unit` as `1 / avg_units_per_eur` (USD 2008
+- **Six of seven mutations to `fct_fx_rates_periods` pass every one of its data
+  tests.** `avg_eur_per_unit` as `1 / avg_units_per_eur` (USD 2008
   0.683499 -> 0.679923), `max()` for `arg_max(.., rate_date)` (USD 2014's period
   end 1.2141 -> 1.3953, and `period_end_vs_avg_pct` **flips sign**, -8.61% ->
   +5.03%), `min()` for `arg_min` (85.9% of `period_start_units_per_eur` wrong),

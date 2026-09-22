@@ -401,8 +401,8 @@ models:
       # (15.5) is below the cooling base (22.0). This is the only place that
       # ordering is checkable. With the two vars swapped (measured on a warehouse
       # copy) heating totals rose 89% and cooling 336%, yet
-      # `stg_weather_daily`'s 27 data tests and `fct_country_weather_year`'s 28
-      # data tests all passed; this expression fails on 52,253 days of it.
+      # every data test on `stg_weather_daily` and `fct_country_weather_year`
+      # passed; this expression fails on 52,253 days of it.
       #
       # `coalesce` because a degree day is null when its temperature is, and
       # `where not(expression)` treats null as a pass.

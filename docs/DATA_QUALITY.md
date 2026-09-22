@@ -1,7 +1,8 @@
 # Data-quality gates, contracts and ownership
 
-`just dbt-build` runs 518 tests alongside the models — 482 data tests and 36 unit
-tests. Dagster surfaces the data tests as asset checks on the models they guard.
+`just dbt-build` runs the data tests and unit tests alongside the models, and the
+site's Pipeline page counts the data tests. Dagster surfaces them as asset checks
+on the models they guard.
 For the pytest side, see [`tests/README.md`](../tests/README.md).
 
 ## The gates
@@ -11,7 +12,7 @@ For the pytest side, see [`tests/README.md`](../tests/README.md).
 | `dbt_utils.unique_combination_of_columns` on `(country_iso3, year)` | The grain contract, on every fact-shaped staging model, the spine and the mart. `fct_emissions_energy` is four left joins off `dim_country_year`, so one duplicated upstream row would fan the mart out silently. |
 | `dbt_utils.accepted_range` | Percentages inside 0–100, non-negative money and tonnage, years inside each source's real span (WDI starts in 1960, Eurostat in 2007), EU electricity under €1/kWh. Unit and index-arithmetic bugs land outside these long before anyone notices a wrong chart. |
 | `not_null` / `unique` / `accepted_values` | The country dimension: one row per ISO3, a region for every row, income groups from the World Bank's four. |
-| `contract: {enforced: true}` on every mart model | The *schema* contract, which the grain contract never saw: 407 columns with a declared type, checked at build time. A column changing type or disappearing under the published Parquet files fails the build instead of arriving in someone's download. |
+| `contract: {enforced: true}` on every mart model | The *schema* contract, which the grain contract never saw: every column with a declared type, checked at build time. A column changing type or disappearing under the published Parquet files fails the build instead of arriving in someone's download. |
 | `dbt source freshness` (`just dbt-freshness`) | Whether the warehouse is stale. dlt stamps every row with `_dlt_load_id`, a unix epoch, so this measures when the *pipeline* last ran (warn at 7 days, error at 30) and not when the publishers last updated. |
 
 Every test runs with `store_failures`, into a `dbt_test__audit` schema. A red
@@ -27,7 +28,7 @@ happily pass a threshold the full 200+ would break.
 
 ## Unit tests
 
-Thirty-six of those tests are dbt *unit* tests, over twelve models — `dim_date`,
+The dbt *unit* tests cover these models — `dim_date`,
 `stg_retail_lines`, `stg_weather_daily`, `fct_cbam_exposure`,
 `fct_country_weather_year`, `fct_fx_rates_daily`, `fct_fx_rates_periods`,
 `fct_retail_returns`, `fct_retail_customer_cohorts`, `dim_retail_customer` and
@@ -50,7 +51,7 @@ sends all 100 voucher lines, which arrive lowercase, into product with the same
 
 `fct_cbam_exposure` is the hardest of them. Its numbers are transcribed from a
 legal instrument, so there is nothing independent to check them against and its
-21 data tests are almost all `not_null` and generous ranges. The two that are
+data tests are almost all `not_null` and generous ranges. The two that are
 not — the production-route test and the one holding the fallback out of the
 excess window — both came out of mutations rather than out of review. What a
 unit test reaches instead is the rules: hardcoding the phase-in mark-up at
@@ -147,7 +148,7 @@ holds across the whole tree with no exceptions — and the labels reach
 decoration.
 
 The six `analytics` tables are written by Polars and invisible to dbt, so their
-59 labels are declared in `EXTRA_ADDITIVITY` beside `EXTRA_CLASSIFICATIONS` —
+labels are declared in `EXTRA_ADDITIVITY` beside `EXTRA_CLASSIFICATIONS` —
 the same split personal data already makes, for the same reason. Two tests hold
 them to their authorities rather than to a list: `co2_intensity` is
 `select * from marts.fct_emissions_energy` plus two derived columns, so every

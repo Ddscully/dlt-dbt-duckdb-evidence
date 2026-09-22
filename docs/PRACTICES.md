@@ -100,8 +100,8 @@ holds 214 countries into the latest year where `primary_energy_twh` collapses to
 **First, a word this repo uses precisely.** In the BI sense a *mart* is the
 subject area a reader works with, and there are **four**: `country_stats`,
 `reference`, `retail` and `compliance`. `marts/` is dbt's name for the
-presentation *layer*, one folder per mart, and the 21 relations (20 models, one
-of them versioned) inside it are **mart models**. Getting that backwards is
+presentation *layer*, one folder per mart, and the models inside it are **mart
+models**. Getting that backwards is
 easy and this repo did it: it counted models and called them marts, so a stale figure sat in five files through two
 additions to the layer.
 
@@ -117,8 +117,8 @@ fails — the point of the layer is that none of it is a comment.
 the start.
 → [`dbt/models/marts/country_stats/_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
 
-**Enforce a schema contract on everything that leaves.** All 20 mart models are
-contract-enforced: 407 columns with a declared type.
+**Enforce a schema contract on everything that leaves.** Every mart model is
+contract-enforced, every column with a declared type.
 The grain test and the schema contract catch different things: the contract is
 what sees a column change type under a consumer. Verified by declaring `year` as
 `VARCHAR`, which fails the build with a per-column mismatch table *before writing
@@ -128,10 +128,10 @@ so the boundary is the one dbt itself can check rather than a filing convention
 
 **Say what a measure means under `sum()`.** A contract states a column's type
 and a test states that it is correct; neither says whether adding it up is
-meaningful. 118 of the 229 numeric mart columns are non-additive: ratios, rates,
+meaningful. About half the numeric mart columns are non-additive: ratios, rates,
 prices, averages or extrema, where a sum is nonsense that comes back as a number.
 Every one carries `meta: {additivity: …}` from a closed four-value vocabulary,
-the 16 `semi_additive` ones have to say in prose *which* direction fails
+the `semi_additive` ones have to say in prose *which* direction fails
 (`population` gives person-years across years; `cumulative_co2` recounts every
 earlier year), and the labels ship in the release manifest so a Parquet consumer
 who cannot be paged has them too. Guarded three ways: exhaustive over the layer,
@@ -179,9 +179,9 @@ release notes, because the consumers who need it never read a dbt log.
 **A data test cannot see an answer that is wrong but legal.** `dim_date`'s fiscal
 quarter is range-checked 1–4, which caught a float-division bug at quarter 5.
 Change the same expression from `/ 3` to `/ 4` and every fiscal quarter in the
-warehouse is wrong while **all 19 data tests on the model pass** — measured, not
-argued. Three unit tests fail on it. There are 36 unit tests over twelve models,
-and each exists because of a specific mutation the data tests could not see.
+warehouse is wrong while **every data test on the model passes** — measured, not
+argued. Three unit tests fail on it. Each unit test exists because of a specific
+mutation the data tests could not see.
 → [`dbt/models/marts/_unit_tests.yml`](../dbt/models/marts/_unit_tests.yml)
 
 **A test earns its place by mutation, and "nothing went red" is the finding.**
@@ -228,9 +228,11 @@ cause; the checks failed more quietly still, by never running.
 → [`orchestration/definitions.py`](../orchestration/definitions.py),
 [`tests/test_definitions.py`](../tests/test_definitions.py)
 
-**Numbers written into prose are untested assertions, so they are tested.** One
-test count moved from 368 to 369 in two files and nowhere else, leaving fourteen
-sites stale with `dbt build`, `pytest` and the linter all green throughout.
+**Numbers written into prose are untested assertions, so most are not written.**
+One test count moved in two files and nowhere else, leaving fourteen sites stale
+with `dbt build`, `pytest` and the linter all green throughout. Now the prose says
+"every data test on the model", a test fails on any other count of what dbt
+builds, and the three figures kept are checked against the manifest.
 → [`tests/test_documented_counts.py`](../tests/test_documented_counts.py)
 
 **A scanner that stops matching reports nothing, which is indistinguishable from

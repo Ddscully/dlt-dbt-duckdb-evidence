@@ -176,15 +176,13 @@ keep the split a split:
   cases in `test_export.py` and `test_restore_history.py` do, or it goes vacuous
   when the allowlist is empty.
 - **The prose guards are calibrated to this repo's volume of prose.**
-  - `test_documented_counts.py` floors its scans: the count-claim scanner must
-    find more than 35 claims, the additivity one at least 8. Two of its cases
-    require a specific claim (the description coverage, and a `PASS=` line from
-    the course).
-    `CITED_MODELS` names the example's models.
+  - `test_documented_counts.py` requires three specific claims: a test total
+    (the README headline), the description coverage, and a `PASS=` line from
+    the course.
   - `test_course.py` always includes the course index, so its skill-citation
     cases crash with no course.
-  - Remove the floors and the claim-must-exist cases; the stale-claim checks
-    themselves carry over and are worth keeping.
+  - Remove the claim-must-exist cases; the checks that keep counts out of
+    prose carry over and are worth keeping.
 
 ### Delete — this is the example, not the framework
 
@@ -466,9 +464,8 @@ the one people reach for.
 the modelled layers in a 282 MB DuckDB file, plus a 111 MiB DuckLake landing
 zone — that one grows about 39 MiB per full ingest and nothing expires the
 snapshots, which is its own answer to what a run costs. The largest relation is
-`fct_retail_order_line` at 1,067,371 rows. A full `dbt build` — 561 built nodes,
-33 models, 482 data tests, 36 unit tests — takes **24.5 s** of dbt's own time on
-four threads. `analytics.pipeline_runs` records that per build, so the trend is a query rather
+`fct_retail_order_line` at 1,067,371 rows. A full `dbt build`, every test
+included, takes **24.5 s** of dbt's own time on four threads. `analytics.pipeline_runs` records that per build, so the trend is a query rather
 than a memory.
 
 **Which layer gives first is answered in full by

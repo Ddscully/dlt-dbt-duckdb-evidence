@@ -8,7 +8,7 @@ version: 2
 # misclassification moves money between buckets without changing any total.
 #
 # Measured rather than argued, by mutating the model against a copy of the
-# warehouse and running its 20 data tests each time:
+# warehouse and running its data tests each time:
 #
 #   | mutation                                    | data tests | net revenue  |
 #   |---------------------------------------------|------------|--------------|
@@ -88,8 +88,8 @@ unit_tests:
       Every branch of the `item_type` case, one row each, with the real codes.
       Seven of the eight families are a handful of codes that arrived in the same
       column as the mugs, and getting one wrong is worth money the tests cannot
-      see — moving AMAZONFEE into `product` costs GBP 260,764 with all 20 data
-      tests green. The paired-case rows are here because `upper(trim(...))` turns
+      see — moving AMAZONFEE into `product` costs GBP 260,764 with every data
+      test green. The paired-case rows are here because `upper(trim(...))` turns
       out to be load-bearing for a whole branch: every one of the 100 voucher
       lines arrives lowercase (`gift_0001_20`), so without the fold the `voucher`
       family is empty and 100% of it books as product. Lowercase `m` is 5 more

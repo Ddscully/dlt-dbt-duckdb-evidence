@@ -105,7 +105,7 @@ unit_tests:
 # **Four mutations of that window against a warehouse copy, and the split
 # between them is the argument for the policy the third test pins:**
 #
-# | mutation                                    | 21 data tests | effect on the warehouse       |
+# | mutation                                    | data tests    | effect on the warehouse       |
 # |---------------------------------------------|---------------|-------------------------------|
 # | window loses `filter (where not p.is_fallback_table)` | all pass | **not one cell moves**   |
 # | the `case` goes, so the fallback keeps a figure       | 1 fails  | 260 nulls become numbers |
@@ -118,7 +118,7 @@ unit_tests:
 # 87.5% of listed sources at the median. So no data test could ever see it and
 # the fixture is the entire guard. The second row is the half that *is*
 # observable, and only because the policy nulls the fallback's figure rather
-# than keeping it — one of the 21 data tests fires, the both-directions
+# than keeping it — one of the data tests fires, the both-directions
 # `expression_is_true` on the column, and it is the only one that can. Choosing
 # to null is what gave half of this rule a data test at all.
 #
@@ -373,7 +373,7 @@ unit_tests:
   # Five mutations against a warehouse copy, every one of them passing all 14 of
   # the model's data tests:
   #
-  # | mutation                              | 14 data tests | effect                                    |
+  # | mutation                              | data tests    | effect                                    |
   # |---------------------------------------|---------------|-------------------------------------------|
   # | cap 7 -> 30 days                      | all pass      | 46 stale rows gain a rate                 |
   # | cap removed entirely                  | all pass      | all 3,359 stale rows priced, self-contradictory |
@@ -396,7 +396,7 @@ unit_tests:
       The carry window is partitioned by currency, and dropping that partition
       is the worst of the five mutations: `last_value(... ignore nulls)` then
       reaches across currencies and 29.7% of the table quotes somebody else's
-      fixing — GBP's 0.7094 becomes 0.3718 — with all 14 data tests green,
+      fixing — GBP's 0.7094 becomes 0.3718 — with every data test green,
       because the dates still move forward and the grain is still unique. The
       fixture is built so a missing partition is unmissable: BBB publishes
       *later* than AAA on every day AAA has to carry, so an unpartitioned window
@@ -501,10 +501,10 @@ unit_tests:
   # ---------------------------------------------------------------------------
   # fct_fx_rates_periods — the aggregation.
   #
-  # Seven mutations against a warehouse copy. The model has 23 data tests and
-  # only one of them notices anything:
+  # Seven mutations against a warehouse copy. Only one of the model's data tests
+  # notices anything:
   #
-  # | mutation                                    | 23 data tests | effect                                        |
+  # | mutation                                    | data tests    | effect                                        |
   # |---------------------------------------------|---------------|-----------------------------------------------|
   # | `avg_eur_per_unit` = 1 / `avg_units_per_eur`| all pass      | USD 2008 0.683499 -> 0.679923; ISK 2008 off 11.9% |
   # | `max()` for `arg_max(.., rate_date)`        | all pass      | USD 2014 period end 1.2141 -> 1.3953, `period_end_vs_avg_pct` **flips** -8.61% -> +5.03% |
@@ -567,7 +567,7 @@ unit_tests:
     description: >
       The mean of the reciprocals is not the reciprocal of the mean, and
       `avg_eur_per_unit` is the former. Writing it as `1 / avg_units_per_eur` is
-      the natural-looking simplification and it passes all 23 data tests: the
+      the natural-looking simplification and it passes every data test: the
       number stays positive and non-null, and it is only 0.07% out in a calm
       year. The gap grows with how far the rate moved inside the period — 0.52%
       for EUR/USD in 2008 and **11.9% for the Icelandic krona that same year** —
@@ -693,7 +693,7 @@ unit_tests:
   # ---------------------------------------------------------------------------
   # fct_retail_returns — the inferred join.
   #
-  # Six mutations against a warehouse copy, all eleven data tests green on every
+  # Six mutations against a warehouse copy, every data test green on every
   # one:
   #
   # | mutation                                      | effect                                          |
@@ -765,8 +765,8 @@ unit_tests:
         - {invoice: "C604", quantity_returned: 2, match_status: "no prior purchase in window",        is_matched: false, original_quantity: null, quantity_is_consistent: null,  days_to_return: null}
   # --- fct_retail_customer_cohorts -----------------------------------------
   #
-  # Eleven data tests, and neither of the two things that define the triangle's
-  # *edge* is among them. Mutated against a warehouse copy, running the model's
+  # Neither of the two things that define the triangle's *edge* has a data
+  # test. Mutated against a warehouse copy, running the model's
   # full data suite each time:
   #
   # | mutation                                    | effect                                          |
@@ -926,8 +926,8 @@ unit_tests:
 
   # --- dim_retail_customer --------------------------------------------------
   #
-  # `dim_retail_customer` carries 11 data tests over 22 columns, and every one
-  # of them lands on a date, a count or an identifier. Not one touches money.
+  # Every data test on `dim_retail_customer` lands on a date, a count or an
+  # identifier. Not one touches money.
   # The two structural tests are `unique(customer_id)` and
   # `last_order_date >= first_order_date`; neither can see a wrong number.
   #
