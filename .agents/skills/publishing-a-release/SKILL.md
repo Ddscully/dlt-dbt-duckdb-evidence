@@ -155,8 +155,8 @@ it cost to learn:
   manifest carries both.** `duckdb_version` answers "who wrote this";
   `storage_version` answers "can I open it", which is the only question a
   consumer has. They differ: DuckDB 1.x writes format **64** by default — the
-  one `v0.10.0` through `v1.1.3` all read — so a file written by 1.5.5 opens on
-  a client five years older. The release notes said "Written by DuckDB 1.5.5.
+  one every DuckDB from `v0.10.0` (February 2024) on reads — so a file written
+  by 1.5.5 opens on a client more than two years older. The release notes said "Written by DuckDB 1.5.5.
   Older clients may not read the storage format" for the whole life of the
   release, which was unmeasured and, it turns out, *pessimistic*.
   - **There is no SQL that answers it.** `duckdb_databases()` returns an empty

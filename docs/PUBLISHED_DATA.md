@@ -4,11 +4,19 @@
 
 The dashboard is one consumer of the warehouse. The warehouse itself is published
 too, so you can use the joined data without running any of this. Each release
-carries the whole DuckDB file plus a Parquet per modelled table, `manifest.json`
-(row counts, year coverage, SHA-256 per asset) and `SHA256SUMS`.
+carries:
+
+- `warehouse.duckdb`, the whole file dbt builds — `staging`, `marts`,
+  `analytics` and `history`, but never `raw`, which lives in the landing zone
+- a Parquet per modelled table
+- `lakehouse.tar.gz`, the one landing table no rebuild can refetch within
+  Open-Meteo's daily budget (`raw.om_weather_daily`), as a relocatable DuckLake
+  catalog
+- `manifest.json` (row counts, year coverage, SHA-256 per asset), `SHA256SUMS`
+  and `ATTRIBUTION.md`
 
 **`manifest.json` also says which columns may be summed.** Its `additivity` map
-labels all 280 numeric columns of every published `marts` and `analytics` table
+labels every numeric column of every published `marts` and `analytics` table
 `additive`, `semi_additive`, `non_additive` or `not_a_measure` — half of them
 are non-additive, and a Parquet file has no way
 of telling you that `sum(renewables_share_pct)` is nonsense that returns a
@@ -41,11 +49,12 @@ packages it. `just export-data` does the same thing locally, into `data/export/`
 Tags are dated, `data-YYYY-MM-DD`; `releases/latest/download/…` always resolves
 to the newest one, so the URLs above never go stale.
 
-`raw` and `history` ship inside the DuckDB file but not as Parquet. The flat
-files are the modelled layers only; anyone who wants dlt's landing tables or the
-snapshots downloads the database.
+`history` ships inside the DuckDB file but not as Parquet: the flat files are the
+modelled layers only, so anyone who wants the snapshots downloads the database.
+The rest of `raw` is never published, since it holds dlt's merge scratch with
+customer ids in the clear; rebuilding it is `just run`.
 
-## What to know if you're copying this setup
+## What to know before building on it
 
 **Alias it `warehouse`.** dbt writes the `staging` views with fully-qualified
 SQL, and DuckDB names a catalog after its file, so those views only resolve under
@@ -63,7 +72,8 @@ filesystem, so checkpointing after the rewrite leaves the file 13% *larger*.
 
 **`customer_id` is pseudonymised, and it is the only column that is.** It ships
 as a salted digest of the publisher's own id — applied to every copy of the
-column in the file, `raw` and `raw_staging` included — so it joins the retail
+column in the file, the `staging` tables and dbt's stored test failures
+included — so it joins the retail
 tables to each other and to the previous release, and does not join them back to
 the source workbook. The salt is stable across releases and is not in this
 repository.
@@ -77,14 +87,14 @@ classification, the measurement and the decisions.
 **The DuckDB file has a storage format, and it is not the version that wrote
 it.** `manifest.json` records both, because they answer different questions:
 `duckdb_version` is the writer, `storage_version` is what a reader has to
-support. Every DuckDB from 1.x writes format **64** by default — the one
-`v0.10.0` through `v1.1.3` all read — so a file written by 1.5.5 opens on a
-client five years older, and the release notes say so rather than hedging.
+support. Every DuckDB from 1.x writes format **64** by default, which every
+DuckDB from `v0.10.0` on reads, so a file written by 1.5.5 opens on a client
+from early 2024, and the release notes say so rather than hedging.
 
 The export refuses to publish a format above that ceiling, and
 `tests/test_export.py` fails if the installed DuckDB stops writing it. That
-matters because DuckDB 2.0 ships a new default storage format: nothing here caps
-`duckdb>=1.1`, so the change would otherwise arrive as one line of a grouped
+matters because DuckDB 2.0 ships a new default storage format, and
+`pyproject.toml` asks only for `duckdb>=1.1`, with no upper bound, so the change would otherwise arrive as one line of a grouped
 monthly Dependabot PR, pass every test in the repo — they all write and read with
 the same binary — and first show up as a consumer unable to open a release.
 Raising the ceiling is a decision that strands old readers, not a lockfile edit.
@@ -104,4 +114,4 @@ Releases redistribute upstream data, which the repository itself doesn't. All th
 sources permit it with attribution, so every release ships an `ATTRIBUTION.md`
 naming the publisher and licence per source, and the release notes repeat it.
 `ATTRIBUTION` in `publish/export_warehouse.py` is the single source of truth for
-both. Keep it in step with the README's licence section when a source is added.
+both, and `tests/test_export.py` holds it to the README's licence section.

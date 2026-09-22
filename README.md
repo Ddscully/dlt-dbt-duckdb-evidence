@@ -50,8 +50,8 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 - **Dagster wraps the layers rather than replacing them**, so `ingest`, `dbt` and
   `transform` stay independently runnable. The asset graph is derived from keys
   the layers already share, not declared by hand.
-- **The unit tests came out of a measurement**: across five models mutated
-  against a warehouse copy, 24 mutations were run and the data tests caught 3, so
+- **The unit tests came out of a measurement**: across seven models mutated
+  against a warehouse copy, 38 mutations were run and the data tests caught 5, so
   "nothing went red" is a finding here rather than an all-clear.
 - **Two grains that are usually two separate projects** — country-year facts and
   one wholesaler's invoice log — because the modelling problems they pose are
@@ -240,12 +240,12 @@ three deployment gotchas behind it, are in
 
 The dashboard is one consumer of the warehouse. The warehouse itself is published
 monthly, so you can use the joined data without running any of this: the whole
-DuckDB file, the DuckLake landing zone beside it, a Parquet per modelled table,
-row counts and checksums. DuckDB will query it over HTTPS where it sits, without
+DuckDB file, a Parquet per modelled table, the weather archive no rebuild can
+refetch, row counts and checksums. DuckDB will query it over HTTPS where it sits, without
 downloading anything.
 
-[`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) has the queries and the four
-things worth knowing before you build on it.
+[`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) has the queries and what is
+worth knowing before you build on it.
 
 ## Use this stack for your own data
 

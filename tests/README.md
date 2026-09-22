@@ -2,18 +2,31 @@
 
 Two tiers, deliberately separated.
 
-## `just test` — unit tests, mocked, ~47 s
+## `just test` — pytest over mocked payloads, ~47 s
 
 `tests/test_*.py`. Every HTTP call is mocked; nothing touches the network or the
-warehouse. They cover the parts of the pipeline that have actually broken:
+warehouse. These five pin the pipeline's own logic, where it has actually broken:
 
 | File | What it pins down |
 |---|---|
-| `test_ingest.py` | `_get_json` retry-then-raise, WDI pagination and the 200-with-an-error-body guard, the WDI incremental window (per-indicator watermarks, the full-reload escape hatch) and the replace/merge load split, the Eurostat JSON-stat stride arithmetic |
+| `test_ingest.py` | `http.get_json`'s retry-then-raise, WDI pagination and the 200-with-an-error-body guard, the WDI incremental window (per-indicator watermarks, the full-reload escape hatch) and the replace/merge load split, the Eurostat JSON-stat stride arithmetic |
 | `test_transform.py` | the Polars intensity metric — Mt→kg conversion, the constant-USD denominator, dropped rows, dense per-cohort ranking |
 | `test_lakehouse.py` | the DuckLake landing zone: that two snapshots diff to the revisions dlt's merge hides, that `revisions()` refuses to answer rather than compare nothing, and that three hand-maintained lists still match dlt — the provenance columns, the weather table's name and the ATTACH alias dbt declares |
 | `test_fixtures.py` | that every URL the pipeline can build resolves to a fixture that exists |
 | `test_exposures.py` | that the exposures in `dbt/models/_exposures.yml` still describe what the Evidence pages read, and that the release exposure names every mart — a stale exposure is invisible, since `dbt build` stays green and `dbt ls --select +exposure:*` keeps answering |
+
+The rest group by what they protect:
+
+| Protects | Files |
+|---|---|
+| hand-maintained lists against the tree | `test_definitions`, `test_asset_checks`, `test_workflows`, `test_documented_counts`, `test_course`, `test_agent_instructions`, `test_plugin_settings`, `test_packaging` |
+| the model metadata | `test_additivity`, `test_bus_matrix` |
+| the publication boundary | `test_export`, `test_privacy`, `test_restore_history` |
+| the package's mechanisms | `test_paths`, `test_db`, `test_workbook`, `test_ratelimit`, `test_pipeline_status`, `test_report` |
+| the service | `test_dagster_instance`, `test_docker_launcher` |
+
+Which list each guard holds, and the traps in writing one, are the `repo-guards`
+skill.
 
 ## `just test-pipeline` — integration against fixtures, ~46 s
 
@@ -23,11 +36,13 @@ then merge), every dbt model, seed, snapshot and test, and the Polars layer all
 execute — offline and deterministically. This is what `.github/workflows/ci.yml`
 runs (via the Dagster asset graph, so the asset checks are evaluated too).
 
-It sets `WAREHOUSE_PATH` to a temp file, and `LAKEHOUSE_DIR` to a temp directory
-beside it. Don't drop either: without them a fixture run overwrites
-`data/warehouse.duckdb` and `data/lakehouse/` with the 17-country slice — and
-the second is not an optimisation, because dlt *lands* in the lakehouse, over a
-weather archive no rebuild can afford to refetch.
+It points `WAREHOUSE_PATH`, `LAKEHOUSE_DIR` and dbt's artifact paths into a temp
+directory (and, when set, gives a bucket or a Postgres catalog a prefix or schema
+of its own). Don't drop any of them: without them a fixture run overwrites
+`data/warehouse.duckdb` and `data/lakehouse/` with the 17-country slice, and
+files its dbt results into the real run history. The landing zone matters most,
+because dlt *lands* there, over a weather archive no rebuild can afford to
+refetch.
 
 ## `just coverage` — line and branch coverage of the first tier, ~58 s
 
@@ -58,10 +73,13 @@ nothing here: the cost is imports and DuckDB/dlt work, not line tracing.
 
 ## `tests/fixtures/ingest/` — the recorded payloads
 
-Produced by `just record-fixtures` (`scripts/record_fixtures.py`), which hits the
-five live endpoints and trims each to those 17 countries — chosen to cover every
-World Bank region and income group, both Eurostat geo-code exceptions (`EL`, `UK`),
-and Taiwan, which the World Bank omits and the `country_overrides` seed exists for.
+Produced by `just record-fixtures` (`scripts/record_fixtures.py`), which hits
+every live endpoint and trims each to a slice. The country-year sources keep 17
+countries, chosen to cover every World Bank region and income group, both
+Eurostat geo-code exceptions (`EL`, `UK`), and Taiwan, which the World Bank omits
+and the `country_overrides` seed exists for. The others are trimmed on their own
+terms: whole invoices for retail, three years of all 41 capitals for weather, and
+the FX series untrimmed. Each recorder's docstring says why.
 
 Rows are filtered; **columns never are**. Dropping unused columns would let a
 renamed upstream field pass CI against a fixture that agrees with a `stg_` model
@@ -71,5 +89,5 @@ for the same reason: they still go through
 test and not bypassed.
 
 Re-record when a source changes shape or a WDI indicator is added, and commit the
-result. `.github/workflows/nightly.yml` is what tells you it's time: it runs the
-same graph against the live endpoints daily and opens an issue when they've moved.
+result. `.github/workflows/nightly.yml` is what tells you it is time: it runs the
+same graph against the live endpoints daily and opens an issue when they have moved.
