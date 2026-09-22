@@ -107,8 +107,14 @@ updates:
   # group is one PR at `open-pull-requests-limit: 1`, a bump that cannot pass
   # also blocks every patch behind it, which is why these are ignored rather
   # than left for review.
+  #
+  # **Two directories**: `.devcontainer/Dockerfile` copies uv and Node from the
+  # same tags, and one grouped PR across both keeps them equal
+  # (`tests/test_dagster_instance.py`).
   - package-ecosystem: docker
-    directory: /
+    directories:
+      - /
+      - /.devcontainer
     schedule:
       interval: monthly
     open-pull-requests-limit: 1

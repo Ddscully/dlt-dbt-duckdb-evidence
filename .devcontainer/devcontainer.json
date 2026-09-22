@@ -1,0 +1,23 @@
+{
+  "name": "dlt-dbt-duckdb-evidence",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "forwardPorts": [3000, 8081],
+  "portsAttributes": {
+    "3000": { "label": "Dagster" },
+    "8081": { "label": "Dashboard (just serve)" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "innoverio.vscode-dbt-power-user",
+        "evidence-dev.evidence",
+        "nefrob.vscode-just-syntax"
+      ]
+    }
+  }
+}

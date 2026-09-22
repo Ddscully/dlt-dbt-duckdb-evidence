@@ -12,6 +12,7 @@ push.*
 
 **[📊 Live dashboard](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)** ·
 [Quickstart](#quickstart) ·
+[Open in a Codespace](https://codespaces.new/Ddscully/dlt-dbt-duckdb-evidence) ·
 [Reuse this stack](#use-this-stack-for-your-own-data) ·
 [Published data](#published-data) ·
 [The practices, indexed](./docs/PRACTICES.md)
@@ -26,13 +27,13 @@ publication boundary, and none of them is a stub. No numbers are exported by
 hand: the site rebuilds from the live sources on every push, so it is never more
 than a week behind what the publishers release.
 
-None of the wiring is specific to emissions. The same tree is packaged as a
-[template](https://github.com/Ddscully/dlt-dbt-duckdb-template) with the subject
-matter taken out, for pointing at your own data.
-
 The stack is deliberately lightweight. Everything runs locally with `uv`: raw
 lands as Parquet in a DuckLake catalog, and dbt builds into a single DuckDB file
 — no cloud warehouse, no credentials, no bill.
+
+None of the wiring is specific to emissions. The same tree is packaged as a
+[template](https://github.com/Ddscully/dlt-dbt-duckdb-template) with the subject
+matter taken out, for pointing at your own data.
 
 ```
 dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
@@ -110,17 +111,24 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 
 ## Quickstart
 
-Two things to install first. [uv](https://docs.astral.sh/uv/) manages Python and
+**Nothing installed?**
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Ddscully/dlt-dbt-duckdb-evidence)
+opens the repo in a browser with uv, `just` and Node in place and `just setup`
+already run; [`.devcontainer/`](./.devcontainer/) does the same in VS Code or
+any dev container tool. From there `just test-pipeline` needs no network, and
+`just run && just report && just serve` gives the asset graph on :3000 and the
+dashboard on :8081, both forwarded.
+
+Otherwise, two things to install first. [uv](https://docs.astral.sh/uv/) manages Python and
 every dependency here; `just` runs the recipes.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh   # or `brew install uv`
 uv tool install rust-just                         # the `just` command runner
-```
 
-Then:
+git clone https://github.com/Ddscully/dlt-dbt-duckdb-evidence.git
+cd dlt-dbt-duckdb-evidence
 
-```bash
 just setup      # uv sync runtime + dev + orchestration groups
 just run        # ingest -> dbt build -> polars transform
 just dagster    # ...or the same pipeline as an asset graph, UI on :3000
