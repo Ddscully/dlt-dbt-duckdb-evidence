@@ -55,19 +55,14 @@ pytestmark = pytest.mark.skipif(
 
 LABELS = {"additive", "semi_additive", "non_additive", "not_a_measure"}
 
-# The contract gives every mart column a `data_type`, so "is this a measure-
-# shaped column" is answerable without opening the warehouse.
+# The contract gives every mart column a `data_type`, so "is this a
+# measure-shaped column" is answerable without opening the warehouse.
 #
-# **A pattern rather than a list, because a list fails in the wrong direction**:
-# a numeric type missing from it (say `DECIMAL`, the natural type for money)
-# exempts its columns from the coverage test, and labelling one anyway fails
-# `test_only_numeric_columns_are_labelled`. The contracts hold only a few types
-# today, so such a gap would stay invisible until the first column arrived.
+# A pattern, not a list: a numeric type missing from a list would silently
+# exempt its columns from coverage until the first column of that type arrived.
 #
-# The `\b` matters twice: `INTERVAL` begins `INT` and is not a measure, and
-# `INTEGER[]` is a list rather than something to sum, which the lookahead
-# excludes. `test_the_numeric_pattern_knows_a_measure_from_a_timestamp` pins
-# both, and `DECIMAL`.
+# The `\b` matters twice: it keeps `INTERVAL` (begins `INT`) out, and the
+# lookahead excludes `INTEGER[]` (a list, not something to sum).
 NUMERIC = re.compile(
     r"^(?:"
     r"U?(?:TINY|SMALL|BIG|HUGE)INT"  # TINYINT … HUGEINT, signed and unsigned
