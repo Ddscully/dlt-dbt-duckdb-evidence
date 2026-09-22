@@ -105,9 +105,7 @@ def attach(
     con.execute("load ducklake")
 
     if "://" in str(catalog_path):
-        # Installed as well as loaded, for httpfs's reason below: DuckDB would
-        # autoload it on first use, but a machine that has never downloaded it
-        # fails a bare `load`. `just extensions` installs it up front.
+        # Installed too: a machine that has never downloaded it fails a bare `load`.
         con.execute("install postgres")
         con.execute("load postgres")
         catalog_sql = f"ducklake:postgres:{catalog_path}"
@@ -120,8 +118,7 @@ def attach(
         data_path_sql = f"{Path(data_path)}/"
     if storage_secret is not None:
         use_ssl = "true" if str(storage_secret["use_ssl"]).lower() == "true" else "false"
-        # Installed as well as loaded: a fresh machine has no httpfs until
-        # something downloads it, and a bare `load` fails there.
+        # Installed too, for the same reason.
         con.execute("install httpfs")
         con.execute("load httpfs")
         # No bind parameters here either, so the values are quoted literals.
@@ -142,10 +139,7 @@ def attach(
     if metadata_schema is not None:
         options.append(f"metadata_schema {sql_literal(metadata_schema)}")
 
-    # ATTACH takes literals, not bind parameters — `attach $path` is a parser
-    # error — so the paths are interpolated, as they are in `history.restore`.
-    # Through `sql_literal`, because a catalog URI and a data path both come
-    # from the environment and neither is validated for quotes.
+    # ATTACH takes no bind parameters, and these come from the environment.
     con.execute(f"attach {sql_literal(catalog_sql)} as {alias} ({', '.join(options)})")
 
 
@@ -188,9 +182,7 @@ def table_versions(
         return []
     id_list = ", ".join(str(int(i)) for i in ids)
 
-    # Files *and* inlined data: a change of `data_inlining_row_limit` rows or
-    # fewer (default 10) is written into the catalog, leaving no
-    # `ducklake_data_file` row, and a file-only list silently skips that load.
+    # Inlined data too: a small change is written into the catalog, not a file.
     sources = [
         f"select begin_snapshot from {meta}.ducklake_data_file where table_id in ({id_list})"
     ]
@@ -335,9 +327,7 @@ def publish(
 
     set_data_path(catalog, f"{data_dirname}/")
 
-    # Measured on the catalog just built — what ships, written by this machine's
-    # DuckLake, whatever the source was written with. `>`: publishing at the
-    # ceiling is ordinary. As in `export`, the directory is left for inspection.
+    # Of the catalog just built, which is what ships; at the ceiling is ordinary.
     published = spec_version(catalog)
     if max_spec_version is not None and version_key(published) > version_key(max_spec_version):
         raise ValueError(

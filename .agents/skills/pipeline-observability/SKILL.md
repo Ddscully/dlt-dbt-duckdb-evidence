@@ -21,7 +21,7 @@ inventories `analytics` and must land after everything it counts.
   `build_tests` degrades to bare table names without it.
 - **A test's verdict is its `fail_calc`, not `count(*)`.** `equal_rowcount`
   returns a one-row summary whether it passed or failed, so counting rows scored
-  both as failing against a build that finished ERROR=0. 480 of the 482 tests use
+  both as failing against a build that finished ERROR=0. All but two tests use
   the default. `severity: warn` carries across as `status='warn'`.
 - **An audit table the manifest does not name is stale, and dropped.** dbt never
   removes one, and renaming a model orphans all its tests' tables, which are empty

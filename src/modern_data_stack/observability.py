@@ -237,10 +237,8 @@ def build_tests(
     ]
     catalogue = manifest_tests(manifest_path)
     if catalogue:
-        # Drop audit tables the manifest does not name: dbt never removes one
-        # whose test is gone (renaming a model orphans all of them), and an empty
-        # orphan would score as a passing test. Only when a manifest is present —
-        # without one nothing matches and the table would empty.
+        # dbt never drops an orphaned audit table, which would score as passing.
+        # Only with a manifest, or nothing would match.
         audit_tables = [table for table in audit_tables if table in catalogue]
 
     rows = []
@@ -267,10 +265,8 @@ def build_tests(
     return pl.DataFrame(rows)
 
 
-# The shape `build_runs` returns, stated so an empty result still has columns:
-# a column-less frame's first append would create a table every later append
-# fails against. `DataTypeClass | pl.DataType` because `pl.String` is a class and
-# `pl.Datetime("us")` an instance; Polars' own union for both is private.
+# Stated, so an empty first append does not create a column-less table. The union
+# because `pl.String` is a class and `pl.Datetime("us")` an instance.
 RUN_COLUMNS: dict[str, DataTypeClass | pl.DataType] = {
     "invocation_id": pl.String,
     "invocation_started_at": pl.Datetime("us"),
@@ -331,8 +327,7 @@ def build_runs(run_results_path: str, nodes: dict[str, dict] | None = None) -> p
     common = {
         "invocation_id": metadata.get("invocation_id"),
         "invocation_started_at": _parse_ts(started).replace(tzinfo=None) if started else None,
-        # Any dbt command overwrites the artifact, so a row set means little
-        # without the command that wrote it (a unit-test run vs a build).
+        # Any dbt command overwrites the artifact, so which one wrote it matters.
         "dbt_command": (payload.get("args") or {}).get("which"),
         "dbt_version": metadata.get("dbt_version"),
     }

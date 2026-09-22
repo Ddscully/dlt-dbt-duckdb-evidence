@@ -26,11 +26,9 @@ def warehouse(tmp_path):
     """A miniature warehouse covering each of the three inventories."""
     path = tmp_path / "warehouse.duckdb"
 
-    # `raw` lives in the lakehouse, not in the warehouse file — so the fixture
-    # builds one. Writing it into the warehouse instead would still *pass* the
-    # source inventory if the catalog filter were dropped, which is exactly the
-    # regression `raw_database` exists to prevent: `information_schema` spans
-    # every attached catalog, so a `raw` schema in either would match.
+    # `raw` lives in the lakehouse, not the warehouse file, so the fixture builds
+    # one. Writing it into the warehouse instead would still pass if the catalog
+    # filter were dropped — `information_schema` spans every attached catalog.
     lake_dir = tmp_path / "lakehouse"
     (lake_dir / "data").mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(path))

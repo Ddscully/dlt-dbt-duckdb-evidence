@@ -45,8 +45,8 @@ stays rejected is [`docs/decisions/`](docs/decisions/README.md) — check it
 before undoing a choice, and move history there rather than into a doc.
 
 - **[`PRACTICES.md`](docs/PRACTICES.md) restates figures from five other files**,
-  and `tests/test_documented_counts.py` covers only its test, mart and additivity
-  counts; any other claim added there is kept in step by hand.
+  kept in step by hand. Counts of tests, mart models, labels and contracted
+  columns stay out of prose, which `tests/test_documented_counts.py` enforces.
 - **[`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) mostly describes
   what the repo has not built.** Its §2 exists as `just serve` and as the compose
   stack built on it; §4 onward is still design, and nothing checks the paths
@@ -162,7 +162,7 @@ globs, holding dbt Labs' skills to this repo's paths.
 | `currency-and-calendar` | the ECB rates, `dim_date`, spot against average |
 | `weather-models` | Open-Meteo's budget, ERA5, the degree-day conventions |
 | `contracts-and-data-quality` | data tests, groups, contracts, exposures, additivity, versions |
-| `unit-testing-dbt-models` | the twelve unit-tested models and the mutation method |
+| `unit-testing-dbt-models` | the unit-tested models and the mutation method |
 | `pipeline-observability` | `transform/pipeline_status.py` and the `pipeline_*` tables |
 | `the-lakehouse` | the DuckLake catalog |
 | `publishing-a-release` | the export, personal data at the boundary, what carries forward |

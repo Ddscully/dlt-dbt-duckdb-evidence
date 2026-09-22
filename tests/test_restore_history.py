@@ -54,9 +54,9 @@ select * from (values
 """
 
 # The other half of what a release carries: a rate-limited landing table, plus
-# the dlt bookkeeping and the sibling landing table that must *not* come with it.
-# `_dlt_loads` is the one that matters — dlt reads it to decide whether the
-# destination is fresh, so carrying it would skip the next load entirely.
+# the dlt bookkeeping, and a sibling table that must not come with it.
+# `_dlt_loads` matters: dlt reads it for freshness, so carrying it would skip
+# the next load entirely.
 WEATHER = """
 create schema raw;
 create table raw.om_weather_daily as
@@ -323,10 +323,10 @@ def test_refuses_to_restore_the_lakehouse_when_dlt_has_local_state(tmp_path, mon
         run(source, dest, lakehouse_dir=tmp_path / "lh")
 
     assert not (tmp_path / "lh").exists(), "refused after writing"
-    # **And the snapshot half.** `run` writes two artifacts, and a refusal is a
-    # promise about what did *not* happen, so it is asked before the first
-    # write: a refusal raised between them would leave `history` replaced
-    # beneath a `RuntimeError` saying nothing was done.
+    # And the snapshot half: `run` writes two artifacts, and a refusal is a
+    # promise nothing happened, so it's checked before the first write — raised
+    # between them, it would leave `history` replaced under a RuntimeError
+    # saying otherwise.
     assert not dest.exists(), "history was restored before the refusal fired"
 
 

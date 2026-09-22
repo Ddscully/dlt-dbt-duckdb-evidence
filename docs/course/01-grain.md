@@ -114,7 +114,7 @@ just course-rebuild
 ```
 
 **Observe.** The build finishes on `PASS=561 WARN=0 ERROR=0 SKIP=0`: the same
-verdict, to the row, as the healthy build. All 482 data tests pass. Both grain
+verdict, to the row, as the healthy build. Every data test passes. Both grain
 contracts still hold, because the grain *is* still unique; the model simply has
 fewer rows in it.
 

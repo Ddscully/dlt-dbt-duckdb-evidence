@@ -19,8 +19,7 @@ from dlt.common.schema.typing import TColumnSchema
 
 from ingest import http
 
-# Page size for the World Bank API (its documented maximum is 32 000, but large
-# pages occasionally time out — 10 000 with pagination is the safer trade).
+# Below the documented maximum of 32,000, whose pages occasionally time out.
 WB_PER_PAGE = 10_000
 
 
@@ -50,25 +49,22 @@ WB_WDI_INDICATORS = {
 }
 
 # The merge key. `country_code` (the World Bank's own code), not `country_iso3`,
-# which is empty on the aggregate series — five of them would share
+# which is empty on the aggregate series, so they would all share
 # `(indicator, '', year)` and the merge would keep one.
 WDI_PRIMARY_KEY = ("indicator", "country_code", "year")
 
 # How far back each incremental run re-fetches. See `wdi_start_year`.
 WDI_LOOKBACK_YEARS = 5
 
-# The first year the WDI series covers, and so the first year worth asking for.
-# The orchestration layer partitions `raw/wb_wdi` from here.
+# The first year the WDI series covers, and the floor of a backfill's range.
 WDI_FIRST_YEAR = 1960
 
 # Where the per-indicator watermarks live inside dlt's resource state.
 WDI_WATERMARK_KEY = "max_year_by_indicator"
 
-# Declared because a merge resource keeps dlt's persisted, widen-only schema (no
-# `REFRESH`): a window of integer-valued indicators would infer bigint for
-# `value` and send the first ratio into a `value__v_double` variant column. Key
-# columns are non-nullable so a null key fails the load instead of duplicating
-# on every run (`null = null` never matches the merge predicate).
+# Declared: a merge keeps dlt's widen-only schema, so integer-valued indicators
+# would infer bigint and send the first ratio into a `value__v_double` column.
+# Keys are non-nullable, because `null = null` never matches the merge predicate.
 WDI_COLUMNS: dict[str, TColumnSchema] = {
     "indicator": {"data_type": "text", "nullable": False},
     "country_code": {"data_type": "text", "nullable": False},
@@ -123,9 +119,8 @@ def wdi_url(
         f"?format=json&per_page={WB_PER_PAGE}&page={page}"
     )
     if start_year is not None:
-        # the range needs both ends; the API tolerates a future one. UTC rather
-        # than the local clock so the URL a fixture is recorded against doesn't
-        # depend on which side of midnight the runner sits.
+        # Both ends, the API tolerating a future one; UTC, so a recorded fixture's
+        # URL does not depend on the runner's side of midnight.
         url += f"&date={start_year}:{end_year if end_year is not None else datetime.now(UTC).year}"
     return url
 
@@ -167,9 +162,7 @@ def _fetch_wdi_indicator(
         rows_out.extend(
             {
                 "indicator": code,
-                # The API's own country key, and the merge key: `countryiso3code`
-                # is empty for the aggregate series ("Arab World", "World"), so
-                # five of them would collide on (indicator, '', year).
+                # The merge key: see `WDI_PRIMARY_KEY`.
                 "country_code": (row.get("country") or {}).get("id"),
                 "country_iso3": row.get("countryiso3code"),
                 "year": int(row["date"]) if row.get("date") else None,
@@ -223,15 +216,10 @@ def wb_wdi(years: tuple[int, int] | None = None):
             rows = future.result()
             loaded = [row["year"] for row in rows if row["year"] is not None]
             if loaded and years is None:
-                # Advanced after a clean fetch; dlt commits it only if the load
-                # succeeds. Clamped to the current year because the World Bank
-                # has served projections (population to 2050, which `stg_wdi.sql`
-                # cuts): a 2050 watermark asks for `&date=2046:2026`, which the
-                # API ignores rather than refuses, silently turning every run
-                # into a full fetch. `min()` also heals a watermark already set.
-                #
-                # A backfill leaves it alone: the watermark means "loaded up to
-                # here", and a partition run only covers its own window.
+                # Committed only if the load succeeds. Clamped to this year: the
+                # World Bank serves projections, and a 2050 watermark asks for a
+                # backwards range the API ignores, making every run a full fetch.
+                # A backfill leaves it alone, covering only its own window.
                 watermarks[code] = min(
                     max(loaded + [watermarks.get(code, 0)]), datetime.now(UTC).year
                 )

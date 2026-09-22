@@ -19,10 +19,8 @@ import requests
 
 from ingest import fixtures
 
-# Waits of 4, 8, 16 and 32 s between five attempts: a minute in all. The first
-# policy, 1.5 s then 3 s, gave up inside 4.5 s; a nightly went red on a Eurostat
-# non-JSON body that had cleared by the time anyone looked (issue #94). Only a
-# failure pays for the wait; a healthy fetch never sleeps.
+# Waits of 4, 8, 16 and 32 s between five attempts: a minute, which outlasts the
+# transient error pages these publishers serve. A healthy fetch never sleeps.
 RETRIES = 5
 BACKOFF_SECONDS = 4.0
 

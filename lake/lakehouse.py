@@ -66,81 +66,52 @@ from modern_data_stack.ducklake import (
 )
 from modern_data_stack.paths import lakehouse_dir as default_lakehouse_dir
 
-# LAKEHOUSE_DIR mirrors WAREHOUSE_PATH: the tests point it at a temp directory so
-# a fixture run cannot write over the real catalog.
+# Like WAREHOUSE_PATH, the tests point it at a temp directory.
 LAKEHOUSE_DIR = default_lakehouse_dir()
 
-# The catalog is a DuckDB file beside `data/`, which holds only Parquet. (Reading
-# that Parquet directly is not reading the table — see `modern_data_stack.ducklake`.)
+# A DuckDB file beside `data/`, whose Parquet is not the table (`modern_data_stack.ducklake`).
 CATALOG_NAME = "catalog.duckdb"
 DATA_DIRNAME = "data"
 
-# The Parquet can live in a bucket instead of `data/` — see the module docstring.
-# The endpoint has its own variable because DuckDB reads none from the
-# environment; the keys are the standard AWS pair. The region is a default most
-# S3-compatible stores ignore and a signature still needs.
+# The bucket (module docstring). DuckDB reads no endpoint from the environment, and
+# a signature needs a region that most S3-compatible stores ignore.
 DATA_PATH_ENV_VAR = "LAKEHOUSE_DATA_PATH"
 S3_ENDPOINT_ENV_VAR = "LAKEHOUSE_S3_ENDPOINT"
 DEFAULT_S3_REGION = "us-east-1"
 
-# The ATTACH name, and therefore the catalog every piece of SQL in the project
-# spells out. dbt's `_sources.yml` says `database: lakehouse`; changing this
-# without changing that splits the graph exactly the way a renamed dlt resource
-# does.
+# The catalog name every piece of SQL spells, dbt's `_sources.yml` included.
 ATTACH_ALIAS = "lakehouse"
 
-# The catalog can live in Postgres instead of a file — see the module docstring.
-# Both schemes libpq accepts, because dlt renders one and a person may type
-# either. The password is never here: it is PGPASSWORD.
+# Postgres (module docstring): both schemes libpq accepts, because dlt renders one.
 CATALOG_ENV_VAR = "LAKEHOUSE_CATALOG"
 CATALOG_SCHEMES = ("postgres://", "postgresql://")
 
-# Which schema of that database holds the `ducklake_*` tables. The default is
-# the alias, which is also dlt's, so a catalog dlt creates and one this module
-# attaches agree with neither side configured. A catalog *file* keeps them in
-# `main` and DuckLake accepts that spelled explicitly (measured), so
-# one attach serves both.
+# The schema holding the `ducklake_*` tables. The default is dlt's too, so both
+# sides agree unconfigured; a catalog file's is `main`, spelled explicitly.
 METADATA_SCHEMA_ENV_VAR = "LAKEHOUSE_METADATA_SCHEMA"
 DEFAULT_METADATA_SCHEMA = ATTACH_ALIAS
 FILE_METADATA_SCHEMA = "main"
 
-# `just test-pipeline` gives each fixture run its own metadata schema rather than
-# its own database, so the throwaway catalog is a `drop schema … cascade`.
-# `drop_fixture_schema` refuses anything not named this way. Lowercase because
-# Postgres folds an unquoted identifier and the recipe builds the name in shell.
+# A fixture run's own metadata schema, and all `drop_fixture_schema` will delete.
+# Lowercase, because Postgres folds the unquoted name the recipe builds in shell.
 FIXTURE_SCHEMA_PREFIX = "test_pipeline_"
-
-# What `drop_fixture_schema` will delete, as a whole pattern rather than a prefix
-# — see its docstring.
 _FIXTURE_SCHEMA = re.compile(rf"{FIXTURE_SCHEMA_PREFIX}[a-z0-9_]+")
 
-# The alias the two functions that reach past DuckLake into the catalog database
-# attach it under. Never `lakehouse`: that is DuckLake's, and attaching the same
-# database twice under one name is refused.
+# For reaching past DuckLake into its database; one name cannot be attached twice.
 _PROBE_ALIAS = "_catalog_probe"
 
-# The two variables that put part of the landing zone somewhere other than
-# `LAKEHOUSE_DIR`, and therefore outrank it. One tuple because four places have
-# to agree on the list — the release's refusal, `tests/conftest.py`, the course
-# recipes' guard and the docs — and a fifth variable added to only some of them
-# is a fixture run leaking into the real lakehouse.
+# The variables that outrank `LAKEHOUSE_DIR`. One tuple, because a variable missing
+# from any reader of the list is a fixture run leaking into the real lakehouse.
 REMOTE_ENV_VARS = (DATA_PATH_ENV_VAR, CATALOG_ENV_VAR)
 
-# dlt's per-row provenance, regenerated on every re-merge whether the data moved
-# or not — see the module docstring. Every comparison here projects them away.
+# dlt's provenance, rewritten on every re-merge (module docstring); diffs drop it.
 DLT_COLUMNS = ("_dlt_load_id", "_dlt_id")
 
-# The merge-loaded table with a scheduled upstream restatement (ERA5T is replaced
-# by final ERA5 within the 90-day lookback), so the one a revision log is about.
-# FX is append-only and retail is frozen.
+# The one merge-loaded table upstream restates: final ERA5 replaces ERA5T.
 WEATHER_TABLE = "raw.om_weather_daily"
 
-# What the release publishes out of the landing zone — an allowlist for two
-# reasons. Cost: `raw.om_weather_daily` costs more than Open-Meteo's daily budget
-# to refetch; everything else in `raw` is free. Disclosure: `raw.retail_invoice_lines`
-# and dlt's `raw_staging` copy of it hold clear customer ids, and DuckLake keeps
-# dropped tables readable in earlier snapshots (`at (version => …)`), so the
-# published catalog is built from this list, never filtered down to it.
+# An allowlist the published catalog is built from, never filtered down to: why
+# is `tests/test_lakehouse.py`'s failure message.
 PUBLISHED_TABLES = ("raw.om_weather_daily",)
 
 __all__ = [
@@ -346,9 +317,8 @@ def dlt_credentials(lakehouse_dir: str | Path = LAKEHOUSE_DIR):
     """
     from dlt.destinations.impl.ducklake.configuration import DuckLakeCredentials
 
-    # Required: dlt will not create the catalog's parent directory. Because
-    # importing `orchestration.assets` builds the pipeline, that import creates an
-    # empty `data/lakehouse/` — which `restore()` has to tolerate.
+    # dlt will not create it. Importing `orchestration.assets` therefore leaves an
+    # empty `data/lakehouse/`, which `restore()` tolerates.
     lake = Path(lakehouse_dir)
     lake.mkdir(parents=True, exist_ok=True)
     data = data_path(lake)
@@ -359,11 +329,8 @@ def dlt_credentials(lakehouse_dir: str | Path = LAKEHOUSE_DIR):
         from dlt.common.configuration.specs import AwsCredentials
         from dlt.common.storages.configuration import FilesystemConfiguration
 
-        # dlt builds its DuckDB secret from these: `http://` in the endpoint
-        # turns TLS off. It needs no s3fs, which it uses for local storage only.
-        # The URL is rebuilt from the secret, not read from the variable, because
-        # dlt strips only the scheme: a trailing slash would reach its secret and
-        # no other.
+        # dlt builds its DuckDB secret from these, `http://` turning TLS off. Rebuilt
+        # from the secret because dlt strips only the scheme, not a trailing slash.
         secret = _s3_secret()
         scheme = "https" if secret["use_ssl"] == "true" else "http"
         storage = FilesystemConfiguration(
@@ -437,15 +404,10 @@ def _postgres_holds_catalog() -> bool:
     try:
         con.execute("install postgres")
         con.execute("load postgres")
-        # Attached rather than queried through `postgres_query`, so the schema
-        # name goes in as a bind parameter: it comes from an environment
-        # variable, and nesting it in a SQL string inside a SQL string is how
-        # the quoting goes wrong.
+        # Attached, not `postgres_query`, so the schema name is a bind parameter.
         con.execute(f"attach {sql_literal(catalog())} as {_PROBE_ALIAS} (type postgres, read_only)")
-        # `information_schema` resolves here only because the remote is
-        # Postgres and DuckDB forwards the name: against a DuckDB-attached
-        # catalog the same query raises `schema "information_schema" does not
-        # exist`, so another catalog backend needs another probe.
+        # Resolves only because DuckDB forwards the name to Postgres; another
+        # catalog backend needs another probe.
         return bool(
             con.execute(
                 f"""
@@ -467,12 +429,8 @@ def attach_lakehouse(
 ) -> None:
     """Attach the landing zone, wherever its two halves are.
 
-    The one spelling of the ATTACH in this project. Four combinations are legal
-    — the catalog in a file or in Postgres, the Parquet on disk or in a bucket —
-    and no caller here chooses between them: the environment does, and this
-    reads it. It is one function because it was once spelled from parts in five
-    places, and a fifth combination reaching only four of them is a reader that
-    silently opens the wrong lakehouse.
+    The one spelling of the ATTACH. The environment picks among the four legal
+    combinations, so a caller that spelled its own could open the wrong lakehouse.
     """
     attach(
         con,
@@ -499,19 +457,12 @@ def read_only_connection(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> duckdb.Du
 def drop_fixture_schema(schema: str) -> None:
     """Drop one `test_pipeline_*` metadata schema from the Postgres catalog.
 
-    A fixture run gets its own metadata schema rather than its own database, so
-    what a throwaway catalog file gets from `mktemp -d` this gets from a
-    `drop schema … cascade` of DuckLake's tables (29 of them).
+    The fixture run's equivalent of deleting a `mktemp -d` catalog.
 
-    **The name is checked here, not trusted from the caller**, and against a
-    whole pattern rather than escaped. The recipe builds it in shell, and the
-    schema beside it is the real landing zone's; a name that arrived empty,
-    unexpanded or with a quote in it would otherwise reach a `cascade`. Matching
-    `test_pipeline_[a-z0-9_]+` leaves nothing to escape, which is the property
-    worth having on a statement that cannot be undone.
-
-    Dropped through the postgres extension because there is no psql on the
-    machines this runs on.
+    **The name is checked here, not trusted from the caller**, against a whole
+    pattern rather than escaped: the recipe builds it in shell, beside the real
+    landing zone's schema, and a pattern leaves nothing to escape on a `cascade`.
+    Through the postgres extension, because these machines have no psql.
     """
     if not _FIXTURE_SCHEMA.fullmatch(schema):
         raise ValueError(
@@ -646,13 +597,8 @@ def restore(source_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -
     Repeats `run()`'s preflight, as a public entry point must, and *before* it
     reads `source_dir` — see the comment below.
     """
-    # **The preflight goes first, and the order is load-bearing.** `is_catalog`
-    # answers about Postgres whenever LAKEHOUSE_CATALOG is set, and ignores the
-    # directory it is given — but `source` is an unpacked release, a file
-    # catalog by construction. Asked first, an empty metadata schema would make
-    # it raise `no published lakehouse` about a directory that holds a perfectly
-    # good catalog, and an unreachable host a raw `IO Error`; either way the
-    # refusal `refuse_remote_lakehouse` exists to give never fires.
+    # First: with LAKEHOUSE_CATALOG set, `is_catalog(source)` would ask Postgres
+    # about a file catalog and fail with the wrong error, not this refusal.
     preflight(lakehouse_dir)
 
     source = Path(source_dir)
@@ -661,8 +607,7 @@ def restore(source_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -
 
     dest = Path(lakehouse_dir)
     if dest.exists():
-        # Usually empty (see `dlt_credentials`); the preflight has already refused
-        # one with carried rows. `copytree` needs the path gone.
+        # Usually empty (`dlt_credentials`); the preflight refused carried rows.
         shutil.rmtree(dest)
 
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -704,7 +649,7 @@ def _refuse_warm_state(state: Path) -> None:
         "_dlt_version does not exist!`. Drop the state first:\n"
         f"    rm -rf {state}\n"
         "The next load re-fetches what it was tracking (WDI's watermark), which is "
-        "eleven requests and free."
+        "one request per indicator and free."
     )
 
 
@@ -749,12 +694,8 @@ def run(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> dict:
 def main() -> None:
     summary = run()
     snaps = summary["snapshots"]
-    # This line is the only thing that says which lakehouse was read, so it has
-    # to name the whole answer. `catalog_path()` would name no Postgres one at
-    # all — and the URL alone is not enough either: one database holds many
-    # lakehouses, separated by the metadata schema, so a fixture run and the
-    # real landing zone print the same URL. The same trap `just where` exists
-    # for, one layer down.
+    # The only line naming which lakehouse was read, and one Postgres database
+    # holds many, told apart by the metadata schema.
     where = catalog()
     if is_remote_catalog():
         where = f"{where} (schema {metadata_schema()})"

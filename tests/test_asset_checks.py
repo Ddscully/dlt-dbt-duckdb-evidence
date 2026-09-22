@@ -33,17 +33,16 @@ from lake.lakehouse import ATTACH_ALIAS, catalog_path, data_path
 from modern_data_stack.ducklake import attach
 from orchestration.resources import dbt_project
 
-# Importing `orchestration.assets` needs the manifest, which does not exist when
-# ci.yml first runs pytest. CI re-runs this file after `dbt parse`, which
-# `tests/test_workflows.py` enforces.
+# Importing `orchestration.assets` needs the manifest, absent when ci.yml first
+# runs pytest; CI re-runs this file after `dbt parse` (enforced by test_workflows.py).
 pytestmark = pytest.mark.skipif(
     not dbt_project.manifest_path.exists(),
     reason="needs dbt/target/manifest.json — run `just dbt-deps` and `dbt parse` first",
 )
 
-# The dlt-pipeline-deactivation fixture this file needs (importing the
-# orchestration layer leaves a dlt pipeline active process-wide) lives in
-# `tests/conftest.py`, shared with `test_definitions.py`.
+# The dlt-pipeline-deactivation fixture this file needs (importing orchestration
+# leaves a dlt pipeline active process-wide) lives in conftest.py, shared with
+# test_definitions.py.
 
 
 @pytest.fixture(scope="module")
@@ -160,9 +159,8 @@ def test_wdi_check_names_the_indicator_the_world_bank_answered_empty(tmp_path, m
 
     assert not result.passed
     assert _meta(result, "missing_indicators") == ["EN.ATM.CO2E.PC"]
-    # The count, not just the verdict: against an unpatched `LAKEHOUSE_DIR` this
-    # reads the real catalog, where `EN.ATM.CO2E.PC` is still absent and the two
-    # assertions above pass unchanged. This is the one that notices.
+    # The count, not just the verdict: against an unpatched LAKEHOUSE_DIR this
+    # reads the real catalog, where the two assertions above would pass unchanged.
     assert _meta(result, "indicators_loaded") == 1
 
 
@@ -553,9 +551,7 @@ def test_run_history_check_fails_when_dbt_left_no_artifact_at_all(tmp_path, monk
 # --------------------------------------------------------------------------- #
 # raw/om_weather_daily — weather_revisions_are_derivable
 # --------------------------------------------------------------------------- #
-#
-# What is fragile is the substitute for DuckLake's change feed — see the check's
-# own docstring.
+# What is fragile is the substitute for DuckLake's change feed — see the check's own docstring.
 
 
 def _weather_lakehouse(tmp_path: Path, loads: list[list[tuple]]) -> Path:

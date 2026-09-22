@@ -1,11 +1,11 @@
 ---
 name: unit-testing-dbt-models
-description: The twelve dbt models that carry unit tests and what mutating each one proved — the method (break the model against a warehouse copy, record what moves), the fixtures that separate an ordering from its permutations, and the defects the data tests could not see. Use when adding or changing a dbt unit test, judging whether a model's data tests are adequate, or investigating a model that is not reproducible between builds.
+description: The dbt models that carry unit tests and what mutating each one proved — the method (break the model against a warehouse copy, record what moves), the fixtures that separate an ordering from its permutations, and the defects the data tests could not see. Use when adding or changing a dbt unit test, judging whether a model's data tests are adequate, or investigating a model that is not reproducible between builds.
 ---
 
 # Unit testing the models (`dbt/models/**/_unit_tests.yml`)
 
-Thirty-six unit tests over twelve models. They exist because a data test cannot
+The unit tests exist because a data test cannot
 see a wrong answer that is a legal one, and every one of them was written after
 mutating the model and watching its data tests stay green. This file is the
 record of those mutations — what moved, what did not, and which fixture shapes
@@ -63,14 +63,14 @@ reasoning behind each is in `compliance-models`, `retail-models` and
 - **Read a red set as candidates.** A unit test whose input is mocked `rows: []`
   goes red on any inner join, guarding nothing.
 
-## The twelve models, and what mutating each one proved
+## The models, and what mutating each one proved
 
-- **There are thirty-six unit tests, over twelve models, and they exist because a data
-  test cannot see a wrong answer that is a legal one.** `dim_date`'s
+- **The unit tests exist because a data test cannot see a wrong answer that is
+  a legal one.** `dim_date`'s
   `fiscal_quarter` carries `accepted_range 1-4`, which is what caught the
   `/3 + 1` float-division bug at quarter *5*. Change the same expression to `/ 4`
-  and every fiscal quarter in the warehouse is wrong while **all 19 data tests on
-  the model pass** — measured, not argued. Its three unit tests fail on it.
+  and every fiscal quarter in the warehouse is wrong while **every data test on
+  the model passes** — measured, not argued. Its three unit tests fail on it.
   `fiscal_year_start_date` and `fiscal_year_end_date` had no test of any kind
   before this.
 - **`overrides.vars` is the real reason to unit test this model.**
@@ -86,9 +86,9 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   proves an answer is *in* the list, never that it is the right member of it. A
   misclassification moves money between buckets without changing any total, so no
   row-level constraint can see it. Mutated against a warehouse copy, running the
-  model's 20 data tests each time: dropping `upper()` from `stock_code` moves net
-  revenue by **+GBP 1,702** and all 19 pass; sending `AMAZONFEE` to `product`
-  moves it by **-GBP 260,764** and all 19 pass; removing
+  model's data tests each time: dropping `upper()` from `stock_code` moves net
+  revenue by **+GBP 1,702** and all pass; sending `AMAZONFEE` to `product`
+  moves it by **-GBP 260,764** and all pass; removing
   `invoice_type <> 'adjustment'` from `is_revenue_line` changes **nothing at all**
   and all 19 pass. Only the fourth mutation goes red — `is_stock_write_off`
   losing its `invoice_type` term takes the flag from 3,457 rows to 22,950 — and
@@ -132,7 +132,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
 - **`fct_cbam_exposure` is the third, and the hardest of the three to test any
   other way.** It is a table of euro costs with a statutory deadline whose every
   figure is plausible, transcribed from a legal instrument — so there is no
-  independent quantity to check the numbers against and its 21 data tests are
+  independent quantity to check the numbers against and its data tests are
   `not_null` and `accepted_range` with bounds that have to be generous, bar the
   two added with the route fix and the excess-window fix below. What is
   left to test is the *rules*. Mutated against a warehouse copy: resolving the
@@ -255,8 +255,8 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     converts at a rate 132% and 98% from the next real quote. That is the
     argument for the cap being 7 rather than generous.
 - **`fct_fx_rates_periods` is the fifth, and the only model so far where an
-  existing test caught one of the mutations.** 23 data tests; seven mutations,
-  six of them green on every one. `avg_eur_per_unit` written as
+  existing test caught one of the mutations.** Seven mutations, six of them
+  green on every data test. `avg_eur_per_unit` written as
   `1 / avg_units_per_eur` moves USD 2008 from 0.683499 to 0.679923; `max()` in
   place of `arg_max(.., rate_date)` takes USD 2014's period end from 1.2141 to
   1.3953 and **flips the sign of `period_end_vs_avg_pct`, -8.61% to +5.03%**;
@@ -291,7 +291,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     policies and the retail `<> 'adjustment'` clause are the same category, and
     that is now three of the five models.
 - **`fct_retail_returns` is the sixth, and unit-testing it turned up that the
-  model is not deterministic.** Six mutations, all eleven data tests green on
+  model is not deterministic.** Six mutations, every data test green on
   every one: checking "no prior purchase" before "no customer id" relabels the
   352 unmatchable rows; `>=` for "quantity exceeds purchase" takes matched from
   16,031 to 10,398; `<` for `quantity_is_consistent` takes consistent to 10,404;
@@ -399,7 +399,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
         guard tens of times, not once; a single green run cannot tell a blind
         test from a flaky one, and those need different repairs.
 - **`fct_retail_customer_cohorts` is the seventh, and the two things that define
-  the triangle's *edge* were both untested.** Six mutations against its 11 data
+  the triangle's *edge* were both untested.** Six mutations against its data
   tests: `<=` to `<` on the ragged bound deletes the newest diagonal of every
   cohort (325 rows to 300, taking 615 active customers and GBP 342k with it),
   and `is_complete_period` inverted relabels every still-open period as
@@ -416,7 +416,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     25,598 active customer-months, 0.34%. The structural test anchors one end
     only, which is why the mutation is invisible.
 - **`dim_retail_customer` is the eighth, and it is the model the returns fix
-  *learned its rule from*.** 11 data tests over 21 columns, every one of them on
+  *learned its rule from*.** Its data tests, every one of them on
   a date, a count or an identifier — not one on money. Eight mutations, **none
   caught**: `min(country)` for `max` relabels 13 customers, the repeat flag on
   `>= 1` makes all 5,881 repeat customers, `n_orders` over every invoice type

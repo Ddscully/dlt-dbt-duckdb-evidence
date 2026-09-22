@@ -27,9 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PAGES_WORKFLOW = REPO_ROOT / ".github/workflows/pages.yml"
 CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
 
-# Tracked paths the published site is *not* built from. Every one of these has
-# a reason, and the reason is never "it is markdown" — `reports/pages/*.md` is
-# the dashboard.
+# Tracked paths the site is not built from; the reason is never "it is
+# markdown" — reports/pages/*.md is the dashboard.
 NOT_A_SITE_INPUT = (
     "docs/**",  # prose about the warehouse, read by people not by the build
     "tests/**",  # this job runs no tests; ci.yml does
@@ -50,32 +49,23 @@ NOT_A_SITE_INPUT = (
     ".github/CONTRIBUTING.md",
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/ISSUE_TEMPLATE/**",
-    # `.github/actions/**` is on the *allow* side, not here: the setup action
-    # installs the toolchain and exports the paths this build runs under, so a
-    # change to it changes the site. So is `justfile`: the build is
-    # `just materialize-site`.
-    #
-    # The other three workflows. Listed one by one rather than as
-    # `.github/workflows/*`: a *new* workflow should land here unclassified and
-    # make someone say whether the site is built from it.
+    # `.github/actions/**` and `justfile` are on the allow side: they define the
+    # `just materialize-site` build. Workflows are listed one by one, not as a
+    # glob, so a new one lands unclassified and forces a decision.
     ".github/workflows/ci.yml",
     ".github/workflows/nightly.yml",
     ".github/workflows/release-data.yml",
-    # One-off scripts: the seed builders (their output is the checked-in seeds,
-    # so the site moves when `dbt/**` does), `record_fixtures.py` (this job runs
-    # live) and `measure_disclosure_risk.py` (read-only).
+    # Seed builders' output is checked in (dbt/** covers it); the rest are live
+    # or read-only.
     "scripts/**",
-    # The backing services, which no runner starts: the site is built from the
-    # landing zone the setup action places on disk, whatever a deployment does.
+    # Backing services: no runner starts them; the setup action places the
+    # landing zone on disk regardless.
     "compose.yaml",
     "deploy/**",
-    # The image, for the same reason: `pages.yml` builds the site on the runner
-    # with `just materialize-site`, never in a container. The `container` job in
-    # ci.yml is what these change, and it runs no site build.
+    # The image, for the same reason: the site builds on the runner, never in a container.
     "Dockerfile",
     ".dockerignore",
-    # The Codespace a contributor works in: it provisions an editor, and the
-    # site is still built on the runner, never inside it.
+    # Provisions an editor only; the site still builds on the runner.
     ".devcontainer/**",
 )
 
@@ -91,9 +81,7 @@ def pages_allowlist() -> list[str]:
     """
     lines = PAGES_WORKFLOW.read_text().splitlines()
     if "    paths:" not in lines:
-        # Deliberately empty rather than raising: an empty read is exactly what
-        # the vacuity guard is written to notice, and its message names the
-        # problem where a bare ValueError traceback would not.
+        # Empty rather than raising: the vacuity guard below reports this.
         return []
     start = lines.index("    paths:")
     found = []
@@ -119,10 +107,8 @@ def tracked_files() -> list[str]:
 
 
 def _matches(path: str, pattern: str) -> bool:
-    # GitHub's `dir/**` matches everything under `dir`; fnmatch's `*` crosses
-    # `/` already, so the two agree on the shapes used here. `fnmatchcase`
-    # because plain `fnmatch` takes the platform's case rules and this
-    # comparison must not differ between a mac and the runner.
+    # fnmatch's `*` crosses `/`, matching GitHub's `dir/**`; fnmatchcase because
+    # plain fnmatch takes the platform's case rules, and this must not differ.
     return fnmatchcase(path, pattern)
 
 
@@ -150,10 +136,11 @@ def test_every_tracked_file_is_claimed_by_exactly_one_side():
         "NOT_A_SITE_INPUT — decide whether the published site is built from "
         f"them: {sorted(unclassified)}"
     )
-    # Overlap is not a harmless duplicate. A deny pattern that also covers an
-    # allowed path would keep this file green if the allow entry were deleted,
-    # which is the drift the whole test exists to catch.
-    assert not both, f"claimed by both lists, so neither is load-bearing: {sorted(both)}"
+    assert not both, (
+        "claimed by both lists, so neither is load-bearing — a deny pattern "
+        "covering an allowed path would stay green if the allow entry were "
+        f"deleted: {sorted(both)}"
+    )
 
 
 @pytest.mark.parametrize("side", ["allow", "deny"])
@@ -176,8 +163,7 @@ def test_no_pattern_has_outlived_the_path_it_named(side):
 # --------------------------------------------------------------------------- #
 
 
-# Anchored at column 0, so it matches a real module-level `pytestmark` and not a
-# file that merely mentions one — this module writes both strings itself.
+# Anchored at column 0: matches a real pytestmark, not a file merely mentioning one.
 _GATED = re.compile(
     r"^pytestmark\s*=\s*pytest\.mark\.skipif\((?:.|\n)*?manifest_path", re.MULTILINE
 )
@@ -276,10 +262,9 @@ def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
     required = {Path(restore_history.DUCKDB_PATH).name, restore_history.LAKEHOUSE_ASSET}
     workflows = release_restoring_workflows()
 
-    # The scan reads workflow text, so it has to be shown to find something —
-    # rename the module and an empty result would pass every assertion below.
     assert {"pages.yml", "release-data.yml"} <= set(workflows), (
-        f"the restore scan found {sorted(workflows)}; both of those restore a release"
+        f"the restore scan found {sorted(workflows)}; both of those restore a "
+        "release — renaming the module would silently empty this scan"
     )
 
     missing = {
@@ -320,8 +305,8 @@ def test_the_release_never_tolerates_a_failed_download():
 
 SETUP_ACTION = REPO_ROOT / ".github/actions/setup/action.yml"
 
-# The three paths every layer resolves itself from. Absolute, and the first one
-# is load-bearing rather than tidy — see the action's own comment.
+# The three paths every layer resolves from; absolute, first one load-bearing
+# (see the setup action).
 PIPELINE_PATHS = ("WAREHOUSE_PATH", "LAKEHOUSE_DIR", "DAGSTER_HOME")
 
 
@@ -492,8 +477,7 @@ def test_dependabot_watches_every_composite_action_that_pins_one():
 
 JUSTFILE = REPO_ROOT / "justfile"
 
-# Running any of these writes to the warehouse or the landing zone. The set is
-# derived from what a recipe *does*, not from a list of recipe names, so a new
+# Derived from what a recipe does, not a list of recipe names, so a new
 # writing recipe is covered without anyone remembering to add it.
 WRITING_COMMANDS = (
     "python -m ingest.pipeline",
@@ -504,9 +488,8 @@ WRITING_COMMANDS = (
     "dagster asset materialize",
 )
 
-# `name:`, `name dep:` or `name arg='': dep` at column 0. The lookahead keeps
-# `set dotenv-load := true` and `export LAKEHOUSE_DIR := …` out: those are
-# assignments, and `:=` is the only thing separating them from a recipe header.
+# `name:`, `name dep:` or `name arg='': dep` at column 0. The negative lookahead
+# excludes `:=` assignments like `export LAKEHOUSE_DIR := …`.
 _RECIPE_HEADER = re.compile(r"^(?P<name>[a-z][a-z0-9-]*)(?P<params>[^:\n]*):(?!=)(?P<deps>.*)$")
 
 
@@ -682,14 +665,14 @@ def test_the_fixture_pipeline_isolates_every_piece_of_state_it_touches():
             f"`just test-pipeline` no longer overrides {variable}, so a fixture run "
             f"leaks that state into the next command that reads it"
         )
-    # The env var alone is not enough: dbt has to be told to *write* there too,
-    # or the override points at a file the build never creates.
-    assert '--target-path "$DBT_TARGET_PATH"' in recipe
+    assert '--target-path "$DBT_TARGET_PATH"' in recipe, (
+        "the env var alone is not enough: dbt must be told to write there too, "
+        "or the override points at a file the build never creates"
+    )
 
 
-# What each command a course recipe runs reads or writes, so what the recipe has
-# to point at the sandbox before running it. `dbt deps` touches none of it.
-# Any whitespace between the words: a joined `\` continuation leaves two spaces.
+# What each course-recipe command reads or writes, so what to point at the
+# sandbox; `dbt deps` touches none of it. `\s+` allows a `\` continuation's gap.
 _DBT_COMMAND = r"\buv\s+run\s+dbt\s+(?!deps\b)\w+"
 _COURSE_STATE_BY_COMMAND = {
     _DBT_COMMAND: ("WAREHOUSE_PATH", "LAKEHOUSE_DIR", "DBT_TARGET_PATH"),
@@ -747,22 +730,17 @@ def test_every_course_recipe_keeps_the_sandbox_to_itself():
                     f"reads or writes the real one"
                 )
             if "LAKEHOUSE_DIR" in variables:
-                # Every variable that outranks LAKEHOUSE_DIR, read from the one
-                # tuple rather than listed here: a third of them added to
-                # `lake/lakehouse.py` alone is a sandbox writing into the real
-                # landing zone, and nothing else would notice.
+                # Read from lakehouse.REMOTE_ENV_VARS, not listed here: one added
+                # there and missed here is a sandbox writing into the real zone.
                 for remote in lakehouse.REMOTE_ENV_VARS:
-                    # Matched as a word on an `unset` line, not as `unset <name>`:
-                    # one `unset A B` clears both and is how the recipes spell it.
+                    # Matched as a word on the unset line: `unset A B` clears both.
                     assert re.search(rf"^\s*unset\b[^\n#]*\b{remote}\b", code, re.MULTILINE), (
                         f"`just {name}` sets the course LAKEHOUSE_DIR but leaves "
                         f"{remote}, which outranks it and names the real landing zone"
                     )
 
-        # The variable alone is not enough, as in `test-pipeline`: every dbt
-        # command that builds has to be told to write there. Split on every
-        # operator that starts another command; reading to the next `&` alone
-        # took `build --target-path …; uv run dbt docs generate` as one command.
+        # As in test-pipeline, the variable alone is not enough — every dbt build
+        # command needs --target-path. Split on any command separator, not just `&`.
         for command in re.split(r"&&|\|\||[;|&\n]", code):
             if not re.search(_DBT_COMMAND, command):
                 continue

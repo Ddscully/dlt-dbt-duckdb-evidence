@@ -106,7 +106,7 @@ that an upstream publisher moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
 that OWID was down.
 
-**What blocks.** 482 dbt tests run inside `dbt build`, every one with
+**What blocks.** Every dbt test runs inside `dbt build`, with
 `store_failures`, so a red test hands you `select * from
 dbt_test__audit.<test_name>` rather than a count. Eight Dagster asset checks sit
 alongside them, and `site_pages_all_rendered` is blocking and checks page
@@ -126,7 +126,7 @@ Measured on this machine against the live APIs, per stage:
 | Stage | Time | Notes |
 |-------|------|-------|
 | `just ingest` | **29.6 s** | eight resources, with the 45 MB retail workbook already cached — its download and parse add ~12 s to a cold run |
-| `just dbt-build` | **31.4 s** wall, **24.5 s** of dbt's own | 561 built nodes: 33 models, 2 snapshots, 8 seeds, 482 data tests and 36 unit tests (dbt's own total of 571 adds the 10 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
+| `just dbt-build` | **31.4 s** wall, **24.5 s** of dbt's own | every model, snapshot, seed and test; contracts are enforced, which is a `describe` per mart |
 | `just transform` | **1.8 s** | two Polars models |
 | `just pipeline-status` | **2.5 s** | observability tables |
 | **total** (`just run`) | **≈ 65 s** | ingest is 45% of it, and most of *that* is still network |
@@ -333,8 +333,8 @@ below, and the profile is the point.
 
 | Dimension | Level | Why, with the number that decides it |
 |---|---|---|
-| Metadata completeness | **Partial** | Every model carries a description and an owner (33/33 each) and 21 relations enforce a contract over 407 typed columns — but only **173 of those 407 columns (43%) carry a description**. |
-| Quality observability | **Established** | 482 data tests and 36 unit tests with failing rows stored per test, 8 asset checks, freshness thresholds on 7 of 8 sources, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
+| Metadata completeness | **Partial** | Every model carries a description and an owner, and a contract types every mart column — but only **173 of those 407 columns (43%) carry a description**. |
+| Quality observability | **Established** | Data and unit tests with failing rows stored per test, Dagster asset checks, freshness thresholds on every source but the closed retail archive, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
 | Access governance | **Absent** | Structurally, not by neglect — see below. |
 | Lineage traceability | **Established** | One graph from dlt through dbt and Polars to the site; 10 exposures answer "what breaks if I change this" per page; the bus matrix is derived from the manifest rather than drawn. |
 | Organizational ownership | **Ad hoc** | Ownership is declared and enforced for all 33 models. There is one owner, who is also the only contributor. |
