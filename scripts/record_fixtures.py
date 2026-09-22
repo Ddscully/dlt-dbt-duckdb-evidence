@@ -192,8 +192,8 @@ def record_weather() -> None:
 
     Fetched through the paced path, not `http.get_json`: this is the largest
     weather request the repo makes and the likeliest to meet a 429, and
-    `http.get_json`'s three retries over 4.5 seconds would fail against a limit
-    that wants a minute or an hour.
+    `http.get_json`'s retries span about a minute, which would fail against a
+    limit that wants an hour.
     """
     locations = weather_locations()
     url = weather_url(locations, WEATHER_FIXTURE_FIRST_DAY, WEATHER_FIXTURE_LAST_DAY)
