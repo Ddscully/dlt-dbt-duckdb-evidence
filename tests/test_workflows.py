@@ -74,6 +74,9 @@ NOT_A_SITE_INPUT = (
     # ci.yml is what these change, and it runs no site build.
     "Dockerfile",
     ".dockerignore",
+    # The Codespace a contributor works in: it provisions an editor, and the
+    # site is still built on the runner, never inside it.
+    ".devcontainer/**",
 )
 
 
