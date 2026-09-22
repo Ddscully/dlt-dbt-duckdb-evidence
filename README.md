@@ -1,8 +1,7 @@
 # A Complete Data Stack, Demonstrated End to End
 
-*dlt → DuckLake → dbt → Polars → Evidence, orchestrated by Dagster. Everything
-runs locally against one DuckDB file, rebuilt from live public sources on every
-push.*
+*dlt → DuckLake → dbt → Polars → Evidence, orchestrated by Dagster, all of it
+running locally with no cloud warehouse.*
 
 [![ci](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/ci.yml/badge.svg)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/ci.yml)
 [![nightly](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/nightly.yml/badge.svg)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/nightly.yml)
@@ -17,23 +16,24 @@ push.*
 [Published data](#published-data) ·
 [The practices, indexed](./docs/PRACTICES.md)
 
-**518 tests** (482 data, 36 unit) · an enforced schema contract on every mart
-model · source freshness checks and Dagster freshness policies · rebuilt from
-live sources on every push
+**518 dbt tests** (482 data, 36 unit) · an enforced schema contract on every
+mart model · source freshness checks and Dagster freshness policies · the site
+rebuilt from live sources weekly and whenever its inputs change
 
-Seven public feeds go in; a dashboard and a queryable copy of the warehouse come
-out. In between sit ingestion, modelling, contracts, orchestration and a
-publication boundary, and none of them is a stub. No numbers are exported by
-hand: the site rebuilds from the live sources on every push, so it is never more
-than a week behind what the publishers release.
+Seven public feeds on emissions, energy, electricity prices, exchange rates,
+weather and one retailer's invoices go in; a dashboard and a queryable copy of
+the warehouse come out. In between sit ingestion, modelling, contracts,
+orchestration and a publication boundary, and none of them is a stub. No numbers
+are exported by hand, and the site is never more than a week behind what the
+publishers release.
 
 The stack is deliberately lightweight. Everything runs locally with `uv`: raw
 lands as Parquet in a DuckLake catalog, and dbt builds into a single DuckDB file
 — no cloud warehouse, no credentials, no bill.
 
-None of the wiring is specific to emissions. The same tree is packaged as a
-[template](https://github.com/Ddscully/dlt-dbt-duckdb-template) with the subject
-matter taken out, for pointing at your own data.
+None of the wiring is specific to that subject matter: a
+[template](#use-this-stack-for-your-own-data) carries the same tree with it
+taken out, for pointing at your own data.
 
 ```
 dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
@@ -51,16 +51,12 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 - **Dagster wraps the layers rather than replacing them**, so `ingest`, `dbt` and
   `transform` stay independently runnable. The asset graph is derived from keys
   the layers already share, not declared by hand.
-- **518 tests — 482 data tests and 36 unit tests** — and an enforced schema
-  contract on every mart model. The unit tests came out of a measurement: across
-  five models mutated against a warehouse copy, 24 mutations were run and the
-  data tests caught 3, so "nothing went red" is a finding here rather than an
-  all-clear.
-- **Two grains that are usually two separate projects**, because the modelling
-  problems they pose are opposite: country-year facts, where the hard part is
-  which country is missing from which series, and one wholesaler's 1.07M-line
-  invoice log, where revenue depends on telling a stock write-off from a customer
-  return when both are a negative quantity.
+- **The unit tests came out of a measurement**: across five models mutated
+  against a warehouse copy, 24 mutations were run and the data tests caught 3, so
+  "nothing went red" is a finding here rather than an all-clear.
+- **Two grains that are usually two separate projects** — country-year facts and
+  one wholesaler's invoice log — because the modelling problems they pose are
+  opposite ([below](#the-data-it-runs-on)).
 - **The warehouse itself is published, not only the dashboard** — monthly, with
   attribution per source. One column identifies a person; it is classified in the
   ymls and pseudonymised at the export, never in a model.
@@ -68,9 +64,6 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
   rate-limiting: every network call on a pull request is served from recorded
   fixtures. The nightly job is the one that hits the live endpoints, and it opens
   an issue when a source has moved.
-- [`docs/PRACTICES.md`](./docs/PRACTICES.md) **indexes the practices with the
-  failure each one prevents**, the number that measures it, and a link to where
-  it happens in the code.
 
 | Tool | Role |
 |------|------|
@@ -83,7 +76,7 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 | [**DuckLake**](https://ducklake.select/) | where `raw` lands: Parquet under a catalog in `data/lakehouse/`, with snapshot lineage you can diff |
 | [**Evidence**](https://evidence.dev/) | BI-as-code dashboard, deployable to GitHub Pages |
 | [**sqlfluff**](https://sqlfluff.com/) + pre-commit | SQL linting, in the hooks and in CI |
-| [**pytest**](https://docs.pytest.org/) | unit tests over the ingest/transform logic |
+| [**pytest**](https://docs.pytest.org/) | the Python layers' tests, over mocked payloads and recorded fixtures |
 | **GitHub Actions** | fixture-backed pipeline run on every PR, live run nightly |
 
 ---
@@ -97,8 +90,8 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 >   conclusions as illustrative.
 > - **`fct_example_scope2_emissions` is fabricated data** over twelve invented
 >   sites, and it ships in the public release.
-> - **Coverage thins unevenly per column.** Several cross-source comparisons rest
->   on it and no chart restates it.
+> - **Coverage thins unevenly per column**, so cross-source comparisons are often
+>   made over different sets of countries, and no chart says so.
 >
 > Why each of those, at length:
 > [`docs/FOR_REVIEWERS.md` §0](./docs/FOR_REVIEWERS.md#0-what-this-is-not-yet).
@@ -186,7 +179,7 @@ so it is corrected from that run rather than written from memory.
 ingest/     dlt — one module per publisher, plus the pipeline's coordination
 lake/       the DuckLake landing zone, where `raw` lives
 dbt/        staging → intermediate → marts, with contracts, tests and groups
-transform/  the Polars derived metrics, for what SQL models badly
+transform/  the Polars derived metrics
 orchestration/  the Dagster asset graph over all of the above
 publish/    the boundary outward: the release, and the state it carries forward
 reports/    the Evidence dashboard
@@ -199,7 +192,7 @@ constants. Copy the directory, or depend on it and write only the layers above.
 
 ## The data it runs on
 
-Seven public feeds, cleaned, joined on ISO code and year, and charted.
+Seven public feeds, at two grains whose hard parts are opposite.
 
 - **Country-year**, the figures organisations are required to act on: the grid
   carbon intensity behind every company's Scope 2 disclosure (30 g/kWh in Norway
@@ -243,26 +236,23 @@ graph, the three jobs and the backfills are
 ## Tests
 
 ```bash
+just dbt-build      # dbt: every data test, unit test and mart-model contract
 just test           # pytest: mocked payloads, no network, ~47 s
 just coverage       # the same, with line + branch coverage; gates nothing, ~58 s
 just test-pipeline  # the whole pipeline against recorded fixtures, ~46 s
 ```
 
-(Nothing checks a timing; `git log -S '<figure>'` finds the commit that
-measured it.)
+`just dbt-build` runs 518 tests (482 data tests and 36 unit tests) and enforces a
+schema contract on every mart model. What each gate catches is
+[`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md); why the gates are shaped that
+way is [`docs/PRACTICES.md`](./docs/PRACTICES.md).
 
-CI on a pull request runs both, plus the Dagster asset graph and the asset
-checks, entirely offline — so a red build means *this repo* broke, not that a
-publisher was rate-limiting. A nightly workflow runs the same graph against the
-live endpoints and opens an issue when a source has moved, which is the cue to
-`just record-fixtures`. Contributors should run `uv run pre-commit install` once;
-CI runs the same hooks over every file. Details in
-[`tests/README.md`](./tests/README.md).
-
-Alongside them, `just dbt-build` runs 518 tests (482 data tests and 36 unit
-tests) and enforces a schema contract on every mart model. What each gate catches
-is [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md); why the gates are shaped
-that way is [`docs/PRACTICES.md`](./docs/PRACTICES.md).
+CI on a pull request runs `pytest` and `just test-pipeline`, then the Dagster
+asset graph and its asset checks, all offline against the fixtures. A nightly
+workflow runs the same graph against the live endpoints and opens an issue when
+a source has moved, which is the cue to `just record-fixtures`. Contributors
+should run `uv run pre-commit install` once; CI runs the same hooks over every
+file. Details in [`tests/README.md`](./tests/README.md).
 
 ## Published dashboard
 
@@ -297,10 +287,10 @@ The README is the tour. The detail lives here:
 
 | | |
 |---|---|
-| [`docs/PRACTICES.md`](./docs/PRACTICES.md) | **the practices this repo demonstrates, and where each one is in the code** |
+| [`docs/PRACTICES.md`](./docs/PRACTICES.md) | **the practices this repo demonstrates, the failure each one prevents, and where it is in the code** |
 | [`docs/WAREHOUSE.md`](./docs/WAREHOUSE.md) | the seven sources, their grains, the DuckLake landing zone and the schemas built from it |
 | [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the Dagster asset graph, the three jobs, backfills and freshness policies |
-| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the 482 dbt tests, the mart-model contracts, and the groups, exposures and model versions around them |
+| [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | the dbt tests, the mart-model contracts, and the groups, exposures and model versions around them |
 | [`docs/DASHBOARD.md`](./docs/DASHBOARD.md) | the eleven dashboard pages, what each is for, and how the site is deployed |
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly data release and how to query it without cloning anything |
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column: how it is classified, what the release does to it, and how identifiable a customer stays without it |
@@ -311,7 +301,7 @@ The README is the tour. The detail lives here:
 
 And [`docs/course/`](./docs/course/) teaches the same warehouse as material for
 analytics engineers, built around the failures that stay green — a one-word join
-edit that drops two thirds of the countries with all 482 tests still passing.
+edit that drops two thirds of the countries with every data test still passing.
 Modules 00–04 are written; 05–10 are outlined in the course index.
 
 Plus [`docs/STYLE_GUIDE.md`](./docs/STYLE_GUIDE.md) for SQL conventions,
