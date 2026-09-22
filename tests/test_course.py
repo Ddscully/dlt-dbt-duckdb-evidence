@@ -30,18 +30,15 @@ COURSE_DIR = project_root() / "docs" / "course"
 INDEX = COURSE_DIR / "README.md"
 JUSTFILE = project_root() / "justfile"
 
-# The project skills quote the repo exactly as the course does — several were
-# split out of AGENTS.md so they load only for the task that needs them — so they
-# rot the same way and are checked by the same two citation tests below. Not by
-# the structural ones: those are about a module's exercises.
-#
-# Globbed, not listed: from a hand-maintained list a skill could be omitted
-# without any error, and nothing would check it.
+# The project skills quote the repo exactly as the course does — split out of
+# AGENTS.md, so they rot the same way and are checked by the same two citation
+# tests below, not the structural ones (which are about exercises).
+# Globbed, not listed: a hand-maintained list could omit a skill with no error.
 SKILLS_DIR = project_root() / ".agents" / "skills"
 
-# Top-level directories a module may cite. `data/` is deliberately absent: it is
-# gitignored and built, so a path under it is correct even on a fresh clone where
-# it does not exist yet.
+# Top-level directories a module may cite. `data/` is deliberately absent: it's
+# gitignored and built, so a path under it is correct even before a fresh clone
+# builds it.
 CITABLE_ROOTS = (
     "dbt",
     "docs",
@@ -57,24 +54,22 @@ CITABLE_ROOTS = (
 )
 
 # A backticked path, e.g. `dbt/models/marts/country_stats/dim_country_year.sql`.
-# Anchored on the citable roots so prose like `country_iso3` and `PASS=402`
-# cannot match.
+# Anchored on the citable roots so prose like `country_iso3` or `PASS=402` can't match.
 _CITED_PATH = re.compile(
     r"`((?:" + "|".join(CITABLE_ROOTS) + r")/[A-Za-z0-9_./*-]+)`",
 )
 
-# `just course-rebuild`. Searched only inside code — a fenced block or an inline
-# span — because "just" is also an English word and the prose is full of it
-# ("exactly what the publisher just served"). Comments inside a fenced block are
-# prose too, and are stripped before the search for the same reason.
+# `just course-rebuild`. Searched only inside code (a fenced block or inline
+# span), since "just" is also an English word the prose is full of; comments
+# inside a fenced block are prose too, and are stripped for the same reason.
 _CITED_RECIPE = re.compile(r"\bjust ([a-z][a-z0-9-]*)")
 _FENCED = re.compile(r"^```[^\n]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
 _SHELL_COMMENT = re.compile(r"#[^\n]*")
 
-# A recipe definition in the justfile: name, then optional args which may carry a
-# default (`backfill-wdi start end=''`), then the colon. The default matters —
-# without it that recipe reads as undefined and every citation of it fails.
+# A recipe definition in the justfile: name, optional args (which may carry a
+# default, e.g. `backfill-wdi start end=''`), then the colon — the default
+# matters, or the recipe reads as undefined.
 _RECIPE_DEF = re.compile(r"^([a-z][a-z0-9-]*)(?: [a-z_]+(?:=[^\s:]*)?)*:", re.MULTILINE)
 
 # A markdown link to a sibling module, e.g. [00 — Setup](./00-setup.md).
@@ -233,18 +228,17 @@ def test_the_decision_index_lists_every_record():
 
 
 # A cross-file markdown anchor, e.g. [AGENTS.md](../AGENTS.md#agent-skills). Only
-# links carrying a `#fragment` — a bare link to a file is already covered by the
-# citation test above, and a same-file `#anchor` cannot survive a rename anyway.
+# `#fragment` links — a bare link is covered by the citation test above, and a
+# same-file `#anchor` can't survive a rename anyway.
 _ANCHOR_LINK = re.compile(r"\]\((\.{0,2}[/A-Za-z0-9_.-]*\.md)#([A-Za-z0-9_-]+)\)")
 
-# Anything that is not a letter, digit, space, hyphen or underscore. GitHub's
-# slug drops it — which is why `## The lakehouse (`lake/lakehouse.py`)` anchors
-# as `#the-lakehouse-lakelakehousepy`, backticks, brackets and slashes all gone.
+# Anything that is not a letter, digit, space, hyphen or underscore — what
+# GitHub's slug drops, e.g. `## The lakehouse (`lake/lakehouse.py`)` anchors as
+# `#the-lakehouse-lakelakehousepy`.
 _NOT_IN_SLUG = re.compile(r"[^a-z0-9 \-_]")
 
-# Any heading level, with its text captured. Not `_HEADING`, which this module
-# already uses for `^## .*$` in the structural checks below; a second definition
-# under that name would silently replace the first.
+# Any heading level, with its text captured. Not `_HEADING`, already used for
+# `^## .*$` below — a second definition under that name would silently replace it.
 _ANY_HEADING = re.compile(r"^#+\s+(.+)$", re.MULTILINE)
 
 
@@ -304,18 +298,17 @@ def test_the_anchor_scan_still_finds_anchors():
 # exercises with these in the section heading.
 EXERCISE_MARKERS = ("\U0001f527", "\U0001f50d", "\U0001f4ac")
 
-# Setup carries no exercises by design, so the exercise rules below don't apply
-# to it. Exempted by name rather than by "has no markers", which would excuse
-# every module that forgot to write any.
+# Setup carries no exercises by design. Exempted by name, not by "has no
+# markers", which would excuse a module that just forgot to write any.
 SETUP_MODULE = "00-setup.md"
 
 _HEADING = re.compile(r"^## .*$", re.MULTILINE)
 
 REVEAL = "<details>"
 
-# The break-and-fix marker specifically. The index promises that *drills* end
-# with a verification query — investigate and design-defence sections have
-# nothing to verify, so the promise is narrower than "every exercise".
+# The break-and-fix marker specifically: the index promises drills end with a
+# verification query, narrower than "every exercise" — investigate and
+# design-defence sections have nothing to verify.
 DRILL_MARKER = "\U0001f527"
 
 VERIFICATION = "**Verification.**"
@@ -434,8 +427,7 @@ def test_every_module_is_structurally_complete(module):
 
 
 # A drill's `sed -i '<script>' <file>`, after line continuations are joined.
-# Everything after a shell operator is a separate command (`… && just
-# course-rebuild`), so the invocation stops there.
+# Stops at a shell operator (e.g. `&& just course-rebuild`) — that's a separate command.
 _CONTINUATION = re.compile(r"\\\n\s*")
 _SHELL_OPERATOR = ("&&", "||", ";", "|")
 

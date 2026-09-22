@@ -42,16 +42,13 @@ from publish.export_warehouse import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The load times a tree migrated to DuckLake has: the lakehouse's `_dlt_loads`
-# and the stale `raw` left in `warehouse.duckdb`. Different on purpose, because
-# the defect pinned here is a believable wrong timestamp, which `is not None`
-# cannot see.
+# The lakehouse's `_dlt_loads` and the stale `raw` left in `warehouse.duckdb`,
+# deliberately different — the defect here is a believable wrong timestamp.
 WAREHOUSE_LOADED_AT = "2026-08-27 11:47:47+00"
 LAKEHOUSE_LOADED_AT = "2026-08-27 16:07:52+00"
 
-# `raw` and `main` must not ship as Parquet; `staging`/`marts`/`analytics` must.
-# The view is written fully qualified the way dbt-duckdb writes it — that's what
-# makes the catalog name load-bearing when the database is copied.
+# `raw`/`main` must not ship as Parquet; `staging`/`marts`/`analytics` must.
+# Fully qualified as dbt-duckdb writes it, so the catalog name is load-bearing on copy.
 SETUP = f"""
 create schema raw;
 create schema staging;
@@ -104,8 +101,8 @@ def export(warehouse: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     """
     monkeypatch.setenv("PII_SALT", "a-salt-for-tests")
     out = tmp_path / "export"
-    # An empty directory, named rather than defaulted (see the module
-    # docstring): the no-lakehouse shape, which most tests here want.
+    # Named rather than defaulted (see the module docstring): the no-lakehouse
+    # shape most tests here want.
     manifest = run(
         str(warehouse),
         str(out),
@@ -181,8 +178,8 @@ def test_the_period_column_reaches_every_table(tmp_path: Path):
 def test_sha256sums_is_checkable(export: dict):
     """`sha256sum -c` format: hash, two spaces, bare filename."""
     lines = (export["out"] / "SHA256SUMS").read_text().splitlines()
-    # Sorted by path, because the list comes from walking the directory rather
-    # than naming what the exporter thinks it wrote — see `export()`.
+    # Sorted by path: the list comes from walking the directory, not from
+    # `export()`'s own idea of what it wrote.
     assert f"{export['warehouse']['sha256']}  warehouse.duckdb" in lines
     assert lines == sorted(lines, key=lambda line: line.split("  ", 1)[1])
     assert len(lines) == len(export["tables"]) + 1
@@ -197,15 +194,13 @@ def test_the_copied_warehouse_keeps_its_views_working(export: dict):
     con = duckdb.connect()
     con.execute(f"attach '{export['out'] / 'warehouse.duckdb'}' as warehouse (read_only)")
     assert con.execute("select count(*) from warehouse.staging.stg_co2").fetchone() == (2,)
-    # And a view over a view: `intermediate` sits on `staging`. This fixture
-    # carries its own in-file `raw`, so both hops resolve here whatever the
-    # exporter does — the version of this that can actually fail is on the
-    # catalog-backed warehouse below.
+    # A view over a view: `intermediate` sits on `staging`. This fixture's in-file
+    # `raw` makes both hops resolve regardless — the version that can fail is below.
     assert con.execute(
         "select count(*) from warehouse.intermediate.int_country_year_observed"
     ).fetchone() == (2,)
-    # This fixture's in-file `raw` survives the copy. (A real warehouse has none:
-    # its `raw` lives in the lakehouse.)
+    # This fixture's in-file `raw` survives the copy; a real warehouse has none
+    # — its `raw` lives in the lakehouse.
     assert con.execute("select count(*) from warehouse.raw.owid_co2").fetchone() == (2,)
 
 
@@ -246,11 +241,9 @@ def test_tags_are_dated():
 
 # --- the storage format of the published file -------------------------------
 #
-# A DuckDB release can change the default storage format, and nothing caps
-# `duckdb>=1.1`: the bump arrives as one line of a grouped Dependabot PR. The
-# guard is split across the two moments that matter — the *toolchain* test
-# catches the bump on its PR; the *artifact* tests catch a file that should not
-# be uploaded.
+# Nothing caps `duckdb>=1.1`, so a release can silently raise the default
+# storage format. The toolchain test below catches the bump on its PR; the
+# artifact tests catch a file that should not have been uploaded.
 
 
 def test_the_installed_duckdb_still_writes_the_format_the_release_promises(tmp_path: Path):
@@ -318,10 +311,8 @@ def test_the_ceiling_is_inclusive(warehouse: Path, tmp_path: Path, refused: bool
     if refused:
         with pytest.raises(ValueError, match="storage"):
             do_export()
-        # The guard fires after the database has been copied — that copy is what
-        # it measured — so the directory is not empty. What it does guarantee is
-        # that no *release* was assembled around the file: a caller that ignored
-        # the exception would find nothing publishable to upload.
+        # Fires after the copy it measured, so the directory isn't empty — but no
+        # release assembled around it: nothing here is publishable.
         assert not (out / "manifest.json").exists()
         assert not (out / "SHA256SUMS").exists()
         assert not list(out.glob("*.parquet"))
@@ -352,20 +343,15 @@ def test_the_release_notes_state_a_minimum_reader_version(export: dict):
 # Attribution — the licence obligation the release actually carries
 # --------------------------------------------------------------------------- #
 
-# Which publisher each *fetch* host's data belongs to. A map rather than a
-# hostname comparison, because attribution names the publisher, not the CDN or
-# API gateway in front of it: OWID is fetched from `raw.githubusercontent.com`
-# and credited at `github.com/owid`, the World Bank from `api.worldbank.org` and
-# credited at `data.worldbank.org`. The euro rates arrive via
-# `api.frankfurter.dev`, a third-party mirror ATTRIBUTION names beside the ECB.
+# Attribution names the publisher, not the CDN or API gateway in front of it —
+# e.g. OWID is fetched from raw.githubusercontent.com, credited at github.com/owid.
 PUBLISHER_FOR_FETCH_HOST = {
     "raw.githubusercontent.com": "github.com/owid",
     "api.worldbank.org": "data.worldbank.org",
     "ec.europa.eu": "ec.europa.eu/eurostat",
     "api.frankfurter.dev": "frankfurter.dev",
     "archive.ics.uci.edu": "archive.ics.uci.edu/dataset/502",
-    # Fetched from the archive subdomain, credited at the bare one — the same
-    # host-is-not-publisher split as OWID and the World Bank above.
+    # Same host-is-not-publisher split as OWID and the World Bank above.
     "archive-api.open-meteo.com": "open-meteo.com",
 }
 
@@ -426,15 +412,14 @@ def test_every_source_the_pipeline_fetches_is_attributed():
         f"the pipeline fetches from {unattributed} and nothing says who publishes it — "
         "add the host to PUBLISHER_FOR_FETCH_HOST and the publisher to ATTRIBUTION"
     )
-    # Its own assertion: swapping one host for another produces a gap *and* a
-    # stale entry, and in one assert the stale half would never be reported.
+    # Its own assertion: one assert would hide the stale half when a host is
+    # swapped for another.
     stale = sorted(set(PUBLISHER_FOR_FETCH_HOST) - fetched)
     assert not stale, (
         f"PUBLISHER_FOR_FETCH_HOST names hosts the pipeline no longer fetches: {stale}"
     )
     # Searched in the Publisher column, not the whole document: a licence link
-    # can contain the publisher's path (`ec.europa.eu/eurostat` sits inside the
-    # Eurostat copyright-notice URL), which would pass a deleted source.
+    # can contain the publisher's path, which would pass a deleted source.
     publishers = " ".join(row[1] for row in _attribution_rows())
     uncredited = sorted(
         publisher for publisher in PUBLISHER_FOR_FETCH_HOST.values() if publisher not in publishers
@@ -462,8 +447,8 @@ def test_the_release_attribution_and_the_readme_agree_on_the_licences():
     ]
     section = _readme_licence_section()
 
-    # Vacuity guards. Both extractions parse hand-written markdown, and a
-    # pattern that stops matching passes by not looking.
+    # Vacuity guards: a pattern that stops matching hand-written markdown passes
+    # by not looking.
     assert len(rows) >= 6, f"only {len(rows)} source rows found in the ATTRIBUTION table"
     assert len(links) >= 6, f"only {len(links)} licence links found in the ATTRIBUTION table"
     assert "MIT" in section and len(section) > 500, "README's License section did not parse"
@@ -475,8 +460,8 @@ def test_the_release_attribution_and_the_readme_agree_on_the_licences():
         f"licences in the release attribution that README's License section never mentions, "
         f"by name or by link: {unstated}"
     )
-    # The other direction, so deleting a source from the table alone is caught.
-    # No allowlist: every http link in that section is an attribution link.
+    # The other direction: every http link in that section counts as an
+    # attribution link, catching a source deleted from the table alone.
     orphaned = sorted(
         url for url in set(re.findall(r"https?://[^\s)]+", section)) if url not in ATTRIBUTION
     )
@@ -490,9 +475,8 @@ def test_the_release_attribution_and_the_readme_agree_on_the_licences():
 # release depends on.
 # --------------------------------------------------------------------------
 
-# Two tables, and only one of them may ship. `PUBLISHED_TABLES` is an allowlist
-# rather than a denylist because a published DuckLake cannot be filtered after
-# the fact — see `test_a_table_outside_the_allowlist_is_absent_at_every_version`.
+# `PUBLISHED_TABLES` is an allowlist, not a denylist, because a published
+# DuckLake cannot be filtered after the fact (see the allowlist test below).
 LAKEHOUSE_SETUP = [
     (
         "raw.om_weather_daily",
@@ -506,10 +490,9 @@ LAKEHOUSE_SETUP = [
         "raw.retail_invoice_lines",
         "select * from (values (17850, 'a-clear-customer-id')) t(customer_id, note)",
     ),
-    # Where dlt stamps the load time. It does not ship (it is not in
-    # `PUBLISHED_TABLES`) but the manifest reads it, and the `warehouse` fixture
-    # holds an older one under the same name so that reading the wrong catalog
-    # gives a wrong *answer* rather than an error.
+    # Where dlt stamps the load time. Not in PUBLISHED_TABLES so it doesn't ship,
+    # but the manifest reads it — the `warehouse` fixture holds an older one
+    # under the same name, so the wrong catalog gives a wrong answer, not an error.
     (
         "raw._dlt_loads",
         f"""
@@ -525,10 +508,8 @@ def lakehouse_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A miniature DuckLake holding one publishable table and one that is not."""
     from modern_data_stack.ducklake import attach
 
-    # The allowlist names the fixture's table rather than trusting the project's
-    # to: the publish mechanism is under test, and a project that published
-    # nothing from its landing zone would otherwise pass these cases by shipping
-    # an empty catalog.
+    # Names the fixture's table rather than trusting the project's allowlist: a
+    # project publishing nothing would otherwise pass by shipping an empty catalog.
     monkeypatch.setattr("lake.lakehouse.PUBLISHED_TABLES", ("raw.om_weather_daily",))
 
     lake = tmp_path / "lakehouse"
@@ -834,8 +815,8 @@ def test_the_lakehouse_ceiling_is_inclusive(lakehouse_dir: Path, tmp_path: Path,
     if refused:
         with pytest.raises(ValueError, match="spec version"):
             lake_module.publish(built, lakehouse_dir, limit)
-        # The refusal fires on the catalog it measured, so the directory exists;
-        # what it guarantees is that no caller got a table map back to package.
+        # Fires on the catalog it measured (directory exists), but no table map
+        # comes back to package.
     else:
         assert lake_module.publish(built, lakehouse_dir, limit)
 
@@ -925,8 +906,8 @@ def test_a_table_outside_the_allowlist_is_absent_at_every_version(
     con.execute("load ducklake")
     con.execute(f"attach 'ducklake:duckdb:{unpacked / 'catalog.duckdb'}' as lh (read_only)")
 
-    # DuckLake attaches its catalog as a sibling *database*, not a schema inside
-    # the lake — `meta_alias` is the one place that name is written down.
+    # DuckLake attaches its catalog as a sibling database, not a schema —
+    # `meta_alias` is the one place that name is written down.
     meta = meta_alias("lh")
     names = [r[0] for r in con.execute(f"select table_name from {meta}.ducklake_table").fetchall()]
     assert names == ["om_weather_daily"], f"published catalog holds {names}"
@@ -963,6 +944,6 @@ def test_the_release_notes_say_when_the_data_landed(export_with_lakehouse: dict)
     "unknown"` turns both failure modes into a sentence that looks written."""
     notes = release_notes(export_with_lakehouse, "acme/demo", "data-1999-12-31")
     assert "**Data last landed:** 2026-08-27T16:07:52+00:00." in notes
-    # The failure branch by name, not a bare `"unknown" not in notes` — the word
-    # is free to appear in the prose around it without meaning this went wrong.
+    # By name, not a bare `"unknown" not in notes` — the word could appear
+    # elsewhere in the prose without meaning this went wrong.
     assert "**Data last landed:** unknown" not in notes

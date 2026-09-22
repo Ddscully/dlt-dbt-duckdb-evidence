@@ -17,17 +17,15 @@ import pytest
 from orchestration.resources import dbt_project
 
 # `just test` runs before `dbt deps && dbt parse` in ci.yml, and importing
-# `orchestration.assets` needs the manifest that parse writes. CI re-runs this
-# file after the parse step; skipping keeps the unit-test tier importable in a
-# fresh clone rather than failing it for a missing build artifact.
+# orchestration.assets needs the manifest parse writes; CI re-runs this file after.
 pytestmark = pytest.mark.skipif(
     not dbt_project.manifest_path.exists(),
     reason="needs dbt/target/manifest.json — run `just dbt-deps` and `dbt parse` first",
 )
 
-# The dlt-pipeline-deactivation fixture this file needs (importing the
-# orchestration layer leaves a dlt pipeline active process-wide) lives in
-# `tests/conftest.py`, shared with `test_asset_checks.py`.
+# The dlt-pipeline-deactivation fixture this file needs (importing orchestration
+# leaves a dlt pipeline active process-wide) lives in conftest.py, shared with
+# test_asset_checks.py.
 
 
 def _defined_in_assets_module():
@@ -37,10 +35,9 @@ def _defined_in_assets_module():
     asset_keys: set[dg.AssetKey] = set()
     check_keys: set[dg.AssetCheckKey] = set()
     for value in vars(assets).values():
-        # `AssetChecksDefinition` is a *subclass* of `AssetsDefinition`, so this
-        # order is load-bearing: the other way round every check falls into the
-        # first branch, contributes an empty `.keys`, and the check set comes out
-        # empty — a test that passes by measuring nothing.
+        # AssetChecksDefinition subclasses AssetsDefinition, so this order is
+        # load-bearing — reversed, every check falls into the first branch and
+        # the set comes out empty.
         if isinstance(value, dg.AssetChecksDefinition):
             check_keys.update(value.check_keys)
         elif isinstance(value, dg.AssetsDefinition):
@@ -52,10 +49,9 @@ def test_every_asset_defined_is_in_the_graph():
     from orchestration.definitions import defs
 
     defined, _ = _defined_in_assets_module()
-    # Executable, not `get_all_asset_keys()`: an unregistered asset that
-    # something *depends on* still shows up in the graph as an external node, so
-    # the wider set reports `analytics/retail_rfm` present purely because
-    # `pipeline_status` names it in `deps`.
+    # Executable, not get_all_asset_keys(): an unregistered dependency still
+    # shows up as an external node, so the wider set can report a key present
+    # purely because something names it in `deps`.
     in_graph = defs.resolve_asset_graph().executable_asset_keys
 
     missing = defined - in_graph
@@ -97,26 +93,24 @@ def test_every_raw_resource_has_an_asset_description():
 
     resources = {r.name for r in pipeline.public_indicators().resources.values()}
 
-    # Both directions, as separate assertions rather than one set equality: they
-    # catch different bugs and the failure message should say which happened.
+    # Separate assertions, not one set equality: they catch different bugs, and
+    # the message should say which.
     undescribed = resources - RAW_DESCRIPTIONS.keys()
     assert not undescribed, (
         "dlt resources with no entry in orchestration/assets.py RAW_DESCRIPTIONS "
         f"(they materialise with no description): {sorted(undescribed)}"
     )
 
-    # The reverse direction is the one nothing else could surface. `.get()`
-    # never consults a key no resource matches, so a stale entry left by a
-    # rename is invisible — where a *missing* one at least shows as a blank.
+    # The reverse direction nothing else could surface: `.get()` never consults
+    # an unmatched key, so a stale entry from a rename is invisible.
     orphaned = RAW_DESCRIPTIONS.keys() - resources
     assert not orphaned, (
         "RAW_DESCRIPTIONS entries naming no dlt resource — renamed or removed "
         f"upstream and left behind here: {sorted(orphaned)}"
     )
 
-    # A key check alone is satisfied by an empty string, which renders as the
-    # same blank the missing key does. The floor is deliberately a length rather
-    # than truthiness: `" "` is falsy nowhere and blank everywhere.
+    # A key check alone accepts an empty string, indistinguishable from missing;
+    # length, not truthiness, since `" "` is falsy nowhere but blank everywhere.
     blank = sorted(name for name, text in RAW_DESCRIPTIONS.items() if not text.strip())
     assert not blank, f"RAW_DESCRIPTIONS entries that render blank: {blank}"
 
@@ -256,10 +250,8 @@ def test_the_dbt_build_writes_its_run_results_where_the_reader_looks():
             return _Invocation()
 
     # `decorated_fn` is the undecorated generator, so this exercises the call
-    # site with no execution harness: nothing is materialized and no output is
-    # yielded, which is exactly the part being asserted. Dagster types
-    # `compute_fn` as a union that does not narrow to the decorated half, so the
-    # annotation states the gap rather than adding a `ty: ignore`.
+    # site with no execution harness — nothing materializes or yields, which is
+    # the part under test. The annotation states that gap rather than a `ty: ignore`.
     compute: Any = assets.dbt_models.op.compute_fn
     list(compute.decorated_fn(context=None, dbt=_Dbt()))
 
@@ -271,6 +263,6 @@ def test_the_dbt_build_writes_its_run_results_where_the_reader_looks():
         "`run_results.json` by path, so every orchestrated build appends nothing to "
         "`analytics.pipeline_runs`."
     )
-    # The property that actually matters, stated as the two paths agreeing: the
-    # artifact the build writes is the one `transform.pipeline_status` reads.
+    # What matters: the two paths agree — the artifact the build writes is the
+    # one pipeline_status reads.
     assert Path(target) / "run_results.json" == Path(dbt_run_results_path())

@@ -202,8 +202,8 @@ def test_wb_wdi_normalises_row_shape(monkeypatch):
         "value": None,
     }
     assert rows[1]["year"] is None and rows[1]["country_iso3"] is None
-    # the merge key comes from `country.id`, so a payload without it is a null
-    # key — declared non-nullable in WDI_COLUMNS, so the load fails loudly
+    # The merge key is `country.id`; missing it is a null key, declared
+    # non-nullable so the load fails loudly.
     assert rows[1]["country_code"] is None
 
 
@@ -483,11 +483,9 @@ def test_the_windowed_resources_are_incremental_and_do_not_overlap():
     partitioned = set(pipeline.PARTITIONED_RESOURCES)
     assert year_range | partitioned <= set(pipeline.INCREMENTAL_RESOURCES)
     assert not year_range & partitioned, "a resource in two blocks loads twice"
-    # Named explicitly, because each tuple is one `@dlt_assets` block: year
-    # ranges as run config, months as partitions. A resource added to either
-    # joins that block's window, which is a decision, not a default — and a
-    # second partitioned resource would have to be excluded from `full_refresh`
-    # by hand, or the job becomes partitioned (`tests/test_definitions.py`).
+    # Named explicitly: each tuple is one `@dlt_assets` block (year ranges as run
+    # config, months as partitions), and joining one is a decision, not a default
+    # — see tests/test_definitions.py for the partitioned-job consequence.
     assert year_range == {"wb_wdi", "om_weather_daily"}
     assert partitioned == {"retail_invoice_lines"}
     unwindowed = [
@@ -503,9 +501,8 @@ def test_the_windowed_resources_are_incremental_and_do_not_overlap():
 
 STG_WDI = Path(__file__).resolve().parent.parent / "dbt" / "models" / "staging" / "stg_wdi.sql"
 
-# `max(case when indicator = '<code>' then value end) as <column>`, the one line
-# shape `stg_wdi.sql` uses for every indicator. Read off the SQL text rather than
-# the dbt manifest, which does not exist yet when ci.yml first runs pytest.
+# The `max(case when indicator = '<code>' then value end) as <column>` shape
+# `stg_wdi.sql` uses; read off the SQL text since the manifest doesn't exist yet.
 WDI_PIVOT = re.compile(
     r"max\(\s*case\s+when\s+indicator\s*=\s*'([^']+)'\s+then\s+value\s+end\s*\)\s+as\s+(\w+)",
     re.IGNORECASE,
@@ -547,15 +544,13 @@ def test_the_wdi_pivot_maps_every_indicator_to_the_column_it_was_configured_for(
         f"configured in WB_WDI_INDICATORS but not pivoted in {STG_WDI.name}: {missing} — "
         "they land in raw.wb_wdi and reach no column"
     )
-    # Its own assertion: renaming a code produces a gap *and* an orphan, and in
-    # one assert the orphan would never be reported.
+    # Its own assertion: one assert would hide the orphan when a code is renamed.
     orphaned = sorted(set(pivot) - set(configured))
     assert not orphaned, (
         f"pivoted in {STG_WDI.name} but not configured in WB_WDI_INDICATORS: {orphaned} — "
         "the column is all nulls"
     )
-    # The dangerous one, and it is invisible to both checks above: the two
-    # collections agree on *which* codes exist and disagree on where they go.
+    # The dangerous case both checks above miss: same codes, different placement.
     crossed = {
         code: (configured[code], pivot[code])
         for code in configured
@@ -981,9 +976,8 @@ def test_weather_url_carries_every_location_in_one_request():
     assert "start_date=2022-01-01&end_date=2022-12-31" in url
     for variable in weather.WEATHER_DAILY_VARIABLES:
         assert variable in url
-    # Four decimals, so the URL is byte-stable for a location set and a recorded
-    # fixture stays reproducible. ERA5's grid is 0.25 degrees, so the precision
-    # cannot change which cell answers.
+    # Four decimals for a byte-stable, reproducible URL; ERA5's 0.25-degree grid
+    # means this precision can't change which cell answers.
     assert "52.523500" not in url
 
 
@@ -1017,7 +1011,7 @@ def test_weather_start_date_cold_starts_recently_not_at_the_series_floor():
 def test_weather_start_date_follows_the_lookback_once_there_is_a_watermark():
     # 90-day lookback, inclusive of the watermark day itself.
     assert weather.weather_start_date("2026-08-20") == "2026-05-23"
-    # Clamped: a watermark near the floor must not ask for years before the
+    # Clamped so a watermark near the floor can't ask for years before the
     # series is worth having.
     assert (
         weather.weather_start_date(f"{weather.WEATHER_FIRST_YEAR}-01-05")
@@ -1308,8 +1302,8 @@ def test_a_transient_weather_failure_is_retried_like_every_other_source(monkeypa
 
     assert result == {"daily": {"time": []}}
     assert len(calls) == 3
-    # The plain backoff, not the minute-long wait a 429 earns: neither failure
-    # had anything to do with the budget.
+    # The plain backoff, not the minute-long 429 wait: neither failure was
+    # about the budget.
     assert sleeps == [weather.WEATHER_BACKOFF_SECONDS, weather.WEATHER_BACKOFF_SECONDS * 2]
 
 
@@ -1365,10 +1359,8 @@ def test_a_spent_daily_budget_raises_rather_than_sleeping_through_a_day():
         weather.weather_retry_after("Daily API request limit exceeded.")
 
 
-# Eurostat's `geo` codes are ISO2 except for two, remapped in
-# `stg_eu_electricity_prices_semiannual.sql`. Restated here rather than parsed
-# out of the SQL because it is two entries and the model states the same pair in
-# a `case` expression the guard below would have to reimplement to read.
+# Eurostat's `geo` codes are ISO2 except two, remapped in
+# stg_eu_electricity_prices_semiannual.sql; restated here since it's just two entries.
 EUROSTAT_GEO_TO_ISO2 = {"EL": "GR", "UK": "GB"}
 
 
@@ -1389,8 +1381,8 @@ def _eurostat_price_countries() -> set[str]:
         for row in payload[1]
         if (row.get("region") or {}).get("value") != "Aggregates"
     }
-    # The inner join is what drops `EA` — two letters, so `len(geo) == 2` keeps
-    # it, and no country carries that ISO2. Exactly as the staging model behaves.
+    # The inner join drops `EA`; `len(geo) == 2` alone would keep it, since no
+    # country carries that ISO2. Matches the staging model's behavior.
     return {by_iso2[code] for code in iso2 if code in by_iso2}
 
 
