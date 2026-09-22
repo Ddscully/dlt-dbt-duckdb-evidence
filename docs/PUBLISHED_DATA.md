@@ -56,10 +56,10 @@ customer ids in the clear; rebuilding it is `just run`.
 
 ## What to know before building on it
 
-**Alias it `warehouse`.** dbt writes the `staging` views with fully-qualified
-SQL, and DuckDB names a catalog after its file, so those views only resolve under
-that name. `ATTACH … AS wh` reads the `marts` and `analytics` *tables* fine and
-makes every view raise `Catalog "warehouse" does not exist`. Same reason the
+**Alias it `warehouse`.** dbt writes the `intermediate` views with
+fully-qualified SQL, and DuckDB names a catalog after its file, so those views
+only resolve under that name. `ATTACH … AS wh` reads every *table* fine and
+makes the views raise `Catalog "warehouse" does not exist`. Same reason the
 export copies the file as `warehouse.duckdb` and not `snapshot-2026-07-30.duckdb`.
 
 **The copy is made with `COPY FROM DATABASE`, not `cp`.** It's consistent

@@ -39,8 +39,7 @@ dashboard is the last node of the asset graph rather than something built beside
 it. `publish/build_report.py` is the implementation, the same one `just report`
 calls, so the recipe and the graph can't drift into running different builds.
 
-- It declares **one dep per table the source queries read** (20 tables today),
-  and `tests/test_report.py` fails if a new source query reads a table
+- It declares **one dep per table the source queries read**, and `tests/test_report.py` fails if a new source query reads a table
   none of them covers. Adding `sources/warehouse/foo.sql` on a new mart therefore
   means adding a line to `TABLE_TO_DBT_MODEL` in `publish/build_report.py`; see
   `just test`'s failure message, which says exactly which table is unclaimed.
@@ -60,14 +59,16 @@ calls, so the recipe and the graph can't drift into running different builds.
   `warehouse.emissions_energy`, `warehouse.co2_intensity`,
   `warehouse.eu_electricity_prices_semiannual`, and so on: the filename is the
   reference name.
-- `pages/index.md`: the home page, an interactive explorer driven by a year
-  selector: clean electricity vs. life expectancy (bubble), CO₂ intensity by
-  income group over time (line), a grid carbon-intensity ranking and a
-  most-efficient table. Its last section is the exception: EU prices half by
-  half, from the semi-annual fact, deliberately covering the whole series rather
-  than the selected year, because the annual average the other charts use hides
-  moves of 300%+ inside a single year.
-- `pages/findings.md`: seven written-up findings from the same two tables. Each
+- `pages/index.md`: the home page, a routing page with no SQL on it — pick the
+  analysis that matches what you are responsible for.
+- `pages/countries.md`: the country explorer, driven by a year selector: clean
+  electricity vs. life expectancy (bubble), CO₂ intensity by income group over
+  time (line), a grid carbon-intensity ranking and a most-efficient table. Its
+  last section is the exception: EU prices half by half, from the semi-annual
+  fact, deliberately covering the whole series rather than the selected year,
+  because the annual average the other charts use hides moves of 300%+ inside a
+  single year.
+- `pages/findings.md`: eight written-up findings from the joined data. Each
   section leads with its chart and puts the reading of it underneath; the notes
   on method sit at the bottom of the page.
 - `pages/coverage.md`: what each source actually covers, built by left-joining
@@ -75,8 +76,8 @@ calls, so the recipe and the graph can't drift into running different builds.
   row rather than an absence. Read this before writing a `where` clause against
   the mart, since the 79/210/217-country ceilings live here.
 - `pages/pipeline.md`: the state of the pipeline itself, with dlt load times,
-  rows per layer, and every dbt test with its stored-failure count. Reads the
-  three `analytics.pipeline_*` tables written by `transform/pipeline_status.py`
+  rows per layer, every data test with its stored-failure count, and the run
+  history. Reads the four `analytics.pipeline_*` tables written by `transform/pipeline_status.py`
   (`just pipeline-status`, part of `just run`).
 - `pages/restatements.md`: what OWID has revised since this warehouse first
   loaded it, off the dbt snapshot.
@@ -112,6 +113,9 @@ calls, so the recipe and the graph can't drift into running different builds.
   are separated out, a cohort retention heatmap, RFM segments from
   `analytics.retail_rfm`, and returns matched to their sale by inference. Its
   heatmap is where the `*_pct` auto-format trap below was found.
+- `pages/weather.md`: capital-city degree days from
+  `marts.fct_country_weather_year`, as the control variable for "was it just a
+  colder year".
 
 The coverage and pipeline pages render an explanatory branch rather than an
 error when their data is empty, the way `restatements.md` does, because the
@@ -253,7 +257,7 @@ points into one band.
 
 Threshold on a real unit, `>= 0.01` for money, not on zero. The same arithmetic
 is why a `first_order_gbp <= net_revenue_gbp` dbt test fails on 272 rows that are
-equal; see the retail section of `AGENTS.md`.
+equal; see the `retail-models` skill.
 
 ## Years render as `2025.0` unless you cast twice
 
@@ -336,7 +340,7 @@ map instead of relying on the global palette's implicit ordering, so a series
 always gets the same color regardless of how the query happens to sort it:
 
 - **`income_group`** (`stg_country`'s income ladder, High → Low, 4 categories)
-  appears in `index.md`'s bubble/line/scatter charts. It's technically ordinal
+  appears in `countries.md`'s bubble/line/scatter charts. It's technically ordinal
   (High → Low is a ladder), which argues for a single-hue light→dark ramp,
   but with 4 overlapping categories on a scatter/bubble, adjacent ramp steps
   read as near-identical at a glance even though they clear the colorblind
@@ -353,10 +357,10 @@ always gets the same color regardless of how the query happens to sort it:
 - **`income_group` also drives the peak-emissions scatter in `findings.md`**, but
   only the three categories present among large emitters that have already
   peaked (High/Upper-middle/Lower-middle, since no Low-income country clears the
-  200 Mt threshold). That's a different `seriesColors` map from `index.md`'s
+  200 Mt threshold). That's a different `seriesColors` map from `countries.md`'s
   four-category one: the first three palette slots (blue/orange/aqua), which
   are the ones that clear the *all-pairs* check on their own, with no need for
-  `index.md`'s special-cased four-hue set. Still-rising countries are
+  `countries.md`'s special-cased four-hue set. Still-rising countries are
   excluded from that scatter entirely (their "change since peak" is 0% by
   construction, so they'd all stack on one point) and broken out in a bar
   chart instead.
@@ -387,15 +391,14 @@ and publishes `reports/build/`. `sources:strict`, which the asset runs, makes a
 missing or empty warehouse fail the build instead of deploying an empty
 dashboard.
 
-Three things nobody tells you, if you're setting this up yourself:
+Three steps that are easy to miss, if you are setting this up yourself:
 
 - **Pages has to be enabled once by hand**: Settings → Pages → Source → GitHub
   Actions.
-- **`evidence build` does not run the sources.** It renders against whatever
-  parquet `.evidence/` already holds, which locally is a warm cache and in CI is
-  nothing at all, so `sources:strict` has to run first. Skip it and you deploy a
-  perfectly working site where every chart says *Table with name emissions_energy
-  does not exist*. That ordering lives in `publish/build_report.py`, the single
+- **`evidence build` does not run the sources** (see *Develop / build*), and in
+  CI `.evidence/` is empty, so `sources:strict` has to run first or you deploy a
+  working site where every chart says the table does not exist. That ordering
+  lives in `publish/build_report.py`, the single
   implementation behind both `just report` and the asset.
 - **Project Pages serve from a subpath**, so the workflow appends
   `deployment.basePath` to `evidence.config.yaml` at build time. It's injected
