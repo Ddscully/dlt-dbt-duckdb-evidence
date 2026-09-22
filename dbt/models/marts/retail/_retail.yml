@@ -12,6 +12,15 @@ models:
       calendar work stops being a demonstration: it is the only fact here with a
       timestamp and a transactional money amount, which is the shape that
       actually needs both.
+
+      **Converted at the transaction date's rate.** A line is a flow at an
+      instant, so the daily fixing is its rate; the spot-or-average question of
+      `fct_fx_rates_periods` arises only on aggregation, and summing converted
+      lines answers it. The rate may be carried forward, and the row says so:
+      139,658 lines (13.1%) fall on a day the ECB did not quote, so
+      `fx_rate_source_date` and `fx_rate_is_carried_forward` travel with the
+      amount. Every one is a Sunday: this business trades on Sundays (139,256
+      lines, against 402 on Saturdays) and closes on the TARGET holidays.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -435,8 +444,13 @@ models:
       (18,286). The source carries no link between the two — no order reference,
       no RMA — so the join is inferred by an `asof` on the same customer's most
       recent prior purchase of the same product, and the model reports how often
-      that failed: 87.6% match cleanly, 2.0% match to a smaller purchase, 8.4%
-      have no prior purchase in the window and 1.9% have no customer id.
+      that failed: 87.7% match cleanly, 2.0% match to a smaller purchase, 8.4%
+      have no prior purchase in the window and 1.9% have no customer id. Lines
+      with no customer id stay, rather than flattering the rate; most misses are
+      goods bought before the extract opens on 2009-12-01. The 2.0% is the rule
+      being wrong rather than the data absent, and an upper bound. The median
+      return comes back 10 days after purchase, the plausible shape: arbitrary
+      matches would spread flat.
 
       **The `original_*` columns are the output of a tie-break, and this file is
       where a consumer of the release finds that out.** A customer can buy the
@@ -611,7 +625,15 @@ models:
       (cohort_month, months_since_first_order). Ragged on purpose: a cohort only
       has rows for months it could have been observed in, so nothing averages in
       a period that had no chance to happen. Retention is against the cohort's
-      own size, never against the previous month.
+      own size, never against the previous month: month-over-month figures
+      compound, so a cohort that loses 20% and wins some back would read as
+      recovering while still down.
+
+      **The first cohort is left-censored.** December 2009 is the extract's
+      first month, so its 955 "new" customers include long-standing ones;
+      `is_left_censored_cohort` lets a chart drop them. Anonymous orders cannot
+      appear: this is retention among the identified customers of
+      `dim_retail_customer`.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

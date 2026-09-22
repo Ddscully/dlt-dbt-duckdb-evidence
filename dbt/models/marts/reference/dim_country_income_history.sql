@@ -1,15 +1,5 @@
--- The World Bank income classification as it stood in each year, next to the one
--- the warehouse carries today.
--- Grain: one row per (country_iso3, year) the World Bank classified.
---
--- Every other `income_group` in the warehouse is today's classification applied
--- to every year: `dim_country` reads the World Bank's `/country` endpoint, which
--- publishes only the current answer. Of the economies classified in both 1987
--- and 2025, 49% are in a different group at the two ends, so "emissions by
--- income group in 1990" otherwise means a current grouping of 1990 emissions.
---
--- Published beside the existing columns, not a migration of the relations that
--- carry `income_group`; `differs_from_current` makes the distortion one query.
+-- The World Bank income classification as it stood in each year, beside the one
+-- `dim_country` carries today. Why it exists is the description in _reference.yml.
 with
 
 history as (

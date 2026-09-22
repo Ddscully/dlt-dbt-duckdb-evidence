@@ -1,11 +1,6 @@
--- Eurostat household electricity prices at the grain Eurostat publishes them:
--- semi-annual. Grain: one row per (country_iso3, year, half).
---
--- This is the cleaning model — geo -> ISO2 -> ISO3 happens here, once, and
--- `stg_eu_electricity_prices` averages this to the project's annual grain.
--- Both exist because the average is lossy in a way the source isn't: within
--- 2022 the Netherlands went 0.034 -> 0.142 EUR/kWh as the energy-tax cuts landed
--- in the first half, and the annual mean of 0.088 is a price no household paid.
+-- Eurostat household electricity prices at the grain Eurostat publishes them,
+-- semi-annual: the cleaning model, where geo -> ISO3 happens once.
+-- `stg_eu_electricity_prices` averages it to the annual grain.
 with source as (
     select * from {{ source('raw', 'eu_elec_prices') }}
 ),

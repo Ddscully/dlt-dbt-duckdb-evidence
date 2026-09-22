@@ -1,17 +1,6 @@
--- Capital-city weather aggregated to the country-year, so the daily archive can
--- join the rest of the warehouse. Grain: one row per (country_iso3, year).
---
--- **A control variable**: "was it colder that year" has to be answered before an
--- energy or price movement can be attributed to anything else (the
--- `weather-models` skill has the worked example).
---
--- 1. **EU/EEA only** — the 41 countries of
---    `fct_eu_electricity_prices_semiannual`. Joined to `fct_emissions_energy`,
---    the rest of the world is null.
--- 2. **Filter on `year_is_complete` for any year-over-year comparison.** The
---    archive stops a few days short of today, and a partial year's degree-day
---    total is not comparable — not even in a stable direction, since which
---    season is missing depends on the date.
+-- Capital-city weather at the country-year, for the 41 EU/EEA countries: the
+-- warehouse's control variable. Filter on `year_is_complete` for any
+-- year-over-year comparison (see _country_stats.yml).
 with daily as (
     select * from {{ ref('stg_weather_daily') }}
 ),

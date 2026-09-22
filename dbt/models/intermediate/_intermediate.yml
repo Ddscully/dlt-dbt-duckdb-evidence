@@ -48,8 +48,17 @@ models:
       with the regulation's row-level fallback rule applied — where a country is
       unlisted, or listed with no total for a good, all three tonnage columns
       and the production route come from the "Other countries and territories"
-      row. The 4-digit CN headings that carry no value in any country are
-      dropped here rather than in the seed, which is a transcription.
+      row. About one listed-country row in eight has no value, so the second
+      half of the rule matters. The fallback is chosen per row, on whether the
+      country has a total, never per column: mixing columns from two rows builds
+      a row the regulation never states.
+
+      The annex is Implementing Regulation (EU) 2025/2621, as corrected by
+      2026/1740. The 23 4-digit CN headings that carry no value in any country
+      (their values sit in the subheadings below them) are dropped here rather
+      than in the seed, which is a transcription. The rule is a model of its own,
+      apart from `fct_cbam_exposure`, because it depends on the annex alone and
+      can be unit-tested against it alone.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

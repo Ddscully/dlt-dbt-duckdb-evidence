@@ -686,13 +686,16 @@ models:
         enforced: true
     description: >
       EU/EEA household electricity prices at Eurostat's published grain: one row
-      per (country_iso3, year, half), 2007 onwards. The only non-annual fact in
-      the warehouse, and the reason it exists is that the annual average is lossy
-      — the mean absolute half-over-half change was 19% across
+      per (country_iso3, year, half), 2007 onwards. The country-stats group's
+      only sub-annual fact, and the reason it exists is that the annual average
+      is lossy — the mean absolute half-over-half change was 19% across
       countries in 2022 and 13% in 2023, against 3-4% through the 2010s.
 
       Built on `dim_country_year` for its dimension attributes, so like every
-      other fact here it can only carry countries the dimension knows.
+      other fact here it can only carry countries the dimension knows. The USD
+      columns put a euro price beside dollar-denominated GDP: a half-year price
+      is a flow, so it converts at the period average from
+      `fct_fx_rates_periods`, and the closing rate ships beside it unused.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
