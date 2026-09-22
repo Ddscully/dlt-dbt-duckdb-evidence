@@ -5,11 +5,12 @@ The [README](../README.md) has the short version.
 
 ## Data sources
 
-Seven feeds from five publishers, all freely licensed and small enough to run
-locally. Six are country-keyed; the seventh isn't a country dataset at all. The
-CBAM default values are an eighth source that arrives as a seed instead of a
-feed, for the reasons in
+Seven sources, all freely licensed and small enough to run locally: six
+publishers' feeds, landed as eight tables, and the CBAM default values, which
+arrive as a seed instead of a feed for the reasons in
 [the `compliance-models` skill](../.agents/skills/compliance-models/SKILL.md).
+Six of the tables are keyed by country; the ECB's rates have no country, and the
+retail log sits below one.
 
 | Dataset | Grain | Link |
 |---------|-------|------|
@@ -18,18 +19,20 @@ feed, for the reasons in
 | World Bank WDI: GDP, life expectancy, population, poverty | country-year (fact) | https://databank.worldbank.org/source/world-development-indicators |
 | World Bank countries: region & income group | country (dimension) | https://api.worldbank.org/v2/country?format=json |
 | Eurostat: household electricity prices (EU/EEA) | country-half-year (fact) | https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204 |
-| ECB euro reference rates, via Frankfurter | date-currency (fact), the first sub-annual grain | https://frankfurter.dev |
+| ECB euro reference rates, via Frankfurter | date-currency (fact), the only one with no country | https://frankfurter.dev |
 | UCI Online Retail II: one retailer's invoice lines | invoice-line (fact), the finest grain here and the only one below a country | https://archive.ics.uci.edu/dataset/502/online+retail+ii |
+| Open-Meteo ERA5: daily weather at 41 capital cities | country-day (fact), aggregated to country-year | https://open-meteo.com/ |
 
-Joins are on **ISO country code + year**, yielding marts like *"CO₂ per \$ of GDP
-by income group over time"* and *"renewables adoption vs. life expectancy."*
+The country-year sources join on **ISO country code + year**, which is what puts
+*CO₂ per \$ of GDP* beside an income group, or renewables adoption beside life
+expectancy, in one query.
 
 The sources don't agree on coverage. The fact is therefore built on an explicit
 country-year spine (`dim_country_year`) instead of off whichever source happens
 to be widest, so a country-year that only Eurostat or only the World Bank reports
 still lands, carrying nulls in the columns the others don't fill.
 
-### Three sources keep a finer grain of their own
+### Four sources keep a finer grain of their own
 
 Eurostat publishes half-yearly. `fct_eu_electricity_prices_semiannual` holds the
 published halves alongside the annual average that joins to everything else.
@@ -42,8 +45,13 @@ the warehouse's first calendar (`dim_date`), its first gap-filling decision and
 its first `materialized='incremental'` model. See the
 [Currency page](https://ddscully.github.io/dlt-dbt-duckdb-evidence/currency).
 
+Open-Meteo's is a day at one capital city, and it is only aggregated to the
+country-year in the mart; the day stays in `staging`, and the
+[`weather-models` skill](../.agents/skills/weather-models/SKILL.md) covers the
+budget that decides how much of it can be fetched.
+
 The retailer's grain is a single invoice line at a timestamp, below a country
-rather than beside one, and it's the only source here that isn't a statistical
+rather than beside one, and it is the only source here that is not a statistical
 publication. Nothing about it has been cleaned by anyone, so the modelling is the
 value: what counts as a return, which rows are revenue, and who the customer is
 when 22.8% of lines have no id. See the
@@ -51,13 +59,13 @@ when 22.8% of lines have no id. See the
 
 ### Two write dispositions, two load calls
 
-Four of the seven resources load with dlt's `replace` disposition: both OWID
+Four of the eight resources load with dlt's `replace` disposition: both OWID
 files, the World Bank country list and Eurostat prices. They're small enough that
 a full reload every run is the honest default, and it keeps dlt re-inferring the
 schema so an upstream type change fails loudly.
 
-The other three are incremental. WDI is the biggest pull (~190k rows across 11
-indicators) and loads with `merge` on `(indicator, country_iso3, year)` over a
+The other four merge: the ECB rates, the retail log, the weather archive and
+WDI. WDI is the biggest pull (~190k rows across 11 indicators) and loads with `merge` on `(indicator, country_iso3, year)` over a
 five-year window. That window is a lookback and not "everything newer than last
 time", because the World Bank restates years it has already published.
 
@@ -197,8 +205,9 @@ Facts conforming to no dimension:
 [DuckLake](https://ducklake.select) catalog — plain Parquet under
 `data/lakehouse/data/`, plus a catalog database holding schema, snapshot lineage
 and per-file statistics. dbt attaches it and builds `staging`,
-`intermediate`, `marts` and `history` into `data/warehouse.duckdb`, which is the only thing the release
-publishes. `just lakehouse` reports what the catalog holds; `just ingest` fills
+`intermediate`, `marts` and `history` into `data/warehouse.duckdb`. A release
+publishes that file, and from the lakehouse only the weather table
+([`PUBLISHED_DATA.md`](./PUBLISHED_DATA.md)). `just lakehouse` reports what the catalog holds; `just ingest` fills
 it.
 
 ```sql
@@ -237,7 +246,7 @@ revisions(WEATHER_TABLE, v[-2], v[-1])   # rows that genuinely differ
   will not give you the table: DuckLake writes positional delete files that only
   the catalog applies, so a glob either fails on a schema mismatch or returns
   superseded rows alongside current ones.
-- **Deleting `data/lakehouse/` is the destructive act in this repo now.** It is
+- **Deleting `data/lakehouse/` is the destructive act in this repo.** It is
   the only copy of every landing table, and it holds both the snapshot lineage
   (which no rebuild invents) and the capital-city weather archive (which no
   rebuild can afford — days of Open-Meteo's daily budget). `just clean` does not
@@ -250,15 +259,15 @@ re-merges 90 days of daily rows in place.
 
 ### The Parquet in an S3-compatible bucket
 
-The catalog is always a local file, but the Parquet under it can live in a
-bucket instead of `data/lakehouse/data/`. One variable switches it,
+Wherever the catalog is, the Parquet under it can live in a bucket instead of
+`data/lakehouse/data/`. One variable switches it,
 `LAKEHOUSE_DATA_PATH=s3://bucket/prefix/`, and three more say how to reach the
 store: `LAKEHOUSE_S3_ENDPOINT` and the standard `AWS_ACCESS_KEY_ID` and
 `AWS_SECRET_ACCESS_KEY`. [`.env.example`](../.env.example) has all four, and
 `just where` prints the data path the recipes will use. Unset, everything above
 holds unchanged.
 
-Measured against SeaweedFS in Docker. It is now a service in
+Measured against SeaweedFS in Docker, which is a service in
 [`compose.yaml`](../compose.yaml), on a named volume so the bucket survives a
 restart:
 
@@ -307,8 +316,8 @@ reaches Python, the DuckDB CLI, dbt and dlt, with no secret in a URL, in dbt's
 rendered profile or in the process list.
 
 Measured against the `postgres:17.11` service in
-[`compose.yaml`](../compose.yaml), which also creates the `dagster` database a
-later change needs:
+[`compose.yaml`](../compose.yaml), which also creates the `dagster` database the
+container stack keeps its run storage in:
 
 ```sh
 just compose-up               # Postgres and SeaweedFS, both on 127.0.0.1
@@ -321,8 +330,8 @@ against it.
 
 - **Choose before the first `just ingest`**, for the reason the data path has:
   the catalog records its data path and refuses any other.
-- **`just setup` installs three extensions now** — `ducklake`, `httpfs` and
-  `postgres` — through the new `just extensions`. DuckDB would autoload the
+- **`just setup` installs three extensions** — `ducklake`, `httpfs` and
+  `postgres` — through `just extensions`. DuckDB would autoload the
   last two, but a bare `load` fails on a machine that has never downloaded one,
   and it fails at the attach rather than at the query.
 - **A fixture run takes its own schema, not its own database.** `LAKEHOUSE_DIR`
