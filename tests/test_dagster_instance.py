@@ -32,6 +32,8 @@ LAPTOP_INSTANCE = REPO_ROOT / ".dagster/dagster.yaml"
 DEPLOYED_INSTANCE = REPO_ROOT / "deploy/dagster.yaml"
 COMPOSE = REPO_ROOT / "compose.yaml"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
+DEVCONTAINER_DOCKERFILE = REPO_ROOT / ".devcontainer/Dockerfile"
+DEPENDABOT = REPO_ROOT / ".github/dependabot.yml"
 PYTHON_VERSION = REPO_ROOT / ".python-version"
 PAGES_WORKFLOW = REPO_ROOT / ".github/workflows/pages.yml"
 
@@ -264,17 +266,18 @@ def image_tags() -> list[tuple[str, str, int]]:
     tags = [
         (s["image"], "compose.yaml", 2) for s in load(COMPOSE)["services"].values() if "image" in s
     ]
-    tags += [
-        (line.split()[1], "Dockerfile", 3)
-        for line in DOCKERFILE.read_text().splitlines()
-        if line.startswith("FROM ")
-    ]
+    for dockerfile in (DOCKERFILE, DEVCONTAINER_DOCKERFILE):
+        tags += [
+            (line.split()[1], str(dockerfile.relative_to(REPO_ROOT)), 3)
+            for line in dockerfile.read_text().splitlines()
+            if line.startswith("FROM ")
+        ]
     return tags
 
 
 def test_every_image_tag_is_pinned():
     """No `latest`, no bare name, no floating alias. Dependabot watches these —
-    `docker-compose` for compose.yaml, `docker` for the Dockerfile — and a
+    `docker-compose` for compose.yaml, `docker` for both Dockerfiles — and a
     moving tag is one it cannot bump, which is the "unwatched pin" that
     `docs/RUNNING_AS_A_SERVICE.md` §2 predicted a container would add.
 
@@ -335,4 +338,25 @@ def test_the_base_images_match_their_other_pins():
     node_image = dockerfile_image_version("node")
     assert node_image.split(".")[0] == node_pin.group(1), (
         f"the Dockerfile's `node:{node_image}` is not on pages.yml's Node {node_pin.group(1)}"
+    )
+
+
+def test_the_dev_container_carries_the_service_images_toolchain():
+    """`.devcontainer/Dockerfile` copies uv and Node out of the same images the
+    root Dockerfile does, so a reviewer's container and the service run one
+    toolchain. Each tag is stated twice; Dependabot's `docker` entry lists both
+    directories, so its grouped PR moves the pair together, and this catches a
+    hand edit to one of them or the directory falling out of that list."""
+    tags = image_tags()
+
+    def version(name: str, source: str) -> str:
+        return next(t.partition(":")[2] for t, s, _ in tags if s == source and t.startswith(name))
+
+    for name in ("node:", "ghcr.io/astral-sh/uv:"):
+        assert version(name, ".devcontainer/Dockerfile") == version(name, "Dockerfile"), (
+            f"the two Dockerfiles copy from different `{name}` tags"
+        )
+    assert "/.devcontainer" in DEPENDABOT.read_text(), (
+        "dependabot.yml's `docker` entry no longer lists /.devcontainer, so its base images "
+        "are pins nothing watches"
     )

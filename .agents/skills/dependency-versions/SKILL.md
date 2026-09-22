@@ -12,8 +12,8 @@ linter, formatter and type checker those pins serve behave is
 
 
 `.github/dependabot.yml` watches five ecosystems — `github-actions` (`/`), `uv`
-(`/`), `npm` (`/reports`), `docker-compose` (`/`) and `docker` (`/`) — monthly,
-each grouped to a single PR.
+(`/`), `npm` (`/reports`), `docker-compose` (`/`) and `docker` (`/` and
+`/.devcontainer`) — monthly, each grouped to a single PR.
 
 - **It exists because green CI proves nothing about versions.** Every action sat
   on a Node 20 major for months while `ci.yml` passed, until the runners started
@@ -97,6 +97,11 @@ each grouped to a single PR.
     one PR at a limit of one, so a broken bump holds back a harmless uv patch
     too. Move either by hand, together with its partner;
     `test_the_base_images_match_their_other_pins` fails on a split.
+  - **The dev container restates the `node:` and `uv` tags.**
+    `.devcontainer/Dockerfile` copies both from the root Dockerfile's images,
+    so a hand bump moves both files;
+    `test_the_dev_container_carries_the_service_images_toolchain` fails on a
+    split, and on `/.devcontainer` leaving the `docker` entry.
 - **Dependabot scans the moment the config lands**, not on the next scheduled
   date — expect PRs immediately after touching that file.
 - **A yanked release stays locked until something re-resolves.** `uv.lock` held
