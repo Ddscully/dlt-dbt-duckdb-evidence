@@ -1,14 +1,6 @@
--- One row per stock code the retailer ever transacted.
--- Grain: `stock_code`.
---
--- 1,192 of the 5,131 codes carry more than one description (one carries nine):
--- variant spellings, corrections, and notes such as "wrong barcode". The label
--- is the description used on the most lines, ties broken alphabetically —
--- deterministic between builds, and preferring what the business used over the
--- latest text, which is often a one-off note.
---
--- `item_type` is constant per code by construction, hence `any_value`;
--- `_retail.yml` tests that it stays so.
+-- One row per stock code the retailer ever transacted. The label is the
+-- description used on the most lines, ties broken alphabetically, so a rebuild
+-- picks the same one (_retail.yml has the counts).
 with lines as (
     select * from {{ ref('stg_retail_lines') }}
 ),
@@ -29,6 +21,7 @@ labels as (
 activity as (
     select
         stock_code,
+        -- Constant per code by construction; `_retail.yml` tests that it stays so.
         any_value(item_type) as item_type,
         count(*) as n_lines,
         count(distinct invoice) as n_invoices,

@@ -51,9 +51,9 @@ one; the page is `retail.md`.
 
 - **Returns have no foreign key**, so `fct_retail_returns` infers the link with
   an `asof left join` to the same customer's most recent earlier purchase of the
-  same product. 87.6% match cleanly, 2.0% match a *smaller* purchase, 8.4% have
+  same product. 87.7% match cleanly, 2.0% match a *smaller* purchase, 8.4% have
   no prior purchase in the window, 1.9% have no customer id. **The 2.0% is the
-  interesting number**, not the 87.6% — it is the rule being wrong rather than
+  interesting number**, not the 87.7% — it is the rule being wrong rather than
   the data being absent. Reported per row instead of tuned into one headline; the
   median return comes back in 10 days, which is the evidence the rule isn't
   latching onto arbitrary sales.

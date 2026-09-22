@@ -13,17 +13,17 @@ models:
       **The published answer to "what is a country" in this warehouse.** It is
       what `dim_country_year` is crossed with, what `fct_cbam_exposure` resolves
       its annex names against, and what a release consumer joins to instead of
-      deduplicating 62,928 spine rows. Until it existed the only country
-      dimension was `stg_country`, a *staging* model that five models across
-      three groups reached into — which is why that model still carries an
-      `access: protected` override, and why the override's reason is now two
-      staging peers rather than a mart in another domain.
+      deduplicating 62,928 spine rows. `stg_country` is the `reference` group's
+      working copy of one API response; this is the contracted, `public` table
+      that ships as its own Parquet file. The facts that also carry
+      `country_name`, `region` and `income_group` inline keep them, for the
+      reason in `docs/WAREHOUSE.md`.
 
       Its `income_group` is the World Bank's **current** classification applied
       to every year, because the `/country` endpoint publishes no history. A
       country reclassified in 2019 reads as its 2026 class in a 1990 rollup.
-      That is a Type-1 dimension attribute and the warehouse has no Type-2 for
-      it; treat "emissions by income group" over long spans accordingly.
+      That is a Type-1 attribute; `dim_country_income_history` holds the
+      classification as it stood each year.
     columns:
       - name: country_iso3
         description: >
@@ -129,10 +129,9 @@ models:
       series reaches, dense and gapless by construction. 10,227 rows today, and
       both ends move with the data rather than being pinned.
 
-      The warehouse ran without one until the daily FX rates landed, because
-      nothing here had a grain finer than a year. It exists so that "which
-      quarter is this", "is this a weekday" and "which fiscal year does this fall
-      in" are answered by a join and answered identically everywhere.
+      It exists so that "which quarter is this", "is this a weekday" and "which
+      fiscal year does this fall in" are answered by a join and answered
+      identically everywhere. The annual models join on `year`, not a date.
 
       Two things it deliberately does not claim. It is **not a market calendar**
       — the ECB's TARGET closures are not derivable from any weekday rule, so
@@ -306,11 +305,11 @@ models:
       **Published because every other `income_group` in this warehouse is a
       Type-1 attribute.** The `/country` endpoint serves only the current
       classification, so the 2026 answer is stamped on 1990 wherever a model
-      groups by it — and 45% of the economies classified at both ends of this
+      groups by it — and 49% of the economies classified at both ends of this
       table changed group in between. That makes "emissions by income group in
       1990" a 2026 grouping of 1990 emissions.
 
-      Nothing is repointed at this yet. It is the fact published beside the
+      Nothing is repointed at this. It is the fact published beside the
       existing column so the distortion is one query rather than an argument;
       whether `dim_country_year.income_group` becomes as-of-year is a contract
       change on eight relations and is deliberately a separate decision.
@@ -483,7 +482,7 @@ models:
       currencies. Sparse on purpose: no row on a weekend, a TARGET holiday, or
       for a currency outside its quoted lifetime.
 
-      **The project's first and only incremental model.** Every other table here
+      **The project's only incremental model.** Every other table here
       is a re-derivation of a source that is fully re-fetched, so rebuilding it
       is how a restatement gets picked up rather than waste. This one grows by
       ~30 rows a day forever and a published fixing never changes, which is the
@@ -559,6 +558,12 @@ models:
       `fx_max_carry_forward_days`, because the alternative is filling Iceland's
       nine-year suspension with a pre-collapse rate. `rate_source_date` says
       which fixing every row is quoting.
+
+      Each currency's rows run from its first fixing to its last, so the kuna
+      stops on 2022-12-30 rather than being carried into the euro era. **For a
+      rate over a period, use `fct_fx_rates_periods`; do not average this
+      table**: the carry repeats Friday's fixing on Saturday and Sunday, so a
+      monthly average here averages the calendar, not the market.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

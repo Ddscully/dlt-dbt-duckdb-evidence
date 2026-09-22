@@ -1,18 +1,5 @@
--- The calendar. One row per day, dense, no gaps by construction.
--- Grain: one row per date_day.
---
--- So that "which quarter", "is this a weekday" and "which fiscal year" are a
--- join answered identically everywhere, not an expression re-derived per query.
---
--- 1. **The span comes from the data**: whole calendar years around the FX
---    series, the daily data the warehouse has. The annual models join on
---    `year`, not a date.
--- 2. **ISO year is not calendar year.** 2021-01-01 is in ISO week 53 of 2020 and
---    2019-12-30 in ISO week 1 of 2020, so pair `iso_week` with `iso_year` (or use
---    `iso_week_start_date`), never with `year`.
--- 3. **The fiscal columns are a policy** from the `fiscal_year_start_month` var,
---    carried on every row. `fiscal_year` is the calendar year the fiscal year
---    ends in, so it equals `year` when the var is 1.
+-- The calendar: one row per day, whole years around the FX series. What it does
+-- not claim (a market calendar) and the ISO and fiscal traps are _reference.yml.
 with bounds as (
     select
         date_trunc('year', min(rate_date)) as first_day,
@@ -45,9 +32,7 @@ parts as (
 fiscal as (
     select
         *,
-        -- The fiscal year containing this day starts on the most recent
-        -- occurrence of `fiscal_year_start_month` — this year's if we are past
-        -- it, last year's if we are not.
+        -- The most recent `fiscal_year_start_month` on or before this day.
         case
             when month >= fiscal_year_start_month
                 then make_date(year, fiscal_year_start_month, 1)
@@ -80,15 +65,13 @@ select
     case when month <= 6 then 'S1' else 'S2' end as half,
     make_date(year, case when month <= 6 then 1 else 7 end, 1) as half_start_date,
 
-    -- ISO weeks. `iso_year` travels with `iso_week` or the pair is wrong at both
-    -- ends of the year — see the header.
+    -- ISO weeks: pair `iso_week` with `iso_year`, never with `year`.
     iso_year,
     iso_week,
     iso_year || '-w' || lpad(cast(iso_week as varchar), 2, '0') as iso_week_label,
     cast(date_day - (day_of_week - 1) as date) as iso_week_start_date,
 
-    -- Generic weekday flags, not a market calendar: TARGET closures show up as
-    -- absences in `fct_fx_rates_daily` rather than being asserted here.
+    -- Weekday flags, not a market calendar.
     day_of_week,
     dayname(date_day) as day_name,
     day_of_week <= 5 as is_weekday,

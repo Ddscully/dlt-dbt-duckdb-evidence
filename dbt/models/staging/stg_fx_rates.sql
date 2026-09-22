@@ -1,14 +1,6 @@
--- ECB daily euro foreign-exchange reference rates, from Frankfurter.
--- Grain: one row per (rate_date, currency_code).
---
--- The landing table is already long (the resource unpivots the API's payload),
--- so this is a rename, a cast and the reciprocal. Gaps are not filled — weekends,
--- holidays and unquoted currencies are absent; `marts.fct_fx_rates_daily`
--- decides what to do about them.
---
--- **Both directions ship**, because an inverted rate still yields a plausible
--- number: `units_per_eur` is the ECB's quote (1 EUR buys 1.15 USD),
--- `eur_per_unit` its reciprocal.
+-- ECB daily euro reference rates, from Frankfurter: a rename, a cast and the
+-- reciprocal. Gaps stay gaps; `fct_fx_rates_daily` decides what to do about them.
+-- Both directions ship, because an inverted rate still yields a plausible number.
 with source as (
     select * from {{ source('raw', 'ecb_fx_rates') }}
 )

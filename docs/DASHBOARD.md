@@ -6,9 +6,9 @@ Eleven pages, built from the modelled layers with [Evidence](https://evidence.de
 No year is hardcoded: every page reads the latest year each metric family can
 actually populate from
 [`reports/sources/warehouse/latest_years.sql`](../reports/sources/warehouse/latest_years.sql),
-because coverage doesn't end in the same year for all of them.
+because coverage does not end in the same year for all of them.
 
-Each page is declared as a dbt exposure in
+Each page that reads a model is declared as a dbt exposure in
 [`dbt/models/_exposures.yml`](../dbt/models/_exposures.yml), so
 `dbt ls --select +exposure:<name>` answers "what breaks if I change this" for one
 page. Building the site locally is [`reports/README.md`](../reports/README.md);
@@ -16,7 +16,7 @@ what the pages are *for* is below.
 
 ## The pages
 
-| Page | What's on it |
+| Page | What is on it |
 |------|--------------|
 | **Home** | A routing page: pick the analysis that matches what you're responsible for. |
 | **CBAM Exposure** | What a tonne of an imported CBAM good costs at the EU border, by where it was made: Annex I of Implementing Regulation (EU) 2025/2621, as corrected by (EU) 2026/1740, priced at a carbon price you choose. Semi-finished steel runs 63× from Azerbaijan to Indonesia, and the ranking sorts by *production route* rather than by the national grid, which is the opposite of the Scope 2 story. A screening tool, not a filing. |
@@ -28,7 +28,7 @@ what the pages are *for* is below.
 | **Country Explorer** | The same data with a year selector on it, for checking a specific country or year yourself instead of reading a conclusion. |
 | **Coverage** | Which series actually cover which countries, by left-joining the fact onto the country-year spine so a gap is a row. Names both populations that break naive queries: territories with World Bank data and no OWID emissions, and countries with emissions and no World Bank GDP (Taiwan leads at 262 Mt, so it is silently absent from every intensity measure). |
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. |
-| **Pipeline** | dlt load times per source, rows and year spans per layer, and all 482 dbt tests with their stored failure counts, from the observability tables that `transform/pipeline_status.py` writes. |
+| **Pipeline** | dlt load times per source, rows and year spans per layer, and every data test with its stored failure count, from the observability tables that `transform/pipeline_status.py` writes. |
 
 ## How it is built and deployed
 
@@ -36,11 +36,11 @@ what the pages are *for* is below.
 is a node in the asset graph (`reports/evidence_site`), so the workflow
 materializes it instead of running npm itself. It builds against the **live**
 sources rather than the fixtures — a published dashboard showing the 17-country
-test slice would be worse than none — weekly, on demand, and on any push to
+slice the tests run on would be worse than none — weekly, on demand, and on any push to
 `main` that touches something the site is built from. That last one is a
 `paths:` allowlist rather than a `paths-ignore`, because `reports/pages/` is
 markdown and ignoring markdown would stop republishing exactly when a page
 changed.
 
-Setting this up yourself takes three things nobody tells you about; they're in
+Setting this up yourself takes three steps that are easy to miss; they are in
 [`reports/README.md`](../reports/README.md#deploying-to-github-pages).

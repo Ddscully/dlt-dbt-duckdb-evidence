@@ -50,7 +50,7 @@ The same runs are available from the UI — `just dagster`, then launch
 `load_retail` and `full_refresh` from the Jobs list, or materialize a selection
 straight off the asset graph. Three things the UI won't tell you:
 
-- **The ordering isn't enforced there either.** Launch `full_refresh` first and
+- **Nothing enforces the order between jobs.** Launch `full_refresh` first and
   it fails inside dbt with `Catalog Error: Table with name retail_invoice_lines
   does not exist!` — one layer downstream of the actual mistake.
 - **Materialize on anything partitioned is a backfill.** The button's dialog asks
@@ -84,17 +84,17 @@ the Pages workflow runs.
 partitioned in Dagster, by month, and a job takes its assets' partitions
 definition. With retail inside, `full_refresh` would be month-partitioned and its
 Materialize button a backfill. It has to run before `full_refresh`,
-because dbt reads the table it lands. The justfile recipes and all four workflows
-pair them.
+because dbt reads the table it lands. The justfile recipes pair them, and all
+four workflows run through those recipes.
 
 ## What that buys over the shell chain
 
-| | |
+| Gain | How |
 |---|---|
 | **Selective rebuilds** | `raw/wb_wdi*` reloads one API and rebuilds only what depends on it. dlt loads only that resource, so the other six keep their data. (`*` is all downstream; a bare `+` is only one layer.) |
-| **Re-runnable backfills** | `raw/wb_wdi` takes a year range (1960 → now) as run config, so a World Bank restatement older than the five-year lookback is a unit of work you can point at instead of a 190k-row full reload. A range is one request per indicator, and `merge` on `(indicator, country_code, year)` makes re-running a year a no-op. The weather archive deepens the same way. Neither is a partition, because a partitioned job's Materialize button is a backfill ([decision 0002](decisions/0002-yearly-sources-as-run-config.md)). Retail is partitioned by month, where every partition together is one read of one file. The split is on the *window* and not on load disposition: the ECB rates merge too, but their whole 27-year series is one three-second request, so a window there would buy nothing. |
+| **Re-runnable backfills** | `raw/wb_wdi` takes a year range (1960 → now) as run config, so a World Bank restatement older than the five-year lookback is a unit of work you can point at instead of a 190k-row full reload. A range is one request per indicator, and `merge` on `(indicator, country_code, year)` makes re-running a year a no-op. The weather archive deepens the same way. Neither is a partition, because a partitioned job's Materialize button is a backfill ([decision 0002](decisions/0002-yearly-sources-as-run-config.md)). Retail is partitioned by month, where every partition together is one read of one file. The split is on the *window* and not on load disposition: the ECB rates merge too, but their whole series since 1999 is one three-second request, so a window there would buy nothing. |
 | **Freshness policies** | Raw assets warn after 2 days and fail after 7; modelled assets are expected by 08:00 UTC daily. A schedule that quietly stops firing turns assets stale in the UI instead of leaving no trace. |
-| **Asset checks** | dbt's `not_null` tests show up as checks on the model they guard, next to Python checks dbt can't express: every WDI indicator present, mart reaching a recent year, dense ranks with no gaps, RFM scores not splitting ties, and the dbt build that just ran appearing in `analytics.pipeline_runs`. |
+| **Asset checks** | dbt's data tests show up as checks on the model they guard, next to eight Python checks dbt cannot express: every WDI indicator present, the mart reaching a recent year, the FX rates reaching the present, dense ranks with no gaps, RFM scores not splitting ties, the weather revisions derivable from the lake, every site page rendered, and the dbt build that just ran appearing in `analytics.pipeline_runs`. |
 | **Lineage that can't drift** | The graph is derived from the dbt manifest and the dlt source, not maintained alongside them. |
 
 A `daily_refresh` schedule (06:00 UTC) is defined but ships **stopped**. Opening

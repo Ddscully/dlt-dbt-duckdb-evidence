@@ -1,30 +1,6 @@
--- FX rates aggregated to the periods the rest of the warehouse thinks in.
--- Grain: one row per (period_type, period_start_date, currency_code), where
--- period_type is month / quarter / half / year.
---
--- **This model exists for one decision: spot or average.** Convert a *stock* (a
--- balance, a position at an instant) at the period-end rate and a *flow*
--- (revenue, spend over the period) at the period average. The wrong one still
--- yields a plausible number, so both ship, named for what they are, and
--- `period_end_vs_avg_pct` measures the gap — for EUR/USD, +11.7% in 2003.
---
--- * The average is over published fixings (`fct_fx_rates_published`), not
---   calendar days: the dense daily table repeats Friday's rate over the weekend,
---   weighting the average toward the days next to closures.
--- * `avg_eur_per_unit` is not 1 / `avg_units_per_eur` — the mean of reciprocals
---   is not the reciprocal of the mean. Each is the mean of its own series; the
---   period-end columns invert exactly.
--- * `period_is_complete` is false for the period in progress, whose average
---   covers only the days so far.
--- * For the rate on a given date use `fct_fx_rates_daily`, which gap-fills.
---
--- `period_end_is_stale` flags a period-end fixing older than the daily model's
--- carry-forward cap. It is computed from `last_rate_date` rather than joined
--- from `fct_fx_rates_daily`, because the daily model has no rows once a currency
--- leaves the ECB panel and a join would miss most stale period-ends. It
--- discloses rather than nulls: the last real fixing is what a period close at
--- that date would have used. The measured cases (the rouble's 2022 year end,
--- 305 days stale) are in the `currency-and-calendar` skill.
+-- FX rates by month, quarter, half and year, with both the period average (for
+-- flows) and the period-end rate (for stocks). Why both, and the subtleties, are
+-- the description in _reference.yml; staleness is the `currency-and-calendar` skill.
 with published as (
     select * from {{ ref('fct_fx_rates_published') }}
 ),
@@ -154,8 +130,8 @@ select
     a.last_rate_date,
     a.period_end_date <= a.series_end_date as period_is_complete,
 
-    -- Age of the fixing behind `period_end_*` at the period (or series) end, and
-    -- whether it exceeds the carry `fct_fx_rates_daily` allows.
+    -- Computed, not joined from `fct_fx_rates_daily`: that model has no rows once
+    -- a currency leaves the ECB panel, which is when most stale period-ends occur.
     date_diff('day', a.last_rate_date, least(a.period_end_date, a.series_end_date))
         as period_end_stale_days,
     -- DuckDB resolves a select-list alias laterally, so the age is written once.

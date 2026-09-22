@@ -1,15 +1,6 @@
--- Order lines, priced in three currencies and joined to the calendar.
--- Grain: one row per (invoice, line_number) — the warehouse's finest grain.
---
---   * **Converted at the transaction date's rate.** A line is a flow at an
---     instant, so the daily fixing is its rate; the spot-or-average question of
---     `fct_fx_rates_periods` arises only on aggregation, and summing converted
---     lines answers it.
---   * **The rate may be carried forward, and the row says so.** 139,658 lines
---     (13.1%) fall on a day the ECB did not quote, so `fx_rate_source_date` and
---     `fx_rate_is_carried_forward` travel with the amount. Every one is a
---     Sunday: this business trades on Sundays (139,256 lines, against 402 on
---     Saturdays) and closes on the TARGET holidays.
+-- Order lines, priced in three currencies at the transaction date's rate and
+-- joined to the calendar. Why that rate, and the carried-forward Sundays, are the
+-- description in _retail.yml.
 with lines as (
     select * from {{ ref('stg_retail_lines') }}
 ),

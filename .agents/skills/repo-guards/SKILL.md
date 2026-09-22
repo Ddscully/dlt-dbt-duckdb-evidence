@@ -1,6 +1,6 @@
 ---
 name: repo-guards
-description: The hand-maintained lists in this repo and the tests that hold them to the tree — SOURCE_TABLES, RAW_DESCRIPTIONS, WB_WDI_INDICATORS, ATTRIBUTION, pages.yml's path allowlist, the seven asset-check bodies, counts cited in prose — plus the offline fixture dispatch table behind INGEST_FIXTURES. Use when adding or editing one of those lists, writing a guard for a duplication, re-recording fixtures, or when a citation, count, workflow-path or fixture test fails.
+description: The hand-maintained lists in this repo and the tests that hold them to the tree — SOURCE_TABLES, RAW_DESCRIPTIONS, WB_WDI_INDICATORS, ATTRIBUTION, pages.yml's path allowlist, the eight asset-check bodies, counts cited in prose — plus the offline fixture dispatch table behind INGEST_FIXTURES. Use when adding or editing one of those lists, writing a guard for a duplication, re-recording fixtures, or when a citation, count, workflow-path or fixture test fails.
 ---
 
 # Hand-maintained lists, their guards, and the fixtures (`tests/`)
@@ -153,7 +153,7 @@ section here. The mutation method these guards were written with is in the
   ever executed by a full materialize, so `just test` could not tell a working
   check from one whose logic had inverted, and the answer arrived minutes later
   in `just test-pipeline` instead of in the `just test` loop.
-  `AssetChecksDefinition` is callable and none of the seven take a `context`, so
+  `AssetChecksDefinition` is callable and none of the eight take a `context`, so
   no execution harness is needed — point the module's `DUCKDB_PATH` (or
   `LAKEHOUSE_DIR`, or `page_routes`) at a throwaway, call the check, read the
   `AssetCheckResult`. **Anything under `tests/` importing the orchestration layer

@@ -1,15 +1,6 @@
--- EU household electricity prices at Eurostat's own grain.
--- Grain: one row per (country_iso3, year, half).
---
--- The country-stats group's one sub-annual fact. Averaging the halves, as
--- `fct_emissions_energy.electricity_price_eur_kwh` must to sit on the
--- country-year spine, erases the sharpest price movements: use this for prices
--- over time, the annual column for joining prices to emissions or GDP.
---
--- The USD columns put a euro price beside dollar-denominated GDP. A half-year
--- price is a flow, so it converts at the period average (see
--- `fct_fx_rates_periods`); the average used and the closing rate not used both
--- ship beside it.
+-- EU household electricity prices at Eurostat's own half-year grain. Use this
+-- for prices over time and `fct_emissions_energy`'s annual column only to join
+-- prices to emissions or GDP (see _country_stats.yml).
 with semiannual as (
     select * from {{ ref('stg_eu_electricity_prices_semiannual') }}
 ),

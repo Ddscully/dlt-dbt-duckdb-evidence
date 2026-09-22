@@ -62,9 +62,10 @@ it cost to learn:
   clear ids in `staging` beside hashed marts, with matching row counts and no
   error.
 - **The declared set is expanded by column name across every schema**, because
-  copies of the identifier appear where nobody would classify them by hand —
-  `dbt_test__audit` tables, and dlt's `raw_staging` merge scratch, a full copy of
-  the landing table. The export then verifies what it rewrote against
+  copies of the identifier appear where nobody would classify them by hand — 47
+  of the 53 relations carrying it in `data-2026-09-01` are `dbt_test__audit`
+  tables, and dlt's `raw_staging` merge scratch shipped 824,364 clear ids when
+  `raw` still lived in the file. The export then verifies what it rewrote against
   `^[0-9a-f]{16}$`, which a five-digit id cannot match.
 - **`||`, never `concat()`.** `concat` ignores NULLs, so all 243,007 anonymous
   rows would hash the bare salt onto one pseudonym indistinguishable from a real
@@ -155,8 +156,8 @@ it cost to learn:
   manifest carries both.** `duckdb_version` answers "who wrote this";
   `storage_version` answers "can I open it", which is the only question a
   consumer has. They differ: DuckDB 1.x writes format **64** by default — the
-  one `v0.10.0` through `v1.1.3` all read — so a file written by 1.5.5 opens on
-  a client five years older. The release notes said "Written by DuckDB 1.5.5.
+  one every DuckDB from `v0.10.0` (February 2024) on reads — so a file written
+  by 1.5.5 opens on a client more than two years older. The release notes said "Written by DuckDB 1.5.5.
   Older clients may not read the storage format" for the whole life of the
   release, which was unmeasured and, it turns out, *pessimistic*.
   - **There is no SQL that answers it.** `duckdb_databases()` returns an empty

@@ -1,31 +1,6 @@
--- The euro reference rates on *every* calendar day, gap-filled.
--- Grain: one row per (date_day, currency_code), within each currency's quoted
--- lifetime.
---
--- The ECB publishes on TARGET settlement days, so about 30% of calendar days
--- (weekends, and closures such as Good Friday, 1 May and 25-26 December) carry
--- no fixing. This model carries the last fixing forward, as a finance system
--- does: Sunday's contractual rate is Friday's. (Interpolating would invent a rate
--- nobody could deal at; nulls would push the decision into every query.)
---
--- The carry has two limits, both handled here:
---
--- 1. **Nothing outside a currency's lifetime.** The spine runs from
---    `first_published_date` to `last_published_date`, so the kuna stops on
---    2022-12-30 rather than being carried into the euro era.
--- 2. **A suspended quote is not a long weekend.** The carry is capped at
---    `fx_max_carry_forward_days`. Every closure fits; two interior gaps do not,
---    both currency crises — the krona's 3,333 days from 2008 to 2018 and the
---    Argentine peso's 26 in 2002. Those rows exist with `is_rate_stale` set and
---    a null rate.
---
--- `rate_source_date` says which fixing each row quotes.
---
--- **For a rate over a period, use `fct_fx_rates_periods`; do not average this
--- table.** Gap-filling weights it — Friday's fixing appears on Saturday and
--- Sunday too — so a monthly average here averages the calendar, not the market.
--- Most currency-months come out slightly different; the `currency-and-calendar`
--- skill has the measurement.
+-- The euro reference rates on every calendar day, the last fixing carried
+-- forward and capped at `fx_max_carry_forward_days`. The why, and what not to do
+-- with it, are the description in _reference.yml.
 with calendar as (
     select * from {{ ref('dim_date') }}
 ),

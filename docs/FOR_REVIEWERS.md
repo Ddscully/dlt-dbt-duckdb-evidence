@@ -12,7 +12,7 @@ of it estimated.
 | [`reports/pages/findings.md`](../reports/pages/findings.md) | the analysis, and the "So what" box under each finding |
 | [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including why WDI and weather backfill by run config rather than partitions |
 | [`dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest. Also the repo's one versioned model, aliased back to the bare relation name so the rename is invisible to its consumers ([`_v1`](../dbt/models/marts/country_stats/fct_emissions_energy_v1.sql) is a compatibility view over it, not a second copy) |
-| [`ingest/pipeline.py`](../ingest/pipeline.py) | seven sources, two write dispositions, and why that has to be two `run()` calls |
+| [`ingest/pipeline.py`](../ingest/pipeline.py) | eight resources, two write dispositions, and why that has to be two `run()` calls |
 | [`AGENTS.md`](../AGENTS.md) | the gotchas every session needs, written down at the point they were learned — the rest are in the skills under `.agents/skills/` |
 
 ---
@@ -55,8 +55,9 @@ findings page:
 - **Scope 2 disclosure.** `carbon_intensity_elec_g_kwh` *is* the location-based
   grid emission factor, the figure a multi-site company multiplies its metered
   kWh by to produce the electricity line in a CSRD, SECR or CDP filing. Across
-  the largest grids in 2024 it runs 30 g/kWh (Norway) to 717 g/kWh (South Africa), so the
-  same 100 GWh site reports ~3 kt CO₂e or ~72 kt depending only on where it sits.
+  the largest grids in 2024 it runs 30 g/kWh (Norway) to 717 g/kWh (South
+  Africa), so the same 100 GWh site reports ~3 kt CO₂e or ~72 kt depending only
+  on where it sits.
 - **Energy cost exposure.** EU household electricity prices at their *published*
   half-year grain, not flattened to an annual average, because the annual
   average hides the thing you'd want to see. The Netherlands went €0.034/kWh in
@@ -124,7 +125,7 @@ Measured on this machine against the live APIs, per stage:
 
 | Stage | Time | Notes |
 |-------|------|-------|
-| `just ingest` | **29.6 s** | seven sources, with the 45 MB retail workbook already cached — its download and parse add ~12 s to a cold run |
+| `just ingest` | **29.6 s** | eight resources, with the 45 MB retail workbook already cached — its download and parse add ~12 s to a cold run |
 | `just dbt-build` | **31.4 s** wall, **24.5 s** of dbt's own | 561 built nodes: 33 models, 2 snapshots, 8 seeds, 482 data tests and 36 unit tests (dbt's own total of 571 adds the 10 exposures, which it counts but never builds); contracts are enforced, which is a `describe` per mart |
 | `just transform` | **1.8 s** | two Polars models |
 | `just pipeline-status` | **2.5 s** | observability tables |
@@ -133,11 +134,10 @@ Measured on this machine against the live APIs, per stage:
 Artifacts: a 282 MB DuckDB file, a 111 MiB DuckLake landing zone and a 165 MiB
 Evidence site.
 
-**Two things move these figures without the pipeline changing.** A cold
-workbook cache adds its download and parse to ingest, so the table says which it
-measured. And
-`dbt-build` quotes both dbt's own time and the wall clock, because the gap is
-`dbt deps` and startup, and one number would silently mean either.
+**Two things move these figures without the pipeline changing.** A cold workbook
+cache adds its download and parse to ingest, so the table says which it
+measured. And `dbt-build` quotes both dbt's own time and the wall clock, because
+the gap is `dbt deps` and startup, and one number would silently mean either.
 
 **A run also costs disk, and nothing reclaims it.** The DuckLake landing zone
 went 72 → 111 MiB across the single ingest above, because DuckLake retains a
@@ -169,8 +169,8 @@ last 40:
 it.** It first read 92 s — measured before the retail source, the
 weather source and the DuckLake move, so 66% low. Corrected to 153 s, it is
 191 s eight days later: in that window the offline graph gained a mart, a seed
-and the tests that came with them. The two live workflows barely moved, because their cost is the
-public APIs rather than the build.
+and the tests that came with them. The two live workflows barely moved, because
+their cost is the public APIs rather than the build.
 
 Nothing could have said so either time. `tests/test_documented_counts.py` guards
 counts by scanning integers in front of a *test*-noun, and a **timing** has no
@@ -184,8 +184,8 @@ the public APIs rather than noise to be averaged away.
 GitHub Actions' free tier, no cloud warehouse, no credentials, no bill. That is a
 property of the scale, not a virtue of the design. The part that transfers is
 that the numbers are *measured and tracked*: `analytics.pipeline_*` records load
-times, per-layer inventory, per-test failure counts and — since
-`analytics.pipeline_runs` landed — the per-node cost of every `dbt build`, all
+times, per-layer inventory, per-test failure counts and, in
+`analytics.pipeline_runs`, the per-node cost of every `dbt build`, all
 rendered by [`reports/pages/pipeline.md`](../reports/pages/pipeline.md). On a
 warehouse that bills by the second, that table is where the invoice comes from.
 
@@ -212,8 +212,9 @@ number before.
    `collect(engine="streaming")`. Its first run broke `retail_rfm`'s
    sort ties in a different order. Both sorts now end on a unique key, and
    after that change it matched the default engine row for row, five runs
-   each. Past that, the window belongs in dbt SQL. The layer exists to demonstrate heavy Python transforms, and these
-   are not heavy enough to need one.
+   each. Past that, the window belongs in dbt SQL. The layer exists to
+   demonstrate heavy Python transforms, and these are not heavy enough to need
+   one.
 2. **The single-writer lock — and it is second here only because this list is
    ordered by *volume*.** It is not a scale limit at all: one writer xor many
    readers binds at 43k rows exactly as hard as at 43M, which is why `just
@@ -244,24 +245,23 @@ number before.
 
    It isn't free. Writes centralise on one server process, DuckDB's own ceiling
    is a few thousand a second and a few terabytes, there's no distributed query
-   processing, and it's beta until 2.0 this autumn. And I haven't put dbt's
+   processing, and it's beta until DuckDB 2.0. And I haven't put dbt's
    build graph through it. That's the run that would settle it.
 3. **Full-refresh materialisation, for 32 of the 33 models.** Every mart is
    `+materialized: table` and rebuilt whole (19 tables, 13 views, one
-   incremental). That is deliberate rather than
-   pending: each one re-derives a source that gets fully re-fetched, so
-   rebuilding is *how* an upstream restatement is picked up, and the whole
-   graph, 1.07M-row retail fact included, rebuilds in 24.5 s. The exception is the
-   one model where the argument reverses:
-   `fct_fx_rates_published` is `incremental`, because a published ECB fixing
-   never changes and the table grows ~30 rows a day forever. At 43M rows the
-   question is which of the 19 table models join it, and the cost of each
-   is the tension
-   WDI's lookback window already documents: a restated year needs a full refresh,
-   so "incremental" and "picks up restatements" are in conflict and you have to
-   choose per model. Today's numbers are honest and unimpressive: 0.16 s
-   incremental against 0.24 s full-refresh at 265k rows. The argument is the
-   shape of the curve, not the saving.
+   incremental). That is deliberate rather than pending: each one re-derives a
+   source that gets fully re-fetched, so rebuilding is *how* an upstream
+   restatement is picked up, and the whole graph, 1.07M-row retail fact
+   included, rebuilds in 24.5 s. The exception is the one model where the
+   argument reverses: `fct_fx_rates_published` is `incremental`, because a
+   published ECB fixing never changes and the table grows ~30 rows a day
+   forever. At 43M rows the question is which of the 19 table models join it,
+   and the cost of each is the tension WDI's lookback window already documents:
+   a restated year needs a full refresh, so "incremental" and "picks up
+   restatements" are in conflict and you have to choose per model. Today's
+   numbers are honest and unimpressive: 0.16 s incremental against 0.24 s
+   full-refresh at 265k rows. The argument is the shape of the curve, not the
+   saving.
 4. **The Evidence site.** It ships Parquet to the browser and queries it with
    DuckDB-WASM. Lovely at 94 MB, wrong at 94 GB — that becomes a pre-aggregated
    serving layer.
@@ -269,8 +269,8 @@ number before.
 What *doesn't* break, which is the more interesting half: dlt already merges
 incrementally on a real primary key with year-range backfills behind it, and the
 fixtures keep CI offline and constant-time. What grows with the landing zone is
-the Parquet that §3's retained snapshots keep alive: 318 MiB of data files, of which
-55 MiB were live.
+the Parquet that §3's retained snapshots keep alive: 318 MiB of data files, of
+which 55 MiB were live.
 
 ## 5. What would I do differently?
 
@@ -360,8 +360,8 @@ supposed to prevent.
 The paper's Established is *"documentation is the default condition of
 ingestion"*; here the default condition is *typing* — a column cannot enter a
 mart without a `data_type` and a contract, but it can enter without a sentence.
-42% is not a bad number for prose coverage and it is not Established, and the
-gap is worth naming because the repo reads as more documented than that: the
+Under half is not a bad number for prose coverage and it is not Established, and
+the gap is worth naming because the repo reads as more documented than that: the
 columns that carry an explanation are the ones where an explanation was needed,
 which is a defensible policy and not the same claim.
 
@@ -399,7 +399,7 @@ eight tables each feeding a named model. Of the rest:
   growing ~39 MiB per ingest with nothing expiring snapshots — is named there
   rather than left flattering.
 - **Governance as afterthought (Pride)** — **partly, and the record shows it.**
-  The personal-data classification arrived as idea 30, well after the data it
+  The personal-data classification arrived well after the data it
   classifies; the release published `raw_staging.retail_invoice_lines` with
   824,364 clear customer ids before anyone looked. It was found and closed, but
   it was found late, which is the sin's exact shape.
@@ -413,6 +413,6 @@ eight tables each feeding a named model. Of the rest:
 
 ---
 
-<sub>Ideas and their post-mortems accumulate in `AGENTS.md` and the skills under
-`.agents/skills/`; they are the files to read if you want to know what this cost
-to learn rather than what it does.</sub>
+<sub>Post-mortems accumulate in `AGENTS.md`, the skills under `.agents/skills/`
+and the decision records in `docs/decisions/`; they are the files to read if you
+want to know what this cost to learn rather than what it does.</sub>

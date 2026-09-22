@@ -7,19 +7,12 @@
     )
 }}
 
--- Every euro reference rate the ECB has published, as published.
--- Grain: one row per (rate_date, currency_code). Sparse by design — no row on a
--- weekend, a TARGET holiday, or outside a currency's quoted lifetime.
---
--- **The project's only incremental model**, because it is the only table that
--- grows by appending facts that never change: a published fixing is not
--- restated, so a full rebuild would reprocess all history to add one day. Every
--- other model is rebuilt, which is how restatements reach it.
+-- Every euro reference rate the ECB has published, as published. Why it is the
+-- only incremental model is the description in _reference.yml.
 --
 -- `on_schema_change='fail'`: dbt refuses `ignore` on a contracted incremental
--- model, and a new column means the model changed — a person should decide on
--- `--full-refresh`. `delete+insert` on the unique key, not an append, because
--- the ingest re-asks for a lookback window whose rows would otherwise duplicate.
+-- model, and a new column means the model changed, so a person should decide on
+-- `--full-refresh`.
 with rates as (
     select s.* from {{ ref('stg_fx_rates') }} as s
 

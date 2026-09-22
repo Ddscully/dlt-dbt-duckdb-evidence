@@ -1,23 +1,6 @@
--- Returns, matched back to the sale they reverse, with the match classified.
--- Grain: one row per product return line, matched or not.
---
--- The match is inferred in `int_retail_return_matches` (the same customer's most
--- recent prior purchase of the product); this model decides what counts as a
--- match and reports how often it failed:
---
---   * **352 lines have no customer id** and cannot be matched; they stay, as
---     `match_status = 'no customer id'`, rather than flattering the rate.
---   * **A return can predate the extract's purchase**, when the goods were
---     bought before 2009-12-01 — left-censoring, the largest category of miss.
---   * **Quantity is checked, not required.** A partial return is a match; a
---     return larger than the purchase suggests the wrong sale
---     (`quantity_is_consistent`).
---
--- Over 18,286 lines: 87.7% match cleanly, 2.0% match a smaller purchase, 8.4%
--- have no prior purchase in the window and 1.9% no customer. The 2.0% is the
--- rule being wrong rather than the data absent, and is an upper bound — see
--- `int_retail_return_matches`. The median return comes back 10 days after
--- purchase, the plausible shape; arbitrary matches would spread flat.
+-- Returns, matched back to the sale they reverse (the match is inferred in
+-- `int_retail_return_matches`), with the match classified. How often it fails,
+-- and why, is the description in _retail.yml.
 with matched as (
     select * from {{ ref('int_retail_return_matches') }}
 ),
@@ -39,9 +22,8 @@ select
     r.invoice_ts,
     r.invoice_date,
     r.invoice_month,
-    -- The return's own date. One key: `original_invoice_date` is a second role
-    -- on the dimension and would need another name, which the bus matrix would
-    -- not read as conformance.
+    -- The return's own date only: a second role would need another name, which
+    -- the bus matrix would not read as conformance.
     d.date_key,
     r.quantity_returned,
     r.unit_price,

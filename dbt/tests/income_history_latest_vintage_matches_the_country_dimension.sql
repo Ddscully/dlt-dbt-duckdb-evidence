@@ -2,7 +2,7 @@
 -- dimension's current answer, because they are the same classification reached
 -- two ways: `dim_country.income_group` is what the World Bank `/country`
 -- endpoint serves today, and this table's latest year is the newest column of
--- `OGHIST.xlsx`. Measured at 0 disagreements over 213 economies when it shipped.
+-- `OGHIST.xlsx`.
 --
 -- **A staleness detector, hence `warn`.** The World Bank reclassifies every
 -- July; the endpoint moves at once and the seed only when

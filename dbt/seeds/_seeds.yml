@@ -41,8 +41,8 @@ seeds:
       not served by the `/country` endpoint the other World Bank resources read.
 
       It exists because `dim_country.income_group` is the *current*
-      classification applied to every year the warehouse holds, and 45% of
-      economies moved group between the two ends of this table.
+      classification applied to every year the warehouse holds, and 49% of the
+      economies classified at both ends of this table moved group between them.
       `marts.dim_country_income_history` publishes the comparison.
     columns:
       - name: country_iso3

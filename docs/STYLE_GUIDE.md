@@ -41,7 +41,7 @@ down and applied consistently.
 | dbt Labs says | We do | Why |
 |---|---|---|
 | Lines wrap at 80 chars | 120 (`max_line_length` in `.sqlfluff`) | The wide mart's column list and the ISO3/year join predicates read worse when folded at 80. |
-| Avoid table aliases in join conditions | Short aliases allowed in marts, and in the four staging models that join or union | `fct_emissions_energy` joins five CTEs on the same two keys; `c.year = e.year` is more scannable than the full CTE name repeated ten times. This row used to end "staging models select from a single source and take no alias at all", which was true when it was written and is not now: `stg_country`, `stg_retail_lines`, `stg_weather_daily` and `stg_eu_electricity_prices_semiannual` all take one — see the structure deviations below. |
+| Avoid table aliases in join conditions | Short aliases allowed in marts, and in the four staging models that join or union | `fct_emissions_energy` joins five CTEs on the same two keys; `c.year = e.year` is more scannable than the full CTE name repeated ten times. The staging models that join or union (`stg_country`, `stg_retail_lines`, `stg_weather_daily`, `stg_eu_electricity_prices_semiannual`) take one for the same reason — see the structure deviations below. |
 | `group by 1, 2` (positional) | **[lint]** Name the columns: `group by country_iso3, year` | Both staging models that aggregate already spell them out, and the grain is the whole contract here — writing it in the `group by` makes a regression visible in the diff. |
 | Sort/dist keys in-model | N/A | DuckDB has neither. Materialization lives in `dbt_project.yml` per directory. |
 
@@ -57,7 +57,7 @@ down and applied consistently.
   do, not what they contain.
 - **[convention]** A CTE duplicated across two models becomes its own model.
 - **[convention]** Open the file with a `--` comment stating what the model is
-  and its grain. Both existing marts do this; keep it up.
+  and its grain.
 
 ### Deliberate deviations from dbt's structure guide
 
@@ -85,25 +85,25 @@ publisher is the point to re-ask.
 
 ## Naming
 
-The grain of every staging model and every fact is **`(country_iso3, year)`**.
-That contract drives most of the naming below.
+The dominant grain is **`(country_iso3, year)`**; the models that keep a finer
+or coarser one are listed in [`WAREHOUSE.md`](./WAREHOUSE.md#schemas). That
+contract drives most of the naming below.
 
 - **[convention]** `snake_case` everywhere — schemas, tables, columns.
-- **[convention]** Model prefixes: `stg_` for staging views, `fct_` for facts,
-  `dim_` for dimensions, `snap_` for snapshots. Underscores only, never dots.
+- **[convention]** Model prefixes: `stg_` for staging views, `int_` for
+  intermediate views, `fct_` for facts, `dim_` for dimensions, `snap_` for
+  snapshots. Underscores only, never dots.
 - **[convention]** Join keys keep the same name in every model that has them:
   `country_iso3` and `year`, and equally `currency_code` and `date_key` — the
   key a conformed dimension publishes is the key every fact spells. Not `iso3`,
   not `iso_code`, not `country_code`. Renaming to the contract is the staging
   layer's job — `stg_co2` maps OWID's `iso_code` to `country_iso3` on the way
   through, and `stg_fx_rates` maps the landing table's `quote_currency` to
-  `currency_code`. **This rule was written before anything checked it, and two
-  marts broke it for months**: `fct_fx_rates_published` and
-  `fct_fx_rates_periods` said `quote_currency` while `dim_currency` published
-  `currency_code` and their own sibling `fct_fx_rates_daily` spelled it the
-  conformed way. Every guard here is scoped to one relation, so a key spelled
-  two ways is three green models; the bus matrix in `docs/WAREHOUSE.md` is what
-  finally saw it, because it is the only thing that reads across relations.
+  `currency_code`. **Only the bus matrix checks this rule**, in
+  [`WAREHOUSE.md`](./WAREHOUSE.md#the-bus-matrix), because every other guard
+  is scoped to one relation: two mart models once said `quote_currency` beside
+  a sibling that spelled it the conformed way, and that was three green models
+  until the matrix read across them.
 - **[convention]** Qualify **both** sides of a correlated subquery, always —
   `where r.currency_code = currencies.currency_code`, never
   `where r.currency_code = currency_code`. An unqualified name binds to the
@@ -128,7 +128,7 @@ That contract drives most of the naming below.
 
 Facts list columns as: **keys → dimensions → measures**, with measures grouped by
 source and a `--` comment naming the group. `fct_emissions_energy` is the
-reference implementation — `country_iso3`, the `stg_country` attributes, `year`,
+reference implementation — `country_iso3`, the country attributes from the spine, `year`,
 then `-- emissions`, `-- energy`, `-- economic / social (World Bank WDI)`.
 
 ## Tests and documentation
@@ -164,7 +164,7 @@ below are the ones it can't check.
 |---|---|
 | [`.sqlfluff`](../.sqlfluff) | The **[lint]** rules above |
 | [`.pre-commit-config.yaml`](../.pre-commit-config.yaml) | Runs sqlfluff + ruff on commit |
-| [`AGENTS.md`](../AGENTS.md) | Stack gotchas and per-source quirks |
+| [`AGENTS.md`](../AGENTS.md) and [`.agents/skills/`](../.agents/skills/) | Stack gotchas, and per-source quirks in the skill for each area |
 | This file | Naming and structure conventions |
 
 Run `just lint` before committing SQL. Pre-commit runs the same check.

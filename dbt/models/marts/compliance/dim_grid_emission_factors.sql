@@ -1,11 +1,6 @@
--- Grid emission factors, packaged as a reference table rather than a chart.
---
--- The factor is also in `fct_emissions_energy`; this serves a different use: "the
--- current factor for country X, in the unit I multiply a meter reading by, with
--- its vintage and source" — hence the vintage columns.
---
--- Grain: one row per (country_iso3, year) with a published factor — not the full
--- spine, since a missing factor is an absence, not a reference value.
+-- Grid emission factors as a Scope 2 reference table, with vintage and lineage
+-- beside the number. Why it repeats `fct_emissions_energy`'s factor, and the
+-- caveats, are the description in _compliance.yml.
 with factors as (
     select * from {{ ref('stg_energy') }}
 ),

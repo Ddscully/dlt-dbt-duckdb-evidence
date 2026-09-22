@@ -32,37 +32,38 @@ Thirty-six of those tests are dbt *unit* tests, over twelve models — `dim_date
 `fct_country_weather_year`, `fct_fx_rates_daily`, `fct_fx_rates_periods`,
 `fct_retail_returns`, `fct_retail_customer_cohorts`, `dim_retail_customer` and
 the two intermediate models, `int_cbam_default_factors` and
-`int_retail_return_matches`. They run a model against fixed input rows and compare the
-entire output, rather than asserting a property of whatever the warehouse happens
-to hold — which is what lets them reach two things a data test structurally
-cannot.
+`int_retail_return_matches`. They run a model against fixed input rows and
+compare the entire output, rather than asserting a property of whatever the
+warehouse happens to hold — which is what lets them reach two things a data test
+structurally cannot.
 
-**A legal answer that is the wrong one.** `dim_date`'s `fiscal_quarter` is bounded
-1–4, so a quarter of 5 is caught and a quarter of 2 where 3 was right is not:
-January scoring Q2 under a July year start passes every test in the project.
-`stg_retail_lines` is the same problem in a different shape — it is two `case`
-expressions and two boolean flags built off them, and `accepted_values` proves an answer is in the list,
-never that it is the right member of it. Misclassifying `AMAZONFEE` as a product
-moves net revenue by £260,764 with all 19 of that model's data tests green;
-dropping the `upper()` from `stock_code` sends all 100 voucher lines, which
-arrive lowercase, into product with the same 19 green.
+**A legal answer that is the wrong one.** `dim_date`'s `fiscal_quarter` is
+bounded 1–4, so a quarter of 5 is caught and a quarter of 2 where 3 was right is
+not: January scoring Q2 under a July year start passes every test in the
+project. `stg_retail_lines` is the same problem in a different shape — it is two
+`case` expressions and two boolean flags built off them, and `accepted_values`
+proves an answer is in the list, never that it is the right member of it.
+Misclassifying `AMAZONFEE` as a product moves net revenue by £260,764 with all
+19 of that model's data tests green; dropping the `upper()` from `stock_code`
+sends all 100 voucher lines, which arrive lowercase, into product with the same
+19 green.
 
-`fct_cbam_exposure` is the hardest of them. Its numbers are transcribed from
-a legal instrument, so there is nothing independent to check them against and its
+`fct_cbam_exposure` is the hardest of them. Its numbers are transcribed from a
+legal instrument, so there is nothing independent to check them against and its
 21 data tests are almost all `not_null` and generous ranges. The two that are
 not — the production-route test and the one holding the fallback out of the
 excess window — both came out of mutations rather than out of review. What a
-unit test reaches
-instead is the rules: hardcoding the phase-in mark-up at 10/20/30% moves the
-fertiliser average from €105.76 to €115.18 a tonne — fertilisers carry a flat 1%
-food-security carve-out — with every data test on the model green, and measuring
-`excess_over_cleanest_source` against the product group instead of the good takes
-the total from 18,153 to 29,469 tonnes, also with every one green. Its join to
-`dim_grid_emission_factors` needs fixture rows of its own, because a test that
-mocks it as `rows: []` leaves three shipped columns untested: turning that left join inner deletes 261 rows including all 260 fallback rows,
-and replacing `where is_latest_available` with the current year strips the
-factor off 2,584 more — **PASS=22, ERROR=0** either way, because this model has
-no row-count test and a missing factor is a legal null.
+unit test reaches instead is the rules: hardcoding the phase-in mark-up at
+10/20/30% moves the fertiliser average from €105.76 to €115.18 a tonne —
+fertilisers carry a flat 1% food-security carve-out — with every data test on
+the model green, and measuring `excess_over_cleanest_source` against the product
+group instead of the good takes the total from 18,153 to 29,469 tonnes, also
+with every one green. Its join to `dim_grid_emission_factors` needs fixture rows
+of its own, because a test that mocks it as `rows: []` leaves three shipped
+columns untested: turning that left join inner deletes 261 rows including all
+260 fallback rows, and replacing `where is_latest_available` with the current
+year strips the factor off 2,584 more — **PASS=22, ERROR=0** either way, because
+this model has no row-count test and a missing factor is a legal null.
 
 **Logic no data reaches.** `fiscal_year_start_month` is a project var and the
 warehouse only ever builds `4`, so eleven of the twelve fiscal policies the model
@@ -75,12 +76,14 @@ is blank) or `quantity > 0` from the purchase universe behind
 `int_retail_return_matches` (every stock write-off is anonymous, so the customer
 filter has already excluded all 3,457). Each is posed by a fixture instead: a
 blank country, and a write-off carrying a customer id, which an unfiltered
-purchase universe turns into a matched sale with a negative quantity. In `fct_cbam_exposure` the fallback rule is the same story: the
-regulation sends a listed country with no value for a good to the "other
-countries" row *as a whole line*, and resolving it column by column instead
-produces a figure that exists nowhere in the regulation — but the row that once
-proved it was corrected out of the annex in July 2026, so today the mutation
-changes not one number in the warehouse.
+purchase universe turns into a matched sale with a negative quantity.
+
+In `fct_cbam_exposure` the fallback rule is the same story: the regulation sends
+a listed country with no value for a good to the "other countries" row *as a
+whole line*, and resolving it column by column instead produces a figure that
+exists nowhere in the regulation — but the row that once proved it was corrected
+out of the annex in July 2026, so today the mutation changes not one number in
+the warehouse.
 
 The same model carries a second one, and it is the cleaner example because
 nothing was ever corrected away. `excess_over_cleanest_source` measures a
@@ -89,7 +92,7 @@ annex's "other countries and territories" row into that window moves not one
 cell: the fallback has never been below the cheapest listed source, and for 48
 of the 260 goods it cannot be, because the resolution rule copies the fallback
 onto every listed country the annex prints "-" for and so guarantees a tie. The
-other 212 are safe by the shape of this month's annex alone — the fallback is
+other 212 are safe by the shape of the current annex alone — the fallback is
 dearer than 87.5% of listed sources at the median good. A fixture pricing the
 fallback below both listed countries is the only possible witness to that
 window, which is what the test does. The other half of the same policy — that
@@ -100,14 +103,15 @@ Fixtures live in `dbt/tests/fixtures/` (dbt's `test-paths`, not the pytest
 fixtures). `dim_date` needs CSV files there because it generates its own rows —
 one input year expands to a whole calendar year, and `expect` is full-set
 equality over all 366. The other eleven are 1:1 on their inputs, or close enough
-that posing the rows directly is clearer, so their cases are inline. `fct_cbam_exposure`'s fixtures also pick totals that are float-exact
-under the mark-up, because `markup_2026_pct` is a ratio of two doubles and the
+that posing the rows directly is clearer, so their cases are inline.
+`fct_cbam_exposure`'s fixtures also pick totals that are float-exact under the
+mark-up, because `markup_2026_pct` is a ratio of two doubles and the
 warehouse holds three distinct values of it that all print as `10.0`.
 
 They run inside `dbt build` rather than being excluded from it. dbt Labs
 recommends keeping unit tests out of production runs to save warehouse spend;
 that argument is about a cloud warehouse, and this is a local DuckDB build where
-all thirty-six cost 4.8 seconds. `just dbt-unit-test` is the inner loop.
+the whole set costs 4.8 seconds. `just dbt-unit-test` is the inner loop.
 
 ## Which measures may be summed
 
@@ -119,12 +123,12 @@ both meaningless and both come back a number with no error anywhere.
 So every numeric column in the marts layer carries `meta: {additivity: …}`
 beside its `data_type`, from a closed vocabulary of four:
 
-| Label | Means | Count |
-|-------|-------|------:|
-| `additive` | Sum it along any dimension of the table. Money, tonnes, counted rows, durations. | 42 |
-| `semi_additive` | Summable some ways and not others; **the column's description says which**. | 13 |
-| `non_additive` | Never summable — ratios, rates, prices, averages, extrema, distinct counts. | 92 |
-| `not_a_measure` | A key, a calendar part, or a parameter carried on the row. | 41 |
+| Label | Means |
+|-------|-------|
+| `additive` | Sum it along any dimension of the table. Money, tonnes, counted rows, durations. |
+| `semi_additive` | Summable some ways and not others; **the column's description says which**. |
+| `non_additive` | Never summable — ratios, rates, prices, averages, extrema, distinct counts. |
+| `not_a_measure` | A key, a calendar part, or a parameter carried on the row. |
 
 Half of them are non-additive, which is the number that makes the exercise worth
 doing. The interesting cases are the middle row: `population` adds across
@@ -154,9 +158,9 @@ inheriting means a mart rename silently takes the copy's label with it.
 `staging` stays outside on purpose — it is a cleaning copy of a source whose
 measures are declared one layer up.
 
-## Who it's for
+## Groups, exposures and versions
 
-Around the tests sits the part that says who this is *for*.
+Around the tests sits the part that says who each model is *for*.
 
 Every model belongs to one of four owned groups — `reference`, `country_stats`,
 `compliance`, `retail`. The groups are by domain and not by layer, since a
@@ -173,9 +177,15 @@ which yml declares a model, so the boundary had to be chosen — and choosing th
 one dbt already enforces means the file a model is declared in and the group it
 answers to cannot drift apart.
 
-Each dashboard page and the monthly data release are declared as `exposures`, so
+Each dashboard page that reads a model, and the monthly data release, are
+declared as `exposures`, so
 `dbt ls --select +exposure:evidence_retail` answers "what breaks if I change
-this". A test fails if a page starts reading a model its exposure doesn't name.
+this". A test fails if a page starts reading a model its exposure does not name.
+
+Which conformed dimensions each fact joins is the other half of that metadata,
+and it is derived rather than declared: the bus matrix in
+[`WAREHOUSE.md`](./WAREHOUSE.md#the-bus-matrix), generated from the manifest by
+`just bus-matrix`.
 
 `fct_emissions_energy` is versioned. v2 renamed one column to state its unit and
 basis (`co2_per_gdp` → `co2_kg_per_gdp_ppp_2011`), and v1 stays live as a

@@ -56,8 +56,10 @@ sibling `fct_fx_rates_daily` spelled it the conformed way. No test here could se
 that, because every guard is scoped to one relation, so a key spelled two ways is
 three green models. Both were renamed, along with the `date_key`
 `fct_retail_returns` was missing beside a sibling at the identical grain — so the
-practice above is now enforced by something rather than only asserted. Two rules keep the output honest. A uniqueness test carrying
-a `where` is not a grain (`dim_grid_emission_factors` asserts one row per country
+practice above is enforced by something rather than only asserted.
+
+Two rules keep the output honest. A uniqueness test carrying a `where` is not a
+grain (`dim_grid_emission_factors` asserts one row per country
 *where `is_latest_available`*, which read as a grain turns a country-year
 reference table into a conformed dimension every fact appears to join). And
 conformance is exact name matching, because an alias list would render the defect
@@ -99,8 +101,8 @@ holds 214 countries into the latest year where `primary_energy_twh` collapses to
 subject area a reader works with, and there are **four**: `country_stats`,
 `reference`, `retail` and `compliance`. `marts/` is dbt's name for the
 presentation *layer*, one folder per mart, and the 21 relations (20 models, one
-of them versioned) inside it are **mart models**. Getting that backwards is easy and this repo did it: it counted
-models and called them marts, so a stale figure sat in five files through two
+of them versioned) inside it are **mart models**. Getting that backwards is
+easy and this repo did it: it counted models and called them marts, so a stale figure sat in five files through two
 additions to the layer.
 
 The boundary between the four is not a folder convention. `access` is enforced at
@@ -116,7 +118,7 @@ the start.
 → [`dbt/models/marts/country_stats/_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
 
 **Enforce a schema contract on everything that leaves.** All 20 mart models are
-contract-enforced, across 397 declared columns each carrying a `data_type`.
+contract-enforced: 407 columns with a declared type.
 The grain test and the schema contract catch different things: the contract is
 what sees a column change type under a consumer. Verified by declaring `year` as
 `VARCHAR`, which fails the build with a per-column mismatch table *before writing
@@ -159,7 +161,8 @@ flipping one model to `private` fails `dbt parse` naming its consumer, not
 `dbt build` an hour later.
 → [`dbt/models/_groups.yml`](../dbt/models/_groups.yml)
 
-**Declare who is reading, per page rather than per site.** Ten exposures, so
+**Declare who is reading, per page rather than per site.** Ten exposures — each
+page that reads a model, and the release — so
 `dbt ls --select +exposure:evidence_retail` answers "what breaks if I change
 this" for one dashboard page.
 → [`dbt/models/_exposures.yml`](../dbt/models/_exposures.yml)
@@ -251,7 +254,7 @@ date-range API, `merge`, the year in the primary key — and are deliberately
 both take their backfill years as run config and the button loads the lookback.
 The one partitioned source is the one where every partition together is one read
 of one file. And merging is not what earns a window: a third source merges and
-takes a date range, and its whole 27-year series is one three-second request.
+takes a date range, and its whole series since 1999 is one three-second request.
 
 **CI runs offline against recorded fixtures; a nightly run against the live
 endpoints is what tells you reality moved.** A red pull request therefore means
@@ -278,8 +281,8 @@ against a build that finished clean.
 ## 6. The boundary outward
 
 **Publish the warehouse, not only the dashboard.** A monthly release ships the
-DuckDB file, the landing zone beside it, a Parquet per modelled table, checksums
-and a manifest, so the joined data is usable without running any of this.
+DuckDB file, a Parquet per modelled table, the weather archive no rebuild can
+refetch, checksums and a manifest, so the joined data is usable without running any of this.
 → [`publish/export_warehouse.py`](../publish/export_warehouse.py),
 [`docs/PUBLISHED_DATA.md`](./PUBLISHED_DATA.md)
 
@@ -300,10 +303,10 @@ mechanism serves both, and one count feeds the three places that check it.
 the result rather than asserting it.** One column identifies a person. Deleting
 it does not anonymise the extract, and the number is the argument: 98.6% of the
 5,881 customers are unique on three money columns with no id at all. The policy
-is applied to the published copy rather than in a model, because the landing
-tables ship inside the same file and because the staging *views* would otherwise
-recompute and re-hash an already-hashed value. 51 relations carry that column and
-six were declared by hand, so the policy expands by column name across every
+is applied to the published copy rather than in a model, because the copy holds
+identifiers no model declares: the staging views are materialised on the way out,
+and dbt's stored test failures ship too. 53 relations in a release carry that
+column and six were declared by hand, so the policy expands by column name across every
 schema and then verifies what it rewrote.
 → [`tests/test_privacy.py`](../tests/test_privacy.py),
 [`scripts/measure_disclosure_risk.py`](../scripts/measure_disclosure_risk.py),

@@ -1,11 +1,6 @@
--- The worked example: metered kWh x grid emission factor -> tonnes CO2e, which
--- is the whole of location-based Scope 2 accounting under the GHG Protocol.
---
--- **The sites are invented** (`seeds/example_scope2_sites.csv`); the factors
--- they are multiplied by are not. It shows how `dim_grid_emission_factors` is
--- used.
---
--- Grain: one row per site.
+-- The worked example of location-based Scope 2: metered kWh x grid emission
+-- factor -> tonnes CO2e. **The sites are invented**
+-- (`seeds/example_scope2_sites.csv`); the factors are not.
 with sites as (
     select * from {{ ref('example_scope2_sites') }}
 ),
