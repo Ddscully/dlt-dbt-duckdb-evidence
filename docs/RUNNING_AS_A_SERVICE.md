@@ -12,7 +12,8 @@
 
 Without `just serve`, the pipeline has two homes and neither is a service.
 Locally it is `just run` or `just materialize`, invoked by a person. On GitHub
-it is four workflows, triggered by a pull request, a push or a cron. The `daily_refresh` schedule in
+it is four workflows, triggered by a pull request, a push or a cron. The
+`daily_refresh` schedule in
 [`orchestration/definitions.py`](../orchestration/definitions.py) exists and
 ships `STOPPED`, so nothing evaluates it.
 
@@ -35,9 +36,10 @@ this shape stops scaling, and none of that changes.
 freshness policies in [`orchestration/assets.py`](../orchestration/assets.py)
 (warn at two days without a load for `raw/*`, fail at seven; the modelled layers
 rebuilt by 08:00 UTC) are declared in code and **evaluated by nothing** unless a
-daemon is running. A schedule that quietly stopped firing is supposed to show as a stale asset
-rather than as an absence somebody notices; that only happens with a daemon
-running. See [`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md#2-what-is-the-freshness-sla-and-what-happens-when-it-is-missed).
+daemon is running. A schedule that quietly stopped firing is supposed to show as
+a stale asset rather than as an absence somebody notices; that only happens with
+a daemon running. See
+[`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md#2-what-is-the-freshness-sla-and-what-happens-when-it-is-missed).
 
 ## 2. `just serve`, and the container built on it
 
@@ -366,11 +368,11 @@ session. That last row is §8's lock nuisance genuinely dissolving rather than
 merely being avoided.
 
 **Re-running this needs separate processes.** DuckDB's Python client caches an
-instance per path within a process, so asking it for a "new" connection to the swapped path returned the *old* one,
-reporting `v1` after the swap, and then refused a writer with `Can't open a
-connection to same database file with a different configuration`. Both answers
-looked like filesystem findings and neither touched the filesystem. Open the
-second connection in a subprocess.
+instance per path within a process, so asking it for a "new" connection to the
+swapped path returned the *old* one, reporting `v1` after the swap, and then
+refused a writer with `Can't open a connection to same database file with a
+different configuration`. Both answers looked like filesystem findings and
+neither touched the filesystem. Open the second connection in a subprocess.
 
 Three properties make this worth the machinery:
 
@@ -435,18 +437,18 @@ running and is not:
   `.dagster/` byte-identical. The failure mode is unchanged, only relocated: drop
   the database and the service comes back up ingesting nothing.
 - **It targets `full_refresh` only, which excludes two things.** It excludes
-  `load_retail`: correct forever on an established lakehouse (retail is a closed archive whose
-  partitions are replayed by hand), and a failure on a fresh one, inside
-  `stg_retail_lines`, with `Catalog Error: Table with name retail_invoice_lines
-  does not exist!`. **It also excludes `reports/evidence_site`.** Under `just
-  serve`, only `publish_site` builds the site and *nothing
-  schedules `publish_site`*, so a scheduled service keeps the warehouse current
-  and leaves the dashboard exactly where the last `just report` left it — no
-  error, no log line, a page that simply stops moving. The exclusion is
-  deliberate and stays (three workflows run `full_refresh` on a bare uv checkout
-  with no Node), so the answer is not to move the asset into the job but to
-  refresh the site alongside the graph: step 6 of §10 by hand, and §4's swap
-  properly.
+  `load_retail`: correct forever on an established lakehouse (retail is a closed
+  archive whose partitions are replayed by hand), and a failure on a fresh one,
+  inside `stg_retail_lines`, with `Catalog Error: Table with name
+  retail_invoice_lines does not exist!`. **It also excludes
+  `reports/evidence_site`.** Under `just serve`, only `publish_site` builds the
+  site and *nothing schedules `publish_site`*, so a scheduled service keeps the
+  warehouse current and leaves the dashboard exactly where the last `just
+  report` left it — no error, no log line, a page that simply stops moving. The
+  exclusion is deliberate and stays (three workflows run `full_refresh` on a
+  bare uv checkout with no Node), so the answer is not to move the asset into
+  the job but to refresh the site alongside the graph: step 6 of §10 by hand,
+  and §4's swap properly.
 
 So **the service's first run is a different command from its steady state** —
 §10 is the runbook that says so, rather than leaving it to be discovered on a
@@ -462,9 +464,10 @@ build file rather than the served one) and one asset on the end of the graph.
 in place. That is the smaller starting point and it costs three things. Two are
 not silent: a reader lockout for the length of a build (§8), and a half-written
 file where the good one was if the build goes red. **The third is silent** — the
-site is served from a fixed `reports/build/` that only a manual `just report` rewrites, so the
-dashboard ages while the warehouse behind it does not. All three are survivable
-on an internal deployment; only the third needs somebody to remember.
+site is served from a fixed `reports/build/` that only a manual `just report`
+rewrites, so the dashboard ages while the warehouse behind it does not. All
+three are survivable on an internal deployment; only the third needs somebody to
+remember.
 
 ### Missed ticks, and one run at a time — measured
 
@@ -552,10 +555,10 @@ order:
 warehouse the service builds and serves from holds `customer_id` in the clear,
 exactly as a local build does. The *site* is fine: the retail source queries
 only aggregate over that column (`count(distinct …)`, `… is null`), so no
-Parquet reaching a browser carries an identifier. The exposure is therefore the **file**, not the pages: do
-not serve `data/warehouse.duckdb` itself, and treat a shell on the host as access
-to the personal column. A deployment that wants to hand the database out needs
-the export path, and with it the salt.
+Parquet reaching a browser carries an identifier. The exposure is therefore the
+**file**, not the pages: do not serve `data/warehouse.duckdb` itself, and treat
+a shell on the host as access to the personal column. A deployment that wants to
+hand the database out needs the export path, and with it the salt.
 
 ## 7. What this does not solve
 
@@ -646,8 +649,8 @@ keeps, extended with the ones only an always-on deployment meets:
   empty `DAGSTER_HOME` reports `max_concurrent_runs` as 10, and one holding a
   symlink to the checked-in file reports 1.
 - **`dagster instance info` prints `compute_logs: NoneType` for a configured
-  compute log manager.** Measured on `deploy/dagster.yaml`: the line
-  says `NoneType` while the instance's manager really is a `LocalComputeLogManager`
+  compute log manager.** Measured on `deploy/dagster.yaml`: the line says
+  `NoneType` while the instance's manager really is a `LocalComputeLogManager`
   writing to `$DAGSTER_STORAGE_DIR`. It is a display quirk of that command and
   not a config that failed to load — read it back off the instance rather than
   out of `instance info` before changing anything to chase it.
@@ -679,9 +682,9 @@ keeps, extended with the ones only an always-on deployment meets:
   - **A catalog remembers the data path it was created with, so one catalog
     schema cannot serve two arrangements.** Hit for real: the compose stack was
     pointed at a Postgres catalog that an earlier laptop run had already
-    initialised with the Parquet *on disk*, and the first run in a
-    container failed with `DATA_PATH parameter "s3://lake/modern-data-stack/"
-    does not match existing data path in the catalog "/home/…/data/lakehouse/data/"`.
+    initialised with the Parquet *on disk*, and the first run in a container
+    failed with `DATA_PATH parameter "s3://lake/modern-data-stack/" does not
+    match existing data path in the catalog "/home/…/data/lakehouse/data/"`.
     Nothing was wrong with either side. A laptop that shares a database with the
     compose stack wants its own `LAKEHOUSE_METADATA_SCHEMA`, or the same data
     path as the stack.
@@ -703,9 +706,9 @@ building the design first:
 - **A full swap cycle end to end**, timed against the ≈65 s stage baseline in
   [`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md#3-what-does-a-run-cost-and-how-long-does-it-take).
   The swap adds a restore, a verify and two renames to a run whose largest stage
-  is ingest, mostly network, so the expectation is that it disappears into the noise. But the
-  restore copies `history` and the weather archive, which is real I/O, and
-  nobody has timed it.
+  is ingest, mostly network, so the expectation is that it disappears into the
+  noise. But the restore copies `history` and the weather archive, which is real
+  I/O, and nobody has timed it.
 
 ## 10. Standing it up
 
@@ -884,12 +887,12 @@ once the run is queued, and the queue does not wait for the run ahead to
 compose-up` reports four running services and the daemon is running, but
 `daily_refresh` ships `STOPPED` (§5) and its on/off state is a row in the
 `dagster` database, so nothing in the image or `compose.yaml` can turn it on.
-Nothing warns, either: the one sign is an empty `instigators` table, or
-`dagster schedule list` inside the container printing `[STOPPED]`. A
-`compose-down volumes` empties that database, so the reset needs this line
-again, like step 5 after a wiped `DAGSTER_HOME`. `just materialize` from the
-*host* is still not the service's queue: it is a different process against a different warehouse entirely, since
-the container's lives on the `mds_data` volume.
+Nothing warns, either: the one sign is an empty `instigators` table, or `dagster
+schedule list` inside the container printing `[STOPPED]`. A `compose-down
+volumes` empties that database, so the reset needs this line again, like step 5
+after a wiped `DAGSTER_HOME`. `just materialize` from the *host* is still not
+the service's queue: it is a different process against a different warehouse
+entirely, since the container's lives on the `mds_data` volume.
 
 What differs from a host deployment, beyond packaging:
 

@@ -56,7 +56,8 @@ findings page:
   grid emission factor, the figure a multi-site company multiplies its metered
   kWh by to produce the electricity line in a CSRD, SECR or CDP filing. Across
   the largest grids in 2024 it runs 30 g/kWh (Norway) to 717 g/kWh (South
-  Africa), so the same 100 GWh site reports ~3 kt CO₂e or ~72 kt depending only on where it sits.
+  Africa), so the same 100 GWh site reports ~3 kt CO₂e or ~72 kt depending only
+  on where it sits.
 - **Energy cost exposure.** EU household electricity prices at their *published*
   half-year grain, not flattened to an annual average, because the annual
   average hides the thing you'd want to see. The Netherlands went €0.034/kWh in
@@ -133,10 +134,10 @@ Measured on this machine against the live APIs, per stage:
 Artifacts: a 282 MB DuckDB file, a 111 MiB DuckLake landing zone and a 165 MiB
 Evidence site.
 
-**Two things move these figures without the pipeline changing.** A cold
-workbook cache adds its download and parse to ingest, so the table says which it
-measured. And `dbt-build` quotes both dbt's own time and the wall clock, because the gap is
-`dbt deps` and startup, and one number would silently mean either.
+**Two things move these figures without the pipeline changing.** A cold workbook
+cache adds its download and parse to ingest, so the table says which it
+measured. And `dbt-build` quotes both dbt's own time and the wall clock, because
+the gap is `dbt deps` and startup, and one number would silently mean either.
 
 **A run also costs disk, and nothing reclaims it.** The DuckLake landing zone
 went 72 → 111 MiB across the single ingest above, because DuckLake retains a
@@ -248,18 +249,19 @@ number before.
    build graph through it. That's the run that would settle it.
 3. **Full-refresh materialisation, for 32 of the 33 models.** Every mart is
    `+materialized: table` and rebuilt whole (19 tables, 13 views, one
-   incremental). That is deliberate rather than pending: each one re-derives a source that gets fully re-fetched, so
-   rebuilding is *how* an upstream restatement is picked up, and the whole
-   graph, 1.07M-row retail fact included, rebuilds in 24.5 s. The exception is the
-   one model where the argument reverses:
-   `fct_fx_rates_published` is `incremental`, because a published ECB fixing
-   never changes and the table grows ~30 rows a day forever. At 43M rows the
-   question is which of the 19 table models join it, and the cost of each is
-   the tension WDI's lookback window already documents: a restated year needs a full refresh,
-   so "incremental" and "picks up restatements" are in conflict and you have to
-   choose per model. Today's numbers are honest and unimpressive: 0.16 s
-   incremental against 0.24 s full-refresh at 265k rows. The argument is the
-   shape of the curve, not the saving.
+   incremental). That is deliberate rather than pending: each one re-derives a
+   source that gets fully re-fetched, so rebuilding is *how* an upstream
+   restatement is picked up, and the whole graph, 1.07M-row retail fact
+   included, rebuilds in 24.5 s. The exception is the one model where the
+   argument reverses: `fct_fx_rates_published` is `incremental`, because a
+   published ECB fixing never changes and the table grows ~30 rows a day
+   forever. At 43M rows the question is which of the 19 table models join it,
+   and the cost of each is the tension WDI's lookback window already documents:
+   a restated year needs a full refresh, so "incremental" and "picks up
+   restatements" are in conflict and you have to choose per model. Today's
+   numbers are honest and unimpressive: 0.16 s incremental against 0.24 s
+   full-refresh at 265k rows. The argument is the shape of the curve, not the
+   saving.
 4. **The Evidence site.** It ships Parquet to the browser and queries it with
    DuckDB-WASM. Lovely at 94 MB, wrong at 94 GB — that becomes a pre-aggregated
    serving layer.
@@ -358,8 +360,8 @@ supposed to prevent.
 The paper's Established is *"documentation is the default condition of
 ingestion"*; here the default condition is *typing* — a column cannot enter a
 mart without a `data_type` and a contract, but it can enter without a sentence.
-Under half is not a bad number for prose coverage and it is not Established, and the
-gap is worth naming because the repo reads as more documented than that: the
+Under half is not a bad number for prose coverage and it is not Established, and
+the gap is worth naming because the repo reads as more documented than that: the
 columns that carry an explanation are the ones where an explanation was needed,
 which is a defensible policy and not the same claim.
 
@@ -412,5 +414,5 @@ eight tables each feeding a named model. Of the rest:
 ---
 
 <sub>Post-mortems accumulate in `AGENTS.md`, the skills under `.agents/skills/`
-and the decision records in `docs/decisions/`; they are the files to read if you want to know what this cost
-to learn rather than what it does.</sub>
+and the decision records in `docs/decisions/`; they are the files to read if you
+want to know what this cost to learn rather than what it does.</sub>
