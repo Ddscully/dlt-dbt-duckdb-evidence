@@ -1,6 +1,6 @@
 # Reusing this stack
 
-How to start a *new* project on this shape (dlt → DuckDB → dbt → Polars →
+How to start a *new* project on this shape (dlt → DuckLake → dbt → Polars →
 Evidence, orchestrated by Dagster), using this repo as the reference
 implementation.
 
@@ -177,8 +177,9 @@ keep the split a split:
   when the allowlist is empty.
 - **The prose guards are calibrated to this repo's volume of prose.**
   - `test_documented_counts.py` floors its scans: the count-claim scanner must
-    find more than 35 claims, the additivity one at least 8. Two of its cases require a specific
-    claim (the description coverage, and a `PASS=` line from the course).
+    find more than 35 claims, the additivity one at least 8. Two of its cases
+    require a specific claim (the description coverage, and a `PASS=` line from
+    the course).
     `CITED_MODELS` names the example's models.
   - `test_course.py` always includes the course index, so its skill-citation
     cases crash with no course.
@@ -251,8 +252,8 @@ the graph every time you add or rename a resource.
 fully-qualified SQL: a staging view reads its source as `lakehouse.raw.owid_co2`
 and a view over a model as `warehouse.staging.stg_co2`, so both the attach alias
 and the file stem are fixed the day the first view is built. A template can vary
-the project name; it cannot make either of these a variable. Rename the file, or `ATTACH … AS wh`, and the views
-raise `Catalog "warehouse" does not exist` while the tables keep working, a
+the project name; it cannot make either of these a variable. Rename the file,
+or `ATTACH … AS wh`, and the views raise `Catalog "warehouse" does not exist` while the tables keep working, a
 half-broken artifact that looks fine until someone queries staging. Pick the file
 name once, and pin it with a test if you publish the file.
 
@@ -262,7 +263,7 @@ name once, and pin it with a test if you publish the file.
 
 Here it's `(country_iso3, year)`, and most of the warehouse follows from it: the
 `unique_combination_of_columns` contract on every fact-shaped model, the spine,
-the join key in every mart model.
+the join key in most mart models.
 
 Write yours down as `(entity, period)` in the style guide before you build the
 first staging model. Then hold every staging model to it. When a source publishes
@@ -321,8 +322,7 @@ one era, because it's the table `rm data/warehouse.duckdb` destroys for good.
 ## 4. Invariants that fail silently
 
 `AGENTS.md` and the skills under `.agents/skills/` have the full list for this
-project. These are the ones that recur in
-anything built this way:
+project. These are the ones that recur in anything built this way:
 
 - **`WAREHOUSE_PATH` must be absolute.** dbt resolves it from `dbt/`, the Python
   layers from the project root. A relative override gives you two different
@@ -343,8 +343,8 @@ anything built this way:
   has validated a page against a dropped column's old schema; clearing
   `reports/.evidence/` (`just report-clean`) after any mart change fixes it.
 - **`evidence build` exits 0 for a site missing a page.** Check rendered file
-  *size*, not exit status: the pages here render at over 20 kB and the check's
-  floor is 8 kB, which catches a route that emitted nothing but the framework shell.
+  *size*, not exit status: the smallest page here renders at about 19 kB and
+  the check's floor is 8 kB, which catches a route that emitted nothing but the framework shell.
 - **A column named `tests` or `rows` silently draws no bars** in an Evidence chart.
   No error, no warning, and the same column is fine in a table three lines below.
 - **Assets must be listed explicitly in `Definitions`.** `definitions validate`
@@ -361,7 +361,7 @@ only because of one key, below. The dry run renamed all three to
 moves and 51 edits.
 
 - **The distribution name and the package are decoupled by one key**, which
-  this repo now sets: `[tool.uv.build-backend] module-name = "modern_data_stack"`
+  this repo sets: `[tool.uv.build-backend] module-name = "modern_data_stack"`
   in `pyproject.toml`. Delete it and uv_build derives the module from the project
   name again, so `uv sync` fails with `Expected a Python module at:
   src/<new_name>/__init__.py` — **the first time anyone renames the project, and
@@ -466,10 +466,9 @@ the one people reach for.
 the modelled layers in a 282 MB DuckDB file, plus a 111 MiB DuckLake landing
 zone — that one grows about 39 MiB per full ingest and nothing expires the
 snapshots, which is its own answer to what a run costs. The largest relation is
-`fct_retail_order_line` at 1,067,371 rows. A full `dbt build` — 571 nodes, 33
-models, 482 data tests, 36 unit tests — takes **24.5 s** of dbt's own time on
-four threads.
-`analytics.pipeline_runs` records that per build, so the trend is a query rather
+`fct_retail_order_line` at 1,067,371 rows. A full `dbt build` — 561 built nodes,
+33 models, 482 data tests, 36 unit tests — takes **24.5 s** of dbt's own time on
+four threads. `analytics.pipeline_runs` records that per build, so the trend is a query rather
 than a memory.
 
 **Which layer gives first is answered in full by
@@ -500,8 +499,7 @@ Postgres and the Parquet in a bucket (`LAKEHOUSE_CATALOG`,
 `LAKEHOUSE_DATA_PATH`, both opt-in and both exercised in CI). That leaves the
 dbt file as the only single-writer thing left, which is a much smaller problem
 than the one you started with. Then a real warehouse, and `dbt/profiles.yml`
-grows the targets §1 says it should.
-The layer that changes is the profile and the two Polars files; the models, the
+grows the targets §1 says it should. The layer that changes is the profile and the two Polars files; the models, the
 tests, the contracts, the exposures and the release all port unchanged, which is
 the argument for the shape rather than for the file.
 
