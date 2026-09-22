@@ -28,9 +28,8 @@ from modern_data_stack.ratelimit import WeightedWindowLimiter
 # to 1940, no key. https://open-meteo.com/en/docs/historical-weather-api
 OPEN_METEO_ARCHIVE_API = "https://archive-api.open-meteo.com/v1/archive"
 
-# The 41 countries Eurostat reports an electricity price for — the set
-# `fct_eu_electricity_prices_semiannual` covers and the weather analysis joins
-# to. `tests/test_ingest.py` holds the list to the price data.
+# The countries Eurostat prices electricity for, which the weather analysis joins
+# to; `tests/test_ingest.py` holds the list to the price data.
 WEATHER_COUNTRIES = (
     "ALB", "AUT", "BEL", "BGR", "BIH", "CYP", "CZE", "DEU", "DNK", "ESP",
     "EST", "FIN", "FRA", "GBR", "GEO", "GRC", "HRV", "HUN", "IRL", "ISL",
@@ -39,9 +38,8 @@ WEATHER_COUNTRIES = (
     "XKX",
 )  # fmt: skip
 
-# The API's own variable names, kept verbatim in `raw`; staging renames. Three
-# temperatures because degree days have two conventions — from the mean, or from
-# (max + min) / 2 — and staging computes both.
+# Verbatim in `raw`. Three temperatures, because staging computes degree days by
+# both conventions: from the mean, and from (max + min) / 2.
 WEATHER_DAILY_VARIABLES = (
     "temperature_2m_mean",
     "temperature_2m_max",
@@ -51,8 +49,7 @@ WEATHER_DAILY_VARIABLES = (
     "shortwave_radiation_sum",
 )
 
-# The units the API declares for those six, checked by `tests/test_ingest.py`:
-# an upstream unit change would shift every derived figure and fail no range test.
+# Checked by `tests/test_ingest.py`: a unit change would fail no range test.
 WEATHER_EXPECTED_UNITS = {
     "temperature_2m_mean": "°C",
     "temperature_2m_max": "°C",
@@ -62,62 +59,43 @@ WEATHER_EXPECTED_UNITS = {
     "shortwave_radiation_sum": "MJ/m²",
 }
 
-# The floor of a watermark-driven load: 2007 is Eurostat's first electricity
-# price year. Not a hard limit — a year-range backfill reaches back to 1960 —
-# and not where a cold start begins (WEATHER_COLD_START_YEARS).
+# Eurostat's first price year: the floor of a watermark-driven load, not of a
+# backfill, and not where a cold start begins.
 WEATHER_FIRST_YEAR = 2007
 
-# How much history an unpartitioned load fetches into an empty destination, the
-# state of a fresh clone and of all three live workflows. Starting at
-# WEATHER_FIRST_YEAR instead costs ~12,600 units against 10,000 a day, and the
-# limiter honours the daily window by sleeping — a ~22-hour hang, not a failure.
-# Three years (~1,700 units) fits the hourly budget and still gives two complete
-# years for a year-over-year comparison. Deeper history is carried from the
-# previous release or backfilled. `tests/test_ingest.py` holds this to the
-# hourly budget.
+# What a load into an empty destination fetches. It must fit the hourly budget,
+# which `tests/test_ingest.py` holds it to: from WEATHER_FIRST_YEAR it would pass
+# the daily one, and the limiter would sleep for most of a day. Three leaves two
+# complete years to compare; deeper history is carried forward or backfilled.
 WEATHER_COLD_START_YEARS = 3
 
-# How far back an incremental run re-asks. Open-Meteo serves preliminary ERA5T
-# within days and Copernicus supersedes it with final ERA5 two to three months
-# later; a shorter window would freeze preliminary values into the carried
-# archive for good.
+# Final ERA5 replaces preliminary ERA5T two to three months on; a shorter window
+# would freeze preliminary values into the carried archive.
 WEATHER_LOOKBACK_DAYS = 90
 
-# Asking past the archive's last day is a 400, not an empty response, and that
-# day sat at exactly yesterday when measured — so `today - 1` would fail on one
-# side of the server's rollover. Three days of latency is free on annual use.
+# Asking past the archive's last day, measured at yesterday, is a 400, so
+# `today - 1` would fail on one side of the server's rollover.
 WEATHER_END_LAG_DAYS = 3
 
 WEATHER_PRIMARY_KEY = ("country_iso3", "weather_date")
 
-# Open-Meteo's published free-tier budget: 600 units a minute, 5,000 an hour,
-# 10,000 a day (a monthly 300,000 exists and is not yet enforced). Units are not
-# requests — see `weather_call_units`.
+# Open-Meteo's free-tier units (not requests: `weather_call_units`) per minute,
+# hour and day. A monthly limit exists and is not enforced.
 WEATHER_RATE_LIMITS = ((60.0, 600.0), (3600.0, 5000.0), (86400.0, 10000.0))
 
-# A 429 from this API carries **no `Retry-After` header**. What it does carry is
-# a message naming *which* window was exceeded — "Minutely API request limit
-# exceeded", "Hourly …", "Daily …" — and those want waits three orders of
-# magnitude apart, so the reason string is the only signal there is and it is
-# worth reading. `http.get_json`'s 1.5s/3s backoff would burn all three of its
-# retries in 4.5 seconds against the shortest of them.
-#
-# The daily window is deliberately absent: waiting out a day inside a pipeline
-# run is not a retry, it is a hang. That one raises and says to come back
-# tomorrow or narrow the window.
+# A 429 carries no `Retry-After`, only a message naming the window exceeded
+# ("Minutely …", "Hourly …", "Daily …"), and the waits differ by orders of
+# magnitude. The daily one is absent: waiting out a day is a hang, so it raises.
 WEATHER_RETRY_AFTER_SECONDS = {"minutely": 65.0, "hourly": 660.0}
 WEATHER_DEFAULT_RETRY_AFTER_SECONDS = 65.0
 WEATHER_RETRIES = 6
 
-# The wait for a failure that is *not* a rate limit — a 5xx, a reset connection,
-# a truncated body. `http.get_json`'s own backoff, deliberately: those failures have
-# nothing to do with the budget, so they should not inherit the minute-long wait
-# a 429 earns. Only the 429 path reads `WEATHER_RETRY_AFTER_SECONDS`.
+# The wait, growing linearly, for a failure that is not a rate limit — a 5xx, a
+# reset, a truncated body — which has nothing to do with the budget.
 WEATHER_BACKOFF_SECONDS = 1.5
 
-# Declared rather than inferred: a merge resource keeps dlt's persisted,
-# widen-only schema, so a window of whole-millimetre rain would infer bigint for
-# `precipitation_sum` and send the next 0.2 into a `__v_double` variant column.
+# Declared: a merge keeps dlt's widen-only schema, so whole-millimetre rain would
+# infer bigint and send the next 0.2 into a `__v_double` variant column.
 WEATHER_COLUMNS: dict[str, TColumnSchema] = {
     "country_iso3": {"data_type": "text", "nullable": False},
     "weather_date": {"data_type": "date", "nullable": False},

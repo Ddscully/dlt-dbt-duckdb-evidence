@@ -111,19 +111,18 @@ def test_get_json_raises_on_non_json_body(monkeypatch):
 
 
 def test_get_json_waits_out_a_minute_long_outage(monkeypatch):
-    """The waits double, so the retries span a minute rather than 4.5 seconds.
-
-    The old 1.5 s/3 s schedule gave up inside 4.5 s, which is how a nightly went
-    red on a Eurostat error page that had cleared by the time anyone looked
-    (issue #94).
-    """
+    """The waits double, so the retries span a minute."""
     sleeps: list[float] = []
     monkeypatch.setattr(time, "sleep", sleeps.append)
     _mock_get(monkeypatch, [FakeResponse(status=503)] * (http.RETRIES - 1) + [FakeResponse({})])
 
     assert http.get_json("https://example.test/x") == {}
     assert sleeps == [4.0, 8.0, 16.0, 32.0]
-    assert sum(sleeps) >= 60
+    assert sum(sleeps) >= 60, (
+        f"the retries span {sum(sleeps)} s. A schedule that gave up inside 4.5 s turned "
+        "a Eurostat error page, cleared by the time anyone looked, into a red nightly "
+        "(issue #94)."
+    )
 
 
 def test_get_json_raises_a_client_error_at_once(monkeypatch):

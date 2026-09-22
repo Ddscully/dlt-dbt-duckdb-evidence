@@ -74,27 +74,12 @@ REFRESH = "drop_resources"
 FULL_REFRESH_RESOURCES = ("owid_co2", "owid_energy", "wb_country", "eu_elec_prices")
 INCREMENTAL_RESOURCES = ("wb_wdi", "ecb_fx_rates", "retail_invoice_lines", "om_weather_daily")
 
-# How the orchestration layer lets a run load *less* than a whole resource — a
-# different question from which resources merge. The unit has to be re-runnable
-# work that maps onto a slice of the destination:
-#
-#   * `YEAR_RANGE_RESOURCES` take a year range as run config. `wb_wdi`: the API
-#     takes `&date=lo:hi` and `year` is in the primary key. `om_weather_daily`:
-#     the API takes a date range, `weather_date` is in the primary key, and a
-#     year is the unit its budget is spent in.
-#   * `PARTITIONED_RESOURCES` are Dagster partitions. `retail_invoice_lines` is
-#     one static workbook, so the fetch cannot narrow, but the load can:
-#     `invoice_month` comes from the partition's timestamp.
-#
-# The year-range pair are not partitions: a partitioned asset makes the Dagster
-# UI's Materialize button a backfill of every year from 1960, which for weather
-# is days of Open-Meteo's allowance (docs/decisions/0002). Retail
-# keeps its partitions because every month together costs what the one file
-# does.
-#
-# `ecb_fx_rates` merges and takes neither: its whole series is one request.
-# Kept here, not in `orchestration/`, so `tests/test_ingest.py` can hold the
-# split to the source without importing Dagster.
+# How a run can load *less* than a whole resource, a different question from
+# which resources merge: a year range as run config (both APIs take a date range,
+# and the year is in the key), or monthly partitions (retail's one workbook,
+# narrowed on the load). Why the years are not partitions is docs/decisions/0002;
+# `ecb_fx_rates` takes neither, its whole series being one request. Here rather
+# than in `orchestration/`, so `tests/test_ingest.py` checks it without Dagster.
 YEAR_RANGE_RESOURCES = ("wb_wdi", "om_weather_daily")
 PARTITIONED_RESOURCES = ("retail_invoice_lines",)
 
@@ -118,9 +103,7 @@ def load_groups(resources: Iterable[str] | None = None) -> list[tuple[list[str],
     return groups
 
 
-# The dataset dlt loads into — the `raw` schema every landing table lands in.
-# Named because `publish/restore_history.py` carries a table *into* it and has to
-# agree with this about which schema that is.
+# The `raw` schema, named because `publish/restore_history.py` restores into it.
 PIPELINE_DATASET = "raw"
 
 
@@ -147,16 +130,11 @@ def build_pipeline() -> dlt.Pipeline:
     `$XDG_DATA_HOME/dlt/pipelines/<name>/`; both can exist with only the first
     live, which is why `just dlt-state` asks dlt rather than listing a directory.
     """
-    # dlt adds `_dlt_load_id` to row objects but not, by default, to Arrow data,
-    # so `raw.retail_invoice_lines` would land without it — silently breaking
-    # `dbt source freshness`, `pipeline_sources` and `source_loaded_at` for that
-    # table. Set here so every caller of this function gets it.
+    # dlt leaves `_dlt_load_id` off Arrow data by default, and retail's freshness
+    # and load times are read from it.
     os.environ.setdefault("NORMALIZE__PARQUET_NORMALIZER__ADD_DLT_LOAD_ID", "true")
 
-    # `raw` lands in the DuckLake catalog, the only copy of the landing tables;
-    # dbt attaches it and builds into the DuckDB file. dlt's merge regenerates
-    # `_dlt_id`/`_dlt_load_id` on every touched row, so the catalog's change feed
-    # cannot see a real revision — `lake.lakehouse.revisions()` diffs snapshots.
+    # Into the DuckLake catalog, the only copy of the landing tables.
     return dlt.pipeline(
         pipeline_name=pipeline_name(),
         destination=dlt.destinations.ducklake(dlt_credentials()),

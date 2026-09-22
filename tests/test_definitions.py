@@ -174,17 +174,8 @@ def test_retail_ingest_is_the_only_thing_full_refresh_leaves_out():
 
 
 def test_the_routine_jobs_are_not_partitioned():
-    """A partitioned job's Materialize button in the Dagster UI launches a
-    backfill, and its dialog has no "no partition" choice: only the Launchpad
-    runs the job plain.
-
-    Measured while WDI and weather were yearly partitions: the
-    button launched `full_refresh` over 1960-2026 as one run, cancelled after ten
-    minutes with days of Open-Meteo's budget still to pace; the same job from
-    the Launchpad finished in 1m38s. A job takes its partitions
-    definition from its assets, so one partitioned asset joining either selection
-    brings that back with nothing else red — which is why retail stays out.
-    """
+    """A job takes its partitions from its assets, and a partitioned job's
+    Materialize button is a backfill (`docs/decisions/0002`)."""
     from orchestration.definitions import defs
 
     for name in ("full_refresh", "publish_site"):
@@ -198,15 +189,7 @@ def test_the_routine_jobs_are_not_partitioned():
 
 
 def test_the_backfill_recipes_address_the_op_that_takes_the_years():
-    """`just backfill-wdi` and `just backfill-weather` pass their years as
-    `{"ops": {"<op>": {"config": ...}}}`, spelling the op name by hand.
-
-    `dagster asset materialize` does not refuse config for an op it does not know.
-    Measured: a stale name loads the incremental lookback and reports success, so
-    renaming the op in `assets.py` would turn both backfills into routine loads
-    with nothing red. (`dagster job execute` does refuse it; the asset CLI does
-    not.)
-    """
+    """The backfill recipes spell the op name their year config is addressed to."""
     import re
 
     from modern_data_stack.paths import project_root
@@ -220,26 +203,24 @@ def test_the_backfill_recipes_address_the_op_that_takes_the_years():
         addressed = re.findall(r'"ops": \{"([\w-]+)"', body[1])
         assert addressed == [raw_by_year_assets.op.name], (
             f"`just {recipe}` addresses its year config to {addressed}, but the op "
-            f"that reads it is `{raw_by_year_assets.op.name}`"
+            f"that reads it is `{raw_by_year_assets.op.name}`. `dagster asset "
+            "materialize` ignores config for an op it does not know, so the recipe "
+            "would load the incremental lookback and report success."
         )
 
 
 def test_every_retail_month_has_a_partition_to_land_in():
-    """`TimeWindowPartitionsDefinition`'s `end` is *exclusive*.
-
-    Passing `RETAIL_LAST_MONTH` straight through drops that month: 24 keys
-    ending at 2011-11, and December 2011's lines unreachable through the
-    partitioned path. The unpartitioned path, which every workflow and recipe
-    uses, loads the whole file regardless, so only a backfill would stop a month
-    early. This asserts the closed interval the constants describe, at both
-    ends.
-    """
+    """The partitions cover the closed interval the retail constants describe."""
     from ingest.sources.retail import RETAIL_FIRST_MONTH, RETAIL_LAST_MONTH
     from orchestration.assets import RETAIL_PARTITIONS
 
     keys = RETAIL_PARTITIONS.get_partition_keys()
     assert keys[0] == RETAIL_FIRST_MONTH
-    assert keys[-1] == RETAIL_LAST_MONTH
+    assert keys[-1] == RETAIL_LAST_MONTH, (
+        f"the last partition is {keys[-1]}, not {RETAIL_LAST_MONTH}: the partitions "
+        "definition's `end` is exclusive, so it takes the month after the last one, "
+        "or a backfill never reaches that month's lines"
+    )
     # 2009-12 through 2011-12 inclusive, i.e. no gaps in between either.
     assert len(keys) == 25
 
@@ -250,17 +231,10 @@ def test_every_retail_month_has_a_partition_to_land_in():
 
 
 def test_the_dbt_build_writes_its_run_results_where_the_reader_looks():
-    """`dbt_models` pins the target path, and `pipeline_runs` depends on it.
+    """`dbt_models` pins the target path that `pipeline_runs` reads.
 
-    Left to itself dagster-dbt gives every invocation a unique target directory
-    (`target/<op>-<run id>-<uuid>/`) so concurrent invocations cannot overwrite
-    each other's artifacts. Nothing here is concurrent, and
-    `observability.build_runs` reads `run_results.json` *by path*, so without the
-    pin every orchestrated build writes `analytics.pipeline_runs` with zero rows.
-
-    This asserts the *call site* rather than the artifact: a real invocation
-    pointed at an explicit path proves dagster-dbt honours the argument, and
-    stays green when the argument is dropped.
+    Asserts the *call site*: a real invocation given an explicit path stays green
+    when the argument is dropped.
     """
     from pathlib import Path
     from typing import Any
@@ -290,8 +264,13 @@ def test_the_dbt_build_writes_its_run_results_where_the_reader_looks():
     list(compute.decorated_fn(context=None, dbt=_Dbt()))
 
     assert called_with == ["build"]
-    target = kwargs_seen["target_path"]
-    assert Path(target) == Path(dbt_target_path())
+    target = kwargs_seen.get("target_path")
+    assert target is not None and Path(target) == Path(dbt_target_path()), (
+        f"`dbt_models` passes target_path={target!r}. Unpinned, dagster-dbt writes "
+        "each invocation's artifacts to a unique directory, and `build_runs` reads "
+        "`run_results.json` by path, so every orchestrated build appends nothing to "
+        "`analytics.pipeline_runs`."
+    )
     # The property that actually matters, stated as the two paths agreeing: the
     # artifact the build writes is the one `transform.pipeline_status` reads.
     assert Path(target) / "run_results.json" == Path(dbt_run_results_path())

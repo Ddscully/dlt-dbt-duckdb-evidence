@@ -78,30 +78,22 @@ __all__ = [
 
 EXPORT_DIR = "data/export"
 
-# The published landing zone, beside `warehouse.duckdb`, so the next release can
-# carry the weather archive forward instead of cold-starting it. What may go in
-# it is `lake.lakehouse.PUBLISHED_TABLES`, an allowlist for disclosure as well as
-# cost. A tarball because a release asset is one file: one download to restore,
-# one line in `SHA256SUMS`.
+# The published landing zone (`lake.lakehouse.PUBLISHED_TABLES`), which the next
+# release restores. One file: one download, one line in `SHA256SUMS`.
 LAKEHOUSE_ASSET = "lakehouse.tar.gz"
 
 # The layers published as Parquet. `raw` is not in the file at all, and dbt's
 # `main` (the seeds) and `history` ship only inside `warehouse.duckdb`.
 PUBLISHED_SCHEMAS = ("staging", "marts", "analytics")
 
-# The storage format the published `warehouse.duckdb` may not exceed, and so the
-# oldest DuckDB that can open it. 64 is DuckDB 1.x's default, so this costs
-# nothing today; it is a tripwire for a DuckDB bump (2.0 changes the default
-# format) that every test would pass, because they write and read with one
-# binary. Raising it strands every reader below the new floor, so it is a
-# decision, not a lockfile edit. The Parquet files carry no such constraint.
+# The storage format ceiling, and so the oldest DuckDB that can open the file. A
+# tripwire for a DuckDB bump, which every test passes by reading with the binary
+# that wrote; raising it strands older readers, so it is a decision.
 MAX_PUBLISHED_STORAGE_VERSION = 64
 MIN_READER_VERSION = "0.10.0"
 
-# The same ceiling for `lakehouse.tar.gz`'s DuckLake spec. It moves differently:
-# the extension comes from extensions.duckdb.org, unpinned, so a newer spec can
-# arrive with no change in this repo and no PR to fail — the next CI run is what
-# notices. 1.0 is what the installed extension writes today.
+# The same for the DuckLake spec, which moves without a PR: the extension is
+# fetched unpinned, so the next CI run is what notices.
 MAX_PUBLISHED_LAKE_VERSION = "1.0"
 
 ATTRIBUTION = """\
@@ -136,15 +128,10 @@ The pipeline code is MIT licensed.
 """
 
 
-# Which classification gets rewritten on the way out. `quasi_identifier` columns
-# identify a customer between them but are published anyway: generalising them
-# would destroy the analysis they exist for. `docs/DATA_PROTECTION.md` measures
-# what they give away.
+# `quasi_identifier` columns ship unchanged, knowingly (`docs/DATA_PROTECTION.md`).
 MASKED_LABELS = ("direct_identifier",)
 
-# Required, never defaulted: an unsalted digest of a five-digit id is reversed by
-# hashing every candidate, in milliseconds, and an invertible hex column reads as
-# though something was done.
+# Required, never defaulted; `pseudonymise`'s error says why.
 SALT_ENV = "PII_SALT"
 
 # Classifications dbt cannot hold, because Polars writes `analytics` downstream
@@ -161,10 +148,8 @@ EXTRA_CLASSIFICATIONS: dict[tuple[str, str, str], str] = {
 }
 
 
-# Additivity labels for the `analytics` tables, which dbt cannot see for the same
-# reason. Stated rather than copied from the mart at runtime: a derived copy
-# would silently lose a label when a mart column is renamed, where a stated one
-# fails `test_a_copied_column_keeps_the_label_the_mart_gave_it`.
+# Additivity for the `analytics` tables, stated rather than copied from the mart,
+# so a renamed mart column fails a test instead of silently losing its label.
 EXTRA_ADDITIVITY: dict[tuple[str, str, str], str] = {
     # `co2_intensity` is `select * from marts.fct_emissions_energy` plus two
     # derived columns, so its labels are the mart's plus two.
@@ -229,9 +214,7 @@ EXTRA_ADDITIVITY: dict[tuple[str, str, str], str] = {
     ("analytics", "pipeline_tables", "year_min"): "not_a_measure",
     ("analytics", "pipeline_tables", "year_max"): "not_a_measure",
     ("analytics", "pipeline_tests", "failing_rows"): "additive",
-    # The run history's timings sum across nodes and across runs, but to
-    # thread-seconds: dbt builds four nodes at once, so a run's summed
-    # `execution_time_s` is several times the wall clock it took.
+    # Timings sum to thread-seconds: dbt builds four nodes at once.
     ("analytics", "pipeline_runs", "execution_time_s"): "additive",
     ("analytics", "pipeline_runs", "compile_time_s"): "additive",
     ("analytics", "pipeline_runs", "execute_time_s"): "additive",
@@ -322,9 +305,8 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
     with tempfile.TemporaryDirectory() as staging:
         built = Path(staging) / "lakehouse"
         copied = lakehouse.publish(built, lake_dir, MAX_PUBLISHED_LAKE_VERSION)
-        # A catalog holding none of the published tables counts as absent: dbt's
-        # `ATTACH IF NOT EXISTS` creates a real, empty DuckLake on a build before
-        # the first ingest, and a tarball of nothing must not pass as published.
+        # Absent, too: dbt's `ATTACH IF NOT EXISTS` creates an empty DuckLake on a
+        # build before the first ingest.
         if not copied:
             return {
                 "lakehouse": {
@@ -336,15 +318,12 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
                 }
             }
 
-        # Read off the built catalog, so the manifest describes what shipped.
-        # `spec_version` is what decides whether a consumer can open it;
-        # `created_by` (a DuckDB git hash) only says who wrote it.
+        # Off the built catalog, so the manifest describes what shipped.
         catalog = catalog_metadata(built / lakehouse.CATALOG_NAME)
 
         archive = dest_dir / LAKEHOUSE_ASSET
         with tarfile.open(archive, "w:gz") as tar:
-            # Under a `lakehouse/` directory rather than the archive root, so it
-            # unpacks self-describing; the restore expects that directory.
+            # Under `lakehouse/`, which the restore expects.
             tar.add(built, arcname="lakehouse")
 
     return {
@@ -407,9 +386,7 @@ def solidify_staging(
         attach_lakehouse(con, lake_dir, read_only=True)
     try:
         for name in views:
-            # Two statements: DuckDB will not `create or replace table` over a
-            # view of the same name, and the temp relation keeps the rows alive
-            # across the drop.
+            # DuckDB will not `create or replace table` over a view of the same name.
             con.execute(
                 f'create or replace table staging."_solid_{name}" as select * from staging."{name}"'
             )
@@ -471,9 +448,6 @@ def pseudonymise(
     known = classifications(manifest_path)
     declared = sorted(c for c, label in known.items() if label in MASKED_LABELS)
     if not declared:
-        # Otherwise fail-open: a typo in a `meta: {pii: …}` key, a dbt that stops
-        # surfacing column meta, or an emptied EXTRA_CLASSIFICATIONS would all
-        # publish every identifier in the clear under a manifest claiming a policy.
         raise privacy.PolicyError(
             "no columns are classified as "
             f"{'/'.join(MASKED_LABELS)} — refusing to publish. Either the classification "

@@ -188,44 +188,35 @@ def test_the_weather_table_named_here_is_the_one_dlt_loads():
 
 
 def test_the_published_allowlist_is_still_only_the_weather_archive():
-    """`PUBLISHED_TABLES` is a disclosure decision, not a convenience list.
-
-    Every mechanism test patches it to its own fixture's table — the publish and
-    carry paths are the same whatever the list holds, and a test that reads the
-    project's copy goes vacuous the day someone empties it. That leaves nothing
-    asserting the project's own value, which is the half that matters: this list
-    decides what leaves the building.
-
-    Weather is on it for cost — refetching the archive is days of Open-Meteo's
-    budget, and everything else in `raw` is free to rebuild. Adding
-    `raw.retail_invoice_lines` would ship clear customer ids inside
-    `lakehouse.tar.gz`, and **a release cannot take it back**: DuckLake keeps a
-    dropped table readable at earlier versions, which is why the published
-    catalog is built from this list rather than filtered down to it.
-    """
+    """The project's own value; every mechanism test patches in its fixture's table."""
     assert lakehouse.PUBLISHED_TABLES == ("raw.om_weather_daily",), (
         "the landing tables a release publishes have changed. This is a "
         "disclosure decision: check the new table holds no personal data, and "
-        "that it is here for a cost that a rebuild cannot pay "
-        "(docs/DATA_PROTECTION.md, the publishing-a-release skill)."
+        "that it is here for a cost that a rebuild cannot pay — weather is, because "
+        "refetching it is days of Open-Meteo's budget. `raw.retail_invoice_lines` "
+        "holds clear customer ids, and a release cannot take a table back: DuckLake "
+        "keeps it readable at earlier versions (docs/DATA_PROTECTION.md, the "
+        "publishing-a-release skill)."
     )
 
 
 def test_the_attach_alias_is_the_database_dbt_declares():
-    """dbt's `_sources.yml` says `database: lakehouse` and `profiles.yml` attaches
-    under that alias. Both are the constant here; a change to one of the three
-    that misses the others means dbt cannot resolve a single source."""
+    """`_sources.yml`'s `database:` and `profiles.yml`'s attach alias are this constant."""
     from pathlib import Path
 
     import yaml
 
+    why = (
+        "dbt resolves every source through this catalog name, so a change to one of "
+        "`ATTACH_ALIAS`, `_sources.yml` and `profiles.yml` needs the other two"
+    )
     sources = yaml.safe_load(Path("dbt/models/staging/_sources.yml").read_text())
     raw = next(s for s in sources["sources"] if s["name"] == "raw")
-    assert raw["database"] == lakehouse.ATTACH_ALIAS
+    assert raw["database"] == lakehouse.ATTACH_ALIAS, why
 
     profile = yaml.safe_load(Path("dbt/profiles.yml").read_text())
     attached = profile["modern_data_stack"]["outputs"]["dev"]["attach"]
-    assert [a["alias"] for a in attached] == [lakehouse.ATTACH_ALIAS]
+    assert [a["alias"] for a in attached] == [lakehouse.ATTACH_ALIAS], why
 
 
 def test_a_bucket_connection_installs_httpfs_before_loading_it(tmp_path):
