@@ -74,6 +74,28 @@ def test_page_routes_cover_the_pages_that_exist():
     assert set(build_report.page_routes()) == markdown
 
 
+def test_the_published_dbt_docs_do_not_track_visitors(monkeypatch):
+    """dbt's docs page hands the manifest's `send_anonymous_usage_stats` to a
+    Snowplow tracker, and dbt's default is on. Measured: with the flag left
+    alone, the rendered page loads `sp.js` from CloudFront, and every visitor
+    to the public site reports their page views to dbt Labs; with it off, no
+    script is injected. The lakehouse path rides along because a relative one
+    is refused inside the docs build, which Dagster runs without `just`."""
+    monkeypatch.setenv("DBT_SEND_ANONYMOUS_USAGE_STATS", "true")
+    monkeypatch.delenv("LAKEHOUSE_DIR", raising=False)
+    env = build_report.dbt_docs_env()
+    assert env["DBT_SEND_ANONYMOUS_USAGE_STATS"] == "false"
+    assert Path(env["LAKEHOUSE_DIR"]).is_absolute()
+
+
+def test_the_index_links_to_the_dbt_docs_as_a_file():
+    """The link has to be relative, for the Pages base path, and `rel="external"`:
+    without it the prerender crawler follows `dbt/` before `build_report` has
+    written it and fails the build with a 404."""
+    index = (build_report.PAGES_DIR / "index.md").read_text()
+    assert f'<a href="{build_report.DBT_DOCS_ROUTE}/" rel="external">' in index
+
+
 def test_site_root_defaults_to_the_build_directory(monkeypatch, tmp_path: Path):
     """Unset, nothing about the build changes: `just serve` on a laptop serves
     `reports/build` directly, and a copy of a site onto itself is the one case

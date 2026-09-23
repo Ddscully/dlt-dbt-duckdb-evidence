@@ -659,20 +659,38 @@ def _routes(tmp_path: Path, sizes: dict[str, int | None]) -> dict[str, Path]:
     return routes
 
 
-def test_site_check_passes_when_every_page_rendered(tmp_path, monkeypatch, assets):
-    routes = _routes(tmp_path, {"index": 19_000, "retail": 92_000})
+def _site(tmp_path: Path, monkeypatch, assets, sizes: dict[str, int | None], dbt_docs: int | None):
+    """Point the check at a temp build: the pages from `sizes`, and the dbt docs,
+    which it finds under `BUILD_DIR` rather than through `page_routes`."""
+    routes = _routes(tmp_path, sizes)
+    _routes(tmp_path, {assets.DBT_DOCS_ROUTE: dbt_docs})
     monkeypatch.setattr(assets, "page_routes", lambda: routes)
+    monkeypatch.setattr(assets, "BUILD_DIR", tmp_path)
+
+
+def test_site_check_passes_when_every_page_rendered(tmp_path, monkeypatch, assets):
+    _site(tmp_path, monkeypatch, assets, {"index": 19_000, "retail": 92_000}, 6_000_000)
 
     result = assets.site_pages_all_rendered()
 
     assert result.passed
-    assert _meta(result, "pages_expected") == 2
+    assert _meta(result, "pages_expected") == 3
+
+
+def test_site_check_fails_a_build_without_the_dbt_docs(tmp_path, monkeypatch, assets):
+    """The docs are written by `build_report` after Evidence, not by it, so every
+    page can render while `/dbt/`, which Home links to, does not exist."""
+    _site(tmp_path, monkeypatch, assets, {"index": 19_000, "retail": 92_000}, None)
+
+    result = assets.site_pages_all_rendered()
+
+    assert not result.passed
+    assert _meta(result, "missing") == [assets.DBT_DOCS_ROUTE]
 
 
 def test_site_check_fails_a_page_that_never_rendered(tmp_path, monkeypatch, assets):
     """`evidence build` exits 0 for a site missing a page."""
-    routes = _routes(tmp_path, {"index": 19_000, "retail": None})
-    monkeypatch.setattr(assets, "page_routes", lambda: routes)
+    _site(tmp_path, monkeypatch, assets, {"index": 19_000, "retail": None}, 6_000_000)
 
     result = assets.site_pages_all_rendered()
 
@@ -683,8 +701,7 @@ def test_site_check_fails_a_page_that_never_rendered(tmp_path, monkeypatch, asse
 def test_site_check_fails_a_route_that_emitted_only_the_shell(tmp_path, monkeypatch, assets):
     """Present and non-empty, and still not a page. This is the failure that
     looks most like success, which is why the check measures size at all."""
-    routes = _routes(tmp_path, {"index": 19_000, "retail": 900})
-    monkeypatch.setattr(assets, "page_routes", lambda: routes)
+    _site(tmp_path, monkeypatch, assets, {"index": 19_000, "retail": 900}, 6_000_000)
 
     result = assets.site_pages_all_rendered()
 

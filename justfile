@@ -379,14 +379,14 @@ typecheck:
 # The same module the `reports/evidence_site` asset calls.
 # Build the Evidence dashboard (requires Node; see reports/README.md)
 [group('publish')]
-report:
+report: dbt-deps
     uv run python -m publish.build_report
 
 # Evidence caches each source's schema and does not notice a column change, so
 # use this rather than `report` after any mart or analytics column changes.
 # Drop Evidence's schema cache, re-extract the sources, then build
 [group('publish')]
-report-clean:
+report-clean: dbt-deps
     uv run python -m publish.build_report --clean
 
 # ---------------------------------------------------------------------------

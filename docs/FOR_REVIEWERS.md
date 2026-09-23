@@ -356,14 +356,15 @@ for this architecture, and still not what the dimension asks for. Scoring it
 Partial because a mitigation exists would be exactly the flattery the rubric is
 supposed to prevent.
 
-**Metadata completeness is the one that is Partial by choice and could move.**
-The paper's Established is *"documentation is the default condition of
-ingestion"*; here the default condition is *typing* — a column cannot enter a
-mart without a `data_type` and a contract, but it can enter without a sentence.
-Under half is not a bad number for prose coverage and it is not Established, and
-the gap is worth naming because the repo reads as more documented than that: the
-columns that carry an explanation are the ones where an explanation was needed,
-which is a defensible policy and not the same claim.
+**Metadata completeness is the one that moved, because effort alone could move
+it.** The paper's Established is *"documentation is the default condition of
+ingestion"*; here a column cannot enter a mart without a `data_type`, a contract
+and a sentence — the last held by a test rather than by dbt, which accepts a
+blank description. The sentences ship in the release and are browsable as the
+[data catalogue](https://ddscully.github.io/dlt-dbt-duckdb-evidence/dbt/) beside
+the dashboard. The qualification is scope: the `analytics` tables Polars writes
+carry no column descriptions, so a reader of the release gets a `null` for each
+of theirs.
 
 **Quality observability is Established with one caveat I would not want passed
 over.** The reach is real, and the alerting is a `nightly-failure` issue opened
@@ -379,10 +380,10 @@ structure is there (four groups, an owner on each, enforced boundaries) and the
 process is not, because there is nobody to have a process with.
 
 **The profile, read the way the paper asks** — weakest dimensions first — points
-at access governance and metadata completeness. The first is a property of
+at access governance and organizational ownership. The first is a property of
 running on an embedded database and moves only by moving off one (§4 covers what
-that migration costs). The second is a fortnight of writing sentences, and is
-the only item here that effort alone would fix.
+that migration costs); the second needs a second person. Neither is something
+more work on this repo would fix.
 
 ### The Seven Deadly Sins, honestly
 

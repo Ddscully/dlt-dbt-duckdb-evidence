@@ -1,6 +1,7 @@
 name: pages
 
-# Publishes the Evidence dashboard to GitHub Pages.
+# Publishes the Evidence dashboard to GitHub Pages, with the dbt docs beside it
+# at /dbt/ (`publish/build_report.py` writes both).
 #
 # Unlike `ci.yml`, this runs against the LIVE sources. The published site is the
 # point of the repo, and a dashboard built from `tests/fixtures/ingest/` would
