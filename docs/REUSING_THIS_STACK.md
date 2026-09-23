@@ -176,9 +176,8 @@ keep the split a split:
   cases in `test_export.py` and `test_restore_history.py` do, or it goes vacuous
   when the allowlist is empty.
 - **The prose guards are calibrated to this repo's volume of prose.**
-  - `test_documented_counts.py` requires three specific claims: a test total
-    (the README headline), the description coverage, and a `PASS=` line from
-    the course.
+  - `test_documented_counts.py` requires two specific claims: a test total
+    (the README headline) and a `PASS=` line from the course.
   - `test_course.py` always includes the course index, so its skill-citation
     cases crash with no course.
   - Remove the claim-must-exist cases; the checks that keep counts out of

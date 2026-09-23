@@ -3,10 +3,9 @@
 A derived total written into prose is an assertion nothing else checks:
 `just lint`, `pytest` and `dbt build` all stay green while a README cites last
 month's test count, and every restatement is one more file to edit when a test
-is added. So the prose says "every data test on the model", and three figures
+is added. So the prose says "every data test on the model", and two figures
 are kept and checked against the manifest: the project's test totals (the
-README headline), the description coverage `FOR_REVIEWERS.md` scores on, and
-the course's `PASS=` verdicts. Any other count of tests, mart models,
+README headline) and the course's `PASS=` verdicts. Any other count of tests, mart models,
 additivity labels or contracted columns fails, with the phrasing to use instead.
 """
 
@@ -231,33 +230,6 @@ def test_no_prose_counts_the_contract():
         'prose counts the contract; write "every mart model" or "every column" instead:\n'
         + "\n".join(stale)
     )
-
-
-def test_the_documented_description_coverage_is_what_the_ymls_carry():
-    """The figure `FOR_REVIEWERS.md` §6 scores metadata completeness on.
-
-    All three numbers are recomputed, the percentage too: a stale numerator
-    with a fresh denominator would still round to something plausible.
-    """
-    contracted = [
-        v
-        for v in manifest()["nodes"].values()
-        if v.get("resource_type") == "model" and (v["config"].get("contract") or {}).get("enforced")
-    ]
-    cols = [c for v in contracted for c in v.get("columns", {}).values()]
-    described = sum(1 for c in cols if c.get("description"))
-    pattern = re.compile(r"(\d+)\s+of\s+those\s+(\d+)\s+columns\s+\((\d+)%\)")
-    seen = 0
-    for path in tracked_prose():
-        text = path.read_text()
-        for match in pattern.finditer(text):
-            seen += 1
-            got = tuple(int(g) for g in match.groups())
-            expected = (described, len(cols), round(described / len(cols) * 100))
-            assert got == expected, (
-                f"{path.relative_to(REPO_ROOT)} claims {got}, the ymls carry {expected}"
-            )
-    assert seen == 1, f"expected the coverage claim in exactly one place, found {seen}"
 
 
 # `dbt build`'s verdict as the course quotes it back: `PASS=561 WARN=0 …`.

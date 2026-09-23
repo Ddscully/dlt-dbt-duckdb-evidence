@@ -40,7 +40,7 @@ WB_WDI_INDICATORS = {
     "NY.GDP.MKTP.KD": "gdp_constant_usd",  # GDP, constant 2015 US$
     "SP.DYN.LE00.IN": "life_expectancy",  # Life expectancy at birth, years
     "SP.POP.TOTL": "population",  # Population, total
-    "SI.POV.DDAY": "poverty_rate",  # Poverty headcount at $2.15/day, % of pop
+    "SI.POV.DDAY": "poverty_rate",  # Poverty at $3.00/day, 2021 PPP, % of pop
     "IT.NET.USER.ZS": "internet_users_pct",  # Individuals using the internet, % pop
     "SP.URB.TOTL.IN.ZS": "urban_pop_pct",  # Urban population, % of total
     "AG.LND.FRST.ZS": "forest_area_pct",  # Forest area, % of land area
