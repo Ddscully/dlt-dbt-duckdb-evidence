@@ -41,17 +41,28 @@ models:
     columns:
       - name: country_iso3
         data_type: VARCHAR
+        description: >
+          ISO3 code. Only country-years `dim_country_year` carries, so OWID's aggregates
+          (`World`, `Europe`) never arrive.
         data_tests: [not_null]
       - name: country_name
         data_type: VARCHAR
+        description: The World Bank's English name, from the spine.
       - name: region
         data_type: VARCHAR
+        description: World Bank region, from the spine.
       - name: income_group
         data_type: VARCHAR
+        description: >
+          World Bank income group, from the spine: today's classification applied to
+          every year.
       - name: year
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          The year the factor describes. Only years OWID publishes a factor for, so each
+          country starts at a different year.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -83,10 +94,16 @@ models:
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          Electricity generated that year, TWh (OWID). Context for the factor: a small
+          grid moves on one new plant.
       - name: low_carbon_share_elec_pct
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Renewables plus nuclear as a share of electricity generated, % (OWID). The
+          main driver of the factor.
       - name: is_latest_available
         data_type: BOOLEAN
         description: >
@@ -138,8 +155,14 @@ models:
         description: Whether the factor has changed since the snapshot first saw it. Null before 2015.
       - name: first_published_at
         data_type: TIMESTAMP
+        description: >
+          When `snap_grid_emission_factors` first recorded this factor: when the
+          warehouse saw it, not when OWID computed it. Null before 2015.
       - name: last_revised_at
         data_type: TIMESTAMP
+        description: >
+          When the snapshot last recorded a change. Null when there has only ever been
+          one version, and before 2015.
       - name: factor_basis
         data_type: VARCHAR
         description: >
@@ -188,20 +211,31 @@ models:
     columns:
       - name: site_id
         data_type: VARCHAR
+        description: >
+          The invented site's key from `seeds/example_scope2_sites.csv`, `S01` onwards.
         data_tests: [not_null]
       - name: site_name
         data_type: VARCHAR
+        description: Invented site name.
       - name: site_type
         data_type: VARCHAR
+        description: >
+          Manufacturing, Distribution or Office & R&D. Invented, like the rest of the
+          seed.
       - name: country_iso3
         data_type: VARCHAR
+        description: Where the site is, and so which country's grid factor prices it.
         data_tests: [not_null]
       - name: country_name
         data_type: VARCHAR
+        description: >
+          From `dim_grid_emission_factors`. Null would mean the country has no published
+          factor, which `emission_factor_g_co2_per_kwh`'s `not_null` catches first.
       - name: annual_electricity_mwh
         data_type: INTEGER
         meta:
           additivity: additive
+        description: The site's metered consumption for a year, MWh. Invented.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -219,6 +253,10 @@ models:
         data_type: INTEGER
         meta:
           additivity: non_additive
+        description: >
+          How many years this country's newest factor sits behind the newest in the
+          table, from `dim_grid_emission_factors`. 0 means the site is priced off the
+          most recent year any country has.
       - name: emission_factor_g_co2_per_kwh
         data_type: DOUBLE
         meta:
@@ -232,6 +270,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Renewables plus nuclear as a share of the country's electricity, % (OWID), in
+          `factor_year`. Context for why the factor is what it is.
       - name: scope2_t_co2e
         data_type: DOUBLE
         meta:
@@ -245,6 +286,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          This site's share of the group's total `scope2_t_co2e`, %. Sums to 100 over
+          the table.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
@@ -300,6 +344,10 @@ models:
     columns:
       - name: country_or_territory
         data_type: VARCHAR
+        description: >
+          The annex's own label for where the good was made, taken from its Excel sheet
+          names and so capped at 31 characters. `Other countries and territories` on the
+          fallback rows. Use `country_display_name` for charts.
         data_tests: [not_null]
       - name: country_iso3
         data_type: VARCHAR
@@ -310,6 +358,9 @@ models:
           carry keeps its default values rather than vanishing.
       - name: country_name
         data_type: VARCHAR
+        description: >
+          `dim_country`'s name for `country_iso3`, left-joined. Null on the fallback
+          rows only.
       - name: country_display_name
         data_type: VARCHAR
         description: >
@@ -320,17 +371,32 @@ models:
           lacks.
       - name: region
         data_type: VARCHAR
+        description: World Bank region from `dim_country`. Null on the fallback rows.
       - name: income_group
         data_type: VARCHAR
+        description: >
+          World Bank income group from `dim_country`: today's classification. Null on
+          the fallback rows and for the territories the World Bank does not classify.
       - name: product_group
         data_type: VARCHAR
+        description: >
+          The annex's product group: Cement, Fertilisers, Aluminium, Hydrogen or Iron
+          and steel. It decides the mark-up schedule.
         data_tests: [not_null]
       - name: cn_code
         data_type: VARCHAR
+        description: >
+          Combined Nomenclature code as the annex prints it, spaced (`2804 10 00`). A
+          good the annex prices at the heading level has a four-digit code.
       - name: goods_description
         data_type: VARCHAR
+        description: >
+          The annex's description of the good. The longest runs to 250 characters.
       - name: good_key
         data_type: VARCHAR
+        description: >
+          The good's key in `cbam_goods`: the CN code without spaces plus a slug of the
+          description, e.g. `28041000-hydrogen`.
         data_tests:
           - not_null
           - relationships:
@@ -379,6 +445,9 @@ models:
                   )
       - name: is_fallback_table
         data_type: BOOLEAN
+        description: >
+          True on the annex's `Other countries and territories` table, the values any
+          country the annex does not list falls back to. One row per good.
       - name: is_country_specific
         data_type: BOOLEAN
         description: >
@@ -391,10 +460,18 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Direct embedded emissions, tCO2e per tonne of good, from Annex I, before the
+          mark-up. Never null.
       - name: indirect_t_co2e_per_t
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Indirect (electricity) embedded emissions, tCO2e per tonne of good, before the
+          mark-up. The annex publishes it only for cement, fertilisers and a few
+          iron-and-steel rows, so it is null on most rows, and on those
+          `total_t_co2e_per_t` equals the direct value.
       - name: total_t_co2e_per_t
         data_type: DOUBLE
         meta:
@@ -424,11 +501,17 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Certificates per tonne in 2027: `total_t_co2e_per_t` with the product group's
+          2027 mark-up from `cbam_markup_schedule`.
         data_tests: [not_null]
       - name: certificates_2028_t_co2e_per_t
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Certificates per tonne in 2028: `total_t_co2e_per_t` with the product group's
+          2028 mark-up.
         data_tests: [not_null]
       - name: markup_2026_pct
         description: >
@@ -449,6 +532,10 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          The EU ETS price the euro columns use, EUR per tonne CO2e. The
+          `eu_ets_price_eur_per_t` dbt var, the same on every row: an assumption, not a
+          market price.
       - name: cbam_cost_2026_eur_per_t
         data_type: DOUBLE
         meta:
@@ -462,11 +549,13 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: 2027 certificates x `ets_price_eur_per_t`, EUR per tonne of good.
         data_tests: [not_null]
       - name: cbam_cost_2028_eur_per_t
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: 2028 certificates x `ets_price_eur_per_t`, EUR per tonne of good.
         data_tests: [not_null]
       - name: excess_over_cleanest_source_t_co2e_per_t
         data_type: DOUBLE
@@ -502,6 +591,10 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          The year of `grid_factor_t_co2_per_mwh`: the country's latest factor in
+          `dim_grid_emission_factors`. Null on the fallback rows and where OWID
+          publishes no factor.
       - name: grid_factor_t_co2_per_mwh
         data_type: DOUBLE
         meta:
@@ -513,6 +606,12 @@ models:
           project does not redistribute. Sitting beside, not reconciled against.
       - name: source_instrument
         data_type: VARCHAR
+        description: >
+          The regulation the values come from, the same on every row, because the table
+          ships as a standalone Parquet file.
         data_tests: [not_null]
       - name: factor_basis
         data_type: VARCHAR
+        description: >
+          Always `location-based, administrative default`. The values are the
+          regulation's defaults, not any installation's verified emissions.

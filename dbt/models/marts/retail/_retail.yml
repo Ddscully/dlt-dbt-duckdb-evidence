@@ -41,28 +41,56 @@ models:
         data_type: VARCHAR
         meta:
           pii: quasi_identifier
+        description: >
+          Source invoice number, prefix included: `C` marks a cancellation, `A` an
+          adjustment.
         data_tests: [not_null]
       - name: line_number
         data_type: BIGINT
         meta:
           additivity: not_a_measure
+        description: >
+          Position within the invoice, assigned at ingest from file order. The source
+          has no line identifier and exact duplicate rows occur, so content cannot key
+          them.
         data_tests: [not_null]
       - name: invoice_type
         data_type: VARCHAR
+        description: >
+          `sale`, `cancellation` (prefix `C`) or `adjustment` (prefix `A`: bad-debt
+          write-downs, the only negative prices).
       - name: item_type
         data_type: VARCHAR
+        description: >
+          What the line is for: `product` is merchandise; `shipping`, `fee`, `discount`,
+          `sample`, `voucher`, `adjustment` and `test` are not. Filter on it before
+          counting products.
       - name: stock_code
         data_type: VARCHAR
+        description: >
+          The product code, upper-cased and trimmed, so codes that differ only by case
+          are one product. Joins to `dim_retail_product`.
       - name: description
         data_type: VARCHAR
+        description: >
+          The label on this line, as the source wrote it. Varies for the same
+          `stock_code`; `dim_retail_product.description` is the most common one. Null on
+          some lines.
       - name: customer_id
         data_type: VARCHAR
         meta:
           pii: direct_identifier
+        description: >
+          The customer's id, pseudonymised in the release. Null on the sales nobody
+          signed in for, about a fifth of lines, so a customer-level total is not the
+          business total.
       - name: country
         data_type: VARCHAR
         meta:
           pii: quasi_identifier
+        description: >
+          The source's own country label, kept as written (`EIRE`, `RSA`, `USA`). Group
+          by `country_iso3` to join the country tables.
       - name: country_iso3
         description: >
           The conformed country key, resolved from `country` through the
@@ -78,14 +106,24 @@ models:
         data_type: TIMESTAMP
         meta:
           pii: quasi_identifier
+        description: >
+          Wall-clock shop time, stored without a timezone on purpose (see
+          `stg_retail_lines`).
       - name: invoice_date
         data_type: DATE
+        description: >
+          The date of `invoice_ts`: the key to `dim_date` and the date the FX rate is
+          taken on.
       - name: invoice_month
         data_type: VARCHAR
+        description: >
+          `YYYY-MM` of `invoice_date`, and the Dagster partition key.
       - name: date_key
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          `invoice_date` as `dim_date`'s integer surrogate, yyyymmdd.
         data_tests: [not_null]
       - name: year
         data_type: INTEGER
@@ -103,36 +141,58 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          ISO 8601 year of `invoice_date`, from `dim_date`. Pairs with `iso_week`; see
+          `year` for why it is not the partition column.
       - name: iso_week
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: ISO 8601 week, 1-53, of `iso_year`.
       - name: iso_week_start_date
         data_type: DATE
+        description: >
+          The Monday that starts the ISO week: the column to group a weekly series on.
       - name: day_name
         data_type: VARCHAR
+        description: >
+          English day name. Sundays trade here although the ECB publishes no rate on
+          them.
       - name: is_weekend
         data_type: BOOLEAN
+        description: Saturday or Sunday.
       - name: fiscal_year
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          The fiscal year from `dim_date`, named for the calendar year it ends in. It
+          starts in the month set by `fiscal_year_start_month`, April in this build.
       - name: fiscal_quarter
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Quarter of that fiscal year, 1-4.
       - name: quantity
         data_type: BIGINT
         meta:
           additivity: additive
+        description: >
+          Units, signed: negative on cancellations and on stock write-offs.
       - name: unit_price
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Price per unit, GBP. Zero on free lines and negative on the bad-debt
+          adjustments.
       - name: line_amount_gbp
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          `quantity * unit_price`, signed, GBP. The source currency; net revenue is a
+          plain sum over `is_revenue_line`.
         data_tests: [not_null]
       - name: line_amount_eur
         data_type: DOUBLE
@@ -150,6 +210,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          The ECB rate the EUR and USD columns used: euros per pound on
+          `fx_rate_source_date`.
       - name: fx_rate_source_date
         data_type: DATE
         description: >
@@ -160,11 +223,21 @@ models:
         data_tests: [not_null]
       - name: fx_rate_is_carried_forward
         data_type: BOOLEAN
+        description: >
+          True where `invoice_date` had no ECB rate (a Sunday or a TARGET holiday) and
+          the last published one was used.
       - name: is_revenue_line
         data_type: BOOLEAN
+        description: >
+          A product sale, or a genuine return, that a customer was charged for: products
+          only, no write-offs or adjustments. The filter behind every revenue figure in
+          the retail group.
         data_tests: [not_null]
       - name: is_stock_write_off
         data_type: BOOLEAN
+        description: >
+          A negative quantity on a sale invoice: stock shrinkage posted through the
+          sales ledger, not a customer return.
 
   - name: dim_retail_product
     config:
@@ -191,6 +264,9 @@ models:
     columns:
       - name: stock_code
         data_type: VARCHAR
+        description: >
+          The product code, upper-cased and trimmed. One row per code, products and
+          non-products alike.
         data_tests: [not_null, unique]
       - name: description
         data_type: VARCHAR
@@ -199,27 +275,38 @@ models:
           nullity: an absent label is the source's answer, not a join failure.
       - name: item_type
         data_type: VARCHAR
+        description: >
+          What the code is for: `product`, `shipping`, `fee`, `discount`, `sample`,
+          `voucher`, `adjustment` or `test`. Constant within a code.
         data_tests: [not_null]
       - name: n_lines
         data_type: BIGINT
         meta:
           additivity: additive
+        description: Lines carrying the code, every invoice type included.
       - name: n_invoices
         data_type: BIGINT
         meta:
           additivity: non_additive
+        description: Distinct invoices carrying the code, cancellations included.
       - name: n_customers
         data_type: BIGINT
         meta:
           additivity: non_additive
+        description: >
+          Distinct signed-in customers. Zero for a code only anonymous customers bought,
+          so it undercounts buyers.
       - name: first_sold_date
         data_type: DATE
+        description: Date of the first line carrying the code, of any invoice type.
       - name: last_sold_date
         data_type: DATE
+        description: Date of the last line carrying the code, of any invoice type.
       - name: units_sold
         data_type: HUGEINT
         meta:
           additivity: additive
+        description: Units on positive sale lines, before returns.
       - name: units_returned
         data_type: HUGEINT
         meta:
@@ -242,6 +329,9 @@ models:
         meta:
           additivity: additive
           pii: non_personal
+        description: >
+          Revenue after returns, GBP, over `is_revenue_line`. Null for every non-product
+          code, which is never revenue.
       - name: median_unit_price_gbp
         data_type: DOUBLE
         meta:
@@ -257,21 +347,32 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          The lowest positive unit price, GBP; free lines are left out. Null where the
+          code never had a positive price.
       - name: max_unit_price_gbp
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: The highest unit price, GBP.
       - name: n_descriptions
         data_type: BIGINT
         meta:
           additivity: non_additive
+        description: How many distinct labels the code has carried.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: has_multiple_descriptions
         data_type: BOOLEAN
+        description: >
+          More than one label. `description` shows only the most common, so a rename or
+          a typo fix hides here.
       - name: is_non_product
         data_type: BOOLEAN
+        description: >
+          `item_type` is anything but `product`: postage, fees, discounts and the like.
+          Filter these out of any product ranking.
 
   - name: dim_retail_customer
     config:
@@ -297,11 +398,18 @@ models:
         data_type: VARCHAR
         meta:
           pii: direct_identifier
+        description: >
+          The customer's id, pseudonymised in the release by a salted digest stable
+          across releases. **Personal data**, and the columns beside it make a customer
+          re-identifiable even without it. Only signed-in customers have a row.
         data_tests: [not_null, unique]
       - name: country
         data_type: VARCHAR
         meta:
           pii: quasi_identifier
+        description: >
+          The source's country label. For a customer seen under two labels it is the
+          alphabetically later one, not the latest: see `has_moved_country`.
       - name: country_iso3
         description: >
           The conformed key for the country named beside it, so a customer
@@ -325,10 +433,15 @@ models:
           additivity: non_additive
       - name: has_moved_country
         data_type: BOOLEAN
+        description: >
+          True where the customer's lines carry more than one country label. `country`
+          shows only one of them.
       - name: first_order_date
         data_type: DATE
         meta:
           pii: quasi_identifier
+        description: >
+          Date of the first purchase invoice, not of the first line of any kind.
         data_tests: [not_null]
       - name: cohort_month
         data_type: VARCHAR
@@ -340,6 +453,7 @@ models:
         data_type: DATE
         meta:
           pii: quasi_identifier
+        description: Date of the last invoice of any kind, cancellations included.
       - name: tenure_days
         data_type: BIGINT
         meta:
@@ -352,6 +466,7 @@ models:
         data_type: BIGINT
         meta:
           additivity: additive
+        description: Distinct sale invoices.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -360,26 +475,40 @@ models:
         data_type: BIGINT
         meta:
           additivity: additive
+        description: >
+          Distinct cancellation invoices. Invoices, not units or value; see
+          `return_rate_pct` for value.
       - name: n_active_months
         data_type: BIGINT
         meta:
           additivity: non_additive
+        description: Distinct months with any invoice, cancellations included.
       - name: n_distinct_products
         data_type: BIGINT
         meta:
           additivity: non_additive
+        description: >
+          Distinct `product` stock codes the customer's lines touch, returns included.
       - name: units_bought
         data_type: HUGEINT
         meta:
           additivity: additive
+        description: >
+          Units on positive revenue lines: purchased, before returns.
       - name: gross_revenue_gbp
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          Revenue lines with a positive quantity, GBP: sales before returns. Excludes
+          postage, fees and adjustments.
       - name: returned_gbp
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          Revenue lines with a negative quantity, GBP, **signed negative**. Gross plus
+          returned is net.
       - name: net_revenue_gbp
         data_type: DOUBLE
         # A quasi-identifier: on its own it is unique for 97.4% of the 5,881
@@ -391,6 +520,9 @@ models:
         meta:
           additivity: additive
           pii: quasi_identifier
+        description: >
+          Revenue after returns, GBP: `gross_revenue_gbp + returned_gbp`. Null for the
+          few customers with no product line at all.
       - name: first_order_gbp
         data_type: DOUBLE
         description: >
@@ -418,6 +550,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          `net_revenue_gbp / n_orders`: net of returns, and over invoices, not days.
+          Null where net revenue is.
       - name: return_rate_pct
         data_type: DOUBLE
         meta:
@@ -428,6 +563,7 @@ models:
           pattern at the extract's edges, not a bug.
       - name: is_repeat_customer
         data_type: BOOLEAN
+        description: More than one sale invoice. Two invoices on the first day count.
       - name: is_left_censored_cohort
         data_type: BOOLEAN
         description: >
@@ -478,24 +614,34 @@ models:
         data_type: VARCHAR
         meta:
           pii: quasi_identifier
+        description: The cancellation invoice the return is on (prefix `C`).
         data_tests: [not_null]
       - name: line_number
         data_type: BIGINT
         meta:
           additivity: not_a_measure
+        description: >
+          Position within the cancellation invoice. With `invoice`, the same key as
+          `fct_retail_order_line`.
         data_tests: [not_null]
       - name: customer_id
         data_type: VARCHAR
         meta:
           pii: direct_identifier
+        description: >
+          Pseudonymised in the release. Null where nobody signed in; those returns
+          cannot be matched and carry `no customer id`.
       - name: stock_code
         data_type: VARCHAR
+        description: The returned product's code.
       - name: description
         data_type: VARCHAR
+        description: The label on the return line, as the source wrote it.
       - name: country
         data_type: VARCHAR
         meta:
           pii: quasi_identifier
+        description: The source's own country label on the return.
       - name: country_iso3
         description: >
           The conformed country key, carried from `stg_retail_lines` through
@@ -508,10 +654,14 @@ models:
         data_type: TIMESTAMP
         meta:
           pii: quasi_identifier
+        description: Wall-clock shop time of the return, stored without a timezone.
       - name: invoice_date
         data_type: DATE
+        description: The date of the return.
       - name: invoice_month
         data_type: VARCHAR
+        description: >
+          `YYYY-MM` of the return.
       - name: date_key
         data_type: INTEGER
         meta:
@@ -536,10 +686,16 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          The price per unit on the return line, GBP. Compare with
+          `original_unit_price`.
       - name: return_amount_gbp
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          The return's value, GBP, **signed negative** as the source carries it, so it
+          adds straight onto sales. `quantity_returned` is positive.
       - name: original_invoice
         description: >
           The inferred purchase, not a recorded one: the source carries no link
@@ -565,6 +721,9 @@ models:
           additivity: not_a_measure
       - name: original_invoice_date
         data_type: DATE
+        description: >
+          The date of the inferred purchase. A second role on `dim_date`, deliberately
+          without a key. Null when unmatched.
       - name: original_quantity
         data_type: BIGINT
         meta:
@@ -579,6 +738,8 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          The unit price on the inferred purchase line, GBP. Null when unmatched.
       - name: original_amount_gbp
         data_type: DOUBLE
         meta:
@@ -599,9 +760,15 @@ models:
               arguments: {min_value: 0}
       - name: is_matched
         data_type: BOOLEAN
+        description: >
+          Whether a prior purchase was found. The column to filter on, rather than
+          `original_invoice`.
         data_tests: [not_null]
       - name: match_status
         data_type: VARCHAR
+        description: >
+          `matched`, `matched, quantity exceeds purchase`, `no prior purchase in window`
+          (usually goods bought before the extract opens) or `no customer id`.
         data_tests:
           - not_null
           - accepted_values:
@@ -613,8 +780,14 @@ models:
                   - no customer id
       - name: quantity_is_consistent
         data_type: BOOLEAN
+        description: >
+          Whether `quantity_returned` is no more than the matched purchase's quantity.
+          Null when unmatched.
       - name: price_differs_from_original
         data_type: BOOLEAN
+        description: >
+          Whether the return was credited at a different unit price from the purchase.
+          Null when unmatched or when the purchase was free.
 
   - name: fct_retail_customer_cohorts
     config:
@@ -668,17 +841,25 @@ models:
         # the columns that identify at customer grain do not identify here.
         meta:
           pii: non_personal
+        description: >
+          `YYYY-MM` of the cohort's first purchase, from `dim_retail_customer`.
         data_tests: [not_null]
       - name: months_since_first_order
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          Months from `cohort_month` to `activity_month`; 0 is the first month. Capped
+          at `retail_max_cohort_age_months`, and later cohorts stop sooner, so the
+          triangle is ragged.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
       - name: activity_month
         data_type: VARCHAR
+        description: >
+          `YYYY-MM`: `cohort_month` plus `months_since_first_order`.
       - name: cohort_size
         data_type: BIGINT
         meta:
@@ -707,10 +888,16 @@ models:
         meta:
           additivity: additive
           pii: non_personal
+        description: >
+          Net revenue of the cohort's customers in `activity_month`, GBP, after
+          returns. Only from customers who also bought that month, so a return in a
+          month with no purchase is not here, and zero when nobody bought.
       - name: retention_pct
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          `active_customers / cohort_size`, %. 100 at month 0 by construction.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -719,8 +906,14 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          `net_revenue_gbp / active_customers`, GBP. Null when nobody was active, not
+          zero.
       - name: is_left_censored_cohort
         data_type: BOOLEAN
+        description: >
+          True for the extract's first month, whose customers may have been buying for
+          years already. Its retention curve is not a new cohort's.
       - name: is_complete_period
         data_type: BOOLEAN
         description: >

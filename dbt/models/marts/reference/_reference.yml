@@ -35,9 +35,17 @@ models:
         data_tests: [not_null, unique]
       - name: country_iso2
         data_type: VARCHAR
+        description: >
+          ISO 3166-1 alpha-2, the key Eurostat prices arrive with (after staging maps
+          its `EL` and `UK`). Follows the World Bank where it is not ISO: the Channel
+          Islands are `JG`.
         data_tests: [not_null, unique]
       - name: country_name
         data_type: VARCHAR
+        description: >
+          The World Bank's English name (`St. Martin (French part)`, `West Bank and
+          Gaza`); the `country_overrides` seed names the territories the World Bank does
+          not list.
         data_tests: [not_null]
       - name: region
         description: >
@@ -77,6 +85,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          The capital's longitude, from the World Bank. Null where the API sends an
+          empty string, and for every `country_overrides` territory.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: -180, max_value: 180}
@@ -156,6 +167,10 @@ models:
     columns:
       - name: date_day
         data_type: DATE
+        description: >
+          The calendar day, and the dimension's natural key. Whole years from the first
+          year of the ECB series (1999) to the end of the last, so a year-to-date query
+          never runs off the end.
         data_tests: [not_null, unique]
       - name: date_key
         data_type: INTEGER
@@ -167,6 +182,7 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Calendar year.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -175,6 +191,7 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Calendar quarter, 1-4.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 4}
@@ -182,6 +199,7 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Calendar month, 1-12.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 12}
@@ -189,24 +207,33 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Day of the month, 1-31.
       - name: day_of_year
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Day of the year, 1-366.
       - name: month_name
         data_type: VARCHAR
+        description: English month name, e.g. `January`.
       - name: year_start_date
         data_type: TIMESTAMP
+        description: 1 January of `year`.
       - name: year_end_date
         data_type: TIMESTAMP
+        description: 31 December of `year`.
       - name: quarter_start_date
         data_type: TIMESTAMP
+        description: First day of the calendar quarter.
       - name: quarter_end_date
         data_type: TIMESTAMP
+        description: Last day of the calendar quarter.
       - name: month_start_date
         data_type: TIMESTAMP
+        description: First day of the month; the column to group a monthly series on.
       - name: month_end_date
         data_type: DATE
+        description: Last day of the month.
       - name: half
         data_type: VARCHAR
         description: "'S1'/'S2', spelled Eurostat's way so the price models join without a translation."
@@ -215,6 +242,8 @@ models:
               arguments: {values: ['S1', 'S2']}
       - name: half_start_date
         data_type: DATE
+        description: >
+          1 January or 1 July: the first day of `half`.
       - name: iso_year
         data_type: INTEGER
         meta:
@@ -230,11 +259,16 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          ISO 8601 week number, 1-53. It belongs to `iso_year`, not `year`: 1 January
+          1999 is in week 53 of 1998.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 53}
       - name: iso_week_label
         data_type: VARCHAR
+        description: >
+          `<iso_year>-w<week>`, zero-padded, e.g. `1998-w53`. Sorts correctly as text.
       - name: iso_week_start_date
         data_type: DATE
         description: The Monday of this row's ISO week — the safe weekly grouping key.
@@ -249,6 +283,7 @@ models:
               arguments: {min_value: 1, max_value: 7}
       - name: day_name
         data_type: VARCHAR
+        description: English day name, e.g. `Monday`.
       - name: is_weekday
         data_type: BOOLEAN
         description: >
@@ -258,6 +293,9 @@ models:
         data_tests: [not_null]
       - name: is_weekend
         data_type: BOOLEAN
+        description: >
+          Saturday or Sunday. The complement of `is_weekday`; public holidays are not
+          flagged.
       - name: fiscal_year_start_month
         data_type: INTEGER
         meta:
@@ -268,8 +306,12 @@ models:
         data_tests: [not_null]
       - name: fiscal_year_start_date
         data_type: DATE
+        description: >
+          First day of the fiscal year this date falls in, set by
+          `fiscal_year_start_month` (April in this build).
       - name: fiscal_year_end_date
         data_type: TIMESTAMP
+        description: Last day of the fiscal year this date falls in.
       - name: fiscal_year
         data_type: INTEGER
         meta:
@@ -282,6 +324,9 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          Quarter of the fiscal year, 1-4, counted from `fiscal_year_start_month`, so
+          with an April start January is fiscal Q4.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 4}
@@ -289,6 +334,7 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Month of the fiscal year, 1-12; 1 is the `fiscal_year_start_month`.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1, max_value: 12}
@@ -418,19 +464,29 @@ models:
     columns:
       - name: currency_code
         data_type: VARCHAR
+        description: >
+          ISO 4217 code, one row per currency in the hand-maintained `currencies` seed.
+          The ECB quotes each against the euro.
         data_tests: [not_null, unique]
       - name: currency_name
         data_type: VARCHAR
+        description: English name from the `currencies` seed.
         data_tests: [not_null]
       - name: first_published_date
         data_type: DATE
         description: Null only for EUR, which is quoted against rather than quoted.
       - name: last_published_date
         data_type: DATE
+        description: >
+          The last day the ECB published a rate for this currency. Null for a seeded
+          currency it has never quoted, which is what `is_quoted` flags.
       - name: n_published_days
         data_type: BIGINT
         meta:
           additivity: additive
+        description: >
+          How many days carry a published rate. Business days only: the ECB publishes
+          none at weekends or on TARGET holidays.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 1}
@@ -460,10 +516,18 @@ models:
         data_tests: [not_null]
       - name: retired_on
         data_type: DATE
+        description: >
+          When the ECB stopped quoting it, from the seed, e.g. `2026-01-01` for the lev.
+          Null for a currency still quoted.
       - name: retired_reason
         data_type: VARCHAR
+        description: >
+          Why it was retired: `euro_adoption` or `redenomination`. Null while quoted.
       - name: replaced_by_currency
         data_type: VARCHAR
+        description: >
+          What replaced it: `EUR` on euro adoption, the new code on a redenomination.
+          Null while quoted.
       - name: retirement_is_explained
         data_type: BOOLEAN
         description: >
@@ -505,12 +569,18 @@ models:
     columns:
       - name: rate_date
         data_type: DATE
+        description: >
+          The business day the ECB published the reference rate for. No weekends
+          and no TARGET holidays; 1999-01-04 is the first.
         data_tests: [not_null]
       - name: currency_code
         data_type: VARCHAR
+        description: ISO 4217 code of the quoted currency.
         data_tests: [not_null]
       - name: base_currency
         data_type: VARCHAR
+        description: >
+          Always `EUR`: every ECB reference rate is quoted against the euro.
         data_tests:
           - not_null
           - accepted_values:
@@ -528,6 +598,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Euros per one unit of `currency_code`: the reciprocal of `units_per_eur`,
+          shipped so nobody inverts it by hand.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -591,16 +664,25 @@ models:
     columns:
       - name: date_day
         data_type: DATE
+        description: >
+          Every calendar day from the currency's first published rate to its last,
+          weekends and holidays included.
         data_tests: [not_null]
       - name: date_key
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          `dim_date`'s integer surrogate, yyyymmdd.
       - name: currency_code
         data_type: VARCHAR
+        description: >
+          ISO 4217 code of the quoted currency. Only currencies the ECB has quoted; a
+          seeded one it never has gets no rows.
         data_tests: [not_null]
       - name: base_currency
         data_type: VARCHAR
+        description: Always `EUR`.
         data_tests: [not_null]
       - name: units_per_eur
         data_type: DOUBLE
@@ -617,6 +699,10 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Euros per one unit of `currency_code`: the published rate, or the last one
+          carried forward. Null once the carry exceeds `fx_max_carry_forward_days`, like
+          `units_per_eur`.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, inclusive: false}
@@ -635,9 +721,15 @@ models:
               arguments: {min_value: 0}
       - name: is_published_rate
         data_type: BOOLEAN
+        description: >
+          True on a day the ECB published a rate for this currency. The complement of
+          `is_carried_forward`.
         data_tests: [not_null]
       - name: is_carried_forward
         data_type: BOOLEAN
+        description: >
+          True on a day with no published rate, so the value is the last published one
+          (or null, if that is too old). Every weekend day is one.
         data_tests: [not_null]
       - name: is_rate_stale
         data_type: BOOLEAN
@@ -649,18 +741,26 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Calendar year of `date_day`, from `dim_date`.
       - name: quarter
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Calendar quarter, 1-4, from `dim_date`.
       - name: month
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Calendar month, 1-12, from `dim_date`.
       - name: half
         data_type: VARCHAR
+        description: >
+          'S1' or 'S2', from `dim_date`, spelled Eurostat's way.
       - name: is_weekday
         data_type: BOOLEAN
+        description: >
+          Monday to Friday. A weekday can still be carried forward: the ECB also closes
+          on TARGET holidays.
 
   - name: fct_fx_rates_periods
     config:
@@ -707,12 +807,16 @@ models:
     columns:
       - name: period_type
         data_type: VARCHAR
+        description: >
+          `month`, `quarter`, `half` or `year`. Every rate is counted once per type, so
+          filter on one: summing across types counts each day four times.
         data_tests:
           - not_null
           - accepted_values:
               arguments: {values: ['month', 'quarter', 'half', 'year']}
       - name: period_start_date
         data_type: TIMESTAMP
+        description: First day of the period.
         data_tests: [not_null]
       - name: period_label
         data_type: VARCHAR
@@ -720,16 +824,22 @@ models:
         data_tests: [not_null]
       - name: period_end_date
         data_type: TIMESTAMP
+        description: >
+          Last day of the period, whether or not it has happened yet: see
+          `period_is_complete`.
         data_tests: [not_null]
       - name: year
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: Calendar year the period starts in.
       - name: currency_code
         data_type: VARCHAR
+        description: ISO 4217 code of the quoted currency.
         data_tests: [not_null]
       - name: base_currency
         data_type: VARCHAR
+        description: Always `EUR`.
       - name: avg_units_per_eur
         data_type: DOUBLE
         meta:
@@ -770,6 +880,8 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          The first published rate in the period, units per euro: the opening rate.
         data_tests: [not_null]
       - name: period_end_vs_avg_pct
         data_type: DOUBLE
@@ -783,10 +895,12 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: The lowest published rate in the period, units per euro.
       - name: max_units_per_eur
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: The highest published rate in the period, units per euro.
       - name: intra_period_range_pct
         data_type: DOUBLE
         meta:
@@ -799,14 +913,24 @@ models:
         data_type: BIGINT
         meta:
           additivity: additive
+        description: >
+          Days in the period with a published rate: the number the averages are over.
+          Low for a currency that joined or left the panel mid-period.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1}
       - name: first_rate_date
         data_type: DATE
+        description: >
+          The first published rate date in the period. Later than `period_start_date`
+          whenever the period opens on a weekend, a holiday, or before the currency was
+          quoted.
       - name: last_rate_date
         data_type: DATE
+        description: >
+          The last published rate date in the period, the one the period-end columns are
+          read from.
       - name: period_is_complete
         data_type: BOOLEAN
         description: >

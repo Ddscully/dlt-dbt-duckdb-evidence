@@ -126,6 +126,31 @@ it cost to learn:
     `marts.fct_emissions_energy_v1` — which is what the Parquet files are called,
     and v1 inherits its 36 labels through `include: all`.
 
+- **The `relations` map carries what each column means**: every published
+  relation's description and each column's type and description.
+  `+persist_docs` in `dbt_project.yml` writes the ymls' descriptions as
+  `COMMENT ON`s, and `modern_data_stack.export.describe_relations` reads them
+  back off the *copy*, so the map describes the file that shipped, not the
+  project. Measured on dbt-duckdb 1.11 and DuckDB 1.5.5 before building it:
+  - **`COPY FROM DATABASE` keeps table, view and column comments; Parquet keeps
+    none**, which is why the manifest has to carry them.
+  - **Dropping a view drops its comments**, so `solidify_staging` reads each
+    staging view's comments before the drop and writes them onto the table.
+    Without that, the published `staging` layer lost all of its descriptions and
+    `marts` kept all of its. `pseudonymise` is an `UPDATE`, so it keeps them.
+  - **dbt writes `''`, not NULL, for an undocumented column**, and DuckDB keeps
+    the `''`. `describe_relations` turns it into `None`, and a `count(comment)`
+    over the file counts every column as described.
+  - **The export tests write their comments by hand**, so deleting
+    `+persist_docs` keeps every one of them green.
+    `test_every_model_writes_its_descriptions_into_the_warehouse` in
+    `tests/test_additivity.py` reads the setting off the dbt manifest and fails
+    even when a single folder overrides it.
+  - **The plumbing is complete but the prose is not**: most mart columns have
+    no description in the ymls yet, and `analytics` and the snapshots have no
+    ymls at all. The release notes print the ratio from the manifest, not from
+    a figure written into prose.
+
 ## Reading the load time
 
 - **`data_loaded_at` has to name the catalog, and getting it wrong is silent in

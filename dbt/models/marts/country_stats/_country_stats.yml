@@ -30,12 +30,18 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          Calendar year. The span runs from the earliest year any source reports (OWID's
+          CO2 reaches back to 1750) to the latest, and is the same for every country.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 1750, max_value: 2030}
       - name: country_name
         data_type: VARCHAR
+        description: >
+          The World Bank's English name, from `dim_country`; the `country_overrides`
+          seed names the territories it does not list.
       - name: region
         data_type: VARCHAR
         description: World Bank region, trimmed. Never null — see `dim_country`.
@@ -67,9 +73,15 @@ models:
     columns:
       - name: country_iso3
         data_type: VARCHAR
+        description: >
+          ISO3 as OWID reports it, from the snapshot rather than the spine, so it
+          includes Antarctica (`ATA`), which `dim_country` does not carry.
         data_tests: [not_null]
       - name: country_name
         data_type: VARCHAR
+        description: >
+          From `dim_country`, left-joined. Null on the Antarctica rows, the same ones
+          with no `region`.
       - name: region
         data_type: VARCHAR
         description: >
@@ -93,6 +105,9 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          The year the estimate is for, 1990 onwards: the snapshot keeps nothing
+          earlier.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -123,10 +138,18 @@ models:
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          The `co2_mt` of the oldest version the warehouse recorded, million tonnes.
+          Equal to `latest_co2_mt` unless `is_revised`; null where OWID published the
+          country-year with no value.
       - name: latest_co2_mt
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          The `co2_mt` of the newest version, million tonnes: the number
+          `fct_emissions_energy` carries now, unless OWID has since withdrawn the
+          country-year.
       - name: co2_mt_change
         data_type: DOUBLE
         meta:
@@ -143,10 +166,13 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          The `co2_per_capita` of the oldest version recorded, tonnes per person.
       - name: latest_co2_per_capita
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: The `co2_per_capita` of the newest version, tonnes per person.
 
   - name: fct_emissions_energy
     # The project's one versioned model: nothing in the project refs it, and the
@@ -200,9 +226,13 @@ models:
     columns:
       - name: country_iso3
         data_type: VARCHAR
+        description: >
+          ISO3 code, from the spine, so only codes `dim_country` carries: World Bank
+          aggregates such as `WLD`, and Antarctica, are not here.
         data_tests: [not_null]
       - name: country_name
         data_type: VARCHAR
+        description: The World Bank's English name, from `dim_country`.
       - name: region
         data_type: VARCHAR
         description: >
@@ -220,6 +250,10 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          Calendar year. A row exists only where at least one source reports the
+          country-year; before 1960 only OWID does, so every World Bank column is null
+          there.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -236,6 +270,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Territorial CO2 per person, tonnes (OWID). Fossil fuels and industry; excludes
+          land-use change, like `co2_mt`.
       # Renamed in v2 from `co2_per_gdp`, which said neither the unit nor the
       # basis while a second, differently-based intensity column sat one schema
       # away. v1 serves it under the old name until the deprecation date.
@@ -252,18 +289,31 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          This country's share of the world's territorial CO2 that year, % (OWID). A
+          flow share; `share_global_cumulative_co2` is the stock.
       - name: coal_co2
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          CO2 from coal, million tonnes (OWID). With `oil_co2` and `gas_co2` it does not
+          sum to `co2_mt`: cement, flaring and other industry make up the rest, and the
+          three fall more than 1% short in 39% of the rows that have all four.
       - name: oil_co2
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          CO2 from oil, million tonnes (OWID). See `coal_co2` for why the fuels do not
+          sum to `co2_mt`.
       - name: gas_co2
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          CO2 from gas, million tonnes (OWID). See `coal_co2` for why the fuels do not
+          sum to `co2_mt`.
       - name: consumption_co2
         data_type: DOUBLE
         meta:
@@ -281,6 +331,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          `consumption_co2` per person, tonnes (OWID). The same ~120 countries and the
+          same one-year lag.
       - name: trade_co2
         data_type: DOUBLE
         meta:
@@ -321,6 +374,10 @@ models:
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          Primary energy consumption, TWh (OWID, substitution method). The
+          narrowest-coverage energy column: ~79 countries from 2024 on, so a
+          latest-year cut thins badly — see `renewables_share_pct`.
       - name: renewables_share_pct
         data_type: DOUBLE
         meta:
@@ -338,6 +395,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Coal, oil and gas as a share of primary energy, % (OWID, substitution method).
+          Covers the same ~79 countries as `primary_energy_twh`.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
@@ -345,6 +405,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: additive
+        description: >
+          Electricity generated, TWh (OWID). ~210 countries, far wider than the
+          primary-energy columns; the denominator of every `*_share_elec_pct`.
       - name: carbon_intensity_elec_g_kwh
         data_type: DOUBLE
         meta:
@@ -368,22 +431,27 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: Solar as a share of electricity generated, % (OWID).
       - name: wind_share_elec_pct
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: Wind as a share of electricity generated, % (OWID).
       - name: nuclear_share_elec_pct
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: Nuclear as a share of electricity generated, % (OWID).
       - name: coal_share_elec_pct
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: Coal as a share of electricity generated, % (OWID).
       - name: gas_share_elec_pct
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: Gas as a share of electricity generated, % (OWID).
       - name: gdp_per_capita_usd
         data_type: DOUBLE
         meta:
@@ -426,6 +494,12 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Share of the population living on less than $3.00 a day at 2021 PPP, % (WDI
+          SI.POV.DDAY). The World Bank moved the line from $2.15 (2017 PPP) in 2025 and
+          restated the whole series, so a figure quoted before then will not match.
+          Survey years only: 171 countries have a value, but only about a third of
+          country-years since 2000 do.
       - name: internet_users_pct
         data_type: DOUBLE
         meta:
@@ -438,10 +512,14 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Urban population, % of total (WDI SP.URB.TOTL.IN.ZS). Each country's own
+          definition of urban, so levels compare loosely across countries.
       - name: forest_area_pct
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: Forest area, % of land area (WDI AG.LND.FRST.ZS).
       - name: renew_elec_pct
         data_type: DOUBLE
         meta:
@@ -454,6 +532,11 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
+        description: >
+          Net energy imports, % of energy use (WDI EG.IMP.CONS.ZS): imports minus
+          exports over primary energy use. Negative for a net exporter, and unbounded
+          below — about a third of values are negative and the lowest is under -3,000%,
+          so a mean across countries is meaningless. 1990 onwards.
       - name: electricity_price_eur_kwh
         data_type: DOUBLE
         meta:
@@ -538,6 +621,9 @@ models:
         data_type: INTEGER
         meta:
           additivity: not_a_measure
+        description: >
+          Calendar year of the daily observations. The current year is partial until 31
+          December, which `year_is_complete` flags.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -590,6 +676,10 @@ models:
         data_type: DOUBLE
         meta:
           additivity: not_a_measure
+        description: >
+          The base temperature `cdd_total` was computed against, °C. Carried per row for
+          the same reason as `heating_base_c`: it is a `var`, so it can differ between
+          builds.
         data_tests:
           - not_null
       - name: temp_mean_c
@@ -703,17 +793,27 @@ models:
     columns:
       - name: country_iso3
         data_type: VARCHAR
+        description: >
+          ISO3, mapped once from Eurostat's two-letter geo code in staging (Eurostat
+          writes `EL` for Greece and `UK` for the United Kingdom). Only the countries
+          Eurostat publishes a price for.
         data_tests: [not_null]
       - name: country_name
         data_type: VARCHAR
+        description: The World Bank's English name, from the spine.
       - name: region
         data_type: VARCHAR
+        description: World Bank region, from the spine. Never null.
       - name: income_group
         data_type: VARCHAR
+        description: >
+          World Bank income group, from the spine: today's classification applied to
+          every year. `dim_country_income_history` has it as it stood each year.
       - name: year
         data_type: BIGINT
         meta:
           additivity: not_a_measure
+        description: Calendar year of the half-year.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:

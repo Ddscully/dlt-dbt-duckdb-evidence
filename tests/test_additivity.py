@@ -267,6 +267,40 @@ def test_the_labels_reach_the_release_manifest():
     assert flat == everything()
 
 
+def test_every_model_writes_its_descriptions_into_the_warehouse():
+    """The descriptions reach the release only as `COMMENT ON`s that
+    `persist_docs` writes, and the manifest's `relations` map is read back from
+    them. `tests/test_export.py` writes its comments by hand, so without this
+    the config could go and every export test would stay green."""
+    manifest = json.loads(Path(manifest_path).read_text())
+    models = [n for n in manifest["nodes"].values() if n.get("resource_type") == "model"]
+    missing = sorted(
+        n["name"]
+        for n in models
+        if (n["config"].get("persist_docs") or {}) != {"relation": True, "columns": True}
+    )
+    assert models
+    assert not missing, f"persist_docs is off for {missing}"
+
+
+def test_every_mart_column_carries_a_description():
+    """What `persist_docs` writes, and so what a release consumer reads beside
+    the type. A blank arrives as `null`, which reads as "nobody looked" rather
+    than "obvious", and who is to judge obvious is the author, who already knows.
+    `poverty_rate` looked self-explanatory and had changed its poverty line.
+
+    All of them, not a threshold: a coverage floor needs an exemption list, and
+    that list is one more thing kept in step by hand. `analytics` is out of
+    scope for the reason `EXTRA_ADDITIVITY` exists — dbt cannot see it.
+    """
+    columns = mart_columns()
+    blank = sorted(
+        key for key, spec in columns.items() if not (spec.get("description") or "").strip()
+    )
+    assert columns
+    assert not blank, f"{len(blank)} mart columns carry no description: {blank}"
+
+
 def test_a_copied_column_keeps_the_label_the_mart_gave_it():
     """`analytics.co2_intensity` is `select * from marts.fct_emissions_energy`
     plus two derived columns, so its labels are the mart's labels — and the

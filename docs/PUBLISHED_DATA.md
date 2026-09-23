@@ -24,6 +24,14 @@ number. Where a column is `semi_additive` its description says which direction
 fails: `population` adds across countries and gives person-years across years,
 `cumulative_co2` is a stock that recounts every earlier year.
 
+**And it says what each column means.** Its `relations` map gives every
+published table's description and each column's type and description, read back
+from the comments dbt's `persist_docs` writes into the file — so the same text
+is on the tables in `warehouse.duckdb` (`select comment from duckdb_columns()`).
+A `null` description means none has been written yet, and the release notes say
+how many have: not every mart column is documented. The Parquet files carry none
+of it; they have nowhere to put it.
+
 ## Querying it
 
 DuckDB reads a remote database over HTTPS, so you can query it where it sits:

@@ -76,6 +76,14 @@ create table marts.fct_emissions_energy as
     select * from intermediate.int_country_year_observed;
 create table analytics.co2_intensity as select country_iso3, year, 1.0 as intensity
     from staging.stg_co2;
+
+-- What dbt's `persist_docs` writes, including the `''` it gives an undocumented
+-- column. The apostrophe is there because `COMMENT ON` cannot be parameterised.
+comment on view staging.stg_co2 is 'OWID''s CO2, one row per country-year';
+comment on column staging.stg_co2.co2_mt is 'Annual CO2, in megatonnes';
+comment on column marts.fct_emissions_energy.year is '';
+comment on table marts.fct_emissions_energy is 'The country-year fact';
+comment on column marts.fct_emissions_energy.country_iso3 is 'ISO 3166-1 alpha-3';
 """
 
 
@@ -202,6 +210,49 @@ def test_the_copied_warehouse_keeps_its_views_working(export: dict):
     # This fixture's in-file `raw` survives the copy; a real warehouse has none
     # — its `raw` lives in the lakehouse.
     assert con.execute("select count(*) from warehouse.raw.owid_co2").fetchone() == (2,)
+
+
+def test_the_manifest_carries_what_each_column_means(export: dict):
+    """A Parquet file has names and types and nowhere to keep a description, so
+    the manifest is the only place its reader finds one. Read back from the
+    published copy, so it holds what shipped."""
+    relations = json.loads((export["out"] / "manifest.json").read_text())["relations"]
+
+    fact = relations["marts.fct_emissions_energy"]
+    assert fact["description"] == "The country-year fact"
+    assert fact["columns"]["country_iso3"] == {
+        "type": "VARCHAR",
+        "description": "ISO 3166-1 alpha-3",
+    }
+    # Undocumented is `None`, never `''`: an empty string reads as "documented as empty".
+    assert fact["columns"]["year"]["description"] is None
+    assert relations["staging.stg_co2"]["columns"]["year"]["description"] is None
+    assert set(relations) == {t["table"] for t in export["tables"]}
+    # Two of the fixture's ten columns are documented, and the notes say so.
+    notes = " ".join((export["out"] / "RELEASE_NOTES.md").read_text().split())
+    assert "2 of the 10 columns carry one" in notes
+
+
+def test_the_staging_descriptions_survive_being_solidified(export: dict):
+    """Dropping a view drops its comments. `solidify_staging` turns every
+    `staging` view into a table, so without carrying them across the published
+    staging layer loses every description dbt wrote on it."""
+    con = duckdb.connect(str(export["out"] / "warehouse.duckdb"), read_only=True)
+    try:
+        table = scalar(
+            con,
+            "select comment from duckdb_tables() "
+            "where schema_name = 'staging' and table_name = 'stg_co2'",
+        )
+        column = scalar(
+            con,
+            "select comment from duckdb_columns() where schema_name = 'staging' "
+            "and table_name = 'stg_co2' and column_name = 'co2_mt'",
+        )
+    finally:
+        con.close()
+    assert table == "OWID's CO2, one row per country-year"
+    assert column == "Annual CO2, in megatonnes"
 
 
 def test_provenance_records_the_load_not_just_the_run(export: dict):

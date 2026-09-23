@@ -209,10 +209,9 @@ section here. The mutation method these guards were written with is in the
   about forty stale ones** — adding one data test once fixed a total in two files
   and left it wrong in fourteen, with `lint`, `pytest` and `dbt build` green. So
   counts of what dbt builds stay out of prose, and `tests/test_documented_counts.py`
-  enforces it: the prose says "every data test on the model", and three figures
+  enforces it: the prose says "every data test on the model", and two figures
   are kept and checked against the manifest — the project's test totals (the
-  README headline), `FOR_REVIEWERS.md`'s description coverage, and the course's
-  `PASS=` verdicts. A per-model test count, a mart-model count, an additivity
+  README headline) and the course's `PASS=` verdicts. A per-model test count, a mart-model count, an additivity
   label count or a contracted-column count fails, naming the phrasing to use.
   - **Per-model counts went because nothing prints them.** `dbt build --select
     <model>` reports the model node and anything eagerly selected, so five of

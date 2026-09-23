@@ -333,7 +333,7 @@ below, and the profile is the point.
 
 | Dimension | Level | Why, with the number that decides it |
 |---|---|---|
-| Metadata completeness | **Partial** | Every model carries a description and an owner, and a contract types every mart column — but only **173 of those 407 columns (43%) carry a description**. |
+| Metadata completeness | **Established** | Every model carries a description and an owner, a contract types every mart column, and every one of those columns carries a description that ships in the release — `tests/test_additivity.py` fails on a blank one. The `analytics` tables are the gap: Polars writes them, so dbt describes none of their columns. |
 | Quality observability | **Established** | Data and unit tests with failing rows stored per test, Dagster asset checks, freshness thresholds on every source but the closed retail archive, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
 | Access governance | **Absent** | Structurally, not by neglect — see below. |
 | Lineage traceability | **Established** | One graph from dlt through dbt and Polars to the site; 10 exposures answer "what breaks if I change this" per page; the bus matrix is derived from the manifest rather than drawn. |

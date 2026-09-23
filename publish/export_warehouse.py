@@ -44,7 +44,7 @@ import duckdb
 
 from modern_data_stack import privacy
 from modern_data_stack.ducklake import catalog_metadata
-from modern_data_stack.export import default_tag, export, loaded_at
+from modern_data_stack.export import default_tag, describe_relations, export, loaded_at
 from modern_data_stack.paths import dbt_manifest_path, warehouse_path
 
 DUCKDB_PATH = warehouse_path()
@@ -365,6 +365,9 @@ def solidify_staging(
 
     The resulting tables hold the original customer ids, which is why this runs
     before `pseudonymise` — see `prepare_published_copy`.
+
+    Dropping a view drops the descriptions `persist_docs` wrote on it, so they are
+    read first and written onto the table.
     """
     from lake.lakehouse import ATTACH_ALIAS, LAKEHOUSE_DIR, attach_lakehouse
 
@@ -386,16 +389,55 @@ def solidify_staging(
         attach_lakehouse(con, lake_dir, read_only=True)
     try:
         for name in views:
+            # Read before the drop, which takes the view's comments with it.
+            comments = _comments(con, "staging", name)
             # DuckDB will not `create or replace table` over a view of the same name.
             con.execute(
                 f'create or replace table staging."_solid_{name}" as select * from staging."{name}"'
             )
             con.execute(f'drop view staging."{name}"')
             con.execute(f'alter table staging."_solid_{name}" rename to "{name}"')
+            _restore_comments(con, "staging", name, comments)
     finally:
         if needs_catalog:
             con.execute(f"detach {ATTACH_ALIAS}")
     return {"staging_views_materialised": views}
+
+
+def _comments(
+    con: duckdb.DuckDBPyConnection, schema: str, name: str
+) -> tuple[str | None, dict[str, str]]:
+    """A relation's comment and its non-empty column comments, as dbt wrote them."""
+    relation = con.execute(
+        "select comment from duckdb_views() where schema_name = $s and view_name = $n "
+        "union all "
+        "select comment from duckdb_tables() where schema_name = $s and table_name = $n",
+        {"s": schema, "n": name},
+    ).fetchone()
+    columns = con.execute(
+        "select column_name, comment from duckdb_columns() "
+        "where schema_name = $s and table_name = $n and coalesce(comment, '') <> ''",
+        {"s": schema, "n": name},
+    ).fetchall()
+    return (relation[0] if relation else None), dict(columns)
+
+
+def _restore_comments(
+    con: duckdb.DuckDBPyConnection,
+    schema: str,
+    name: str,
+    comments: tuple[str | None, dict[str, str]],
+) -> None:
+    """Put back what `_comments` read. `COMMENT ON` takes no parameters."""
+
+    def literal(text: str) -> str:
+        return "'" + text.replace("'", "''") + "'"
+
+    relation, columns = comments
+    if relation:
+        con.execute(f'comment on table {schema}."{name}" is {literal(relation)}')
+    for column, text in columns.items():
+        con.execute(f'comment on column {schema}."{name}"."{column}" is {literal(text)}')
 
 
 def landed_at(
@@ -559,6 +601,9 @@ def release_notes(manifest: dict, repo: str, tag: str) -> str:
     ]
 
     labelled = sum(len(columns) for columns in (manifest.get("additivity") or {}).values())
+    relations = manifest.get("relations") or {}
+    columns = [c for r in relations.values() for c in r["columns"].values()]
+    described = sum(1 for c in columns if c["description"])
 
     published_lake = manifest.get("lakehouse") or {}
     lakehouse_row = (
@@ -627,6 +672,13 @@ extremum: recompute it from its components rather than aggregating it) and
 Roughly half the numeric columns here are non-additive, which a Parquet file has
 no way of telling you: `sum(renewables_share_pct)` and `avg(co2_per_capita)`
 across countries are both meaningless and both come back a number.
+
+**And what each column means.** Its `relations` map gives every published table's
+description and each column's type and description — {described:,} of the
+{len(columns):,} columns carry one; `null` means none has been written yet, not
+that the column needs none. The same text is on the tables in
+`{warehouse["file"]}` (`select comment from duckdb_columns()`), and nowhere in the
+Parquet, which has no place for it.
 
 **`raw` is not in `{warehouse["file"]}` any more.** dlt lands the source tables
 in a [DuckLake](https://ducklake.select) catalog rather than in the database, so
@@ -791,7 +843,11 @@ def run(
         tag=tag,
         repo=repo,
         grain="(country_iso3, year)",
-        extra_manifest=lambda con: {"history": _history(con), "additivity": additivity()},
+        extra_manifest=lambda con: {
+            "history": _history(con),
+            "additivity": additivity(),
+            "relations": describe_relations(con, PUBLISHED_SCHEMAS),
+        },
         read_loaded_at=lambda con: landed_at(con, lakehouse_dir),
         prepare_copy=lambda con: prepare_published_copy(con, lakehouse_dir),
         extra_artifacts=lambda dest: publish_lakehouse(dest, lakehouse_dir),

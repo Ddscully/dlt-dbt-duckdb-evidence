@@ -69,6 +69,13 @@ vars:
 
 models:
   modern_data_stack:
+    # Writes each description into the database as a `COMMENT ON`, which is the
+    # only way it reaches the release: `COPY FROM DATABASE` keeps comments, and the
+    # manifest's `relations` map is read back from them. A column with no
+    # description gets `''`, not NULL.
+    +persist_docs:
+      relation: true
+      columns: true
     staging:
       +materialized: view
       +schema: staging
