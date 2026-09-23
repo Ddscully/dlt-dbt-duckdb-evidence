@@ -267,6 +267,22 @@ def test_the_labels_reach_the_release_manifest():
     assert flat == everything()
 
 
+def test_every_model_writes_its_descriptions_into_the_warehouse():
+    """The descriptions reach the release only as `COMMENT ON`s that
+    `persist_docs` writes, and the manifest's `relations` map is read back from
+    them. `tests/test_export.py` writes its comments by hand, so without this
+    the config could go and every export test would stay green."""
+    manifest = json.loads(Path(manifest_path).read_text())
+    models = [n for n in manifest["nodes"].values() if n.get("resource_type") == "model"]
+    missing = sorted(
+        n["name"]
+        for n in models
+        if (n["config"].get("persist_docs") or {}) != {"relation": True, "columns": True}
+    )
+    assert models
+    assert not missing, f"persist_docs is off for {missing}"
+
+
 def test_a_copied_column_keeps_the_label_the_mart_gave_it():
     """`analytics.co2_intensity` is `select * from marts.fct_emissions_energy`
     plus two derived columns, so its labels are the mart's labels — and the

@@ -127,6 +127,38 @@ def published_tables(
     return [(schema, table) for schema, table in rows]
 
 
+def describe_relations(con: duckdb.DuckDBPyConnection, schemas: tuple[str, ...]) -> dict[str, dict]:
+    """Each published relation's description and its columns' types and descriptions.
+
+    Read from the database's own comments (dbt's `persist_docs` writes them), so
+    it describes the file that ships and not the project that built it. A Parquet
+    file has nowhere to keep them; this is how its reader gets them. An empty
+    comment, which is what dbt writes for an undocumented column, is `None`; the
+    trailing newline a folded yml description leaves is stripped.
+    """
+    out: dict[str, dict] = {}
+    for schema, table in published_tables(con, schemas):
+        relation = con.execute(
+            "select comment from duckdb_tables() where schema_name = $s and table_name = $t "
+            "union all "
+            "select comment from duckdb_views() where schema_name = $s and view_name = $t",
+            {"s": schema, "t": table},
+        ).fetchone()
+        columns = con.execute(
+            "select column_name, data_type, comment from duckdb_columns() "
+            "where schema_name = $s and table_name = $t order by column_index",
+            {"s": schema, "t": table},
+        ).fetchall()
+        out[f"{schema}.{table}"] = {
+            "description": ((relation[0] if relation else None) or "").strip() or None,
+            "columns": {
+                name: {"type": data_type, "description": (comment or "").strip() or None}
+                for name, data_type, comment in columns
+            },
+        }
+    return out
+
+
 def loaded_at(
     con: duckdb.DuckDBPyConnection,
     raw_schema: str = "raw",
