@@ -1,6 +1,6 @@
 # 0012. Lakehouse expiry keeps the last two weather loads, not a window of days
 
-Status: accepted 2026-09-24
+Status: accepted 2026-09-24 (#104)
 
 ## Context
 
