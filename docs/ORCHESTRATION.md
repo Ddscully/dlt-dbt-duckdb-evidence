@@ -27,7 +27,9 @@ raw/eu_elec_prices─┘                            (dbt snapshot)              
 Everything under `raw/` is written by dlt into the DuckLake catalog at
 `data/lakehouse/`; everything downstream of `staging/` is built by dbt into
 `data/warehouse.duckdb`. There is no separate file-layer asset — the Parquet is
-what the ingest assets already wrote.
+what the ingest assets already wrote. `lake/snapshot_expiry` follows the loads
+and expires the catalog's old snapshots, keeping the last two weather loads
+([decision 0012](decisions/0012-lakehouse-expiry-counts-weather-loads.md)).
 
 Nothing declares that order by hand. The dlt resources are keyed `raw/<resource>`
 to match the source keys dagster-dbt derives from `_sources.yml`; the

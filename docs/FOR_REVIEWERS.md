@@ -139,16 +139,15 @@ cache adds its download and parse to ingest, so the table says which it
 measured. And `dbt-build` quotes both dbt's own time and the wall clock, because
 the gap is `dbt deps` and startup, and one number would silently mean either.
 
-**A run also costs disk, and nothing reclaims it.** The DuckLake landing zone
-went 72 → 111 MiB across the single ingest above, because DuckLake retains a
-snapshot per write and the catalog then held **51** of them. Nothing in this
-repo calls `ducklake_expire_snapshots` or `ducklake_cleanup_old_files`, so the
-landing zone grows monotonically — about 39 MiB per full ingest at today's
-volumes. That is the honest answer to "what does a run cost" on a stack with no
-invoice: not money, but a directory that only goes one way until somebody
-decides on a retention policy. It is not urgent at 111 MiB and it is the kind of
-thing that is embarrassing at 111 GiB. It has since grown to 330 MiB across 234
-snapshots, and only 55 MiB of the Parquet was still live.
+**A run also costs disk, and expiry is what gives it back.** The DuckLake
+landing zone went 72 → 111 MiB across the single ingest above, because DuckLake
+retains a snapshot per write and the catalog then held **51** of them — about
+39 MiB per full ingest at today's volumes, and 318 MiB of Parquet across 234
+snapshots before anything expired, of which 55 MiB was live. Every load now ends
+by expiring all but the last two weather loads: on a copy of that catalog the
+Parquet went to 104 MiB, and a second pass freed nothing. What remains is one
+load's worth of rewrites, which is the price of keeping the weather diff's pair
+([decision 0012](decisions/0012-lakehouse-expiry-counts-weather-loads.md)).
 
 Warehouse contents: 1,647,099 staging rows and 1,959,307 mart rows — of which
 1,067,371 are the retail order lines, 667,809 the three FX tables and 43,138 the

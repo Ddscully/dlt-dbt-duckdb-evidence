@@ -306,6 +306,9 @@ What bites outside that task:
 - **It is the only copy of every landing table**, so `just clean` never takes it:
   deleting it costs the snapshot lineage and the weather archive, which is days
   of Open-Meteo budget.
+- **A copied catalog still names the original's absolute `data_path`**, so
+  expiring or cleaning the copy deletes the real Parquet: `set_data_path` the
+  copy before any write to it.
 - **`just sql` attaches it**, because `staging` and `intermediate` are views over
   `lakehouse.raw`; a bare `duckdb data/warehouse.duckdb` fails them with
   `Catalog "lakehouse" does not exist!`.

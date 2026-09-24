@@ -235,8 +235,17 @@ revisions(WEATHER_TABLE, v[-2], v[-1])   # rows that genuinely differ
 ```
 
   which projects the provenance columns away and returns **0 rows** for a no-op
-  reload and exactly the changed rows for a real restatement. It also works
-  between *any* two snapshots, so "what changed since last month" is one query.
+  reload and exactly the changed rows for a real restatement. It works between
+  any two snapshots the catalog still holds.
+
+- **Old snapshots expire after every load, counted in weather loads.**
+  `full_refresh` (as `lake/snapshot_expiry`) and `just run` keep the last two
+  weather loads — the pair above — and delete the files only older snapshots
+  read, plus orphaned Parquet on disk. Without it every `replace` load's rewrite
+  stays on disk forever: 81% of the catalog's bytes were dead before it ran.
+  `just lakehouse` prints live against recorded bytes, and
+  `just lakehouse-expire` runs it by hand. Why loads and not days is
+  [decision 0012](decisions/0012-lakehouse-expiry-counts-weather-loads.md).
 
 - **No partition column, and none needed.** DuckLake prunes on catalog
   statistics, so a filter still reads one file with no directory layout to
@@ -247,8 +256,8 @@ revisions(WEATHER_TABLE, v[-2], v[-1])   # rows that genuinely differ
   the catalog applies, so a glob either fails on a schema mismatch or returns
   superseded rows alongside current ones.
 - **Deleting `data/lakehouse/` is the destructive act in this repo.** It is
-  the only copy of every landing table, and it holds both the snapshot lineage
-  (which no rebuild invents) and the capital-city weather archive (which no
+  the only copy of every landing table, and it holds both the recent snapshot
+  lineage (which no rebuild invents) and the capital-city weather archive (which no
   rebuild can afford — days of Open-Meteo's daily budget). `just clean` does not
   list it.
 

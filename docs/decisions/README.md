@@ -57,3 +57,4 @@ Status: accepted YYYY-MM-DD (#PR) | superseded by NNNN
 | [0009](0009-cbam-annex-transcribed-faithfully.md) | The CBAM seeds transcribe the annex faithfully, and the mart handles its defects | accepted 2026-08-09 |
 | [0010](0010-cbam-markup-schedule-is-a-seed.md) | The CBAM mark-up schedule is a seed, asserted rather than derived | accepted 2026-08-18 |
 | [0011](0011-deploy-is-the-containers-instance.md) | `deploy/` is the container's Dagster instance, and only the container's | accepted 2026-09-20 |
+| [0012](0012-lakehouse-expiry-counts-weather-loads.md) | Lakehouse expiry keeps the last two weather loads, not a window of days | accepted 2026-09-24 |

@@ -138,6 +138,14 @@ dbt-docs-serve: dbt-docs
 lakehouse:
     uv run python -m lake.lakehouse
 
+# Expiry is counted in weather loads, not days, so an idle catalog keeps the
+# pair `weather_revisions_are_derivable` diffs (the-lakehouse). `just run` and
+# `full_refresh` both expire after loading.
+# Expire lakehouse snapshots before the last `keep` weather loads, and their files
+[group('pipeline')]
+lakehouse-expire keep="2": where
+    uv run python -m lake.lakehouse --expire {{ keep }}
+
 # Polars derived metrics
 [group('pipeline')]
 transform: where
@@ -152,7 +160,7 @@ pipeline-status: where
 
 # Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
 [group('pipeline')]
-run: ingest dbt-build transform pipeline-status
+run: ingest lakehouse-expire dbt-build transform pipeline-status
 
 # Unit tests — mocked API payloads, no network, no warehouse
 [group('check')]
@@ -201,7 +209,7 @@ test-pipeline: _no-dbt-dotenv
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
-    uv run python -m lake.lakehouse
+    uv run python -m lake.lakehouse --expire
     # Last, and only on success: `set -e` stops a failed run before here, leaving
     # its schema to be inspected — the same bargain as the orphaned Parquet an S3
     # fixture run leaves in the bucket.

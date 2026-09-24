@@ -47,6 +47,7 @@ from .db import scalar
 
 __all__ = [
     "attach",
+    "expire",
     "publish",
     "revisions",
     "row_count",
@@ -55,6 +56,7 @@ __all__ = [
     "spec_version",
     "sql_identifier",
     "sql_literal",
+    "storage",
     "table_versions",
 ]
 
@@ -191,8 +193,17 @@ def table_versions(
     ).fetchall()
     sources += [f"select begin_snapshot from {meta}.{sql_identifier(row[0])}" for row in inlined]
 
+    # A live file can begin at an expired snapshot; the change is readable from
+    # the next surviving one. Dropping the id would end the list a change early.
     rows = con.execute(
-        f"select distinct begin_snapshot from ({' union all '.join(sources)}) order by 1"
+        f"""
+        select distinct (
+            select min(s.snapshot_id) from {meta}.ducklake_snapshot s
+            where s.snapshot_id >= v.begin_snapshot
+        ) as version
+        from ({" union all ".join(sources)}) v
+        order by 1
+        """
     ).fetchall()
     return [row[0] for row in rows]
 
@@ -223,6 +234,64 @@ def revisions(
         select {projection} from {alias}.{table} at (version => {since})
         """
     ).fetchall()
+
+
+def expire(
+    con: duckdb.DuckDBPyConnection,
+    alias: str,
+    before: int,
+    delete_orphans: bool,
+    orphan_grace: str = "1 day",
+) -> dict[str, int]:
+    """Expire every snapshot older than `before`, then delete the files only they read.
+
+    `before` survives, so a diff from it still reads. Orphans are Parquet the
+    catalog never recorded, such as a crashed load's; `delete_orphans` lists the
+    whole data path, so pass it only for a path this catalog owns outright, and
+    `orphan_grace` spares a write still in flight.
+    """
+    expired = [
+        row[0]
+        for row in con.execute(
+            f"select snapshot_id from {alias}.snapshots() where snapshot_id < $before",
+            {"before": before},
+        ).fetchall()
+    ]
+    if expired:
+        ids = ", ".join(str(int(i)) for i in expired)
+        con.execute(f"call ducklake_expire_snapshots({sql_literal(alias)}, versions => [{ids}])")
+    cleaned = con.execute(
+        f"call ducklake_cleanup_old_files({sql_literal(alias)}, cleanup_all => true)"
+    ).fetchall()
+    orphans = []
+    if delete_orphans:
+        orphans = con.execute(
+            f"call ducklake_delete_orphaned_files({sql_literal(alias)}, "
+            f"older_than => now() - interval {sql_literal(orphan_grace)})"
+        ).fetchall()
+    return {"snapshots": len(expired), "files": len(cleaned), "orphans": len(orphans)}
+
+
+def storage(
+    con: duckdb.DuckDBPyConnection, alias: str, metadata_schema: str = "main"
+) -> dict[str, int]:
+    """Bytes of the files the catalog records, and of those the current snapshot reads.
+
+    The difference is what `expire` can free. Orphans are not recorded, so not counted.
+    """
+    meta = f"{meta_alias(alias)}.{sql_identifier(metadata_schema)}"
+    total, live = con.execute(
+        f"""
+        select coalesce(sum(file_size_bytes), 0),
+               coalesce(sum(file_size_bytes) filter (where end_snapshot is null), 0)
+        from (
+            select file_size_bytes, end_snapshot from {meta}.ducklake_data_file
+            union all
+            select file_size_bytes, end_snapshot from {meta}.ducklake_delete_file
+        )
+        """
+    ).fetchall()[0]
+    return {"bytes": int(total), "live_bytes": int(live)}
 
 
 def sql_literal(value: str | Path) -> str:
