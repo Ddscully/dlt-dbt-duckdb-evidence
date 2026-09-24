@@ -138,6 +138,15 @@ dbt-docs-serve: dbt-docs
 lakehouse:
     uv run python -m lake.lakehouse
 
+# Expiry is counted in weather loads, not days, so an idle catalog keeps the
+# pair `weather_revisions_are_derivable` diffs (the-lakehouse). `just run` and
+# `full_refresh` both end with it. `keep` defaults to `KEEP_WEATHER_LOADS`, so
+# the constant is the one place the number lives.
+# Expire lakehouse snapshots before the last `keep` weather loads, and their files
+[group('pipeline')]
+lakehouse-expire keep="": where
+    uv run python -m lake.lakehouse --expire {{ keep }}
+
 # Polars derived metrics
 [group('pipeline')]
 transform: where
@@ -152,7 +161,7 @@ pipeline-status: where
 
 # Full pipeline via shell ordering (see `just materialize` for the graph-aware one)
 [group('pipeline')]
-run: ingest dbt-build transform pipeline-status
+run: ingest dbt-build transform pipeline-status lakehouse-expire
 
 # Unit tests — mocked API payloads, no network, no warehouse
 [group('check')]
@@ -201,6 +210,11 @@ test-pipeline: _no-dbt-dotenv
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
+    # A second weather load, so expiry has a snapshot to expire: after one load it
+    # expires nothing, and CI would never call DuckLake's expiry against Postgres
+    # and a bucket, which the compose job runs this recipe on.
+    uv run python -m ingest.pipeline om_weather_daily
+    uv run python -c "from lake.lakehouse import expire; freed = expire(); print(freed); assert freed['snapshots'], 'expiry expired no snapshot'"
     uv run python -m lake.lakehouse
     # Last, and only on success: `set -e` stops a failed run before here, leaving
     # its schema to be inspected — the same bargain as the orphaned Parquet an S3

@@ -102,6 +102,158 @@ def test_one_restated_value_yields_exactly_that_row(tmp_path):
     assert changed[0][2] == -0.5
 
 
+def test_a_version_whose_snapshot_expired_is_read_at_the_next_surviving_one(tmp_path):
+    """Expiry removes snapshots, not live files, so a live file can begin at a
+    snapshot that no longer exists. Handed that id, `revisions()` fails with
+    `No snapshot found at version N` — what the real catalog did after a
+    one-day expiry. Dropping the id instead would end the list at the previous
+    change and diff the wrong pair, silently.
+    """
+    _write(tmp_path, [DAY, [("DEU", "2021-12-20", -0.5), ("FRA", "2021-12-20", 7.1)]])
+    con = duckdb.connect()
+    attach(con, tmp_path / "catalog.duckdb", tmp_path / "data", alias="lakehouse")
+    try:
+        restated = table_versions(con, "lakehouse", WEATHER)[-1]
+        # A later snapshot, so the one to expire is not the newest.
+        con.execute("create table lakehouse.raw.unrelated as select 1 as x")
+        con.execute(f"call ducklake_expire_snapshots('lakehouse', versions => [{restated}])")
+
+        versions = table_versions(con, "lakehouse", WEATHER)
+        live = {
+            row[0]
+            for row in con.execute("select snapshot_id from lakehouse.snapshots()").fetchall()
+        }
+        changed = revisions(
+            con, "lakehouse", WEATHER, versions[-2], versions[-1], ignore=lakehouse.DLT_COLUMNS
+        )
+    finally:
+        con.close()
+    assert set(versions) <= live
+    assert versions[-1] > restated
+    assert [(row[0], row[2]) for row in changed] == [("DEU", -0.5)]
+
+
+# Over DuckLake's inlining limit, so each load writes Parquet that expiry can delete.
+LOAD = [(f"C{i:02d}", "2021-12-20", float(i)) for i in range(20)]
+
+
+def _parquet(lake_dir) -> set:
+    return set((lake_dir / "data").rglob("*.parquet"))
+
+
+def test_expiry_keeps_the_pair_the_weather_check_diffs_and_every_current_row(tmp_path):
+    """Expiry deletes files from the only copy of the weather archive, so what
+    must survive is asserted whole: the current rows, and the last two loads as
+    a diffable pair."""
+    restated = [("C00", "2021-12-20", -0.5), *LOAD[1:]]
+    _write(tmp_path, [LOAD, LOAD, restated])
+    con = _connect(tmp_path)
+    try:
+        current = sorted(con.execute(f"select * from lakehouse.{WEATHER}").fetchall())
+    finally:
+        con.close()
+    files = _parquet(tmp_path)
+
+    freed = lakehouse.expire(keep=2, lakehouse_dir=tmp_path)
+
+    con = _connect(tmp_path)
+    try:
+        assert sorted(con.execute(f"select * from lakehouse.{WEATHER}").fetchall()) == current
+        versions = table_versions(con, "lakehouse", WEATHER)
+        changed = revisions(
+            con, "lakehouse", WEATHER, versions[-2], versions[-1], ignore=lakehouse.DLT_COLUMNS
+        )
+    finally:
+        con.close()
+    assert len(versions) == 2
+    assert [(row[0], row[2]) for row in changed] == [("C00", -0.5)]
+    assert freed["snapshots"] > 0
+    assert _parquet(tmp_path) < files
+    # Nothing older is left to expire, so a second run is a no-op.
+    assert lakehouse.expire(keep=2, lakehouse_dir=tmp_path)["snapshots"] == 0
+
+
+def test_expiry_that_would_leave_no_load_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="at least the current load"):
+        lakehouse.expire(keep=0, lakehouse_dir=tmp_path)
+
+
+def test_an_orphan_is_deleted_only_once_it_is_older_than_a_write_could_be(tmp_path):
+    """An orphan is Parquet the catalog never recorded — a crashed load's, or
+    one still being written. The grace window is what tells them apart."""
+    import os
+    import time
+
+    from modern_data_stack.ducklake import expire
+
+    _write(tmp_path, [LOAD])
+    stale, fresh = tmp_path / "data" / "stale.parquet", tmp_path / "data" / "fresh.parquet"
+    for path in (stale, fresh):
+        duckdb.sql(f"copy (select 1 as x) to '{path}' (format parquet)")
+    two_days_ago = time.time() - 2 * 86_400
+    os.utime(stale, (two_days_ago, two_days_ago))
+
+    con = duckdb.connect()
+    attach(con, tmp_path / "catalog.duckdb", tmp_path / "data", alias="lakehouse")
+    try:
+        freed = expire(con, "lakehouse", before=0, delete_orphans=True)
+    finally:
+        con.close()
+    assert freed["orphans"] == 1
+    assert not stale.exists()
+    assert fresh.exists()
+
+
+def test_a_single_weather_load_expires_nothing_but_still_sweeps_orphans(tmp_path):
+    """The weather pair gates expiring snapshots, not deleting files: a first
+    load that crashed, or a catalog with no weather table, would otherwise keep
+    its orphans until a second weather load arrived."""
+    import os
+    import time
+
+    _write(tmp_path, [LOAD])
+    orphan = tmp_path / "data" / "crashed.parquet"
+    duckdb.sql(f"copy (select 1 as x) to '{orphan}' (format parquet)")
+    two_days_ago = time.time() - 2 * 86_400
+    os.utime(orphan, (two_days_ago, two_days_ago))
+
+    freed = lakehouse.expire(keep=2, lakehouse_dir=tmp_path)
+
+    assert freed["snapshots"] == 0
+    assert freed["orphans"] == 1
+    assert not orphan.exists()
+
+
+def test_expiry_leaves_a_directory_with_no_catalog_alone(tmp_path):
+    """Attaching for writes would create an empty catalog there."""
+    assert lakehouse.expire(lakehouse_dir=tmp_path)["snapshots"] == 0
+    assert not (tmp_path / lakehouse.CATALOG_NAME).exists()
+
+
+@pytest.mark.parametrize(
+    ("where", "deletes_orphans"), [("disk", True), ("s3://bucket/lake/", False)]
+)
+def test_orphans_are_deleted_only_from_a_data_path_on_disk(
+    where, deletes_orphans, monkeypatch, tmp_path
+):
+    """A bucket prefix can hold what this catalog does not own — a bucket-root
+    data path would include every fixture run's `test-pipeline/` prefix — and
+    an orphan sweep deletes whatever the catalog does not recognise."""
+    spy = MagicMock(return_value={"snapshots": 0, "files": 0, "orphans": 0})
+    monkeypatch.setattr(lakehouse, "expire_catalog", spy)
+    monkeypatch.setattr(lakehouse, "is_catalog", lambda lakehouse_dir: True)
+    monkeypatch.setattr(lakehouse, "attach_lakehouse", MagicMock())
+    monkeypatch.setattr(lakehouse, "table_versions", MagicMock(return_value=[1, 2]))
+    monkeypatch.setattr(lakehouse, "storage", MagicMock(return_value={}))
+    if where != "disk":
+        monkeypatch.setenv(lakehouse.DATA_PATH_ENV_VAR, where)
+
+    lakehouse.expire(keep=2, lakehouse_dir=tmp_path)
+
+    assert spy.call_args.kwargs["delete_orphans"] is deletes_orphans
+    assert spy.call_args.args[2] == 1
+
+
 def test_forgetting_the_provenance_columns_reports_the_whole_table(tmp_path):
     """The mutation that proves the ignore list is load-bearing.
 

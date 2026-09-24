@@ -139,16 +139,17 @@ cache adds its download and parse to ingest, so the table says which it
 measured. And `dbt-build` quotes both dbt's own time and the wall clock, because
 the gap is `dbt deps` and startup, and one number would silently mean either.
 
-**A run also costs disk, and nothing reclaims it.** The DuckLake landing zone
-went 72 → 111 MiB across the single ingest above, because DuckLake retains a
-snapshot per write and the catalog then held **51** of them. Nothing in this
-repo calls `ducklake_expire_snapshots` or `ducklake_cleanup_old_files`, so the
-landing zone grows monotonically — about 39 MiB per full ingest at today's
-volumes. That is the honest answer to "what does a run cost" on a stack with no
-invoice: not money, but a directory that only goes one way until somebody
-decides on a retention policy. It is not urgent at 111 MiB and it is the kind of
-thing that is embarrassing at 111 GiB. It has since grown to 330 MiB across 234
-snapshots, and only 55 MiB of the Parquet was still live.
+**A run also costs disk, and expiry is what gives it back.** The DuckLake
+landing zone went 72 → 111 MiB across the single ingest above, because DuckLake
+retains a snapshot per write and the catalog then held **51** of them — about
+39 MiB per full ingest at today's volumes, and 317 MiB of Parquet across 234
+snapshots before anything expired, of which 55 MiB was live. `just run` and
+`full_refresh` now end by expiring all but the last two weather loads, and it
+took that catalog to 104 MiB, with a second pass freeing nothing. What remains
+is one load's worth of rewrites, the price of keeping the weather diff's pair
+([decision 0012](decisions/0012-lakehouse-expiry-counts-weather-loads.md)).
+`just ingest`, the backfills and `load_retail` do not expire; their snapshots
+go at the next of those two.
 
 Warehouse contents: 1,647,099 staging rows and 1,959,307 mart rows — of which
 1,067,371 are the retail order lines, 667,809 the three FX tables and 43,138 the
@@ -268,9 +269,9 @@ number before.
 
 What *doesn't* break, which is the more interesting half: dlt already merges
 incrementally on a real primary key with year-range backfills behind it, and the
-fixtures keep CI offline and constant-time. What grows with the landing zone is
-the Parquet that §3's retained snapshots keep alive: 318 MiB of data files, of
-which 55 MiB were live.
+fixtures keep CI offline and constant-time. The landing zone no longer grows with
+the number of runs: expiry (§3) holds it to the live Parquet plus one load's
+rewrites, so it grows with the data.
 
 ## 5. What would I do differently?
 

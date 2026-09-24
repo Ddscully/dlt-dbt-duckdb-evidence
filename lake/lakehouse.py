@@ -3,7 +3,8 @@
 dlt writes straight into this DuckLake catalog, dbt reads `raw` from it, and
 `data/warehouse.duckdb` holds only what dbt builds.
 
-Run:  uv run python -m lake.lakehouse       (report the catalog's snapshots)
+Run:  uv run python -m lake.lakehouse            (report the catalog's snapshots)
+      uv run python -m lake.lakehouse --expire   (expire old snapshots first)
 
 ## Reading what changed
 
@@ -11,8 +12,16 @@ Run:  uv run python -m lake.lakehouse       (report the catalog's snapshots)
 `_dlt_load_id` on every row it re-merges, so reloading 500 identical rows reports
 500 updates. `revisions()` diffs two snapshots with `EXCEPT` instead, projecting
 those columns away — measured at 0 rows for an identical reload and 1 for a
-one-row change. It works between any two snapshots and needs no bookkeeping, so
-a consumer can re-derive it from the published catalog. The cost is two scans.
+one-row change. It works between any two surviving snapshots and needs no
+bookkeeping. The cost is two scans.
+
+## Expiry
+
+Nothing is freed until snapshots expire: every `replace` load rewrites its table
+and the old files stay readable at older versions. `expire()` keeps the last
+`KEEP_WEATHER_LOADS` weather loads, because weather is the one history anyone
+diffs, and that history lives only here — `publish()` builds the released
+catalog without lineage.
 
 ## Why the working paths are absolute
 
@@ -46,6 +55,7 @@ two steps refuse either variable (`refuse_remote_lakehouse`).
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import shutil
@@ -56,12 +66,14 @@ import duckdb
 
 from modern_data_stack.ducklake import (
     attach,
+    expire as expire_catalog,
     publish as publish_catalog,
     revisions as diff_snapshots,
     row_count,
     set_data_path,
     snapshots,
     sql_literal,
+    storage,
     table_versions,
 )
 from modern_data_stack.paths import lakehouse_dir as default_lakehouse_dir
@@ -110,6 +122,10 @@ DLT_COLUMNS = ("_dlt_load_id", "_dlt_id")
 # The one merge-loaded table upstream restates: final ERA5 replaces ERA5T.
 WEATHER_TABLE = "raw.om_weather_daily"
 
+# The weather loads `expire` keeps diffable; `weather_revisions_are_derivable`
+# reads the last two. Weather is the one table whose history anyone reads.
+KEEP_WEATHER_LOADS = 2
+
 # An allowlist the published catalog is built from, never filtered down to: why
 # is `tests/test_lakehouse.py`'s failure message.
 PUBLISHED_TABLES = ("raw.om_weather_daily",)
@@ -126,6 +142,7 @@ __all__ = [
     "DLT_COLUMNS",
     "FILE_METADATA_SCHEMA",
     "FIXTURE_SCHEMA_PREFIX",
+    "KEEP_WEATHER_LOADS",
     "LAKEHOUSE_DIR",
     "METADATA_SCHEMA_ENV_VAR",
     "PUBLISHED_TABLES",
@@ -138,6 +155,7 @@ __all__ = [
     "data_path",
     "dlt_credentials",
     "drop_fixture_schema",
+    "expire",
     "is_catalog",
     "is_remote_catalog",
     "main",
@@ -512,6 +530,38 @@ def versions(table: str, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> list[int]
         con.close()
 
 
+def expire(
+    keep: int = KEEP_WEATHER_LOADS, lakehouse_dir: str | Path = LAKEHOUSE_DIR
+) -> dict[str, int]:
+    """Expire the snapshots before the `keep`-th newest weather load, and their files.
+
+    Counted in loads rather than days, so a catalog left idle past any window
+    still keeps the pair the weather check diffs. Expiry is catalog-wide, so the
+    `replace` tables' rewrites go with it. With fewer weather loads than `keep`
+    nothing expires, but unreferenced files and orphans still go. Orphans are
+    deleted only from `data/` on disk: a bucket prefix may hold what this catalog
+    does not own. Returns the counts and the catalog's bytes afterwards.
+    """
+    if keep < 1:
+        raise ValueError(f"keep={keep}: expiry must leave at least the current load")
+    # Attaching for writes would create an empty catalog where there is none.
+    if not is_catalog(lakehouse_dir):
+        return {"snapshots": 0, "files": 0, "orphans": 0, "bytes": 0, "live_bytes": 0}
+    con = duckdb.connect()
+    try:
+        attach_lakehouse(con, lakehouse_dir, read_only=False)
+        weather = table_versions(con, ATTACH_ALIAS, WEATHER_TABLE, metadata_schema())
+        freed = expire_catalog(
+            con,
+            ATTACH_ALIAS,
+            weather[-keep] if len(weather) >= keep else None,
+            delete_orphans=isinstance(data_path(lakehouse_dir), Path),
+        )
+        return {**freed, **storage(con, ATTACH_ALIAS, metadata_schema())}
+    finally:
+        con.close()
+
+
 def rows(table: str, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> int:
     con = read_only_connection(lakehouse_dir)
     try:
@@ -686,12 +736,33 @@ def run(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> dict:
             f"{schema}.{name}": row_count(con, ATTACH_ALIAS, f"{schema}.{name}")
             for schema, name in tables
         }
-        return {"tables": counts, "snapshots": snapshots(con, ATTACH_ALIAS)}
+        return {
+            "tables": counts,
+            "snapshots": snapshots(con, ATTACH_ALIAS),
+            "storage": storage(con, ATTACH_ALIAS, metadata_schema()),
+        }
     finally:
         con.close()
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--expire",
+        type=int,
+        nargs="?",
+        const=KEEP_WEATHER_LOADS,
+        metavar="KEEP",
+        help=f"first expire all but the last KEEP weather loads (default {KEEP_WEATHER_LOADS})",
+    )
+    args = parser.parse_args()
+    if args.expire is not None:
+        freed = expire(args.expire)
+        print(
+            f"expired {freed['snapshots']} snapshots, deleted {freed['files']} files "
+            f"and {freed['orphans']} orphans"
+        )
+
     summary = run()
     snaps = summary["snapshots"]
     # The only line naming which lakehouse was read, and one Postgres database
@@ -700,6 +771,12 @@ def main() -> None:
     if is_remote_catalog():
         where = f"{where} (schema {metadata_schema()})"
     print(f"{where} — {len(snaps)} snapshots, newest {snaps[-1] if snaps else '(none)'}")
+    size = summary["storage"]
+    # The gap is what the kept snapshots still read, so it survives an expiry.
+    print(
+        f"  {size['live_bytes'] / 1e6:,.1f} MB live of {size['bytes'] / 1e6:,.1f} MB "
+        "in the files the catalog records"
+    )
     for table, rows in summary["tables"].items():
         print(f"  {table:40} {rows:>10,} rows")
 

@@ -33,10 +33,10 @@ means nothing because DuckLake content-addresses them
   - **The replacement is a snapshot diff, and it is better in two ways.**
     `revisions()` compares the table at two versions with `EXCEPT`, projecting
     dlt's provenance columns away: **0 rows** for the identical reload, **1 row**
-    for the one-row change, naming it. It works between *any* two snapshots
-    rather than adjacent ones, and it is a query a consumer can re-derive from a
-    published catalog months later with no bookkeeping this repo has to keep
-    right.
+    for the one-row change, naming it. It works between any two snapshots the
+    catalog still holds rather than adjacent ones, with no bookkeeping this repo
+    has to keep right. Only the working catalog holds them: a published one is
+    built without lineage, and expiry keeps the last two weather loads.
   - **The failure mode is a plausible number, not an exception.** Drop a column
     from the ignore list and every row differs on `_dlt_id` alone, so the diff
     returns the whole table — which reads exactly like a catastrophic upstream
@@ -84,6 +84,44 @@ means nothing because DuckLake content-addresses them
   (`solidify_staging`) — which is exactly what an interactive session cannot do.
   The recipe attaches in the same mode as the warehouse, so `just sql write` can
   repair a landing table and the default cannot touch one by accident.
+
+## Expiry
+
+`lake.lakehouse.expire()` expires every snapshot older than the
+`KEEP_WEATHER_LOADS`-th newest weather load and deletes the files only those
+snapshots read. It runs as the `snapshot_expiry` asset after the loads in
+`full_refresh`, at the end of `just run`, and as `just lakehouse-expire`, whose
+`keep` defaults to the constant. Fewer weather loads than that expire no
+snapshot, but the file deletion still runs. `just lakehouse` prints live against
+recorded bytes. Why loads and not days is
+[`docs/decisions/0012-lakehouse-expiry-counts-weather-loads.md`](../../../docs/decisions/0012-lakehouse-expiry-counts-weather-loads.md).
+
+- **Measure it on a copy, and repoint the copy first.** A copied catalog keeps
+  the original's absolute `data_path`, so `ducklake_cleanup_old_files` on the
+  copy deletes the *real* files. `set_data_path(copy/"catalog.duckdb",
+  f"{copy}/data/")` before any write, then check the `ducklake_metadata` row.
+- **A live file can begin at an expired snapshot.** Expiry removes snapshots,
+  not files something still reads, so `ducklake_data_file.begin_snapshot` can
+  name a version that is gone, and `at (version => …)` on it fails with
+  `No snapshot found at version N`. `table_versions()` maps each change to the
+  earliest snapshot still held at or after it. Dropping the id instead would
+  end the list a change early and diff the wrong pair, silently.
+- **`ducklake_cleanup_old_files` never touches orphans.** Parquet an
+  interrupted load wrote and never recorded needs
+  `ducklake_delete_orphaned_files` — 8 files and 32 MB in the real catalog.
+  That call deletes *anything* under the data path the catalog does not
+  record, so it runs only for a path on disk, and only on files a day old: a
+  bucket prefix can hold other catalogs' files (a bucket-root data path holds
+  every fixture run's), and a younger file can be a write in flight.
+- **Expiry is catalog-wide**, so keeping the weather pair also keeps the
+  `replace` tables' rewrites between those two loads — the dead bytes
+  `just lakehouse` still shows afterwards.
+- **`just test-pipeline` makes a second weather load before it expires**, and
+  asserts a snapshot went. After one load there is nothing to expire, so the step
+  would pass having called no DuckLake function at all — in the compose job too,
+  which is the one run of expiry against Postgres and a bucket.
+- **`ducklake_merge_adjacent_files` buys nothing here**: 2 weather files into 1,
+  because the delete files dlt's merge writes stop adjacent files merging.
 
 ## Migrating, and the empty-file trap
 

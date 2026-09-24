@@ -54,8 +54,10 @@ from ingest.sources.worldbank import (
 )
 from lake.lakehouse import (
     ATTACH_ALIAS,
+    KEEP_WEATHER_LOADS,
     LAKEHOUSE_DIR,
     WEATHER_TABLE,
+    expire as expire_lakehouse,
     read_only_connection,
     revisions as weather_revisions,
     rows as weather_rows,
@@ -310,6 +312,26 @@ def raw_retail_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
             dlt_source=public_indicators(retail_months=months).with_resources(*names),
             **kwargs,
         )
+
+
+@dg.asset(
+    key=dg.AssetKey(["lake", "snapshot_expiry"]),
+    # After the loads in `full_refresh`; retail is not in it, and its old
+    # snapshots go at the next run's expiry.
+    deps=[*raw_assets.keys, *raw_by_year_assets.keys],
+    group_name="raw",
+    kinds={"ducklake"},
+    description=(
+        "Expires lakehouse snapshots before the last "
+        f"{KEEP_WEATHER_LOADS} weather loads and deletes the files only they "
+        "read. Counted in loads, not days, so `weather_revisions_are_derivable` "
+        "keeps its pair on a catalog left idle."
+    ),
+)
+def snapshot_expiry(context: AssetExecutionContext) -> dg.MaterializeResult:
+    freed = expire_lakehouse()
+    context.log.info("expired %(snapshots)s snapshots, %(files)s files, %(orphans)s orphans", freed)
+    return dg.MaterializeResult(metadata=freed)
 
 
 # --------------------------------------------------------------------------- #
@@ -696,7 +718,7 @@ def weather_revisions_are_derivable() -> dg.AssetCheckResult:
     if len(versions) < 2:
         return dg.AssetCheckResult(
             passed=True,
-            metadata={"versions": len(versions), "note": "first load — nothing to diff yet"},
+            metadata={"versions": len(versions), "note": "fewer than two weather loads held"},
         )
 
     since, until = versions[-2], versions[-1]

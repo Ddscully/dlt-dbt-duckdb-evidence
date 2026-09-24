@@ -82,6 +82,7 @@ defs = dg.Definitions(
         # partitioned by month.
         assets.raw_by_year_assets,
         assets.raw_retail_asset,
+        assets.snapshot_expiry,
         assets.dbt_models,
         assets.co2_intensity,
         assets.retail_rfm,
