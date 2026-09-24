@@ -203,6 +203,53 @@ def test_the_backfill_recipes_address_the_op_that_takes_the_years():
         )
 
 
+def _this_year() -> int:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).year
+
+
+def test_a_year_range_resolves_to_the_closed_range_it_names():
+    """Unset is the lookback, one field is one year, and both bounds are loadable.
+
+    `just materialize` never passes config, so CI never calls this method; only a
+    backfill does, against WDI and weather, the two sources that still move.
+    """
+    from orchestration.assets import WDI_FIRST_YEAR, YearRange
+
+    this_year = _this_year()
+    assert YearRange().years() is None
+    assert YearRange(first_year=2020).years() == (2020, 2020)
+    assert YearRange(first_year=2015, last_year=2020).years() == (2015, 2020)
+    # Both ends inclusive: the floor is WDI's first year, the ceiling this one.
+    assert YearRange(first_year=WDI_FIRST_YEAR, last_year=this_year).years() == (
+        WDI_FIRST_YEAR,
+        this_year,
+    )
+
+
+def test_a_year_range_refuses_what_would_load_nothing_or_projections():
+    """Each refusal stands in for a run that would report success.
+
+    A backwards range loads no rows, a year past this one loads World Bank
+    projections that `stg_wdi` then cuts, and `last_year` alone would silently
+    fall back to the lookback.
+    """
+    from orchestration.assets import WDI_FIRST_YEAR, YearRange
+
+    this_year = _this_year()
+    refused = {
+        "last_year without first_year": YearRange(last_year=2020),
+        "backwards": YearRange(first_year=2020, last_year=2015),
+        "before WDI's first year": YearRange(first_year=WDI_FIRST_YEAR - 1),
+        "past this year": YearRange(first_year=this_year, last_year=this_year + 1),
+    }
+    for case, config in refused.items():
+        with pytest.raises(ValueError):
+            config.years()
+            pytest.fail(f"YearRange accepted a range it must refuse: {case}")
+
+
 def test_every_retail_month_has_a_partition_to_land_in():
     """The partitions cover the closed interval the retail constants describe."""
     from ingest.sources.retail import RETAIL_FIRST_MONTH, RETAIL_LAST_MONTH
