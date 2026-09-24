@@ -204,6 +204,32 @@ def test_an_orphan_is_deleted_only_once_it_is_older_than_a_write_could_be(tmp_pa
     assert fresh.exists()
 
 
+def test_a_single_weather_load_expires_nothing_but_still_sweeps_orphans(tmp_path):
+    """The weather pair gates expiring snapshots, not deleting files: a first
+    load that crashed, or a catalog with no weather table, would otherwise keep
+    its orphans until a second weather load arrived."""
+    import os
+    import time
+
+    _write(tmp_path, [LOAD])
+    orphan = tmp_path / "data" / "crashed.parquet"
+    duckdb.sql(f"copy (select 1 as x) to '{orphan}' (format parquet)")
+    two_days_ago = time.time() - 2 * 86_400
+    os.utime(orphan, (two_days_ago, two_days_ago))
+
+    freed = lakehouse.expire(keep=2, lakehouse_dir=tmp_path)
+
+    assert freed["snapshots"] == 0
+    assert freed["orphans"] == 1
+    assert not orphan.exists()
+
+
+def test_expiry_leaves_a_directory_with_no_catalog_alone(tmp_path):
+    """Attaching for writes would create an empty catalog there."""
+    assert lakehouse.expire(lakehouse_dir=tmp_path)["snapshots"] == 0
+    assert not (tmp_path / lakehouse.CATALOG_NAME).exists()
+
+
 @pytest.mark.parametrize(
     ("where", "deletes_orphans"), [("disk", True), ("s3://bucket/lake/", False)]
 )
@@ -215,8 +241,10 @@ def test_orphans_are_deleted_only_from_a_data_path_on_disk(
     an orphan sweep deletes whatever the catalog does not recognise."""
     spy = MagicMock(return_value={"snapshots": 0, "files": 0, "orphans": 0})
     monkeypatch.setattr(lakehouse, "expire_catalog", spy)
-    monkeypatch.setattr(lakehouse, "versions", lambda table, lakehouse_dir: [1, 2])
+    monkeypatch.setattr(lakehouse, "is_catalog", lambda lakehouse_dir: True)
     monkeypatch.setattr(lakehouse, "attach_lakehouse", MagicMock())
+    monkeypatch.setattr(lakehouse, "table_versions", MagicMock(return_value=[1, 2]))
+    monkeypatch.setattr(lakehouse, "storage", MagicMock(return_value={}))
     if where != "disk":
         monkeypatch.setenv(lakehouse.DATA_PATH_ENV_VAR, where)
 

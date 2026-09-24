@@ -239,24 +239,19 @@ def revisions(
 def expire(
     con: duckdb.DuckDBPyConnection,
     alias: str,
-    before: int,
+    before: int | None,
     delete_orphans: bool,
     orphan_grace: str = "1 day",
 ) -> dict[str, int]:
     """Expire every snapshot older than `before`, then delete the files only they read.
 
-    `before` survives, so a diff from it still reads. Orphans are Parquet the
+    `before` survives, so a diff from it still reads; None expires nothing but
+    still deletes files that earlier expiries left. Orphans are Parquet the
     catalog never recorded, such as a crashed load's; `delete_orphans` lists the
     whole data path, so pass it only for a path this catalog owns outright, and
     `orphan_grace` spares a write still in flight.
     """
-    expired = [
-        row[0]
-        for row in con.execute(
-            f"select snapshot_id from {alias}.snapshots() where snapshot_id < $before",
-            {"before": before},
-        ).fetchall()
-    ]
+    expired = [] if before is None else [s for s in snapshots(con, alias) if s < before]
     if expired:
         ids = ", ".join(str(int(i)) for i in expired)
         con.execute(f"call ducklake_expire_snapshots({sql_literal(alias)}, versions => [{ids}])")

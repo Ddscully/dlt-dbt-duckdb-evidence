@@ -168,7 +168,6 @@ __all__ = [
     "revisions",
     "rows",
     "run",
-    "storage_bytes",
     "storage_secret",
     "versions",
 ]
@@ -538,32 +537,27 @@ def expire(
 
     Counted in loads rather than days, so a catalog left idle past any window
     still keeps the pair the weather check diffs. Expiry is catalog-wide, so the
-    `replace` tables' rewrites go with it. Orphans are deleted only from `data/`
-    on disk: a bucket prefix may hold what this catalog does not own.
+    `replace` tables' rewrites go with it. With fewer weather loads than `keep`
+    nothing expires, but unreferenced files and orphans still go. Orphans are
+    deleted only from `data/` on disk: a bucket prefix may hold what this catalog
+    does not own. Returns the counts and the catalog's bytes afterwards.
     """
     if keep < 1:
         raise ValueError(f"keep={keep}: expiry must leave at least the current load")
-    before = versions(WEATHER_TABLE, lakehouse_dir)
-    if len(before) < keep:
-        return {"snapshots": 0, "files": 0, "orphans": 0}
+    # Attaching for writes would create an empty catalog where there is none.
+    if not is_catalog(lakehouse_dir):
+        return {"snapshots": 0, "files": 0, "orphans": 0, "bytes": 0, "live_bytes": 0}
     con = duckdb.connect()
     try:
         attach_lakehouse(con, lakehouse_dir, read_only=False)
-        return expire_catalog(
+        weather = table_versions(con, ATTACH_ALIAS, WEATHER_TABLE, metadata_schema())
+        freed = expire_catalog(
             con,
             ATTACH_ALIAS,
-            before[-keep],
+            weather[-keep] if len(weather) >= keep else None,
             delete_orphans=isinstance(data_path(lakehouse_dir), Path),
         )
-    finally:
-        con.close()
-
-
-def storage_bytes(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> dict[str, int]:
-    """What the catalog's files hold, and how much of it the current snapshot reads."""
-    con = read_only_connection(lakehouse_dir)
-    try:
-        return storage(con, ATTACH_ALIAS, metadata_schema())
+        return {**freed, **storage(con, ATTACH_ALIAS, metadata_schema())}
     finally:
         con.close()
 
@@ -778,9 +772,10 @@ def main() -> None:
         where = f"{where} (schema {metadata_schema()})"
     print(f"{where} — {len(snaps)} snapshots, newest {snaps[-1] if snaps else '(none)'}")
     size = summary["storage"]
+    # The gap is what the kept snapshots still read, so it survives an expiry.
     print(
         f"  {size['live_bytes'] / 1e6:,.1f} MB live of {size['bytes'] / 1e6:,.1f} MB "
-        "in recorded files; `just lakehouse-expire` frees the rest"
+        "in the files the catalog records"
     )
     for table, rows in summary["tables"].items():
         print(f"  {table:40} {rows:>10,} rows")

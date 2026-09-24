@@ -570,6 +570,15 @@ def test_load_groups_drops_groups_the_selection_empties():
     assert pipeline.load_groups([]) == []
 
 
+def test_the_cli_refuses_a_resource_it_does_not_know(monkeypatch):
+    """`load_groups` drops an unknown name, so a typo on the command line would
+    load nothing and exit 0 — a load that looks done."""
+    monkeypatch.setattr("sys.argv", ["ingest.pipeline", "om_weather_dialy"])
+    monkeypatch.setattr(pipeline, "build_pipeline", lambda: pytest.fail("built a pipeline"))
+    with pytest.raises(SystemExit, match="om_weather_dialy"):
+        pipeline.main()
+
+
 # --------------------------------------------------------------------------- #
 # eu_elec_prices — JSON-stat grid walking
 # --------------------------------------------------------------------------- #

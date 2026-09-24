@@ -17,12 +17,14 @@ Sources (all freely licensed; country + year keyed apart from the last):
 Set ``INGEST_FIXTURES=1`` to read checked-in payloads instead of the live
 endpoints — see `ingest/fixtures.py`. That's what CI does on pull requests.
 
-Run:  uv run python -m ingest.pipeline
+Run:  uv run python -m ingest.pipeline                     (every resource)
+      uv run python -m ingest.pipeline om_weather_daily    (only those named)
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterable
 
 import dlt
@@ -143,8 +145,13 @@ def build_pipeline() -> dlt.Pipeline:
 
 
 def main() -> None:
+    # Resource names narrow the load, as a Dagster selection does; none loads all.
+    wanted = sys.argv[1:] or None
+    unknown = sorted(set(wanted or ()) - {*FULL_REFRESH_RESOURCES, *INCREMENTAL_RESOURCES})
+    if unknown:
+        raise SystemExit(f"no such resource: {', '.join(unknown)}")
     pipeline = build_pipeline()
-    for names, kwargs in load_groups():
+    for names, kwargs in load_groups(wanted):
         print(pipeline.run(public_indicators().with_resources(*names), **kwargs))
 
 

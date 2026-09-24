@@ -142,12 +142,14 @@ the gap is `dbt deps` and startup, and one number would silently mean either.
 **A run also costs disk, and expiry is what gives it back.** The DuckLake
 landing zone went 72 → 111 MiB across the single ingest above, because DuckLake
 retains a snapshot per write and the catalog then held **51** of them — about
-39 MiB per full ingest at today's volumes, and 318 MiB of Parquet across 234
-snapshots before anything expired, of which 55 MiB was live. Every load now ends
-by expiring all but the last two weather loads: on a copy of that catalog the
-Parquet went to 104 MiB, and a second pass freed nothing. What remains is one
-load's worth of rewrites, which is the price of keeping the weather diff's pair
+39 MiB per full ingest at today's volumes, and 317 MiB of Parquet across 234
+snapshots before anything expired, of which 55 MiB was live. `just run` and
+`full_refresh` now end by expiring all but the last two weather loads, and it
+took that catalog to 104 MiB, with a second pass freeing nothing. What remains
+is one load's worth of rewrites, the price of keeping the weather diff's pair
 ([decision 0012](decisions/0012-lakehouse-expiry-counts-weather-loads.md)).
+`just ingest`, the backfills and `load_retail` do not expire; their snapshots
+go at the next of those two.
 
 Warehouse contents: 1,647,099 staging rows and 1,959,307 mart rows — of which
 1,067,371 are the retail order lines, 667,809 the three FX tables and 43,138 the
@@ -267,9 +269,9 @@ number before.
 
 What *doesn't* break, which is the more interesting half: dlt already merges
 incrementally on a real primary key with year-range backfills behind it, and the
-fixtures keep CI offline and constant-time. What grows with the landing zone is
-the Parquet that §3's retained snapshots keep alive: 318 MiB of data files, of
-which 55 MiB were live.
+fixtures keep CI offline and constant-time. The landing zone no longer grows with
+the number of runs: expiry (§3) holds it to the live Parquet plus one load's
+rewrites, so it grows with the data.
 
 ## 5. What would I do differently?
 

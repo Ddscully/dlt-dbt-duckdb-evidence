@@ -90,8 +90,10 @@ means nothing because DuckLake content-addresses them
 `lake.lakehouse.expire()` expires every snapshot older than the
 `KEEP_WEATHER_LOADS`-th newest weather load and deletes the files only those
 snapshots read. It runs as the `snapshot_expiry` asset after the loads in
-`full_refresh`, in `just run` after `ingest`, and as `just lakehouse-expire`.
-`just lakehouse` prints live against recorded bytes. Why loads and not days is
+`full_refresh`, at the end of `just run`, and as `just lakehouse-expire`, whose
+`keep` defaults to the constant. Fewer weather loads than that expire no
+snapshot, but the file deletion still runs. `just lakehouse` prints live against
+recorded bytes. Why loads and not days is
 [`docs/decisions/0012-lakehouse-expiry-counts-weather-loads.md`](../../../docs/decisions/0012-lakehouse-expiry-counts-weather-loads.md).
 
 - **Measure it on a copy, and repoint the copy first.** A copied catalog keeps
@@ -114,6 +116,10 @@ snapshots read. It runs as the `snapshot_expiry` asset after the loads in
 - **Expiry is catalog-wide**, so keeping the weather pair also keeps the
   `replace` tables' rewrites between those two loads — the dead bytes
   `just lakehouse` still shows afterwards.
+- **`just test-pipeline` makes a second weather load before it expires**, and
+  asserts a snapshot went. After one load there is nothing to expire, so the step
+  would pass having called no DuckLake function at all — in the compose job too,
+  which is the one run of expiry against Postgres and a bucket.
 - **`ducklake_merge_adjacent_files` buys nothing here**: 2 weather files into 1,
   because the delete files dlt's merge writes stop adjacent files merging.
 

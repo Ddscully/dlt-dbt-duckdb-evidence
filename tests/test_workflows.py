@@ -481,6 +481,7 @@ JUSTFILE = REPO_ROOT / "justfile"
 # writing recipe is covered without anyone remembering to add it.
 WRITING_COMMANDS = (
     "python -m ingest.pipeline",
+    "python -m lake.lakehouse --expire",
     "python -m transform.",
     "python -m publish.restore_history",
     "dbt build",

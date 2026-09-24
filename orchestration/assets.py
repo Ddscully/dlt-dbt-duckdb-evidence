@@ -61,7 +61,6 @@ from lake.lakehouse import (
     read_only_connection,
     revisions as weather_revisions,
     rows as weather_rows,
-    storage_bytes as lakehouse_storage,
     versions as table_versions_for,
 )
 from modern_data_stack.db import row, scalar
@@ -331,11 +330,8 @@ def raw_retail_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
 )
 def snapshot_expiry(context: AssetExecutionContext) -> dg.MaterializeResult:
     freed = expire_lakehouse()
-    size = lakehouse_storage()
     context.log.info("expired %(snapshots)s snapshots, %(files)s files, %(orphans)s orphans", freed)
-    return dg.MaterializeResult(
-        metadata={**freed, "live_bytes": size["live_bytes"], "recorded_bytes": size["bytes"]}
-    )
+    return dg.MaterializeResult(metadata=freed)
 
 
 # --------------------------------------------------------------------------- #

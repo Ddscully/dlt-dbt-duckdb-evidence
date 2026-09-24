@@ -40,8 +40,10 @@ earliest snapshot still held at or after it.
 `lake.lakehouse.expire()` expires every snapshot older than the
 `KEEP_WEATHER_LOADS`-th newest weather version (2), deletes the files only
 those snapshots read, and, for a data path on disk, deletes orphans more than a
-day old. It runs as `lake/snapshot_expiry` after the loads in `full_refresh`,
-in `just run` after `ingest`, and by hand as `just lakehouse-expire`.
+day old. With fewer weather loads than that, no snapshot expires, but the file
+deletion still runs. It runs as `lake/snapshot_expiry` after the loads in
+`full_refresh`, at the end of `just run`, and by hand as `just lakehouse-expire`,
+whose `keep` defaults to the constant.
 
 ## Rejected
 
@@ -71,6 +73,6 @@ in `just run` after `ingest`, and by hand as `just lakehouse-expire`.
   in the working copy. "What did ERA5 revise this quarter" needs a larger
   `KEEP_WEATHER_LOADS`, and pays for it in every other table's rewrites.
 - `just lakehouse-expire N` with a larger N holds only until the next
-  `full_refresh`, which expires back to the constant.
+  `full_refresh` or `just run`, which expire back to the constant.
 - Revisit if a second table's history gets a reader, or if DuckLake grows
   per-table expiry.
