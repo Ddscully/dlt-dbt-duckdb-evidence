@@ -5,6 +5,7 @@ Wraps the npm commands the dashboard needs, in the order it needs them:
     npm ci / npm install          Evidence + its DuckDB adapter
     npm run sources[:strict]      warehouse tables -> reports/.evidence/ parquet
     npm run build                 parquet + markdown -> reports/build/ (static)
+    dbt docs generate --static    the dbt docs -> reports/build/dbt/index.html
 
 Run:  uv run python -m publish.build_report            (or `just report`)
       uv run python -m publish.build_report --clean    (or `just report-clean`)
@@ -28,6 +29,11 @@ finished site is copied afterwards — a served directory that is not the one
 Evidence builds into. The compose stack mounts a volume there and lets nginx read
 it; `just serve` leaves it at the default and copies nothing. See `publish_to`.
 
+The dbt docs go in after Evidence, because `run()` empties `build/` first and
+Evidence writes into it: done anywhere else, the next `just report` would drop
+them. They are one self-contained HTML file (`--static`), so they need no
+server beyond the one already serving the site. See `build_dbt_docs`.
+
 It does not touch `evidence.config.yaml`. GitHub Pages serves from a subpath,
 which Evidence reads from `deployment.basePath` and no env var; `pages.yml`
 appends it before calling this, and a committed value would break `npm run dev`.
@@ -40,9 +46,10 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
-from modern_data_stack.paths import project_root
+from modern_data_stack.paths import dbt_dir, lakehouse_dir, project_root, warehouse_path
 
 REPORTS_DIR = project_root() / "reports"
 
@@ -51,6 +58,8 @@ REPORTS_DIR = project_root() / "reports"
 PAGES_DIR = REPORTS_DIR / "pages"
 SOURCES_DIR = REPORTS_DIR / "sources"
 BUILD_DIR = REPORTS_DIR / "build"
+# Where the dbt docs land inside the site: `/dbt/` beside the dashboard's pages.
+DBT_DOCS_ROUTE = "dbt"
 
 # What `source_tables` looks for in the SQL.
 WAREHOUSE_SCHEMAS = ("raw", "staging", "marts", "analytics", "history")
@@ -256,6 +265,42 @@ def publish_to(build_dir: Path, destination: Path) -> bool:
     return True
 
 
+def dbt_docs_env() -> dict[str, str]:
+    """The environment `dbt docs generate` runs under for the published site.
+
+    Tracking off: the docs page hands the manifest's `send_anonymous_usage_stats`
+    to a tracker that reports each visitor's page views to dbt Labs, and dbt's
+    default is on. The lakehouse path absolute, or DuckLake refuses the attach
+    (AGENTS.md); `just` exports it, but Dagster and a bare `python -m` need not.
+    """
+    return {
+        **os.environ,
+        "DBT_SEND_ANONYMOUS_USAGE_STATS": "false",
+        "LAKEHOUSE_DIR": lakehouse_dir(),
+        "WAREHOUSE_PATH": warehouse_path(),
+    }
+
+
+def build_dbt_docs(build_dir: Path) -> Path:
+    """Write the dbt docs into `build_dir/dbt/index.html` and return that path.
+
+    The catalog reads column types from the built warehouse, so this runs after
+    dbt has built it. Into a throwaway target path: `docs generate` writes its
+    own `run_results.json`, which `pipeline_status` would record as a run.
+    """
+    destination = build_dir / DBT_DOCS_ROUTE / "index.html"
+    with tempfile.TemporaryDirectory(prefix="dbt-docs-") as target:
+        subprocess.run(
+            ["dbt", "docs", "generate", "--static", "--target-path", target],
+            cwd=dbt_dir(),
+            env=dbt_docs_env(),
+            check=True,
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(Path(target) / "static_index.html", destination)
+    return destination
+
+
 def run(
     reports_dir: Path | str = REPORTS_DIR,
     *,
@@ -283,6 +328,7 @@ def run(
     # Extract first: `build` renders whatever parquet is already there.
     _npm("run", "sources:strict" if strict else "sources", cwd=reports_dir)
     _npm("run", "build", cwd=reports_dir)
+    dbt_docs = build_dbt_docs(build_dir)
 
     routes = page_routes(reports_dir / "pages", build_dir)
     files, size = _tree_size(build_dir)
@@ -296,6 +342,7 @@ def run(
         "files": files,
         "bytes": size,
         "build_dir": str(build_dir),
+        "dbt_docs_bytes": dbt_docs.stat().st_size,
         "site_root": str(served_from),
         "copied_to_site_root": copied,
     }
@@ -322,7 +369,8 @@ def main() -> None:
     summary = run(install=args.install, clean=args.clean, strict=args.strict)
     print(
         f"{summary['build_dir']}: {summary['pages']} pages, "
-        f"{summary['files']:,} files ({summary['bytes'] / 1e6:.1f} MB)"
+        f"{summary['files']:,} files ({summary['bytes'] / 1e6:.1f} MB), "
+        f"dbt docs {summary['dbt_docs_bytes'] / 1e6:.1f} MB"
     )
     if summary["copied_to_site_root"]:
         print(f"  copied to SITE_ROOT {summary['site_root']}")

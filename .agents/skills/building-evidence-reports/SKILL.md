@@ -366,6 +366,30 @@ filed here, because all three are about the site rather than about Dagster.
   does not help, because nothing is stale. The country explorer is
   `pages/countries.md` for exactly this reason.
 
+## The dbt docs at `/dbt/`
+
+`publish.build_report.build_dbt_docs` writes `dbt docs generate --static` — one
+self-contained file — to `build/dbt/index.html` after `npm run build`, so every
+build that serves the site serves the docs too, and `site_pages_all_rendered`
+fails on a missing one as it does on a missing page. Four things it cost to
+learn:
+
+- **After Evidence, never before.** `run()` empties `build/` and Evidence writes
+  into it, so docs placed there by a separate step vanish on the next
+  `just report`.
+- **dbt's default tracks every visitor.** The docs page passes the manifest's
+  `send_anonymous_usage_stats` to a Snowplow tracker; left on, the rendered page
+  loads `sp.js` from CloudFront. `dbt_docs_env()` sets it off, and a test holds it.
+- **The link is plain HTML with `rel="external"`.** A markdown link, or an
+  `<a>` with only `data-sveltekit-reload`, is followed by SvelteKit's prerender
+  crawler before the docs exist, and the build fails on `404 /dbt/ (linked
+  from /)`. It is relative (`dbt/`) because raw HTML gets no base path, and that
+  resolves only because every route ends in `/` — so it works from Home, and
+  would not from a page one level down.
+- **Its own `--target-path`.** `docs generate` writes a `run_results.json`, and in
+  the shared `dbt/target/` it would replace the build's, which `pipeline_status`
+  reads.
+
 ## `SITE_ROOT`: where the built site is served from
 
 `publish/build_report.py` builds into `reports/build/` and always has. What is

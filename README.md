@@ -10,6 +10,7 @@ running locally with no cloud warehouse.*
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 **[📊 Live dashboard](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)** ·
+[Data catalogue](https://ddscully.github.io/dlt-dbt-duckdb-evidence/dbt/) ·
 [Quickstart](#quickstart) ·
 [Open in a Codespace](https://codespaces.new/Ddscully/dlt-dbt-duckdb-evidence) ·
 [Reuse this stack](#use-this-stack-for-your-own-data) ·
@@ -232,7 +233,9 @@ asset graph, so the workflow materializes it rather than running npm itself. It
 builds against the **live** sources, because a published dashboard showing the
 17-country slice the tests run on would be worse than none. What is on each page, and the
 three deployment gotchas behind it, are in
-[`docs/DASHBOARD.md`](./docs/DASHBOARD.md).
+[`docs/DASHBOARD.md`](./docs/DASHBOARD.md). Beside it, at
+[`/dbt/`](https://ddscully.github.io/dlt-dbt-duckdb-evidence/dbt/), are dbt's own
+docs: every model and column with its description, contract, tests and lineage.
 
 ## Published data
 

@@ -29,8 +29,12 @@ published table's description and each column's type and description, read back
 from the comments dbt's `persist_docs` writes into the file — so the same text
 is on the tables in `warehouse.duckdb` (`select comment from duckdb_columns()`).
 A `null` description means none has been written yet, and the release notes say
-how many have: not every mart column is documented. The Parquet files carry none
-of it; they have nowhere to put it.
+how many have: every mart column is described, and none of the `analytics`
+tables' columns are, because Polars writes those. The Parquet files carry none
+of it; they have nowhere to put it. The same descriptions, with each model's
+contract, tests and lineage, are browsable as the
+[data catalogue](https://ddscully.github.io/dlt-dbt-duckdb-evidence/dbt/) beside
+the dashboard.
 
 ## Querying it
 

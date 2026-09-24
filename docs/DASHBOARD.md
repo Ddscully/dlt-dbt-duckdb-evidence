@@ -14,6 +14,14 @@ Each page that reads a model is declared as a dbt exposure in
 page. Building the site locally is [`reports/README.md`](../reports/README.md);
 what the pages are *for* is below.
 
+The same site carries dbt's docs at
+[`/dbt/`](https://ddscully.github.io/dlt-dbt-duckdb-evidence/dbt/), linked from
+Home as the data catalogue: every model and column with its description,
+contract, tests and lineage, without a clone. `publish/build_report.py` writes
+them as one self-contained file (`dbt docs generate --static`) after Evidence
+builds, with dbt's visitor tracking switched off — left at dbt's default, the
+page loads a Snowplow tracker for everyone who opens it.
+
 ## The pages
 
 | Page | What is on it |

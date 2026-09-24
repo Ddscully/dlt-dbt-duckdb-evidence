@@ -66,6 +66,7 @@ from modern_data_stack.paths import dbt_run_results_path, dbt_target_path, wareh
 from orchestration.resources import dbt_project
 from publish.build_report import (
     BUILD_DIR,
+    DBT_DOCS_ROUTE,
     TABLE_TO_ASSET_KEY,
     TABLE_TO_DBT_MODEL,
     page_routes,
@@ -448,7 +449,8 @@ SITE_DEPS = [
     description=(
         "The Evidence dashboard as a static site in `reports/build/`: extracts "
         "the warehouse tables to parquet (`npm run sources:strict`), then renders "
-        "every page under `reports/pages/` against them. Published by "
+        "every page under `reports/pages/` against them, and puts the dbt docs "
+        "beside them at `dbt/`. Published by "
         "`.github/workflows/pages.yml`."
     ),
 )
@@ -469,6 +471,7 @@ def evidence_site(context: AssetExecutionContext) -> dg.MaterializeResult:
             "pages": summary["pages"],
             "files": summary["files"],
             "bytes": summary["bytes"],
+            "dbt_docs_bytes": summary["dbt_docs_bytes"],
             "warehouse_tables": summary["warehouse_tables"],
             "build_dir": dg.MetadataValue.path(summary["build_dir"]),
             "site_root": dg.MetadataValue.path(summary["site_root"]),
@@ -713,12 +716,12 @@ def weather_revisions_are_derivable() -> dg.AssetCheckResult:
 
 @dg.asset_check(asset=EVIDENCE_SITE, blocking=True)
 def site_pages_all_rendered() -> dg.AssetCheckResult:
-    """Every page in `reports/pages/` has HTML in `reports/build/`.
+    """Every page in `reports/pages/` has HTML in `reports/build/`, and so do the dbt docs.
 
     `evidence build` exits 0 for a site missing a page, and a route that
     rendered only the shell looks most like success, so size is checked too.
     """
-    routes = page_routes()
+    routes = {**page_routes(), DBT_DOCS_ROUTE: BUILD_DIR / DBT_DOCS_ROUTE / "index.html"}
     # Real pages render at over 20 kB; the bare SvelteKit shell is under 8 kB.
     empty = {
         slug: path.stat().st_size

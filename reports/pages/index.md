@@ -62,6 +62,14 @@ not a fixed record.
 
 **[Pipeline](/pipeline)** reports the operational state of the load itself.
 
+<!-- Plain HTML, relative: `dbt/` is a file `build_report` adds after
+Evidence builds. `rel="external"` keeps the prerender crawler from failing
+on it and the router from taking it; every route ends in `/`, so it
+resolves under any base path. -->
+**<a href="dbt/" rel="external">Data catalogue</a>** is the dbt
+documentation: every model and column, what each one means, its contract, its
+tests and its lineage back to the source.
+
 ## What this project has and has not done yet
 
 <Alert status=warning>
