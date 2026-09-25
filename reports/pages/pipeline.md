@@ -40,7 +40,7 @@ from warehouse.pipeline_sources
 order by rows desc
 ```
 
-<DataTable data={sources} rows=5>
+<DataTable data={sources} rows=10>
     <Column id=source_table title="Landing table"/>
     <Column id=rows title="Rows" fmt="#,##0"/>
     <Column id=year_min title="From" fmt="0"/>
@@ -54,11 +54,14 @@ the pipeline stopped running, not that OWID stopped publishing. That is also why
 it is tautologically green on a freshly built copy of this site, since the build
 loads the data and then reports on the load.
 
-Note the two distinct timestamps. Four resources load with `replace` and three
-load incrementally, and `refresh` is an argument to a dlt *run*, not a property
+The timestamps differ, and by design. Four resources load with `replace` and
+four incrementally, and `refresh` is an argument to a dlt *run*, not a property
 of a resource, so a single run cannot refresh the first group while leaving the
-second alone. It is two loads, seconds apart, and this table is where that shows
-up.
+second alone: every ingest is at least two loads, seconds apart. The Dagster
+graph splits it further, loading retail first and the year-range World Bank and
+weather resources in a step of their own. Each row is the latest load that wrote
+to that table, so an incremental table that received nothing new keeps an older
+time.
 
 ## What each layer holds
 

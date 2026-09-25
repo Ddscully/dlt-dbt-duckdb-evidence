@@ -119,7 +119,7 @@ from warehouse.retail_headline
 
 <BarChart data={weekday} x=day_name y=n_lines swapXY=true title="Order lines by weekday" yFmt="#,##0" sort=false/>
 
-In total <Value data={fx_carried} column=n_lines_fx_carried fmt="#,##0"/> lines, <Value data={fx_carried} column=pct fmt='0.0"%"'/> of the file, convert on a rate the ECB published on an earlier day, and every one of them falls on a Sunday. The business trades on Sundays and barely at all on Saturdays: 139,256 lines against 402. It also closes on the same holidays the euro system does, so no weekday closure ever coincides with an order.
+In total <Value data={fx_carried} column=n_lines_fx_carried fmt="#,##0"/> lines, <Value data={fx_carried} column=pct fmt='0.0"%"'/> of the file, convert on a rate the ECB published on an earlier day, and every one of them falls on a weekend, almost all of them on a Sunday. The business trades on Sundays and barely at all on Saturdays: 139,256 lines against 402. It also closes on the same holidays the euro system does, so no weekday closure ever coincides with an order.
 
 The carry-forward rule and its 7-day cap were written against the FX series
 alone, where they filled a gap nothing was querying. With a transaction fact on

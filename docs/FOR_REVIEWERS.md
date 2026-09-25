@@ -132,7 +132,8 @@ Measured on this machine against the live APIs, per stage:
 | **total** (`just run`) | **≈ 65 s** | ingest is 45% of it, and most of *that* is still network |
 
 Artifacts: a 282 MB DuckDB file, a 111 MiB DuckLake landing zone and a 165 MiB
-Evidence site.
+Evidence site. The whole asset graph *including* the site took **3 minutes**
+from a cold cache in the measured run.
 
 **Two things move these figures without the pipeline changing.** A cold workbook
 cache adds its download and parse to ingest, so the table says which it

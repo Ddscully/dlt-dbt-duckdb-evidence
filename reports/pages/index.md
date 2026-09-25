@@ -35,7 +35,7 @@ competing explanation that has to be ruled out first, and what happens when you
 actually test it.
 
 **Long-run emissions strategy, siting or supply agreements**
-→ **[Eight Findings](/findings)** — what two decades of national emissions and
+→ **[Nine Findings](/findings)** — what two decades of national emissions and
 energy data support, and what they don't.
 
 To check a specific country or year yourself rather than read a conclusion, use

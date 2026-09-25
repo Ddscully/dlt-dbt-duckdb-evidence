@@ -30,10 +30,12 @@ exposures:
     url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/countries/
     description: >
       The self-serve country explorer: pick a year and every chart re-queries.
-      Headline emissions, the decarbonisation ranking and the European
+      Headline emissions, the decarbonisation ranking, carbon intensity by
+      income group as each country was classified that year, and the European
       electricity price panel. Also reads `analytics.co2_intensity`, which dbt
       does not build.
     depends_on:
+      - ref('dim_country_income_history')
       - ref('fct_emissions_energy')
       - ref('fct_eu_electricity_prices_semiannual')
     owner:
@@ -45,8 +47,8 @@ exposures:
     type: dashboard
     url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/findings/
     description: >
-      The eight findings, each ending in a decision. The most load-bearing page
-      on the site: every number in it is quoted in `README.md` and
+      The nine findings, each ending in a decision. The most load-bearing page
+      on the site: several of its numbers are quoted in `README.md` and
       `docs/FOR_REVIEWERS.md`, so a change to `fct_emissions_energy` that moves
       one of them has to move the prose too. Also reads
       `analytics.co2_intensity`.
@@ -144,12 +146,14 @@ exposures:
     description: >
       Capital-city degree days as a control variable: whether a year was colder,
       tested against what electricity prices did in the same year and found to
-      explain none of it. Also carries the two degree-day conventions, the
-      capital-as-proxy distance, and why the current year is filtered out of
-      every comparison.
+      explain none of it, then against what the country emitted and found to
+      explain much of the year-to-year swing. Also carries the two degree-day
+      conventions, the capital-as-proxy distance, and why the current year is
+      filtered out of every comparison.
     depends_on:
       - ref('dim_country_year')
       - ref('fct_country_weather_year')
+      - ref('fct_emissions_energy')
       - ref('fct_eu_electricity_prices_semiannual')
     owner:
       name: Daniel Scully

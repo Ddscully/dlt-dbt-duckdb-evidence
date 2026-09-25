@@ -194,3 +194,20 @@ its first source with a *finite budget*.
   essentially none of the divergence, which upgrades the existing Netherlands
   finding — EUR 0.034 to EUR 0.142 across the 2022 halves, "a price nobody paid"
   — from narrated to demonstrated.
+- **Against emissions the same test comes out positive**, and the page shows
+  both (`reports/sources/warehouse/weather_emissions_pairs.sql`). With 2020 and
+  2021 left out, the panel's year-level HDD change and total CO₂ change
+  correlate at 0.73 over ten year-pairs. Per country the correlation runs about
+  0.7–0.8 in Romania, Austria, Poland, Belgium and France, 0.77–0.85 on gas CO₂
+  alone, and near zero or negative in Spain, Portugal, Türkiye and Norway. Two
+  traps sit in the method:
+  - **Leave the pandemic years out.** 2020 was mild *and* a lockdown, 2021 cold
+    *and* a rebound; both line up with the weather by coincidence and inflate
+    every correlation.
+  - **The signal is continent-wide winters.** Demeaning each year across
+    countries, which strips out the shared winter, leaves r ≈ 0.16. So read the
+    per-country fits as each country against its own history, never as a
+    same-year cross-country comparison.
+  The newest complete weather year has no OWID CO₂ to pair with (it runs a year
+  behind), so that source is deliberately unfiltered; a filtered one would be
+  empty, and fail the build, on a cold-started archive.

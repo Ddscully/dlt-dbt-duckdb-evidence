@@ -1,16 +1,18 @@
 ---
-title: Eight Findings
-description: Eight patterns in the warehouse data on emissions, energy, growth and trade.
+title: Nine Findings
+description: Nine patterns in the warehouse data on emissions, energy, growth and trade.
 sidebar_position: 6
 ---
 
-Eight patterns in six decades of national emissions, energy and economic data.
+Nine patterns in six decades of national emissions, energy and economic data.
 Each one closes with the decision it feeds, who makes that decision, and what it
 costs to get wrong. An observation nobody acts on isn't a finding, and three of
 these are inputs to numbers a company is legally required to publish.
 
-Every chart is a live query, not a pasted figure, so the numbers in the prose
-move when the data does. For a year-by-year interactive view of the same data see
+Every chart is a live query, re-run each time the site is built. The prose quotes
+figures from those charts, and not all of them are computed: after a data release
+a sentence can trail its chart by a point or two, and where the two disagree the
+chart is the current number. For a year-by-year interactive view of the same data see
 the [country explorer](/countries); notes on method are at the
 [bottom of the page](#notes-on-method).
 
@@ -118,13 +120,16 @@ where status = 'Past peak'
 />
 
 Western Europe peaked in the 1970s, the post-Soviet bloc in 1990, the US and
-southern Europe in 2005, Japan in 2013. Coloured by World Bank income group,
-high-income economies dominate the early decades and upper-middle-income
-economies take over from the 2010s on. Bubble size is latest-year emissions. The
-UK peaked in 1971 and is 53% below it; France peaked in 1973 and is 51% below.
+southern Europe in 2005, Japan in 2013. Coloured by today's World Bank income
+group, high-income economies dominate the early decades and upper-middle-income
+economies take over from the 2010s on. The colour is what each country is now,
+not what it was when it peaked: Poland peaked in 1987 as a lower-middle-income
+economy, and the classification itself only starts that year. Bubble size is
+latest-year emissions. The UK peaked in 1971 and is 53% below it; France peaked
+in 1973 and is 51% below.
 
 "Large emitter" here means above 200 Mt in the latest year, roughly the top 30
-and about 85% of world emissions. A cluster of mostly lower- and
+and close to 90% of world emissions. A cluster of mostly lower- and
 upper-middle-income Asian and Middle Eastern economies hasn't peaked at all.
 Those are left out of the scatter, because their "change since peak" is 0% by
 construction (their latest year *is* their peak) and they would all stack on one
@@ -344,8 +349,21 @@ where b.gdp_constant_usd is not null
 
 Anything in the lower-right quadrant grew its economy while cutting emissions.
 The sample is countries emitting more than 100 Mt in 2005, which is large enough
-for the comparison to mean something. The US grew 42% in real terms while cutting
-emissions 20%; the UK grew 26% and cut 46%.
+for the comparison to mean something.
+
+```sql decoupling_examples
+-- Cuts negated so the sentence below can say "cutting 20%" rather than "-20%".
+select
+    count(*)                                                            as n_countries,
+    count(*) filter (where decoupled = 'Cut emissions while growing')   as n_decoupled,
+    max(real_gdp_change) filter (where country_name = 'United States')  as us_growth,
+    -max(co2_change) filter (where country_name = 'United States')      as us_cut,
+    max(real_gdp_change) filter (where country_name = 'United Kingdom') as uk_growth,
+    -max(co2_change) filter (where country_name = 'United Kingdom')     as uk_cut
+from ${decoupling}
+```
+
+Of those <Value data={decoupling_examples} column=n_countries/> countries, <Value data={decoupling_examples} column=n_decoupled/> are in that quadrant. The US grew <Value data={decoupling_examples} column=us_growth fmt='0"%"'/> in real terms while cutting emissions <Value data={decoupling_examples} column=us_cut fmt='0"%"'/> over the same years, and the UK grew <Value data={decoupling_examples} column=uk_growth fmt='0"%"'/> and cut <Value data={decoupling_examples} column=uk_cut fmt='0"%"'/> of its emissions.
 
 The standing objection to any chart like this is that production moved offshore,
 so the cut is an accounting artifact of where the factory sits. That claim is
@@ -355,8 +373,8 @@ testable, and the next finding tests it.
 
 **So what.** This is the national-scale evidence that "grow and cut" is
 achievable, and it is the same choice a company makes when it sets a target: the
-US grew 42% in real terms while cutting 20%, the UK grew 26% and cut 46%. An
-absolute reduction target is credible alongside a growth plan, but only where
+US and the UK both grew in real terms while cutting emissions, the UK by far the
+more. An absolute reduction target is credible alongside a growth plan, but only where
 the intensity improvement outruns the growth, and finding 7 shows that isn't
 automatic.
 
@@ -603,10 +621,23 @@ from ${stock_vs_flow}
 The two rankings disagree sharply. The stock is the sum of every tonne emitted
 since 1750, and the United States has put out roughly a quarter of it while
 accounting for about an eighth of current emissions. China is the mirror image:
-around 15% of the stock and close to a third of the flow. The UK, the first
-industrial economy and 0.8% of emissions today, still carries over 4% of the
-cumulative total. That is more than India, which has four times its current
-output and twenty times its population.
+around 15% of the stock and close to a third of the flow.
+
+```sql uk_vs_india
+select
+    max(share_global_co2) filter (where country_iso3 = 'GBR')            as uk_flow,
+    max(share_global_cumulative_co2) filter (where country_iso3 = 'GBR') as uk_stock,
+    max(share_global_cumulative_co2) filter (where country_iso3 = 'IND') as india_stock,
+    max(co2_mt) filter (where country_iso3 = 'IND')
+        / max(co2_mt) filter (where country_iso3 = 'GBR')                as output_multiple,
+    max(population) filter (where country_iso3 = 'IND')
+        / max(population) filter (where country_iso3 = 'GBR')            as population_multiple
+from warehouse.emissions_energy
+where year = (select co2_year from ${latest_years})
+  and country_iso3 in ('GBR', 'IND')
+```
+
+The UK, the first industrial economy and <Value data={uk_vs_india} column=uk_flow fmt='0.0"%"'/> of emissions today, still carries <Value data={uk_vs_india} column=uk_stock fmt='0.0"%"'/> of the cumulative total against <Value data={uk_vs_india} column=india_stock fmt='0.0"%"'/> for India, which emits <Value data={uk_vs_india} column=output_multiple fmt='0'/> times as much every year and has <Value data={uk_vs_india} column=population_multiple fmt='0'/> times as many people.
 
 Neither number stands alone. Finding 5 measures the flow; this measures the
 stock.
@@ -676,12 +707,51 @@ order by i.country_name, i.year
 
 Two things get conflated here and the chart separates them: whether a country's
 economy got *cleaner* (CO₂ per dollar of real GDP), and whether its *tonnage*
-went up or down. The first is close to universal, and every line falls. China's
-carbon intensity is down roughly 47% since 2005 and India's around 13%, while
-renewables' share of their energy mix roughly tripled and grew 39% respectively.
+went up or down. The first is close to universal, and every line falls.
+
+```sql intensity_examples
+with base as (
+    select country_iso3, co2_per_gdp_const_usd as base_intensity, renewables_share_pct as base_renew
+    from warehouse.co2_intensity
+    where year = 2005
+      and country_iso3 in ('CHN', 'IND', 'JPN')
+),
+
+latest as (
+    select country_iso3, co2_per_gdp_const_usd as intensity, renewables_share_pct as renew
+    from warehouse.co2_intensity
+    where year = (select gdp_year from ${latest_years})
+      and country_iso3 in ('CHN', 'IND', 'JPN')
+),
+
+changes as (
+    select
+        l.country_iso3,
+        100 * (1 - l.intensity / b.base_intensity) as intensity_cut,
+        b.base_renew,
+        l.renew
+    from latest l
+    inner join base b on l.country_iso3 = b.country_iso3
+)
+
+select
+    max(intensity_cut) filter (where country_iso3 = 'CHN') as china_cut,
+    max(intensity_cut) filter (where country_iso3 = 'IND') as india_cut,
+    max(intensity_cut) filter (where country_iso3 = 'JPN') as japan_cut,
+    max(base_renew) filter (where country_iso3 = 'CHN')    as china_renew_2005,
+    max(renew) filter (where country_iso3 = 'CHN')         as china_renew_latest,
+    max(base_renew) filter (where country_iso3 = 'IND')    as india_renew_2005,
+    max(renew) filter (where country_iso3 = 'IND')         as india_renew_latest
+from changes
+```
+
+China cut the carbon intensity of its economy by <Value data={intensity_examples} column=china_cut fmt='0"%"'/> between 2005 and <Value data={latest_years} column=gdp_year_label/> and India by <Value data={intensity_examples} column=india_cut fmt='0"%"'/> in the same years, while renewables went from <Value data={intensity_examples} column=china_renew_2005 fmt='0.0"%"'/> to <Value data={intensity_examples} column=china_renew_latest fmt='0.0"%"'/> of China's energy mix and from <Value data={intensity_examples} column=india_renew_2005 fmt='0.0"%"'/> to <Value data={intensity_examples} column=india_renew_latest fmt='0.0"%"'/> of India's energy mix.
+
 Neither country's absolute emissions fell, because GDP grew faster than intensity
-dropped. The US, Germany, UK and Japan cut intensity by roughly as much or more
-and grew slower, so their tonnage fell too.
+dropped. The US, Germany and the UK cut intensity by about as much or more and
+grew more slowly, so their tonnage fell.
+
+Japan got there the other way round: it cut intensity by only <Value data={intensity_examples} column=japan_cut fmt='0"%"'/> and its tonnage fell anyway, because its economy barely grew.
 
 ```sql intensity_table
 with base as (
@@ -712,9 +782,9 @@ order by co2_change_mt desc
 <Alert status=info>
 
 **So what.** This is the intensity-target versus absolute-target choice, and the
-chart is six countries hitting one while missing the other. China cut carbon
-intensity 47% since 2005 and still raised tonnage, because GDP grew faster than
-intensity fell. An intensity target is fully compatible with rising emissions,
+chart has two countries hitting one while missing the other. China cut carbon
+intensity by about half since 2005 and still raised tonnage, because GDP grew
+faster than intensity fell. An intensity target is fully compatible with rising emissions,
 which is why most corporate target-setting frameworks require an absolute one,
 and why an organisation can report a KPI improving every year while its actual
 footprint grows.
@@ -831,6 +901,177 @@ rather than a transitional one.
 **Who acts:** whoever signs off site selection, long-term supply agreements or a
 decarbonisation roadmap that assumes convergence. **Cost of getting it wrong:**
 building a twenty-year plan on the expectation that the gap closes on its own.
+
+</Alert>
+
+## 9. The rich world's cut so far is coal, and what is left is oil and gas
+
+Finding 2 showed the cleanup happening in electricity, mostly by burning less
+coal. This is the same question asked of *all* emissions rather than the grid:
+which fuel did the falling, and what does that leave?
+
+```sql fuel_panel
+-- Today's high-income economies, held fixed: the same countries in every year, so
+-- a line moves only because emissions did. Today's classification is the right
+-- one here — "the economies that are rich now" is a fixed list, which is what a
+-- before-and-after comparison needs — unlike an income-group trend, where each
+-- year wants the group as it stood (see the country explorer).
+--
+-- Only countries publishing CO₂ and all three fuel lines in every year from 1990,
+-- so no line jumps when a small economy starts reporting one.
+with members as (
+    select country_iso3
+    from warehouse.emissions_energy
+    where income_group = 'High income'
+      and year between 1990 and (select co2_year from ${latest_years})
+      and co2_mt is not null
+      and coal_co2 is not null
+      and oil_co2 is not null
+      and gas_co2 is not null
+    group by country_iso3
+    having count(*) = (select co2_year from ${latest_years}) - 1989
+)
+
+select
+    year,
+    count(*)                                    as n_countries,
+    sum(coal_co2)                               as coal_mt,
+    sum(oil_co2)                                as oil_mt,
+    sum(gas_co2)                                as gas_mt,
+    -- Cement, flaring and other industry: what OWID's total carries beyond the three fuels.
+    sum(co2_mt - coal_co2 - oil_co2 - gas_co2)  as other_mt,
+    sum(co2_mt)                                 as total_mt
+from warehouse.emissions_energy
+where country_iso3 in (select country_iso3 from members)
+  and year between 1990 and (select co2_year from ${latest_years})
+group by year
+order by year
+```
+
+```sql fuel_panel_long
+select year, 'Coal' as fuel, coal_mt as co2_mt from ${fuel_panel}
+union all select year, 'Oil', oil_mt from ${fuel_panel}
+union all select year, 'Gas', gas_mt from ${fuel_panel}
+union all select year, 'Cement, flaring and other', other_mt from ${fuel_panel}
+order by year
+```
+
+<LineChart
+    data={fuel_panel_long}
+    x=year
+    y=co2_mt
+    series=fuel
+    seriesColors={{
+        'Coal': ['#eb6834', '#d95926'],
+        'Oil': ['#2a78d6', '#3987e5'],
+        'Gas': ['#1baf7a', '#199e70'],
+        'Cement, flaring and other': ['#eda100', '#c98500']
+    }}
+    xFmt="0"
+    yFmt="#,##0"
+    yAxisTitle="CO₂ (Mt)"
+    title="CO₂ of today's high-income economies, by fuel"
+/>
+
+```sql fuel_change
+with first_year as (
+    select * from ${fuel_panel} where year = 2005
+),
+
+last_year as (
+    select * from ${fuel_panel} where year = (select co2_year from ${latest_years})
+)
+
+select
+    l.n_countries,
+    f.total_mt - l.total_mt                          as total_cut_mt,
+    f.coal_mt - l.coal_mt                            as coal_cut_mt,
+    100 * (f.coal_mt - l.coal_mt) / (f.total_mt - l.total_mt) as coal_share_of_cut,
+    f.oil_mt - l.oil_mt                              as oil_cut_mt,
+    l.gas_mt - f.gas_mt                              as gas_rise_mt,
+    100 * f.oil_mt / f.total_mt                      as oil_share_2005,
+    100 * l.oil_mt / l.total_mt                      as oil_share_latest,
+    100 * f.gas_mt / f.total_mt                      as gas_share_2005,
+    100 * l.gas_mt / l.total_mt                      as gas_share_latest,
+    100 * (l.oil_mt + l.gas_mt) / l.total_mt         as oil_gas_share_latest
+from first_year f
+cross join last_year l
+```
+
+Between 2005 and <Value data={latest_years} column=co2_year_label/> the CO₂ of today's high-income economies fell by <Value data={fuel_change} column=total_cut_mt fmt="#,##0"/> Mt. Coal fell by <Value data={fuel_change} column=coal_cut_mt fmt="#,##0"/> Mt, which is <Value data={fuel_change} column=coal_share_of_cut fmt='0"%"'/> of that net cut, while oil fell by <Value data={fuel_change} column=oil_cut_mt fmt="#,##0"/> Mt and gas rose by <Value data={fuel_change} column=gas_rise_mt fmt="#,##0"/> Mt.
+
+Over the same years gas went from <Value data={fuel_change} column=gas_share_2005 fmt='0"%"'/> to <Value data={fuel_change} column=gas_share_latest fmt='0"%"'/> of what the group emits and oil from <Value data={fuel_change} column=oil_share_2005 fmt='0"%"'/> to <Value data={fuel_change} column=oil_share_latest fmt='0"%"'/> of it, so oil and gas together are now <Value data={fuel_change} column=oil_gas_share_latest fmt='0"%"'/> of what is left.
+
+The panel is the <Value data={fuel_change} column=n_countries/> high-income economies that publish every fuel line in every year since 1990, which between them are almost all of the group's emissions.
+
+```sql fuel_by_country
+with first_year as (
+    select country_iso3, co2_mt, coal_co2, oil_co2, gas_co2
+    from warehouse.emissions_energy
+    where year = 2005
+),
+
+last_year as (
+    select country_iso3, country_name, co2_mt, coal_co2, oil_co2, gas_co2
+    from warehouse.emissions_energy
+    where year = (select co2_year from ${latest_years})
+)
+
+select
+    l.country_name,
+    l.co2_mt - f.co2_mt                 as total_change,
+    l.coal_co2 - f.coal_co2             as coal_change,
+    l.oil_co2 - f.oil_co2               as oil_change,
+    l.gas_co2 - f.gas_co2               as gas_change,
+    100 * l.coal_co2 / l.co2_mt         as coal_share_latest,
+    100 * l.oil_co2 / l.co2_mt          as oil_share_latest
+from last_year l
+inner join first_year f on l.country_iso3 = f.country_iso3
+-- Large emitters whose total fell: the countries a "look how far we've come"
+-- trajectory is drawn from.
+where f.co2_mt > 250
+  and l.co2_mt < f.co2_mt
+  and l.coal_co2 is not null
+  and l.oil_co2 is not null
+  and l.gas_co2 is not null
+  and f.coal_co2 is not null
+  and f.oil_co2 is not null
+  and f.gas_co2 is not null
+order by total_change
+```
+
+<DataTable data={fuel_by_country} rows=12>
+    <Column id=country_name title="Country"/>
+    <Column id=total_change title="All CO₂ since 2005 (Mt)" fmt="#,##0" contentType=delta downIsGood=true/>
+    <Column id=coal_change title="Coal (Mt)" fmt="#,##0" contentType=delta downIsGood=true/>
+    <Column id=oil_change title="Oil (Mt)" fmt="#,##0" contentType=delta downIsGood=true/>
+    <Column id=gas_change title="Gas (Mt)" fmt="#,##0" contentType=delta downIsGood=true/>
+    <Column id=coal_share_latest title="Coal, share now" fmt='0"%"'/>
+    <Column id=oil_share_latest title="Oil, share now" fmt='0"%"'/>
+</DataTable>
+
+Country by country the pattern holds for the large emitters whose totals fell.
+The US cut more coal than its whole net fall, and gas took back part of it. Across
+most of the table oil is now the largest line and coal one of the smallest. The
+exceptions are the countries still burning a lot of coal, and they are the ones
+with the easier cut still ahead of them. Japan is the outlier the other way: its
+fall came mostly from oil, because after 2011 its grid leaned on coal and gas to
+replace nuclear.
+
+<Alert status=info>
+
+**So what.** Twenty years of rich-world decarbonisation is, net, the story of
+burning less coal, and part of the coal was replaced by gas, which is now a
+bigger share of what is left than it was. What remains is mostly oil, much of it
+transport, and gas, much of it heating and industry. Those are cut by replacing
+vehicles, boilers and furnaces one at a time, not by closing a few hundred power
+stations, so a reduction rate measured over the coal years is a poor guide to
+the next twenty.
+
+**Who acts:** whoever builds a decarbonisation roadmap, or prices carbon
+exposure, off a historical trend. **Cost of getting it wrong:** a trajectory
+that holds while there is coal to close and stalls when it runs out, with the
+target still set on the old slope.
 
 </Alert>
 

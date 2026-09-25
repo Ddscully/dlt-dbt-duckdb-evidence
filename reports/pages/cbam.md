@@ -244,10 +244,90 @@ where not is_fallback_table
 
 Indirect emissions — the carbon in the electricity the plant drew — are published
 only for **cement and fertilisers**. For aluminium and hydrogen the annex carries
-no indirect column at all, and for iron and steel it is present on 34 of 6,672
-rows. Even where it does count, it is small: 7.5% of a cement tonne and 5.5% of a
+no indirect column at all, and for iron and steel it is present on 33 of the
+6,472 rows above. Even where it does count, it is small: 7.5% of a cement tonne and 5.5% of a
 fertiliser one. Across the whole annex, electricity is under **1%** of the carbon
 being priced.
+
+That leaves a testable prediction: if the grid barely enters the number, a
+country's border cost should barely follow its grid. It doesn't.
+
+```sql grid_vs_default
+-- The grid factor is OWID's (`grid_factor_t_co2_per_mwh`), context rather than
+-- the factor the annex used, which is the question being asked: does the grid a
+-- country runs on show up in what its goods pay at all?
+select
+    product_group,
+    count(*)                                               as n_values,
+    corr(grid_factor_t_co2_per_mwh, total_t_co2e_per_t)     as correlation
+from warehouse.cbam_exposure
+where is_country_specific
+  and not is_fallback_table
+  and grid_factor_t_co2_per_mwh is not null
+group by product_group
+order by correlation desc
+```
+
+<DataTable data={grid_vs_default} rows=5 rowNumbers=false>
+    <Column id=product_group title="Product group"/>
+    <Column id=n_values title="Country × good values" fmt="#,##0"/>
+    <Column id=correlation title="Correlation with the country's grid factor" fmt="0.00"/>
+</DataTable>
+
+Iron and steel and cement follow the grid somewhat. For steel the priced value is
+almost entirely direct emissions, as the table above shows, so whatever links a
+country's steel to its grid, it is not the carbon in the electricity. Aluminium
+does not follow the grid at all.
+
+```sql primary_aluminium
+-- Route K is primary aluminium, made by electrolysis; L, the other route the
+-- annex prints for this good, is secondary aluminium from scrap. Holding the
+-- route fixed keeps it out of the comparison, which matters because in steel
+-- the route is the whole spread (see above).
+select
+    country_display_name,
+    grid_factor_t_co2_per_mwh,
+    grid_factor_year,
+    cbam_cost_2026_eur_per_t
+from warehouse.cbam_exposure
+where good_key = '7601-unwrought-aluminium'
+  and is_country_specific
+  and not is_fallback_table
+  and production_route_code = 'K'
+  and grid_factor_t_co2_per_mwh is not null
+```
+
+```sql primary_aluminium_summary
+select
+    count(*)                                                            as n_countries,
+    corr(grid_factor_t_co2_per_mwh, cbam_cost_2026_eur_per_t)            as correlation,
+    arg_min(country_display_name, grid_factor_t_co2_per_mwh)            as cleanest_grid_country,
+    arg_min(cbam_cost_2026_eur_per_t, grid_factor_t_co2_per_mwh)        as cleanest_grid_cost,
+    arg_max(country_display_name, grid_factor_t_co2_per_mwh)            as dirtiest_grid_country,
+    arg_max(cbam_cost_2026_eur_per_t, grid_factor_t_co2_per_mwh)        as dirtiest_grid_cost,
+    arg_max(country_display_name, cbam_cost_2026_eur_per_t)             as dearest_country,
+    max(cbam_cost_2026_eur_per_t)                                       as dearest_cost,
+    arg_max(grid_factor_t_co2_per_mwh, cbam_cost_2026_eur_per_t)        as dearest_grid
+from ${primary_aluminium}
+```
+
+<ScatterPlot
+    data={primary_aluminium}
+    x=grid_factor_t_co2_per_mwh
+    y=cbam_cost_2026_eur_per_t
+    xFmt="0.00"
+    yFmt='€#,##0'
+    yMin={0}
+    xAxisTitle="Grid emission factor (tCO₂ / MWh)"
+    yAxisTitle="CBAM cost per tonne, 2026"
+    tooltipTitle=country_display_name
+    title="Primary aluminium: the border cost against the grid it was smelted on"
+    subtitle="Unwrought aluminium, production route K, one point per sourcing country."
+/>
+
+Primary aluminium is made by electrolysis, and the annex publishes no indirect value for it. Across the <Value data={primary_aluminium_summary} column=n_countries/> countries with a primary-aluminium value, <Value data={primary_aluminium_summary} column=cleanest_grid_country/> has the cleanest grid and pays <Value data={primary_aluminium_summary} column=cleanest_grid_cost fmt='€#,##0'/> a tonne while <Value data={primary_aluminium_summary} column=dirtiest_grid_country/> has the dirtiest and pays <Value data={primary_aluminium_summary} column=dirtiest_grid_cost fmt='€#,##0'/> a tonne, with a correlation of <Value data={primary_aluminium_summary} column=correlation fmt="0.00"/> between the two across them.
+
+The dearest source of all is <Value data={primary_aluminium_summary} column=dearest_country/> at <Value data={primary_aluminium_summary} column=dearest_cost fmt='€#,##0'/> a tonne, on a grid of <Value data={primary_aluminium_summary} column=dearest_grid fmt="0.00"/> tCO₂ per MWh.
 
 <Alert status=info>
 
@@ -331,10 +411,10 @@ order by median_2026 desc
     <Column id=median_2028 title="Median €/t, 2028" fmt='€#,##0.00'/>
 </DataTable>
 
-The mark-up is read off the published values instead of asserted from the
-articles, and the difference matters: hardcoding 10/20/30% would overstate every
-one of the 2,457 fertiliser rows by nine points in 2026 and twenty-seven by
-2028.
+The mark-up is set per product group, not as one rate, and the difference
+matters: a flat 10/20/30% would overstate every one of the 2,457 fertiliser rows
+by nine points in 2026 and twenty-seven by 2028. The schedule itself comes from
+the articles rather than the annex, as the limits below explain.
 
 ## What this is not
 
