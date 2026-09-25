@@ -68,6 +68,7 @@ WAREHOUSE_SCHEMAS = ("raw", "staging", "marts", "analytics", "history")
 # models by name, Polars outputs by asset key. Here rather than beside the asset,
 # so `tests/test_report.py` checks them against the SQL without Dagster.
 TABLE_TO_DBT_MODEL = {
+    "marts.dim_country_income_history": "dim_country_income_history",
     "marts.dim_country_year": "dim_country_year",
     "marts.dim_currency": "dim_currency",
     "marts.dim_date": "dim_date",

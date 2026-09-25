@@ -335,8 +335,9 @@ and a dollar-denominated buyer of the same electricity did face 13.5%. A chart
 titled "European electricity prices" with no stated currency is reporting the
 exchange rate alongside the energy market. This warehouse already carried that
 warning in prose, from the case where Japan cut emissions 21% between 2010 and
-2024 and still scored 10% worse on carbon intensity because the yen fell 28%
-against the dollar. It is a column now, not a paragraph.
+2024 and still scored 10% worse on carbon intensity measured in current dollars:
+the yen lost 42% of its dollar value, so Japan's GDP counted in dollars fell 28%.
+It is a column now, not a paragraph.
 
 </Alert>
 

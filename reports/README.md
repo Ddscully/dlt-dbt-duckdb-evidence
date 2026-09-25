@@ -317,9 +317,12 @@ before you check the SQL.
 
 The suffix is matched against every tag in `builtInFormats.js`, so `_pct` is not
 the only one: `id`, `fract`, `mult`, `sci`, `num0`…`num4`, `yyyy`, `mmm` and the
-date tags are all live. Currency suffixes are *not* on that list, which is why
-`revenue_gbp` and `gdp_usd` pass through untouched and `_pct` is the one that
-bites here. A column named `customer_id` does pick up the `id` format. That one
+date tags are all live, and so is **every bare currency code** — `usd`, `eur`,
+`gbp` and the rest head that list. `revenue_gbp` looks untouched only because
+every chart on it passes a format; a column the Country Explorer named
+`kg_co2_per_usd` rendered its axis as `$1.50` until it got a `yFmt`. So a unit
+suffix that happens to be a currency code (`_per_usd`, `_eur`) needs an explicit
+format as much as `_pct` does. A column named `customer_id` does pick up the `id` format. That one
 is harmless — it suppresses thousands separators, which is what you want for an
 identifier — but it looks like a bug until you know.
 

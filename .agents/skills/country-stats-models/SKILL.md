@@ -60,9 +60,20 @@ transcribed from the publisher's own history (`OGHIST.xlsx`, by
 
 The current year's 0 is an invariant — the same classification reached two
 ways — so a `warn` test fires when they stop agreeing, which is what a July
-reclassification looks like before anyone re-runs the script. Nothing is
+reclassification looks like before anyone re-runs the script. No model is
 repointed at the history yet: that is a contract change on every relation
 carrying `income_group`, and a separate decision.
+
+- **A trend by income group reads the history directly**, as
+  `reports/sources/warehouse/co2_intensity_by_income.sql` does for the Country
+  Explorer. The Explorer's chart used to group every year by today's list *and*
+  average country ratios (Bhutan weighted like China), and each choice alone
+  moves it; together they invert 1990. Upper-middle income ranked most
+  carbon-intensive at 1.00 kg/$ on the old basis. Grouped as classified and
+  weighted by output (sum over sum), low income did at 1.39, because China was
+  low income until 1998 and India until 2006. A single recent year is fine on
+  today's list, and a before-and-after comparison wants a fixed list, which
+  today's is.
 
 ## Revisions: `snap_co2_estimates`
 

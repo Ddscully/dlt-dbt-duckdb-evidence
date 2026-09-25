@@ -251,8 +251,9 @@ where year = ${inputs.year.value}
   think needed one, like a `<Heatmap>`'s color legend (`retail.md` shipped one
   reading `263%`–`3,757%` for a 2.63–37.57 column). Pass `valueFmt` /
   `fmt` / `yFmt` on anything rendering a `*_pct` column. `id`, `fract`, `mult`,
-  `sci`, `num0`–`num4` and the date tags are live suffixes too; currency ones
-  are not.
+  `sci`, `num0`–`num4`, the date tags and **every bare currency code** (`usd`,
+  `eur`, `gbp`, …) are live suffixes too: `kg_co2_per_usd` drew a `$1.50` axis
+  until it was given a `yFmt`.
 - Filter nulls in the SQL. `electricity_price_eur_kwh` is null outside the
   EU/EEA and `life_expectancy` is sparse in early years — unfiltered they render
   as gaps or drag averages.
