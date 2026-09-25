@@ -15,6 +15,7 @@ import zipfile
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import duckdb
 import pytest
 import requests
 from dlt.extract.exceptions import ResourceExtractionError
@@ -1139,6 +1140,106 @@ def test_weather_windows_chunk_the_seed_into_affordable_requests():
         days = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1
         cost = weather.weather_call_units(len(weather.WEATHER_COUNTRIES), days)
         assert cost <= hourly, f"{start}..{end} costs {cost:,.0f} units against {hourly:,.0f}/hour"
+
+
+# `weather_windows` above is handed its watermark; these read it out of the
+# catalog. A wrong None is a cold start, and nothing downstream is red:
+# `just test-pipeline` serves the same fixture whatever dates are asked for.
+
+
+def _landing_zone(tmp_path: Path, *statements: str) -> Path:
+    """A throwaway DuckLake attached the way production attaches it."""
+    from lake import lakehouse
+
+    lake_dir = tmp_path / "lakehouse"
+    Path(lakehouse.data_path(lake_dir)).mkdir(parents=True)
+    con = duckdb.connect()
+    try:
+        lakehouse.attach_lakehouse(con, lake_dir, read_only=False)
+        for statement in statements:
+            con.execute(statement)
+    finally:
+        con.close()
+    return lake_dir
+
+
+def _weather_loaded(tmp_path: Path, days: list[str]) -> Path:
+    rows = ", ".join(f"('DEU', date '{day}')" for day in days) or "('DEU', date '2000-01-01')"
+    return _landing_zone(
+        tmp_path,
+        "create schema lakehouse.raw",
+        "create table lakehouse.raw.om_weather_daily as select * from (values "
+        f"{rows}) as t(country_iso3, weather_date)" + ("" if days else " where false"),
+    )
+
+
+def test_the_weather_watermark_is_the_newest_day_the_catalog_holds(tmp_path):
+    # Out of order, so `max` is what is tested and not insertion order.
+    lake_dir = _weather_loaded(tmp_path, ["2026-08-20", "2026-08-24", "2025-01-01"])
+    assert weather.weather_watermark(lake_dir) == "2026-08-24"
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["no catalog", "dbt's empty catalog file", "no weather table yet", "an empty weather table"],
+)
+def test_the_weather_watermark_is_none_only_when_nothing_has_loaded(tmp_path, state):
+    """Each is a landing zone weather has genuinely never loaded into.
+
+    The empty file is what dbt's `ATTACH IF NOT EXISTS` leaves on a build before
+    the first ingest: a file is there and it is not a catalog, so asking whether
+    the file exists answers wrong in the other direction and raises.
+    """
+    from lake import lakehouse
+
+    if state == "no catalog":
+        lake_dir = tmp_path / "lakehouse"
+    elif state == "dbt's empty catalog file":
+        lake_dir = tmp_path / "lakehouse"
+        lake_dir.mkdir()
+        duckdb.connect(str(lakehouse.catalog_path(lake_dir))).close()
+    elif state == "no weather table yet":
+        lake_dir = _landing_zone(
+            tmp_path,
+            "create schema lakehouse.raw",
+            "create table lakehouse.raw.owid_co2 as select 'DEU' as country_iso3",
+        )
+    else:
+        lake_dir = _weather_loaded(tmp_path, [])
+
+    assert weather.weather_watermark(lake_dir) is None
+
+
+def test_the_weather_watermark_is_read_from_a_catalog_that_is_not_a_file(tmp_path, monkeypatch):
+    """A Postgres catalog leaves no file in `lakehouse_dir` — asking for one reads
+    as an empty archive on every run, which is the cold start this function's
+    docstring records. Postgres is stood in for by the probe and the connection;
+    the question under test is whether the watermark asks `is_catalog`.
+    """
+    from lake import lakehouse
+    from modern_data_stack.ducklake import attach
+
+    loaded = _weather_loaded(tmp_path, ["2026-08-24"])
+
+    def _connect_to_loaded(_lake_dir):
+        # Spelled here, not through `attach_lakehouse`, which would follow the
+        # patched `is_remote_catalog` to a Postgres that is not there.
+        con = duckdb.connect()
+        attach(
+            con,
+            lakehouse.catalog_path(loaded),
+            lakehouse.data_path(loaded),
+            alias=lakehouse.ATTACH_ALIAS,
+            read_only=True,
+        )
+        return con
+
+    monkeypatch.setattr(lakehouse, "is_remote_catalog", lambda: True)
+    monkeypatch.setattr(lakehouse, "_postgres_holds_catalog", lambda: True)
+    monkeypatch.setattr(lakehouse, "read_only_connection", _connect_to_loaded)
+
+    no_file_here = tmp_path / "remote"
+    assert weather.weather_watermark(no_file_here) == "2026-08-24"
 
 
 def _weather_entry(days: list[str], mean: list[float], *, latitude=52.5, longitude=13.4) -> dict:
