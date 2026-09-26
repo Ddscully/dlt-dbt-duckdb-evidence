@@ -50,7 +50,7 @@ depend on it and write only the layers below.
 | `fixtures` | serve recorded payloads instead of live endpoints | a list of `(url pattern, filename)` routes |
 | `ducklake` | attach, publish and relocate a DuckLake catalog | an alias, a data path and a spec ceiling |
 | `observability` | dlt/dbt/DuckDB metadata as queryable tables | landing-table and layer names |
-| `export` | package a warehouse as a publishable artifact | schemas, attribution, a notes renderer |
+| `export` | package a warehouse as a publishable artifact, and compare it with the last one | schemas, attribution, a notes renderer, a loss threshold |
 | `history` | carry unreproducible relations forward between builds | a tuple of `Carry` rules |
 | `privacy` | pseudonymise an identifier at the publication boundary | the classified columns and a salt |
 | `ratelimit` | a sliding-window budget for an API that charges by volume | `(seconds, units)` limits |

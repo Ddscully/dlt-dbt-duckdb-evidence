@@ -36,6 +36,13 @@ contract, tests and lineage, are browsable as the
 [data catalogue](https://ddscully.github.io/dlt-dbt-duckdb-evidence/dbt/) beside
 the dashboard.
 
+**No published table shrinks between releases without a person deciding it
+should.** Before a release uploads, each table's row count and year span are
+compared with the previous release's `manifest.json`, and a table that lost more
+than 1% of its rows, or a year at either end, stops it. A table that is retired
+or renamed is listed, not stopped. The comparison is in the release run's
+summary on the Actions tab.
+
 ## Querying it
 
 DuckDB reads a remote database over HTTPS, so you can query it where it sits:

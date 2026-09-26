@@ -24,6 +24,11 @@ on:
         description: "Release tag (default: data-YYYY-MM-DD)"
         required: false
         type: string
+      accept_volume_drop:
+        description: "Publish even if a table lost rows or years against the previous release"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write # creates the tag, the release and its assets
@@ -75,6 +80,7 @@ jobs:
             exit 0
           fi
           echo "Restoring history from $prev"
+          echo "prev=$prev" >> "$GITHUB_OUTPUT"
           gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
           # A release cut before the landing zone was published has no tarball,
           # and that alone may skip it. So ask the release what it holds, rather
@@ -232,6 +238,27 @@ jobs:
           )
           print(f"carried forward: {rows:,} rows total ({restored:,} restored)")
           PY
+
+      # Every gate above reads this build alone, so a model edit that drops a
+      # third of the countries passes them all: the smaller table is still unique,
+      # in range and non-null. The previous release's manifest records each
+      # table's rows and year span, so the loss shows against it
+      # (`publish/compare_releases.py` has the threshold and what it measured).
+      # The manifest goes outside data/export/, which is uploaded whole.
+      #
+      # A scheduled run cannot take the input, so a deliberate drop fails the
+      # month's release and is published by dispatching with accept_volume_drop.
+      - name: Compare with the previous release
+        if: steps.history.outputs.prev != ''
+        env:
+          PREV: ${{ steps.history.outputs.prev }}
+          ACCEPT_DROP: ${{ inputs.accept_volume_drop }}
+        run: |
+          gh release download "$PREV" --pattern manifest.json --output prev-manifest.json
+          accept=()
+          if [ "$ACCEPT_DROP" = "true" ]; then accept=(--accept-drop); fi
+          uv run python -m publish.compare_releases prev-manifest.json \
+            --summary "$GITHUB_STEP_SUMMARY" "${accept[@]}"
 
       # The notes are the release body, so they move out of the way and
       # everything left in data/export/ becomes an asset. `--clobber` on the

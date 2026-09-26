@@ -358,3 +358,65 @@ def export(
     ]
     (dest_dir / "SHA256SUMS").write_text("\n".join(sums) + "\n")
     return manifest
+
+
+# The verdicts `compare_manifests` gives that mean a table lost data. `removed` is
+# not one of them: retiring or renaming a model removes a table on purpose.
+LOSS_VERDICTS = frozenset({"dropped", "narrowed"})
+
+
+def compare_manifests(
+    previous: dict,
+    current: dict,
+    max_drop: float,
+    exempt_prefixes: tuple[str, ...] = (),
+) -> list[dict]:
+    """Each published table's row count and period span against an earlier release.
+
+    One entry per table in either manifest, sorted by name, with a `verdict`:
+
+    - `dropped` — lost more than `max_drop` (a fraction) of its rows
+    - `narrowed` — its period span lost a year at either end, or lost its span
+    - `removed` / `added` — published by only one of the two releases
+    - `exempt` — named by `exempt_prefixes`, so reported but never judged
+    - `ok` — anything else, growth included
+
+    A join that drops two thirds of the countries passes every test that reads
+    one build, because each test sees a consistent, smaller table; only a
+    comparison with another build can see the rows that went. `max_drop` has no
+    default for `db.write_frames`'s `schema` reason: what counts as a loss is a
+    promise to the project's consumers.
+    """
+    before = {entry["table"]: entry for entry in previous["tables"]}
+    after = {entry["table"]: entry for entry in current["tables"]}
+
+    changes = []
+    for table in sorted(before.keys() | after.keys()):
+        old, new = before.get(table), after.get(table)
+        old_years = old.get("years") if old else None
+        new_years = new.get("years") if new else None
+        if table.startswith(exempt_prefixes):
+            verdict = "exempt"
+        elif old is None:
+            verdict = "added"
+        elif new is None:
+            verdict = "removed"
+        elif old["rows"] and (old["rows"] - new["rows"]) / old["rows"] > max_drop:
+            verdict = "dropped"
+        elif old_years and (
+            not new_years or new_years[0] > old_years[0] or new_years[1] < old_years[1]
+        ):
+            verdict = "narrowed"
+        else:
+            verdict = "ok"
+        changes.append(
+            {
+                "table": table,
+                "previous_rows": old["rows"] if old else None,
+                "rows": new["rows"] if new else None,
+                "previous_years": old_years,
+                "years": new_years,
+                "verdict": verdict,
+            }
+        )
+    return changes
