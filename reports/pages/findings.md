@@ -764,7 +764,7 @@ select
     i.country_name,
     i.co2_mt - b.base_co2 as co2_change_mt,
     100 * (i.co2_per_gdp_const_usd / b.base_intensity - 1) as intensity_change_pct,
-    100 * (i.renewables_share_pct / nullif(b.base_renew, 0) - 1) as renewables_change_pct
+    i.renewables_share_pct - b.base_renew as renewables_change_pp
 from warehouse.co2_intensity i
 inner join base b on i.country_iso3 = b.country_iso3
 where i.year = (select gdp_year from ${latest_years})
@@ -776,7 +776,7 @@ order by co2_change_mt desc
     <Column id=country_name title="Country"/>
     <Column id=co2_change_mt title="CO₂ change since 2005 (Mt)" fmt="#,##0" contentType=delta downIsGood=true/>
     <Column id=intensity_change_pct title="Carbon intensity" fmt='0.0"%"' contentType=delta downIsGood=true/>
-    <Column id=renewables_change_pct title="Renewables share" fmt='0.0"%"' contentType=delta/>
+    <Column id=renewables_change_pp title="Renewables share change (pp)" fmt='0.0" pp"' contentType=delta/>
 </DataTable>
 
 <Alert status=info>
