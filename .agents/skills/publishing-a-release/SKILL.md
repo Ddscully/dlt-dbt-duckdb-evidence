@@ -1,6 +1,6 @@
 ---
 name: publishing-a-release
-description: The publication boundary — publish/export_warehouse.py and publish/restore_history.py. What a release holds and must be named, attribution, the personal-data policy applied at export (pseudonymising customer_id, why deleting an id does not anonymise, the salt), the storage-format ceiling and the two moments its tripwire fires, the DuckLake spec ceiling that has no PR to fail, reading data_loaded_at from the catalog rather than the copy, and carrying the unreproducible tables forward so the snapshot accumulates and the weather archive deepens. Use when editing anything under publish/, changing release-data.yml or pages.yml, or reasoning about what a consumer of a data-YYYY-MM-DD release can open.
+description: The publication boundary — publish/export_warehouse.py, publish/restore_history.py and publish/compare_releases.py. What a release holds and must be named, attribution, the personal-data policy applied at export (pseudonymising customer_id, why deleting an id does not anonymise, the salt), the storage-format ceiling and the two moments its tripwire fires, the DuckLake spec ceiling that has no PR to fail, reading data_loaded_at from the catalog rather than the copy, and carrying the unreproducible tables forward so the snapshot accumulates and the weather archive deepens, and the comparison with the previous release that stops a table shrinking unnoticed. Use when editing anything under publish/, changing release-data.yml or pages.yml, or reasoning about what a consumer of a data-YYYY-MM-DD release can open.
 ---
 
 # The publication boundary (`publish/`)
@@ -328,3 +328,39 @@ it cost to learn:
     release 1, restore into a fresh warehouse, restate three country-years in
     `raw.owid_co2`, rebuild — 595 snapshot rows became 598 and
     `fct_co2_estimate_versions` showed the three at version 2.
+
+## Comparing with the previous release (`publish/compare_releases.py`)
+
+`release-data.yml` compares this release's `manifest.json` with the previous
+release's before it uploads, and stops on a published table that lost more than
+`MAX_DROP` (1%) of its rows or a year at either end of its span. Every other gate
+reads one build, and a join that drops a third of the countries leaves a table
+that is still unique, in range and non-null — only a second build sees the rows
+that went.
+
+- **The manifest, not `analytics.pipeline_tables`, is what it reads.** Both hold
+  row counts, but the manifest is the documented shape consumers parse, has
+  carried `table`/`rows`/`years` unchanged since the first release, and is one
+  small asset. `pipeline_tables` is replaced every run and its Parquet is not a
+  contract.
+- **One threshold, not one per table, because nothing has ever shrunk.** Measured
+  over the five releases `data-2026-07-30` → `data-2026-09-01`: no published
+  table lost a row or a year, and the largest change was +0.15%. Tables differ
+  only in how fast they *grow*, which is not a failure. One country is about 0.4%
+  of `marts.fct_emissions_energy`, so losing one shows in the report and passes;
+  losing three fails.
+- **`analytics.pipeline_*` is exempt**: those tables count the project's own
+  tests and tables, so deleting a model shrinks them on purpose.
+- **`removed` is reported, never judged**, or retiring a model — as
+  `fct_emissions_energy_v1` will be — would fail the next release on a planned
+  removal. A test pins this through the command's exit, because
+  counting `removed` as a loss keeps every verdict label right.
+- **A deliberate drop is published by dispatch**: a scheduled run cannot take
+  inputs, so it fails and a person re-runs with `accept_volume_drop`. The failed
+  month's release never existed, so the re-run still compares against the last
+  one that did.
+- **The previous manifest is downloaded outside `data/export/`**, which the
+  publish step uploads whole — inside it, last month's manifest would ship as
+  an asset of this release.
+- Checked before it could first run: the local warehouse exported against
+  `data-2026-09-01` passed, with the two new marts reported as `added`.

@@ -292,7 +292,13 @@ def test_the_release_never_tolerates_a_failed_download():
     commands = text.replace("\\\n", " ")  # one line per continued command
     downloads = [line for line in commands.splitlines() if "gh release download" in line]
 
-    assert len(downloads) == 2, f"expected both assets' downloads, found {downloads}"
+    # Named rather than counted: the restore's two assets, and the manifest the
+    # comparison step reads. A failed manifest download would skip the only check
+    # that sees a table shrink between releases.
+    expected = {"warehouse.duckdb", "lakehouse.tar.gz", "manifest.json"}
+    assert downloaded_assets("\n".join(downloads)) == expected, (
+        f"expected downloads of {sorted(expected)}, found {downloads}"
+    )
     tolerated = [line.strip() for line in downloads if "||" in line]
     assert not tolerated, f"release-data.yml tolerates a failed download: {tolerated}"
     assert "continue-on-error" not in text, "a soft-failing step would tolerate it too"
