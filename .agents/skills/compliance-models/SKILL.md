@@ -318,11 +318,14 @@ mutation in this table:
 ### Reading it
 
 - **The story is production route, not grid** — the opposite of the Scope 2 page.
-  Semi-finished steel runs 63x from Azerbaijan to Indonesia, and sorting by cost
+  Semi-finished steel costs about €11 a tonne from Azerbaijan and €677 from
+  Indonesia, and sorting by cost
   sorts almost perfectly by the annex's route indicator (`E` scrap/EAF against
   `C`/`F` ore/BF-BOF), not by the country's grid — the correlation between a
   country's steel default and its grid factor is 0.32 (it was 0.26 before the
-  2026/1740 correction; the spread held at 63x through it).
+  2026/1740 correction). Quote that spread as a gap in euros, never as a ratio:
+  the cheapest source is a scrap route near zero, so the ratio (63x) measures the
+  denominator, and for one good it divides by zero.
 - **Excel mangles the country names, so `country_display_name` exists.** Sheet
   names cap at 31 characters and forbid some punctuation, which is why the annex's
   Koreas arrive as `North Korea (Democratic People’` and
