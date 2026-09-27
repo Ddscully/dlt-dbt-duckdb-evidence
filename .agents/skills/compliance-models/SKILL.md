@@ -73,8 +73,8 @@ packaging.
   average rather than hourly matching, and production- rather than
   consumption-based. Naming them is the difference between a credible reference
   table and a liability; a practitioner checks all three first.
-- The page quotes a 57x spread across grids above 10 TWh where `findings.md`
-  quotes 24x above 150 TWh. Both are correct and the page says why — if one
+- The page quotes a 57x spread across grids above 10 TWh where
+  `findings/electricity.md` quotes 24x above 150 TWh. Both are correct and the page says why — if one
   moves, check the other.
 
 ## CBAM exposure (`fct_cbam_exposure`, the `cbam_*` seeds, `reports/pages/cbam.md`)

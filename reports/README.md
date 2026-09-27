@@ -59,8 +59,12 @@ calls, so the recipe and the graph can't drift into running different builds.
   `warehouse.emissions_energy`, `warehouse.co2_intensity`,
   `warehouse.eu_electricity_prices_semiannual`, and so on: the filename is the
   reference name.
-- `pages/index.md`: the home page, a routing page with no SQL on it — pick the
-  analysis that matches what you are responsible for.
+- `pages/index.md`: the home page. A world map of CO₂ per person, then one small
+  chart per analysis page, each linking to it. The map reads its outlines from
+  `static/world-countries.geojson` (Natural Earth, 1:110m, cut to an ISO code and
+  a name) and draws on `static/blank-tile.png` rather than Evidence's default
+  basemap, which is CARTO's tile server: every visitor would otherwise fetch map
+  tiles from a third party.
 - `pages/countries.md`: the country explorer, driven by a year selector: clean
   electricity vs. life expectancy (bubble), CO₂ intensity by income group over
   time (line), a grid carbon-intensity ranking and a most-efficient table. Its
@@ -68,9 +72,12 @@ calls, so the recipe and the graph can't drift into running different builds.
   fact, deliberately covering the whole series rather than the selected year,
   because the annual average the other charts use hides moves of 300%+ inside a
   single year.
-- `pages/findings.md`: eight written-up findings from the joined data. Each
-  section leads with its chart and puts the reading of it underneath; the notes
-  on method sit at the bottom of the page.
+- `pages/findings.md` and `pages/findings/`: the nine findings. The overview is
+  one chart and a caption of a sentence or two per finding, each linking to its
+  own page under `findings/`, which carries the argument, the "So what" box, the
+  table and the method. A page and a folder of the same name coexist: the folder's
+  pages route beneath it (`/findings/income/`) and sit under a "Nine Findings"
+  heading in the sidebar, ordered by `sidebar_position`.
 - `pages/coverage.md`: what each source actually covers, built by left-joining
   `marts.fct_emissions_energy` onto the `dim_country_year` spine so a gap is a
   row rather than an absence. Read this before writing a `where` clause against
@@ -205,6 +212,18 @@ charts, and 25 s left one of them blank each time, varying. 60 s renders all
 three, repeatably. Before believing a chart is broken, shoot it twice: a real
 failure is the same chart every time.
 
+**And a false alarm that survives shooting twice.** The virtual clock can also
+stop while a chart is still in ECharts' entry animation, which freezes it at
+frame 0, the same frame every time. A bar chart shows its value labels stacked
+against the axis at zero and no bars; a line or area chart shows only its first x
+value, as a vertical spike. The findings sub-pages hit it on three charts,
+repeatably, at 60 s and 90 s budgets alike, and a clean rebuild changed nothing.
+`printEchartsConfig=true` on the chart printed a correct config, and a screenshot
+taken over CDP after a real-time wait (no virtual time at all) showed every chart
+drawn. So when the labels sit at zero rather than at the bar ends, suspect the
+clock before the page, and confirm in real time, as `building-evidence-reports`
+describes.
+
 ## A scatter over 3,000 points stops rendering
 
 **ECharts switches a scatter series to *progressive* rendering at
@@ -292,7 +311,7 @@ Put a word in front of the component and the paragraph is wrapped normally:
 
 This only applies to the first line of a *paragraph*. A component that starts a
 wrapped line **inside** a paragraph is fine and is sometimes deliberate, as in
-`findings.md`, where a sentence continues onto a line beginning with a `<Value>`.
+the findings pages, where a sentence continues onto a line beginning with a `<Value>`.
 Check for a blank line above before "fixing" one.
 
 ## A column named `*_pct` is silently multiplied by 100
@@ -357,7 +376,7 @@ always gets the same color regardless of how the query happens to sort it:
   magenta, a dark-mode colorblind-separation dip on green/gold) that the
   legend + hover tooltip mitigate rather than eliminate. Don't push income_group
   past 4 categories without re-running the validator.
-- **`income_group` also drives the peak-emissions scatter in `findings.md`**, but
+- **`income_group` also drives the peak-emissions scatter in `findings/peak-emissions.md`**, but
   only the three categories present among large emitters that have already
   peaked (High/Upper-middle/Lower-middle, since no Low-income country clears the
   200 Mt threshold). That's a different `seriesColors` map from `countries.md`'s
@@ -368,18 +387,17 @@ always gets the same color regardless of how the query happens to sort it:
   construction, so they'd all stack on one point) and broken out in a bar
   chart instead.
 - **Binary progress/business-as-usual series** (`decoupled` and `direction` in
-  `findings.md`) reuses the same two hues throughout: blue for the "improving"
+  the findings pages) reuses the same two hues throughout: blue for the "improving"
   side, orange for the opposite. Deliberately not red/green, which fails the
   colorblind check outright (ΔE ~4, well under the ~6 floor) despite looking
   fine to most readers.
 - **"Two ways of measuring the same quantity" always gets aqua/gold**
-  (`#1baf7a`/`#eda100` light, `#199e70`/`#c98500` dark). Three charts in
-  `findings.md` use it: CO₂ share vs. population share, territorial vs.
-  consumption-based emissions, and share of the cumulative stock vs. share of
-  the current flow. They are not good/bad pairs, so borrowing the progress hues
-  would import a value judgment the chart isn't making; using one consistent
-  pair for the role means a reader who has decoded one of the three has decoded
-  all of them.
+  (`#1baf7a`/`#eda100` light, `#199e70`/`#c98500` dark). The findings pages use
+  it for CO₂ share vs. population share and for territorial vs.
+  consumption-based emissions. They are not good/bad pairs, so borrowing the
+  progress hues would import a value judgment the chart isn't making; using one
+  consistent pair for the role means a reader who has decoded one has decoded
+  them all.
 
 Adding a new `series=` chart? Pick colors from the same validated set in
 `evidence.config.yaml` rather than eyeballing new hex values, and if two
