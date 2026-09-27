@@ -92,7 +92,7 @@ where year = ${inputs.year.value}
 ```
 
 <Grid cols=4>
-    <BigValue data={kpis} value=n_countries title="Countries reporting all four"/>
+    <BigValue data={kpis} value=n_countries title="Countries reporting all three"/>
     <BigValue data={kpis} value=avg_life_expectancy fmt="0.0" title="Avg life expectancy (yrs)"/>
     <BigValue data={kpis} value=avg_grid_intensity fmt="#,##0" title="Avg grid (gCO₂/kWh)"/>
     <BigValue data={kpis} value=avg_low_carbon fmt='0.0"%"' title="Avg low-carbon electricity"/>
@@ -236,10 +236,12 @@ limit 15
 />
 
 Grams of CO₂ per kWh generated, for countries with a grid big enough for the
-number to be stable (over 50 TWh). Coal-heavy grids sit near 800, gas near 400,
-nuclear and hydro grids under 50.
+number to be stable (over 50 TWh). Coal-heavy grids sit near 800, and nuclear and
+hydro grids under 50. Gas grids range from about 400 with modern plant to 600–700
+with older plant or oil in the mix, which is why grids with no coal at all appear
+in this chart.
 
-## Does cleaner electricity mean cheaper power? (EU, {inputs.year.label})
+## Does cleaner electricity mean cheaper power? (Europe, {inputs.year.label})
 
 ```sql eu_price_vs_clean
 select
@@ -281,11 +283,12 @@ where year = ${inputs.year.value}
     tooltipTitle=country_name
 />
 
-Household electricity prices (including all taxes, from Eurostat) against each EU
-country's low-carbon share of electricity. The relationship is messy; grid, tax
-and policy choices dominate. Using the electricity share rather than the
-primary-energy one keeps all 39 priced countries in the chart, since nine of them
-have no renewables figure at all.
+Household electricity prices (including all taxes, from Eurostat) against each
+country's low-carbon share of electricity. Eurostat's series reaches beyond the EU
+to the EEA and the candidate countries. The relationship is messy; grid,
+tax and policy choices dominate. The electricity share is used rather than the
+primary-energy one because it keeps almost every priced country in the chart,
+where the primary-energy share would drop about a quarter of them.
 
 {#if partial_price_years.length > 0 && partial_price_years[0].n_partial > 0}
 
@@ -297,7 +300,7 @@ averaging costs.
 
 {/if}
 
-## Most expensive EU electricity ({inputs.year.label})
+## Most expensive electricity in Europe ({inputs.year.label})
 
 ```sql eu_prices
 select
@@ -348,10 +351,11 @@ Without a size floor this table is a list of financial and tourism micro-states
 (Macao, Bermuda, Malta) whose ranking says more about having no industry than
 about having clean industry.
 
-Even with the floor, read it carefully. Low CO₂ per dollar has two very different
-causes: a genuinely low-carbon economy such as Sweden or France, running on
-nuclear and hydro, and an economy whose industrial production happens somewhere
-else, which finding 4 on the [findings page](/findings) quantifies. Ireland's
+Even with the floor, read it carefully. Low CO₂ per dollar has three very
+different causes: a genuinely low-carbon economy such as Sweden or France, running
+on nuclear and hydro; an economy whose industrial production happens somewhere
+else, which finding 4 on the [findings page](/findings) measures; and an economy
+that uses little commercial energy at all. Ireland's
 number is also inflated by the multinational profit-shifting that distorts its
 GDP denominator.
 

@@ -151,7 +151,7 @@ order by latest_available_year
 
 The bars are the distribution; the line is the thing a reporter has to decide.
 Insisting on a 2025 factor covers **43%** of countries. Accepting 2024 or later
-covers **94%**, and the two years below that are worth four points between them.
+covers **94%**, and the two years below that add the last six points.
 So the cut-off is not a tidy "use the latest year". It is a choice about how much
 of the world you are willing to leave out of a filing, and tightening it by one
 year costs fifty points of coverage.
@@ -214,7 +214,7 @@ from warehouse.example_scope2_emissions
 <Grid cols=3>
     <BigValue data={group_totals} value=mwh fmt="#,##0" title="Electricity purchased (MWh)"/>
     <BigValue data={group_totals} value=t_actual fmt="#,##0" title="Scope 2, location-based (tCO₂e)"/>
-    <BigValue data={group_totals} value=ratio fmt='0.0"×"' title="Best grid vs worst, same demand"/>
+    <BigValue data={group_totals} value=ratio fmt='0.0"×"' title="Dirtiest grid vs cleanest, same demand"/>
 </Grid>
 
 ```sql sites
@@ -383,9 +383,10 @@ carbon-free-energy accounting needs hourly generation data; a yearly grain
 structurally cannot express it.
 
 **Production-based, not consumption-based.** OWID's series is the carbon
-intensity of electricity *generated* in a country. It ignores imports, so a
-country running on hydro imported from a neighbour looks cleaner than its
-consumed mix, and an exporter of coal power looks dirtier.
+intensity of electricity *generated* in a country. It ignores trade, so a country
+that imports much of its power is assigned only what it generates itself: one
+importing a neighbour's hydro looks dirtier than the mix it consumes, and one
+importing coal power looks cleaner.
 
 </Alert>
 

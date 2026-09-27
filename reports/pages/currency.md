@@ -159,8 +159,8 @@ select
     -- and sort as strings.
     period_start_date,
     period_label,
-    avg_units_per_eur,
-    period_end_units_per_eur,
+    avg_units_per_eur        as annual_average,
+    period_end_units_per_eur as year_end_rate,
     period_end_vs_avg_pct,
     intra_period_range_pct
 from warehouse.fx_periods
@@ -210,12 +210,12 @@ order by abs(period_end_vs_avg_pct) desc
 limit 1
 ```
 
-For {inputs.ccy.label}, the year where the two answers diverge most is <Value data={worst} column=period_label/>, at <Value data={worst} column=period_end_vs_avg_pct fmt='0.0"%"'/>. A full year of flows converted at the closing rate instead of the average is misstated by that much, which is often more than the margin of the business doing the converting.
+For {inputs.ccy.label}, the two answers diverge most in <Value data={worst} column=period_label/> by <Value data={worst} column=period_end_vs_avg_pct fmt='0.0"%"'/> of the annual average. A full year of flows converted at the closing rate instead of the average is misstated by that much, which is often more than the margin of the business doing the converting.
 
 <LineChart
     data={spot_vs_avg}
     x=period_start_date
-    y={["avg_units_per_eur", "period_end_units_per_eur"]}
+    y={["annual_average", "year_end_rate"]}
     title="Annual average against year-end rate, per EUR"
     yFmt='0.000'
     xFmt='yyyy'
@@ -230,7 +230,7 @@ second, component-free paragraph for that reason, where marks do work. -->
 
 <Alert status=warning>
 
-**{inputs.ccy.label}'s year-end rate is stale in <Value data={stale_years} column=period_label/>.** The closing
+**{inputs.ccy.label}'s year-end rate for <Value data={stale_years} column=period_label/> is stale.** The closing
 value the chart plots for that year is the fixing of <Value data={stale_years} column=last_rate_date fmt='d mmm yyyy'/> —
 <Value data={stale_years} column=period_end_stale_days/> days before the year ended — because the ECB stopped
 publishing this currency partway through it. The number is a true statement about converting at the last
@@ -273,8 +273,8 @@ with paired as (
 )
 select
     period_start_date,
-    avg(electricity_price_eur_kwh) as eur_kwh,
-    avg(electricity_price_usd_kwh) as usd_kwh,
+    avg(electricity_price_eur_kwh) as price_in_euros,
+    avg(electricity_price_usd_kwh) as price_in_dollars,
     min(usd_per_eur_period_avg) as usd_per_eur
 from warehouse.eu_electricity_prices_semiannual
 where country_iso3 in (select country_iso3 from paired)
@@ -322,7 +322,7 @@ Across the <Value data={crisis} column=n_countries/> countries Eurostat covers i
 <LineChart
     data={eur_vs_usd}
     x=period_start_date
-    y={["eur_kwh", "usd_kwh"]}
+    y={["price_in_euros", "price_in_dollars"]}
     title="EU average household electricity price, per kWh"
     yFmt='0.000'
     xFmt='yyyy-mmm'
@@ -330,7 +330,7 @@ Across the <Value data={crisis} column=n_countries/> countries Eurostat covers i
 
 <Alert status=info>
 
-**So what.** Both numbers are right. A euro-area household did face a 35% rise,
+**So what.** Both numbers are right. A household paying in euros did face a 35% rise,
 and a dollar-denominated buyer of the same electricity did face 13.5%. A chart
 titled "European electricity prices" with no stated currency is reporting the
 exchange rate alongside the energy market. This warehouse already carried that

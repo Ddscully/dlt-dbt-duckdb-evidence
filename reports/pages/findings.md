@@ -129,8 +129,8 @@ latest-year emissions. The UK peaked in 1971 and is 53% below it; France peaked
 in 1973 and is 51% below.
 
 "Large emitter" here means above 200 Mt in the latest year, roughly the top 30
-and close to 90% of world emissions. A cluster of mostly lower- and
-upper-middle-income Asian and Middle Eastern economies hasn't peaked at all.
+and close to 90% of world emissions. A cluster of mostly upper-middle-income
+Asian and Middle Eastern economies, plus India, hasn't peaked at all.
 Those are left out of the scatter, because their "change since peak" is 0% by
 construction (their latest year *is* their peak) and they would all stack on one
 point. They get their own chart instead.
@@ -180,8 +180,8 @@ priced on the assumption it would fall.
 ## 2. Electricity is where the cleanup happened, and coal is most of it
 
 Carbon intensity of electricity is the most legible decarbonisation number there
-is: a coal grid runs around 800–900 g of CO₂ per kWh, a gas grid around 400, a
-nuclear or hydro grid under 50.
+is: a coal grid runs around 800–900 g of CO₂ per kWh, a modern gas grid around
+400, a nuclear or hydro grid under 50.
 
 ```sql elec_intensity
 with base as (
@@ -245,11 +245,11 @@ order by g_change
     yAxisTitle="Country"
 />
 
-Spain took 329 g out of every kWh (−69%), Poland 324 g and the UK 318 g (−60%).
-The mechanism is in the next two columns and it is almost entirely one fuel: the
+Spain took 329 g out of every kWh (−69%), Poland 324 g and the UK 319 g (−60%).
+The table's coal columns show the mechanism, and it is almost entirely one fuel: the
 UK went from 34% coal-fired to 1%, Spain from 27% to 1%, Poland from 91% to 54%.
 France barely registers on this chart, which is the measure working. Its grid was
-already nuclear at 86 g in 2005 and it still found another 46 g. The countries
+already nuclear at 86 g in 2005 and it still found another 45 g. The countries
 that got *dirtier* did the same thing in reverse, Vietnam going from 21% coal to
 50% and Indonesia from 39% to 61%, while their absolute generation more than
 doubled.
@@ -385,7 +385,7 @@ two years later.
 
 </Alert>
 
-## 4. …and it isn't only offshoring
+## 4. …and offshoring explains little of it
 
 Territorial emissions count what a country burns. Consumption-based emissions
 count what it buys: territorial output plus the carbon embodied in imports, minus
@@ -409,6 +409,10 @@ select
     e.country_name,
     100 * (e.co2_mt / b.co2_mt - 1)                   as territorial_change,
     100 * (e.consumption_co2 / b.consumption_co2 - 1) as consumption_change,
+    -- The offshoring test itself, in tonnes. Comparing the two percentages above
+    -- is not: a net importer's consumption total starts from a larger base, so an
+    -- identical tonnage cut is a smaller percentage of it.
+    (e.consumption_co2 - e.co2_mt) - (b.consumption_co2 - b.co2_mt) as net_import_change_mt,
     e.co2_mt
 from end_year e
 inner join base_year b on e.country_iso3 = b.country_iso3
@@ -443,36 +447,45 @@ from ${offshoring}
     yAxisTitle="Change since 2005 (%)"
 />
 
-The objection is real but partial. The UK's territorial emissions fell 46% and its
-consumption emissions fell 36%; Italy 38% against 29%, France 35% against 25%,
-Germany 32% against 26%. So roughly a fifth to a third of Europe's headline cut is
-trade moving around, and the rest is not. For Japan and the US the two measures
-are within a few points of each other, and Canada moves the other way: it cut 4%
-territorially and 16% on consumption.
+In percentages the objection looks plausible. The UK's territorial emissions fell
+46% and its consumption emissions 36%; Italy 38% against 29%, France 35% against
+25%, Germany 32% against 26%. But each of these countries imports more carbon than
+it exports, so its consumption total starts from a larger base and the same
+tonnage cut is a smaller percentage of it. Counted in tonnes, the UK's consumption
+emissions fell by 279 Mt against 263 Mt territorially, and Germany's by 277 Mt
+against 274 Mt. Only Italy and France cut consumption by less, and by 13 Mt and
+8 Mt, under a tenth of their cuts. Japan, the US and Canada all cut more on
+consumption than territorially. Where offshoring does show, it is elsewhere:
+Mexico's territorial emissions were flat while its consumption emissions rose by
+about 50 Mt.
 
-The consumption series covers about 120 countries and runs to
-<Value data={latest_years} column=consumption_year_label/>, one year behind the
-territorial one.
+The table's net-import column is that subtraction: the change since 2005 in the
+carbon each country imports, net.
 
-The same subtraction cuts against the "China is just the world's factory" reading
-too: China's consumption emissions have grown *faster* than its territorial ones
-since 2005 (+134% against +107%). Its own consumers, not only its export
-customers, are behind the increase.
+The consumption series covers about 120 countries and runs one year behind the territorial one, to <Value data={latest_years} column=consumption_year_label/> at the latest.
+
+The same subtraction answers the "China is just the world's factory" reading:
+China's consumption emissions rose by about 6,200 Mt since 2005, almost exactly as
+much as its territorial ones. Its own economy, not its export customers, accounts
+for nearly all of the increase.
 
 <DataTable data={offshoring} rows=10>
     <Column id=country_name title="Country"/>
     <Column id=territorial_change title="Territorial" fmt='0"%"' contentType=delta downIsGood=true/>
     <Column id=consumption_change title="Consumption" fmt='0"%"' contentType=delta downIsGood=true/>
+    <Column id=net_import_change_mt title="Net imported CO₂, change (Mt)" fmt="#,##0" contentType=delta downIsGood=true/>
     <Column id=co2_mt title="Latest (Mt)" fmt="#,##0"/>
 </DataTable>
 
 <Alert status=info>
 
 **So what.** Anyone reporting a supply-chain (Scope 3) reduction should expect
-the question *did it fall, or did it move?*, and this is the size of that doubt
-at national scale: roughly **a fifth to a third** of Europe's headline cut is
-trade moving rather than emissions ending. The useful part is that it's a
-subtraction, so the question can be answered rather than caveated.
+the question *did it fall, or did it move?* For Europe's largest economies it
+fell: the carbon they import, net, barely changed while their territorial
+emissions dropped by a third or more. Setting the two percentage changes side by
+side suggests a fifth to a quarter of the cut moved abroad, but that gap comes
+from dividing by different bases, not from trade. The question is answered by a
+subtraction in tonnes, not by comparing percentages.
 
 **Who acts:** sustainability reporting and external assurance. **Cost of getting
 it wrong:** a claimed reduction that an auditor, or a journalist, reclassifies
@@ -775,7 +788,7 @@ order by co2_change_mt desc
 <DataTable data={intensity_table} rows=6>
     <Column id=country_name title="Country"/>
     <Column id=co2_change_mt title="CO₂ change since 2005 (Mt)" fmt="#,##0" contentType=delta downIsGood=true/>
-    <Column id=intensity_change_pct title="Carbon intensity" fmt='0.0"%"' contentType=delta downIsGood=true/>
+    <Column id=intensity_change_pct title="Carbon intensity change" fmt='0.0"%"' contentType=delta downIsGood=true/>
     <Column id=renewables_change_pp title="Renewables share change (pp)" fmt='0.0" pp"' contentType=delta/>
 </DataTable>
 
@@ -846,8 +859,8 @@ order by 1
 Each box is the distribution of national grid carbon intensity across the same 80
 countries. The middle of it has moved a long way: the first quartile fell from
 347 to 199 gCO₂/kWh, a 43% improvement in twenty-four years. The two ends have
-barely moved at all. The cleanest 5% of grids were already near zero in 2000 and
-still are, and the dirtiest 5% have gone from about 807 to 722 — roughly a tenth.
+barely moved. The cleanest 5% of grids were already under 50 g in 2000 and still
+are, and the dirtiest 5% have gone from about 807 to 722, roughly a tenth.
 
 ```sql grid_dispersion
 with eligible as (
@@ -877,13 +890,13 @@ order by 1
 <DataTable data={grid_dispersion} rows=2 rowNumbers=false>
     <Column id=year_label title="Year" align=left/>
     <Column id=mean_ci title="Mean gCO₂/kWh" fmt="#,##0"/>
-    <Column id=gap_p90_p10 title="Cleanest-to-dirtiest gap" fmt="#,##0"/>
+    <Column id=gap_p90_p10 title="Gap, 10th to 90th percentile" fmt="#,##0"/>
     <Column id=spread_relative_to_mean title="Spread relative to mean" fmt="0.00"/>
 </DataTable>
 
-The average grid got **18% cleaner**. The gap between the cleanest and dirtiest
-grids closed by **8%**. Because the mean fell and the spread did not, the spread
-*relative* to the mean rose by 23%: in proportional terms the world's grids are
+The average grid got **18% cleaner**. The gap between the 10th and 90th
+percentiles closed by only **8%**. Because the mean fell faster than the spread,
+the spread *relative* to the mean rose by 23%: in proportional terms the world's grids are
 further apart than when the period started. Neither reading is an artefact of the
 start and end points chosen. Fitted across all twenty-five years, the fall in the
 mean and the rise in relative spread both carry p-values below 0.001.
@@ -985,8 +998,9 @@ last_year as (
 select
     l.n_countries,
     f.total_mt - l.total_mt                          as total_cut_mt,
+    -- No "coal's share of the cut": gas rose, so the net cut is smaller than coal's
+    -- fall and the share prints over 100%. The two tonnages side by side say it.
     f.coal_mt - l.coal_mt                            as coal_cut_mt,
-    100 * (f.coal_mt - l.coal_mt) / (f.total_mt - l.total_mt) as coal_share_of_cut,
     f.oil_mt - l.oil_mt                              as oil_cut_mt,
     l.gas_mt - f.gas_mt                              as gas_rise_mt,
     100 * f.oil_mt / f.total_mt                      as oil_share_2005,
@@ -998,7 +1012,7 @@ from first_year f
 cross join last_year l
 ```
 
-Between 2005 and <Value data={latest_years} column=co2_year_label/> the CO₂ of today's high-income economies fell by <Value data={fuel_change} column=total_cut_mt fmt="#,##0"/> Mt. Coal fell by <Value data={fuel_change} column=coal_cut_mt fmt="#,##0"/> Mt, which is <Value data={fuel_change} column=coal_share_of_cut fmt='0"%"'/> of that net cut, while oil fell by <Value data={fuel_change} column=oil_cut_mt fmt="#,##0"/> Mt and gas rose by <Value data={fuel_change} column=gas_rise_mt fmt="#,##0"/> Mt.
+Between 2005 and <Value data={latest_years} column=co2_year_label/> the CO₂ of today's high-income economies fell by <Value data={fuel_change} column=total_cut_mt fmt="#,##0"/> Mt. Coal alone fell by <Value data={fuel_change} column=coal_cut_mt fmt="#,##0"/> Mt, about as much as that whole net cut, while oil fell by <Value data={fuel_change} column=oil_cut_mt fmt="#,##0"/> Mt and gas rose by <Value data={fuel_change} column=gas_rise_mt fmt="#,##0"/> Mt.
 
 Over the same years gas went from <Value data={fuel_change} column=gas_share_2005 fmt='0"%"'/> to <Value data={fuel_change} column=gas_share_latest fmt='0"%"'/> of what the group emits and oil from <Value data={fuel_change} column=oil_share_2005 fmt='0"%"'/> to <Value data={fuel_change} column=oil_share_latest fmt='0"%"'/> of it, so oil and gas together are now <Value data={fuel_change} column=oil_gas_share_latest fmt='0"%"'/> of what is left.
 
@@ -1117,5 +1131,6 @@ Coverage caveats: a row exists wherever any source reports, with nulls in the
 columns the others don't cover, so the charts above filter for what they need.
 The narrowest column used here is <code>consumption_co2</code> (~120 countries);
 <code>renewables_share_pct</code> covers 79 and
-<code>carbon_intensity_elec_g_kwh</code> about 210. 11 small territories have
-World Bank data but no OWID emissions.</small>
+<code>carbon_intensity_elec_g_kwh</code> about 210. About a dozen small
+territories have World Bank data but no OWID emissions; the Coverage page lists
+them.</small>

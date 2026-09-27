@@ -49,7 +49,8 @@ from the European Central Bank, capital-city weather from Open-Meteo's ERA5
 archive, the EU's own CBAM reference values, and one retailer's transaction log —
 loaded, modelled, tested and published on a schedule.
 
-Every table is released publicly each month as both Parquet and a DuckDB file.
+The whole warehouse is released publicly each month as a DuckDB file, with its
+published tables also as Parquet.
 
 ## Before you quote a number
 

@@ -1,6 +1,6 @@
 ---
 title: Weather
-description: Whether it was a colder year is the first explanation to rule out before crediting an energy number to policy, price or efficiency. Across EU/EEA capitals it explains none of what household electricity prices did, and much of the year-to-year swing in emissions.
+description: Whether it was a colder year is the first explanation to rule out before crediting an energy number to policy, price or efficiency. Across European capitals it explains none of what household electricity prices did, and much of the year-to-year swing in emissions.
 sidebar_position: 5
 ---
 
@@ -10,8 +10,9 @@ price movement can be credited to anything else.
 
 It is the only source in this warehouse with a finite budget (Open-Meteo meters
 requests, not rows), so the scope is deliberately narrow: daily ERA5 reanalysis
-for the capital city of each EU/EEA country, aggregated to the year and turned
-into degree days.
+for the capital of every country in Eurostat's household electricity price series
+(the EU and EEA, the candidate countries and the UK), aggregated to the year and
+turned into degree days.
 
 ```sql panel
 select
@@ -134,7 +135,7 @@ The point at the top is <Value data={widest_outlier} column=country_name/> at <V
 
 <Alert status=info>
 
-**So what.** For prices, weather is ruled out: over the whole EU/EEA panel, the
+**So what.** For prices, weather is ruled out: over the whole European panel, the
 year-over-year change in heating demand carries essentially no information about
 the year-over-year change in household electricity price, in any year measured.
 What is left is tax, network cost and gas exposure — which is where the
@@ -290,10 +291,11 @@ heating demand barely moved.
 
 Country by country, <Value data={country_fit_summary} column=n_positive/> of the <Value data={country_fit_summary} column=n_countries/> countries emitting 10 Mt or more move with their winters, and <Value data={country_fit_summary} column=n_strong/> of them at a correlation of 0.5 or better, where a winter 10% colder than the last typically adds <Value data={country_fit_summary} column=typical_slope fmt='0.0"%"'/> to national CO₂.
 
-The bottom of the chart is where there is little to heat, as in Spain, Portugal
-and Türkiye, or where heat is already electric and the electricity is hydro, as
-in Norway. The table below adds the gas line on its own, which is the fuel a
-winter mostly moves.
+The bottom of the chart is where there is little to heat, as in Spain and
+Portugal; where heat is already electric and the electricity is hydro, as in
+Norway; or where growth swamps the winter, as in Türkiye, whose emissions have
+nearly doubled since 2005. The table below adds the gas line on its own, which is
+the fuel a winter mostly moves.
 
 <DataTable data={country_weather_fit} rows=12>
     <Column id=country_name title="Country"/>
@@ -392,7 +394,7 @@ order by 1
 
 Fitted across <Value data={trend} column=n_years/> complete years, the mean temperature of these capitals rises <Value data={trend} column=deg_c_per_decade fmt='0.00'/>°C per decade, and annual heating degree days fall by <Value data={trend} column=hdd_fall_per_year fmt='0.0'/> a year. Fitted per country instead of on the pooled average, <Value data={slopes} column=n_warming/> of <Value data={slopes} column=n_countries/> capitals are warming.
 
-The fit is <Value data={trend} column=fit fmt='0.00'/> on that pooled average, which is a real trend with a lot of weather noise on top of it — about what annual observations over this span can support, and no more.
+The R² is <Value data={trend} column=fit fmt='0.00'/> on that pooled average, which is a real trend with a lot of weather noise on top of it — about what annual observations over this span can support, and no more.
 
 {:else}
 
@@ -580,7 +582,7 @@ partial the moment the archive is refreshed.
 
 ## Limitations
 
-- **EU/EEA only.** The scope was chosen to match the Eurostat electricity price
+- **Europe only.** The scope was chosen to match the Eurostat electricity price
   series exactly, so the two join with no gaps. Joined to the global emissions
   data it leaves the rest of the world null, the same way the electricity price
   column already does.

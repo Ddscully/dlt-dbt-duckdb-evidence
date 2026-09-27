@@ -43,8 +43,8 @@ Two years and <Value data={shape} column=n_lines fmt="#,##0"/> lines. One row is
 ## What counts as revenue
 
 The source has one amount column and one quantity column. Summing them gives a
-number that looks like revenue but isn't, because a third of the row types in
-this file are not sales.
+number that looks like revenue but isn't, because the same two columns also carry
+cancellations, postage, bank fees and bad-debt adjustments.
 
 ```sql line_types
 select
@@ -126,16 +126,19 @@ alone, where they filled a gap nothing was querying. With a transaction fact on
 top, 13% of the rows depend on them.
 
 ```sql monthly_currency
+-- A real date on the axis, not the 'YYYY-MM' label: 25 category ticks render as
+-- "2...". Series are named by their formatted title, so `seriesColors` keys on
+-- "Sterling" and "Euros", not on the column names.
 select
-    invoice_month,
-    sum(revenue_gbp) as revenue_gbp,
-    sum(revenue_eur) as revenue_eur
+    cast(invoice_month || '-01' as date) as month_start,
+    sum(revenue_gbp)                     as sterling,
+    sum(revenue_eur)                     as euros
 from warehouse.retail_daily
 group by invoice_month
 order by invoice_month
 ```
 
-<LineChart data={monthly_currency} x=invoice_month y={['revenue_gbp','revenue_eur']} title="Monthly revenue, GBP and EUR" yFmt="#,##0" seriesColors={{revenue_gbp: '#1baf7a', revenue_eur: '#eda100'}}/>
+<LineChart data={monthly_currency} x=month_start y={['sterling','euros']} title="Monthly revenue, GBP and EUR" yFmt="#,##0" seriesColors={{'Sterling': '#1baf7a', 'Euros': '#eda100'}}/>
 
 Both lines track the same trading, so the distance between them is sterling's
 exchange rate and nothing the business did. The [electricity price](/currency)
@@ -196,9 +199,11 @@ order by months_since_first_order
 The curve decays as expected, and then stops:
 
 ```sql bounce
+-- The low is found, not assumed: which month it lands on moves with the data.
 select
     max(retention_pct) filter (where months_since_first_order = 1)  as m1,
-    max(retention_pct) filter (where months_since_first_order = 11) as m11,
+    min(retention_pct)                                              as low,
+    arg_min(months_since_first_order, retention_pct)                as low_month,
     max(retention_pct) filter (where months_since_first_order = 12) as m12
 from (
     select months_since_first_order, avg(retention_pct) as retention_pct
@@ -210,7 +215,7 @@ from (
 )
 ```
 
-Retention falls from <Value data={bounce} column=m1 fmt='0.0"%"'/> in month 1 to a low of <Value data={bounce} column=m11 fmt='0.0"%"'/> at month 11, then rises to <Value data={bounce} column=m12 fmt='0.0"%"'/> at month 12. Customers are not becoming more loyal at the one-year mark.
+Retention falls from <Value data={bounce} column=m1 fmt='0.0"%"'/> in month 1 to a low of <Value data={bounce} column=low fmt='0.0"%"'/> at month <Value data={bounce} column=low_month fmt="0"/> and then rises to <Value data={bounce} column=m12 fmt='0.0"%"'/> at month 12. Customers are not becoming more loyal at the one-year mark.
 
 The heatmap explains it, in a direction the line chart averages away. Reading
 down a column shows ageing, or what happens to a relationship as it gets older.
@@ -360,8 +365,8 @@ Fifty-eight customers out of <Value data={concentration_stats} column=n_customer
 
 **So what.** Concentration this steep changes what a retention number is worth.
 A campaign that lifts overall repeat rate by two points but misses the top
-percentile has moved almost nothing; losing nine of those 58 customers costs more
-than losing the bottom 2,900. It also sets the reporting grain: an average order
+percentile has moved almost nothing; losing the top nine of those 58 customers
+costs more than losing the bottom 2,900 combined. It also sets the reporting grain: an average order
 value or a blended churn rate over 5,835 customers is dominated by people who
 contribute a rounding error, which is the argument for the segmentation below
 rather than a single headline metric.
@@ -462,7 +467,7 @@ who came back.
 The temptation is to quote a Pearson *r*, which is **0.641** and looks
 convincing. It is almost entirely one customer: the largest first order in the
 file is £33,168, from an account that went on to spend £235,833, and deleting
-that single row takes *r* down to **0.397**. Below £5,000 of first order it is
+that single row takes *r* down to **0.398**. Below £5,000 of first order it is
 0.344. A statistic that moves by a quarter of its range when you remove one of
 4,868 points is measuring the outlier, not the relationship.
 
@@ -520,10 +525,9 @@ quintiles. The top fifth spent 6.8 times what the bottom fifth did on day one
 signal amplifies instead of merely persisting, and that fifth accounts for 44.8%
 of the cohort's revenue.
 
-One wrinkle worth admitting: the repeat rate is not monotonic. It climbs 58% →
-65% → 73%, dips to 72% in the fourth quintile, then reaches 78% in the fifth.
-Whatever separates a £330 first order from a £400 one, it is not whether the
-customer comes back.
+One wrinkle: the repeat rate is not monotonic. It climbs 58% → 64% → 73%, dips
+to 72% in the fourth quintile, then reaches 78% in the fifth. Whatever separates
+a £300 first order from a £400 one, it is not whether the customer comes back.
 
 <Alert status=info>
 
@@ -682,4 +686,4 @@ The two shares differ: anonymous rows are <Value data={anonymous} column=pct_lin
 (Chen, D., 2019), CC BY 4.0. Exchange rates from the ECB via
 [Frankfurter](https://frankfurter.dev). The transaction data is real and
 unmodified; the modelling decisions on this page are documented in
-`dbt/models/staging/stg_retail_lines.sql` and the five marts built on it.
+`dbt/models/staging/stg_retail_lines.sql` and the retail mart models built on it.
