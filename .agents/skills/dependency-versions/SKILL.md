@@ -129,7 +129,7 @@ linter, formatter and type checker those pins serve behave is
   when 23 of the 94 commits on `main` had been documentation, skills or
   testing, and each one rebuilt and redeployed an identical site for the same
   Actions minutes and the same API load as a data change. The obvious
-  `paths-ignore: ['**.md']` is the trap — `reports/pages/` is ten markdown files
+  `paths-ignore: ['**.md']` is the trap — `reports/pages/` is markdown files
   and they *are* the dashboard, so a blanket markdown ignore would stop
   republishing the site exactly when a page changed. An allowlist gets the two
   mistakes the right way round: a build input left out of it makes the site

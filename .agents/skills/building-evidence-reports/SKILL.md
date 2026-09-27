@@ -19,7 +19,7 @@ OSS 40.1.8 (`@evidence-dev/core-components` 5.4.2). The Evidence Studio docs, an
 the `evidence-studio` MCP that serves them, describe the cloud, Markdoc-based
 product and are wrong here in both directions: they list components that do not
 exist in OSS (`treemap`, `pie_chart`, `radar_chart`, …), omit `BoxPlot`, which
-does and is used on `findings.md`, and write `{% line_chart … /%}` where pages
+does, and write `{% line_chart … /%}` where pages
 here write `<LineChart data={x} yFmt="…"/>`. The MCP was installed once and
 removed for exactly that; don't re-add it. Read a component's props in
 `reports/node_modules/@evidence-dev/core-components/dist/` (the `.svelte` file)
@@ -158,7 +158,7 @@ where year = ${inputs.year.value}
   the first row of that query, not the selection, so it silently disagrees with
   the charts as soon as the user picks another year.
 - **`<Alert>` needs blank lines around its content.** It's the callout component
-  (`findings.md` uses it for the "So what" boxes) and takes
+  (the findings pages use it for the "So what" boxes) and takes
   `status="base|info|positive|warning|negative"` — the older `default`/`danger`/
   `success` spellings still render but log a deprecation warning. Written tight
   against the tags, the markdown inside comes out literal (`**text**`):
@@ -192,8 +192,7 @@ where year = ${inputs.year.value}
 - **A paragraph that *starts* with a component isn't wrapped in `<p>`**, so it
   renders with no margin against the paragraph below it. Lead with a word
   (`In total <Value .../> lines, …`). Only paragraph-initial components matter:
-  a component beginning a wrapped line *inside* a paragraph is fine, and
-  `findings.md` relies on that.
+  a component beginning a wrapped line *inside* a paragraph is fine.
 - **`agg=` on `<Value>` renders the right number and logs two failed queries
   per use.** `<Value data={q} column=n agg=sum/>` prints the correct total — it
   falls back to aggregating the rows it already has — while the build log gains
@@ -215,7 +214,7 @@ where year = ${inputs.year.value}
   lines are the price; a following paragraph with no component is unaffected.
   - **It is every mark, not just links** — `**bold**` and `` `code` `` go
     literal the same way, and the asymmetry inside one paragraph is what makes
-    it hard to see: `currency.md`'s staleness alert opens with `**…**` that
+    it hard to see: `currency/spot-or-average.md`'s staleness alert opens with `**…**` that
     renders as `<strong>` and closes, four wrapped lines later, with marks that
     do not. Same block, same syntax, different treatment, no error.
   - **Inside an `<Alert>` it is easier to miss again**, because the callout
@@ -258,6 +257,49 @@ where year = ${inputs.year.value}
   EU/EEA and `life_expectancy` is sparse in early years — unfiltered they render
   as gaps or drag averages.
 
+## How a page is laid out
+
+Every analysis page follows one pattern: **charts first, reasoning underneath or
+one click away.**
+
+- **Lead with the answer.** A bold sentence or two stating the finding, then the
+  chart that shows it. A chart's `title` states what it shows, and `subtitle`
+  carries the units and the sample. Keep titles short: a phone clips a long one.
+- **Captions, not essays, next to a chart.** One or two sentences. The argument,
+  the "So what" box, the table and the method go further down, in `<Details>`, or
+  on a page of their own.
+- **A long page splits into an overview and sub-pages.** `pages/findings.md` sits
+  beside a `pages/findings/` folder, and `cbam`, `scope2`, `retail`, `currency`,
+  `weather` and `countries` do the same: the folder's pages route beneath it and
+  get their own sidebar group. A page with no folder is listed under Home, so the
+  method pages (Coverage, Restatements, Pipeline) stay single pages with their
+  explanations in `<Details>` blocks. Inputs are per page, so a sub-page that
+  needs the overview's dropdown declares its own. `sidebar_link: false` does *not* hide a sub-page in
+  this version (`Sidebar.svelte` reads `.length` on an object, so the check never
+  fires), so give sub-pages a short `title` and a `sidebar_position` instead. A
+  sub-page counts towards its folder's exposure (`evidence_findings`), which
+  `tests/test_exposures.py` enforces.
+- **Pick the chart for the comparison.** A share of a whole is a `stacked100` bar;
+  two points in time per country is a slope (`LineChart` over two categories);
+  composition over time is an `AreaChart`; each series against its own peak or
+  base year is an indexed line; a ranking over many categories is a vertical
+  `BarChart` coloured by the variable that explains it, with
+  `echartsOptions={{xAxis: {axisLabel: {show: false}}}}` and the names in the
+  tooltip (`cbam.md`); a panel of units over years is a `<Heatmap>` against each
+  unit's own mean (`weather.md`), which leaves an empty cell for a missing year
+  where a line would interpolate — but only if the query gives that year a null
+  row, because a category axis closes up a year that has no row at all. Keep a `DataTable` for the reader who wants the
+  numbers, below the chart rather than instead of it.
+- **`AreaMap` needs two local files** in `static/`, which Evidence copies to the
+  site root: a GeoJSON (`world-countries.geojson`, keyed on `iso3`) and a blank
+  `basemap` tile, or every visitor fetches tiles from CARTO. Reference both
+  relatively so they resolve under the Pages base path: bare names on the home
+  page, `../world-countries.geojson` on any other page. A bare name on `/scope2/`
+  asks for `/scope2/world-countries.geojson`, and the map renders its legend and
+  no countries, with a clean build log. The map's `min`/`max` set
+  the colour scale but the legend still prints the data's own range, so cap the
+  value in SQL instead.
+
 ## Verify a build actually succeeded
 
 Evidence exits 0 on some failures and writes the error into the page, so check
@@ -286,7 +328,7 @@ snapshot closes a version, which needs a later run to find a different number.
 Seen while neither snapshot had closed one since it began
 (`snap_co2_estimates` on 2026-07-30, `snap_grid_emission_factors` on
 2026-08-09). Both pages render that state on purpose — `restatements.md` and
-`scope2.md` put their revision tables inside `{#if … .length > 0}` — so the build
+`scope2/vintage.md` put their revision tables inside `{#if … .length > 0}` — so the build
 passes `--strict` and every page renders. It stops once either snapshot records a
 revision. The same warning on a column that *should* hold values is the empty
 extract it describes.
@@ -323,6 +365,15 @@ chromium --headless=old --no-sandbox --disable-gpu --window-size=1400,2100 \
   run, which reads exactly like the reserved-column-name failure and sends you
   editing SQL that was fine. Shoot twice before believing a chart is broken: a
   real failure hits the same chart every time.
+- **Shooting twice does not rule out the clock.** It can also stop while a chart
+  is mid-way through ECharts' entry animation, freezing it at frame 0 on every
+  run: a bar chart's value labels stacked at zero with no bars, or a line or area
+  chart drawn only at its first x. The findings sub-pages hit it on three charts
+  at 60 s and 90 s alike. Labels at zero rather than at the bar ends is the tell.
+  Confirm in real time over CDP (below) before editing anything: navigate, wait
+  about 15 s, then `Page.captureScreenshot`. `Emulation.setDeviceMetricsOverride`
+  sets the viewport, and a 400 px width is also the honest phone check, because
+  `--window-size=400,…` clips charts on the right that render fine in real time.
 - For console errors and failed requests, drive it over CDP instead: launch with
   `--remote-debugging-port=9222`, then connect from a Node script (Node 22 has a
   global `WebSocket`) and subscribe to `Runtime.consoleAPICalled`,
@@ -354,9 +405,9 @@ filed here, because all three are about the site rather than about Dagster.
 - **`site_pages_all_rendered` is blocking, and it checks file *size*.**
   `evidence build` exits 0 for a site missing a page, and nothing downstream reads
   `reports/build/` — so a route that emitted only the SvelteKit shell would
-  materialise green and deploy. The eleven pages render at 19–92 kB; the floor is
-  8 kB. The two smallest are the ones carrying the least SQL — the routing front
-  page (19 kB) and Restatements (20 kB) — so it is prose-only pages, not chart
+  materialise green and deploy. The forty pages render at 34–61 kB; the floor is
+  8 kB. The two smallest are the ones carrying the least SQL — Scope 2's limits
+  page (34 kB) and Restatements (35 kB) — so it is prose-only pages, not chart
   pages, that would ever bring the floor into play.
 - **`explore`, `settings` and `api` are reserved route names.** Evidence's own
   template ships `pages/explore/` (the SQL console and schema browser) and

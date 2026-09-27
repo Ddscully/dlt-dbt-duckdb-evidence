@@ -5,11 +5,9 @@ sidebar_position: 9
 sidebar_badge: Method
 ---
 
-Emissions data is not a fixed record. Countries resubmit inventories, OWID
-recalculates, and the figure published for 2019 is not necessarily the figure you
-will read for 2019 next year. Every model in this project overwrites the old
-number on each run, so a revision would normally leave no trace at all. The
-`snap_co2_estimates` dbt snapshot is what keeps them.
+Countries resubmit inventories and OWID recalculates, so the CO₂ figure for a
+past year can change. Every model here overwrites the old number; the
+`snap_co2_estimates` snapshot keeps it.
 
 ```sql summary
 select
@@ -57,30 +55,42 @@ limit 25
     xAxisTitle="Year restated"
     yAxisTitle="Change vs. first estimate"
     tooltipTitle=country_name
-/>
+    title="The 25 largest revisions in tonnes, as a % of the first estimate"
+>
+    <ReferenceLine y=0 label=" "/>
+</ScatterPlot>
 
-The 25 largest changes in absolute tonnes. A positive change means the current
-estimate is *higher* than the one this warehouse first recorded.
+Above the line, the current estimate is *higher* than the one this warehouse
+first recorded.
 
 <DataTable data={biggest} rows=25>
     <Column id=country_name title="Country"/>
     <Column id=year title="Year" fmt="0"/>
     <Column id=first_co2_mt title="First (Mt)" fmt="0.0"/>
     <Column id=latest_co2_mt title="Now (Mt)" fmt="0.0"/>
-    <Column id=co2_mt_change title="Change (Mt)" fmt="0.0"/>
+    <Column id=co2_mt_change title="Change (Mt)" fmt="0.0" contentType=delta/>
     <Column id=co2_mt_change_pct title="Change" fmt='0.0"%"'/>
     <Column id=version_count title="Versions" fmt="0"/>
 </DataTable>
 
-## How it is tracked
+{:else}
+
+## Nothing revised yet
+
+Every country-year is still on version 1. A snapshot can only record a revision
+it was present for, so an empty table means nothing has been restated since the
+history began, not that nothing is being watched.
+
+{/if}
+
+<Details title="How it is tracked">
 
 The snapshot stores one row per `(country_iso3, year, version)` with the window
 each version was valid for, and `marts.fct_co2_estimate_versions` reads the first
 and the current version back off it.
 
-It is also the one table here that a rebuild cannot reproduce, and this site is
-rebuilt from empty on every push. So the history is carried in instead of
-recomputed: the
+It is the one table here that a rebuild cannot reproduce, and this site is rebuilt
+from empty on every push. So the history is carried in instead of recomputed: the
 [Pages build](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/pages.yml)
 copies `history` out of the most recent
 [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases)
@@ -88,30 +98,7 @@ before it builds, and the release does the same from the release before it.
 "Watching since" above is therefore the date that chain started, not the date of
 this build.
 
-{:else}
-
-## Nothing revised yet
-
-Every country-year above is on version 1, and on a warehouse that was just built
-that is what it *should* say: a snapshot can only record a revision it was
-present for. The first run stores version 1 of everything, and a row becomes
-revised the first time a later run finds a different number. The snapshot stores
-one row per `(country_iso3, year, version)` with the window each version was
-valid for, and `marts.fct_co2_estimate_versions` reads the first and the current
-version back off it.
-
-That makes the snapshot the one table here that isn't reproducible from the
-sources. Rebuild the warehouse from scratch and the history is gone, which is
-why it is carried in instead of recomputed: the
-[Pages build](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/blob/main/.github/workflows/pages.yml)
-copies `history` out of the most recent
-[data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases)
-before it builds, and the release does the same from the release before it. So an
-empty table here means nothing has been restated since that chain began, not
-that nothing is being watched. Before the first data release was cut there was
-nothing to carry, and the page was empty for that reason instead.
-
-{/if}
+</Details>
 
 ---
 

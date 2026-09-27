@@ -15,8 +15,6 @@ select * from warehouse.latest_years
 
 ## How many countries each series actually covers
 
-Each line is the number of countries reporting a column in that year.
-
 ```sql coverage_by_year
 -- Six series, short labels: eight paginates the legend, which makes half the
 -- lines unidentifiable. The rest are in the table below.
@@ -58,9 +56,15 @@ order by series, year
         'Renewables share': ['#4a3aa7', '#9085e9']
     }}
     yAxisTitle="Countries reporting"
+    title="Countries reporting each series, by year"
 />
 
-Three features of that chart have each bitten a query in this repo:
+Renewables share stops at 79 countries where the electricity mix covers about
+210, primary energy drops by two thirds in its latest year, and the series end in
+different years. Each has bitten a query here, and each is why a chart filters for
+exactly the columns it needs.
+
+<Details title="The three features in detail">
 
 1. **The renewables ceiling.** `renewables_share_pct` flatlines at 79 countries
    in every year since 1990. OWID's broad-coverage series is the *electricity*
@@ -77,6 +81,8 @@ Three features of that chart have each bitten a query in this repo:
    already run a year beyond the emissions series, with the grid series partly
    there, while consumption-based CO₂ ends a year before the emissions series. The mart's
    `max(year)` is the leader, not the consensus.
+
+</Details>
 
 ```sql column_coverage
 select 'co2_mt' as column_name, count(distinct country_iso3) as countries,
@@ -103,7 +109,7 @@ order by countries desc
 
 <DataTable data={column_coverage} rows=10>
     <Column id=column_name title="Column"/>
-    <Column id=countries title="Countries" fmt="0"/>
+    <Column id=countries title="Countries" fmt="0" contentType=bar/>
     <Column id=first_year title="From" fmt="0"/>
     <Column id=last_year title="To" fmt="0"/>
     <Column id=rows_present title="Rows" fmt="#,##0"/>
@@ -127,11 +133,9 @@ select
     <BigValue data={spine_summary} value=unreported fmt="#,##0" title="No source reports"/>
 </Grid>
 
-`marts.fct_emissions_energy` is built on a **spine**, `marts.dim_country_year`,
-the full cross join of the country dimension with every year the warehouse
-covers. That is what makes coverage answerable at all. Left-join the fact onto
-the spine and a gap comes back as a row you can count, instead of an absence you
-have to infer from what is not there.
+The fact is built on a **spine**, `marts.dim_country_year`: every country crossed
+with every year. Left-join the fact onto it and a gap comes back as a row you can
+count.
 
 ### A country-year no source reports at all
 
@@ -167,27 +171,20 @@ order by ord
     labels=true
     labelFmt="#,##0"
     xAxisTitle="Era"
-    yAxisTitle="Country-years no source reports"
+    title="Country-years no source reports"
 />
 
-These never reach the fact. The mart inner-joins the spine to the union of what
-the sources cover, so they exist only in `dim_country_year`. Almost all of them
-are the deep past: the spine starts in 1750 because OWID's emissions series does,
-and in 1750 that series is a handful of countries. From 1990 on the spine is
-essentially complete, so this gap says something about history and nothing about
-the pipeline.
+Almost all are the deep past: the spine starts in 1750 because OWID's emissions
+series does. From 1990 on it is essentially complete, so this gap is about
+history, not the pipeline. These rows exist only in `dim_country_year`.
 
 ### A country-year in the fact where one source is silent
 
-These *do* reach the fact, carrying nulls in the columns their missing source
-would have filled. This is the case that quietly breaks queries: the row is
-present, and a `where` clause on the wrong column drops it without saying so.
+These reach the fact with nulls where the silent source would be, and a `where`
+clause on the wrong column drops them without saying so.
 
-Two populations are worth knowing by name.
-
-**World Bank data, no OWID emissions.** Small territories the World Bank
-classifies and OWID doesn't estimate for. They are the reason the mart has more
-rows than OWID's CO₂ table.
+**World Bank data, no OWID emissions:** small territories OWID does not estimate
+for.
 
 ```sql wb_no_owid
 select country_name, region, income_group, population, life_expectancy
@@ -205,11 +202,9 @@ order by population desc
     <Column id=population title="Population" fmt="#,##0"/>
 </DataTable>
 
-**OWID emissions, no World Bank GDP.** The mirror image, and a more consequential
-one. Every intensity and decoupling measure on this site divides by
-`gdp_constant_usd`, so these countries are silently absent from all of them.
-Taiwan is the one that matters at scale: it emits more than the Netherlands and
-is not a World Bank member.
+**OWID emissions, no World Bank GDP:** absent from every intensity and
+decoupling measure on this site. Taiwan, not a World Bank member, emits more than
+the Netherlands.
 
 ```sql owid_no_wb
 select country_name, region, co2_mt, population
@@ -227,7 +222,7 @@ order by co2_mt desc
     <Column id=population title="Population" fmt="#,##0"/>
 </DataTable>
 
-## What is deliberately not here
+<Details title="What is deliberately not here">
 
 The dimension is authoritative for *what counts as a country*, so two things are
 missing on purpose:
@@ -240,6 +235,8 @@ missing on purpose:
   Taiwan and ten small territories are the opposite case: they *are* countries
   the World Bank simply doesn't list, and `dbt/seeds/country_overrides.csv` puts
   them back.
+
+</Details>
 
 ---
 

@@ -43,15 +43,21 @@ def declared_models(name: str) -> set[str]:
 
 
 def page_models() -> dict[str, set[str]]:
-    """`{"retail": {"fct_retail_order_line", …}, …}` — the dbt models each page reads."""
-    return {
-        page: {
+    """`{"retail": {"fct_retail_order_line", …}, …}` — the dbt models each section reads.
+
+    A section is a top-level page and every page in the folder of the same name, so
+    `pages/findings/income.md` counts towards `evidence_findings`: an exposure name
+    cannot hold a slash, and one exposure per sub-page would name the same models
+    nine times over.
+    """
+    models: dict[str, set[str]] = {}
+    for page, tables in build_report.page_tables().items():
+        models.setdefault(page.split("/", 1)[0], set()).update(
             build_report.TABLE_TO_DBT_MODEL[t]
             for t in tables
             if t in build_report.TABLE_TO_DBT_MODEL
-        }
-        for page, tables in build_report.page_tables().items()
-    }
+        )
+    return models
 
 
 def test_each_page_exposure_names_exactly_what_its_charts_read():
@@ -72,26 +78,19 @@ def test_each_page_exposure_names_exactly_what_its_charts_read():
     assert declared == expected
 
 
-def test_the_pages_with_no_exposure_are_the_two_that_cannot_have_one():
-    """Two pages carry no exposure, for opposite reasons, and both are asserted.
-
-    `pipeline.md` reads the `analytics.pipeline_*` tables, every one written by
+def test_the_one_page_with_no_exposure_is_the_one_that_cannot_have_one():
+    """`pipeline.md` reads the `analytics.pipeline_*` tables, every one written by
     Polars, downstream of dbt and unknown to it — so there is nothing an exposure
-    could depend on, and `depends_on` cannot be empty. `index.md` reads *no*
-    tables: it is a routing page, prose and links only.
+    could depend on, and `depends_on` cannot be empty.
 
-    Both look identical through `page_models()` — an empty set — so the table
-    reads below are what separate "dbt cannot describe this" from "there is
-    nothing here to describe".
+    Through `page_models()` that looks the same as a page reading nothing at all,
+    so the table read below is what separates "dbt cannot describe this" from
+    "there is nothing here to describe".
     """
     tables = build_report.page_tables()
     pages_without_models = {page for page, models in page_models().items() if not models}
-    assert pages_without_models == {"index", "pipeline"}
-
-    assert tables["index"] == set(), "the routing page grew a query; give it an exposure"
+    assert pages_without_models == {"pipeline"}
     assert tables["pipeline"], "pipeline.md should still read the Polars tables"
-
-    assert "evidence_index" not in exposures()
     assert "evidence_pipeline" not in exposures()
 
 

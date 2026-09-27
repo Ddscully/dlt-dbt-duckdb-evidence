@@ -73,8 +73,8 @@ packaging.
   average rather than hourly matching, and production- rather than
   consumption-based. Naming them is the difference between a credible reference
   table and a liability; a practitioner checks all three first.
-- The page quotes a 57x spread across grids above 10 TWh where `findings.md`
-  quotes 24x above 150 TWh. Both are correct and the page says why — if one
+- The page quotes a 57x spread across grids above 10 TWh where
+  `findings/electricity.md` quotes 24x above 150 TWh. Both are correct and the page says why — if one
   moves, check the other.
 
 ## CBAM exposure (`fct_cbam_exposure`, the `cbam_*` seeds, `reports/pages/cbam.md`)
@@ -285,7 +285,7 @@ mutation in this table:
   `is_fallback_table` is the column that identifies it. Reads oddly, so it is
   pinned rather than left to be rediscovered.
 - **A fallen-back row is indistinguishable from a country's own value unless the
-  page says so, and `reports/pages/cbam.md` now does.**
+  page says so, and `reports/pages/cbam/by-country.md` now does.**
   It once selected `is_country_specific` and rendered every other
   column but that one, so 221 of the 10,785 rows the dropdown can reach — over 40
   of its 252 goods — showed a tonnage, a cost and (on 36 of them) a production

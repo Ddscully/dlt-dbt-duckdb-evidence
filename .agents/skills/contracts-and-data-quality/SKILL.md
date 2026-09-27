@@ -81,11 +81,12 @@ account of the same ground is `docs/DATA_QUALITY.md`.
   globs and derives the expected set from the `.sql` files. When moving yml
   blocks, compare a manifest fingerprint before and after: a green build proves
   the yml parses, not that nothing moved.
-- **Exposures are per *page*** — nine Evidence pages and the release — so
-  `dbt ls --select +exposure:evidence_retail` answers "what breaks" for one page.
-  `tests/test_exposures.py` holds them to the SQL through
-  `publish/build_report.py`'s `page_tables()`. An exposure cannot name Polars
-  output, so `pipeline.md` has none (and `index.md` reads nothing); what the pages
+- **Exposures are per *page*** — one per top-level Evidence page and one for the
+  release — so `dbt ls --select +exposure:evidence_retail` answers "what breaks"
+  for one page. A page in a folder counts towards the page of the same name
+  (`findings/income.md` is `evidence_findings`). `tests/test_exposures.py` holds
+  them to the SQL through `publish/build_report.py`'s `page_tables()`. An exposure
+  cannot name Polars output, so `pipeline.md` has none; what the pages
   read that dbt cannot describe is exactly `TABLE_TO_ASSET_KEY`, asserted. The
   release exposure is exactly the marts.
 - **Every numeric mart column declares `meta: {additivity: …}`** from a closed

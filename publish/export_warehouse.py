@@ -118,7 +118,7 @@ Annexes II and III of that regulation — the country electricity emission facto
 — are **not** in this artifact. They are IEA data under CC BY-NC-SA 4.0, and
 carrying them would put a non-commercial and share-alike restriction on
 everything here. `marts.dim_grid_emission_factors` is the OWID-derived analogue
-and is not the same measurement; see `reports/pages/cbam.md`.
+and is not the same measurement; see `reports/pages/cbam/method.md`.
 
 Attribute the publishers, not this repository, when you use the numbers. Neither
 the publishers nor this project warrant the data; the transformations are the

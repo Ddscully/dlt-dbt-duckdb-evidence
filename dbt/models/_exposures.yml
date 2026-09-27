@@ -13,17 +13,37 @@ version: 2
 # dbt cannot see the Polars outputs in `analytics` (`co2_intensity`,
 # `retail_rfm`, the four `pipeline_*` tables), so the Findings, Countries and
 # Retail exposures each name one fewer dependency than their page reads; the test
-# asserts that remainder is exactly `TABLE_TO_ASSET_KEY`. Two pages have no
-# exposure: `pipeline.md` reads only Polars tables and `index.md` reads nothing.
+# asserts that remainder is exactly `TABLE_TO_ASSET_KEY`. One page has no
+# exposure: `pipeline.md` reads only Polars tables.
 #
 # `maturity:` is not set: every page deploys from one workflow on one schedule.
 exposures:
-  # Named `evidence_<page file slug>`, which the test maps mechanically.
+  # Named `evidence_<page file slug>`, which the test maps mechanically. A page in
+  # a folder counts towards the page of the folder's name: `findings/income.md`
+  # is part of `evidence_findings`.
   #
   # The page is `countries.md`, not `explore.md`: **`explore` is a reserved
   # Evidence route** (the template's SQL console), so a page of that name is never
   # copied in and the build dies on `/api/explore/evidencemeta.json` 500.
   # `settings` and `api` are reserved too.
+  - name: evidence_index
+    label: Dashboard — Home
+    type: dashboard
+    url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/
+    description: >
+      The front page: a world map of CO₂ per person and one small chart for
+      each analysis page, so it reads a little of almost every mart.
+    depends_on:
+      - ref('dim_grid_emission_factors')
+      - ref('fct_cbam_exposure')
+      - ref('fct_country_weather_year')
+      - ref('fct_emissions_energy')
+      - ref('fct_eu_electricity_prices_semiannual')
+      - ref('fct_retail_order_line')
+    owner:
+      name: Daniel Scully
+      email: danieldscully@gmail.com
+
   - name: evidence_countries
     label: Dashboard — Country Explorer
     type: dashboard
@@ -47,7 +67,8 @@ exposures:
     type: dashboard
     url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/findings/
     description: >
-      The nine findings, each ending in a decision. The most load-bearing page
+      The nine findings: an overview with one chart each, and a page per finding
+      under `findings/` ending in a decision. The most load-bearing page
       on the site: several of its numbers are quoted in `README.md` and
       `docs/FOR_REVIEWERS.md`, so a change to `fct_emissions_energy` that moves
       one of them has to move the prose too. Also reads

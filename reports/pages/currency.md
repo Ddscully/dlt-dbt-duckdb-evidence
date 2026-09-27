@@ -1,22 +1,16 @@
 ---
 title: Currency
-description: The ECB's daily euro reference rates, what the 30% of days with no rate cost you, and why the same electricity price rose 35% or 13.5% depending on which currency you counted in.
+description: The ECB's daily euro reference rates, what the 30% of days with no rate cost you, and why the same electricity price rose about 36% or 14% depending on which currency you counted in.
 sidebar_position: 4
 ---
 
-A rate has a direction, the calendar has holes in it, and converting a flow works
-differently from converting a balance. Each of those three turns one underlying
-figure into a different reported number, and all three show up in the European
-Central Bank's daily euro reference rates below.
-
-This is also the only source here that publishes every business day rather than
-once a year.
+The European Central Bank's daily euro reference rates, the only source here that
+publishes every business day. A rate has a direction, the calendar has holes in
+it, and a flow converts differently from a balance; each turns one figure into a
+different reported number.
 
 ```sql coverage
 select
-    sum(n_rows) as n_rows,
-    sum(n_published) as n_published,
-    sum(n_carried) as n_carried,
     sum(n_stale) as n_stale,
     100.0 * sum(n_carried) / sum(n_rows) as carried_pct
 from warehouse.fx_coverage
@@ -24,10 +18,8 @@ from warehouse.fx_coverage
 
 ```sql gap_days
 select
-    sum(calendar_days) as calendar_days,
     sum(publication_days) as publication_days,
-    sum(days_with_no_fixing) as missing_days,
-    sum(days_with_no_fixing) filter (where is_weekday) as missing_weekdays
+    sum(days_with_no_fixing) as missing_days
 from warehouse.fx_calendar_gaps
 ```
 
@@ -38,11 +30,7 @@ from warehouse.fx_calendar_gaps
     <BigValue data={coverage} value=n_stale fmt='#,##0' title="Rows too stale to use"/>
 </Grid>
 
-## The 30% of days that have no rate
-
-The ECB fixes rates on TARGET settlement days, so most of the calendar is empty.
-
-Of <Value data={gap_days} column=calendar_days fmt='#,##0'/> calendar days since the series began, <Value data={gap_days} column=publication_days fmt='#,##0'/> carry a fixing. The rest are weekends, and <Value data={gap_days} column=missing_weekdays/> weekdays that are not.
+## Almost a third of days have no rate
 
 ```sql publication_calendar
 select date_day, has_fixing
@@ -54,138 +42,18 @@ order by date_day
     data={publication_calendar}
     date=date_day
     value=has_fixing
-    title="Days with a published fixing, 2023-2025"
-    subtitle="Dark is a fixing. Sunday and Saturday are the outer rows; pale squares between them are closures."
+    title="Days with a published fixing"
+    subtitle="Dark is a fixing. Pale squares inside the weekday block are closures."
     colorPalette={['#eef3fa', '#2a78d6']}
     legend=false
 />
 
-Two of the seven rows in each year are structurally empty — the ECB does not fix
-at a weekend. The interesting part is the handful of pale squares punched out of
-the weekday block: 1 January, Good Friday, Easter Monday, 1 May, and 25 and 26
-December. Seventeen days over the three years.
+The ECB fixes on settlement days only: never at weekends, and not on New Year,
+Good Friday, Easter Monday, 1 May or Christmas. A Sunday transaction still needs a
+rate, so the daily table carries the last fixing forward and records which one it
+used. **[Gaps, retirements and suspensions →](/currency/gaps)**
 
-Read the Easter pair across the years and it moves: 7 and 10 April in 2023, 29
-March and 1 April in 2024, 18 and 21 April in 2025. That is why this project
-carries no holiday calendar. No weekday rule predicts those dates, the only rule
-that does is the Gregorian computus, so they are observed as absences in the data
-instead of being asserted from a list somebody would have to maintain forever.
-(The series has one closure no rule of any kind would give you: 1999-12-31, taken
-for the millennium changeover.)
-
-<Alert status=info>
-
-**So what.** A transaction dated on a Sunday still has to be converted, and every
-option here is a modelling decision, not a lookup. Interpolating between Friday
-and Monday invents a rate nobody could have dealt at, and it needs the future to
-compute the past. Leaving the rate null pushes the same decision into every
-downstream query, to be answered differently each time. So the daily table
-carries the last fixing forward, which is what a finance system does, and records
-the date of the fixing it used on every row, so you can always see which rate you
-are quoting.
-
-</Alert>
-
-## Two ways carrying forward goes wrong
-
-```sql lifecycle
-select
-    currency_code,
-    currency_name,
-    first_published_date,
-    last_published_date,
-    n_published_days,
-    longest_gap_days,
-    retired_reason,
-    replaced_by_currency,
-    retirement_is_explained
-from warehouse.fx_currencies
-where is_quoted and (not is_currently_published or has_interior_gap)
-order by last_published_date
-```
-
-```sql panel
-select
-    count(*) filter (where is_quoted) as n_quoted,
-    count(*) filter (where is_quoted and is_currently_published) as n_live,
-    count(*) filter (where is_quoted and not is_currently_published) as n_stopped,
-    count(*) filter (where retired_reason = 'euro_adoption') as n_euro,
-    count(*) filter (where retired_reason = 'redenomination') as n_redenominated,
-    count(*) filter (
-        where is_quoted and not is_currently_published and not retirement_is_explained
-    ) as n_unexplained
-from warehouse.fx_currencies
-```
-
-**One: outside a currency's lifetime there is nothing to carry.** The ECB's panel
-changes over time.
-
-Of the <Value data={panel} column=n_quoted/> codes the series has ever quoted, <Value data={panel} column=n_live/> are still live and <Value data={panel} column=n_stopped/> stopped.
-
-Of those, <Value data={panel} column=n_euro/> stopped on the last business day before their country adopted the euro: the Greek drachma in 2000, the Croatian kuna in 2022, the Bulgarian lev at the end of 2025. <Value data={panel} column=n_redenominated/> stopped at a redenomination, where the same money continued under a new code, as with the Turkish lira at 1,000,000:1 and the Romanian leu at 10,000:1, both in 2005. The remaining <Value data={panel} column=n_unexplained/> simply ceased, and this project does not guess at why.
-
-So the dense series is built per currency between its first and last fixing, and
-a euro-era drachma never gets invented.
-
-<DataTable data={lifecycle} rows=20>
-    <Column id=currency_code title="Code"/>
-    <Column id=currency_name title="Currency"/>
-    <Column id=last_published_date title="Last quoted"/>
-    <Column id=n_published_days title="Fixings" fmt='#,##0'/>
-    <Column id=longest_gap_days title="Longest gap, days" fmt='#,##0'/>
-    <Column id=retired_reason title="Reason"/>
-    <Column id=replaced_by_currency title="Became"/>
-</DataTable>
-
-**Two: a suspended quote is not a long weekend.** The longest closure in the whole
-series is five days, so the carry-forward is capped at seven. That fills every
-weekend and holiday while refusing exactly two gaps, both of which are currency
-crises rather than calendars. The Icelandic króna has no reference rate for 3,341
-days between the 2008 banking collapse and February 2018, and the Argentine peso
-none for 34 days after the January 2002 breaking of the dollar peg.
-
-Those <Value data={coverage} column=n_stale fmt='#,##0'/> rows exist with a null rate and a flag saying so, giving an absence you can count instead of nine years of a rate that had stopped being real.
-
-## Spot or average
-
-Converting a stock (a balance, a position at an instant) uses the closing rate.
-Converting a flow (revenue, spend, a price paid across a period) uses the period
-average. Getting the two the wrong way round is invisible in the output, because
-a plausible number comes out either way.
-
-```sql spot_vs_avg
-select
-    -- A real date on the axis, not the label: 27 category ticks render as "2..."
-    -- and sort as strings.
-    period_start_date,
-    period_label,
-    avg_units_per_eur        as annual_average,
-    period_end_units_per_eur as year_end_rate,
-    period_end_vs_avg_pct,
-    intra_period_range_pct
-from warehouse.fx_periods
-where period_type = 'year' and currency_code = '${inputs.ccy.value}' and period_is_complete
-order by period_start_date
-```
-
-```sql stale_years
--- Years whose closing rate is a fixing older than the carry `fct_fx_rates_daily`
--- allows. Not a headline for any currency in the dropdown — the worst
--- divergence is always a real crisis with a same-day fixing — but the year-end
--- point is drawn on the chart below like any other, and it is not like any
--- other.
-select
-    period_label,
-    period_end_stale_days,
-    last_rate_date,
-    period_end_units_per_eur
-from warehouse.fx_periods
-where period_type = 'year'
-  and currency_code = '${inputs.ccy.value}'
-  and period_is_complete
-  and period_end_is_stale
-order by period_start_date
-```
+## A year's flows at the closing rate misstate them
 
 ```sql ccy_list
 select
@@ -200,6 +68,18 @@ order by label
 
 <Dropdown data={ccy_list} name=ccy value=value label=label defaultValue="USD" title="Currency"/>
 
+```sql spot_vs_avg
+-- A real date on the axis, not the label: 27 category ticks render as "2..."
+-- and sort as strings.
+select
+    period_start_date,
+    avg_units_per_eur        as annual_average,
+    period_end_units_per_eur as year_end_rate
+from warehouse.fx_periods
+where period_type = 'year' and currency_code = '${inputs.ccy.value}' and period_is_complete
+order by period_start_date
+```
+
 ```sql worst
 select
     period_label,
@@ -210,146 +90,71 @@ order by abs(period_end_vs_avg_pct) desc
 limit 1
 ```
 
-For {inputs.ccy.label}, the two answers diverge most in <Value data={worst} column=period_label/> by <Value data={worst} column=period_end_vs_avg_pct fmt='0.0"%"'/> of the annual average. A full year of flows converted at the closing rate instead of the average is misstated by that much, which is often more than the margin of the business doing the converting.
-
 <LineChart
     data={spot_vs_avg}
     x=period_start_date
     y={["annual_average", "year_end_rate"]}
-    title="Annual average against year-end rate, per EUR"
+    seriesColors={{'Annual Average': '#2a78d6', 'Year End Rate': '#eb6834'}}
+    title="Annual average against year-end rate, units per euro"
     yFmt='0.000'
+    echartsOptions={{yAxis: {scale: true}}}
     xFmt='yyyy'
 />
 
-<!-- The first paragraph below wraps and carries <Value> components, so its
-markdown stops processing at the first line break (see the one-source-line
-rule in .agents/skills/building-evidence-reports). Emphasis and code marks
-past line one render as literal characters, silently. The flag name is in a
-second, component-free paragraph for that reason, where marks do work. -->
-{#if stale_years.length > 0}
+A balance converts at the closing rate and a flow at the period average. For {inputs.ccy.label} the two differ most in <Value data={worst} column=period_label/> by <Value data={worst} column=period_end_vs_avg_pct fmt='0.0"%"'/> of the average, which is often more than the margin of the business doing the converting. **[Spot or average →](/currency/spot-or-average)**
 
-<Alert status=warning>
-
-**{inputs.ccy.label}'s year-end rate for <Value data={stale_years} column=period_label/> is stale.** The closing
-value the chart plots for that year is the fixing of <Value data={stale_years} column=last_rate_date fmt='d mmm yyyy'/> —
-<Value data={stale_years} column=period_end_stale_days/> days before the year ended — because the ECB stopped
-publishing this currency partway through it. The number is a true statement about converting at the last
-available rate, which is why it is shown rather than blanked, but it is not a year-end rate in the sense the
-other points on this line are.
-
-The published data carries a `period_end_is_stale` flag on it.
-
-</Alert>
-
-{/if}
-
-<Alert status=warning>
-
-**The averages are taken over published fixings, not over calendar days.**
-Averaging the gap-filled daily table would count every Friday three times, since
-Friday, Saturday and Sunday all carry Friday's rate, and four or five times
-around a holiday weekend. That weights the mean toward whichever weekday sits
-next to a closure. There is a second trap in the same table: the average of
-euros-per-unit is not one divided by the average of units-per-euro, because the
-mean of reciprocals is not the reciprocal of the mean. For EUR/USD the two
-disagree by 0.07% in a calm year and 0.53% in 2008.
-
-</Alert>
-
-## What this changes about a number already on the site
-
-The warehouse holds exactly one euro-denominated measurement, Eurostat's
-household electricity prices, sitting beside GDP in dollars. Until there was an
-FX table the two could not be compared at all. They can now, and the comparison
-turns out to matter.
+## The same price, counted in euros and in dollars
 
 ```sql eur_vs_usd
-with paired as (
-    select country_iso3
-    from warehouse.eu_electricity_prices_semiannual
-    where period in ('2021-S1', '2022-S2')
-    group by country_iso3
-    having count(*) = 2
-)
-select
-    period_start_date,
-    avg(electricity_price_eur_kwh) as price_in_euros,
-    avg(electricity_price_usd_kwh) as price_in_dollars,
-    min(usd_per_eur_period_avg) as usd_per_eur
-from warehouse.eu_electricity_prices_semiannual
-where country_iso3 in (select country_iso3 from paired)
-group by period_start_date
-order by period_start_date
+-- Both currencies indexed to the first half of 2021, over one fixed set of
+-- countries (eu_price_panel.sql), so the gap between the lines is the exchange
+-- rate alone.
+with base as (select eur_kwh, usd_kwh from warehouse.eu_price_panel where period = '2021-S1')
+
+select a.period_start_date, 'Priced in euros' as currency, 100 * a.eur_kwh / b.eur_kwh as price_index
+from warehouse.eu_price_panel a cross join base b
+union all
+select a.period_start_date, 'Priced in dollars', 100 * a.usd_kwh / b.usd_kwh
+from warehouse.eu_price_panel a cross join base b
+order by 1
 ```
 
-```sql crisis
-with paired as (
-    select country_iso3
-    from warehouse.eu_electricity_prices_semiannual
-    where period in ('2021-S1', '2022-S2')
-    group by country_iso3
-    having count(*) = 2
-),
-ends as (
-    select
-        period,
-        avg(electricity_price_eur_kwh) as eur_kwh,
-        avg(electricity_price_usd_kwh) as usd_kwh,
-        min(usd_per_eur_period_avg) as usd_per_eur
-    from warehouse.eu_electricity_prices_semiannual
-    where country_iso3 in (select country_iso3 from paired) and period in ('2021-S1', '2022-S2')
-    group by period
-)
+```sql crisis_rise
 select
-    (select count(*) from paired) as n_countries,
     100.0 * (max(eur_kwh) filter (where period = '2022-S2')
         / max(eur_kwh) filter (where period = '2021-S1') - 1) as eur_rise_pct,
     100.0 * (max(usd_kwh) filter (where period = '2022-S2')
-        / max(usd_kwh) filter (where period = '2021-S1') - 1) as usd_rise_pct,
-    max(usd_per_eur) filter (where period = '2021-S1') as fx_before,
-    max(usd_per_eur) filter (where period = '2022-S2') as fx_after
-from ends
+        / max(usd_kwh) filter (where period = '2021-S1') - 1) as usd_rise_pct
+from warehouse.eu_price_panel
 ```
-
-<Grid cols=3>
-    <BigValue data={crisis} value=eur_rise_pct fmt='0.0"%"' title="Price rise, 2021-S1 to 2022-S2, in EUR"/>
-    <BigValue data={crisis} value=usd_rise_pct fmt='0.0"%"' title="... the same rise, in USD"/>
-    <BigValue data={crisis} value=n_countries title="Countries, present in both halves"/>
-</Grid>
-
-Across the <Value data={crisis} column=n_countries/> countries Eurostat covers in both halves, the average household electricity price rose <Value data={crisis} column=eur_rise_pct fmt='0.0"%"'/> in euros and <Value data={crisis} column=usd_rise_pct fmt='0.0"%"'/> in dollars over the same eighteen months. The euro fell from <Value data={crisis} column=fx_before fmt='0.000'/> to <Value data={crisis} column=fx_after fmt='0.000'/> against the dollar while that was happening.
 
 <LineChart
     data={eur_vs_usd}
     x=period_start_date
-    y={["price_in_euros", "price_in_dollars"]}
-    title="EU average household electricity price, per kWh"
-    yFmt='0.000'
-    xFmt='yyyy-mmm'
-/>
+    y=price_index
+    series=currency
+    seriesColors={{'Priced in euros': ['#2a78d6', '#3987e5'], 'Priced in dollars': ['#eb6834', '#d95926']}}
+    yFmt='0'
+    xFmt='yyyy'
+    title="EU average household electricity price, first half of 2021 = 100"
+>
+    <ReferenceLine y=100 label=" "/>
+</LineChart>
 
-<Alert status=info>
+From the first half of 2021 to the second half of 2022 the same electricity rose <Value data={crisis_rise} column=eur_rise_pct fmt='0"%"'/> in euros and <Value data={crisis_rise} column=usd_rise_pct fmt='0"%"'/> in dollars.
 
-**So what.** Both numbers are right. A household paying in euros did face a 35% rise,
-and a dollar-denominated buyer of the same electricity did face 13.5%. A chart
-titled "European electricity prices" with no stated currency is reporting the
-exchange rate alongside the energy market. This warehouse already carried that
-warning in prose, from the case where Japan cut emissions 21% between 2010 and
-2024 and still scored 10% worse on carbon intensity measured in current dollars:
-the yen lost 42% of its dollar value, so Japan's GDP counted in dollars fell 28%.
-It is a column now, not a paragraph.
+The euro fell against the dollar while European electricity got dearer, so a
+dollar-based buyer of the same kilowatt-hour saw a much smaller rise. Both numbers
+are right; a chart of "European electricity prices" with no stated currency is
+also a chart of the exchange rate. **[The crisis in both currencies →](/currency/spot-or-average)**
 
-</Alert>
-
-## Limitations
+<Details title="Limitations">
 
 - **The reference rate is not a dealable rate.** The ECB publishes it at 16:00
   CET for information, and nobody transacts at it. Use it for reporting and
   translation, not for pricing a trade.
 - **The fiscal year is a policy, not a fact.** It is set to April here, for the
   UK and Japanese convention, and every row carries the value it was built with.
-  The same Tuesday belongs to a different fiscal year under a US federal October
-  or a continental January start.
 - **The calendar is not a market calendar.** It knows weekends. It does not know
   trading days, settlement days or public holidays in any jurisdiction, and
   where this warehouse needs those it reads them out of the observed fixings.
@@ -359,3 +164,7 @@ The tables are `marts.dim_date`, `marts.dim_currency`,
 incremental model in the project), `marts.fct_fx_rates_daily` (gap-filled) and
 `marts.fct_fx_rates_periods` (month, quarter, half and year). All five ship in
 the [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest).
+
+</Details>
+
+<small>Source: <a href="https://frankfurter.dev">ECB reference rates via Frankfurter</a>; electricity prices from <a href="https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204">Eurostat</a>.</small>
