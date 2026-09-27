@@ -225,7 +225,7 @@ carries it forward is `publishing-a-release`.
   2010–2024 and still scored 10% *worse* on carbon intensity.
   `gdp_constant_usd` (`NY.GDP.MKTP.KD`, constant 2015 US$) is the real-terms
   series. **The same failure is now measurable rather than narrated** — see the
-  Currency section: the EU household electricity price rose 35% or 13.5% between
+  Currency section: the EU household electricity price rose about 36% or 14% between
   2021-S1 and 2022-S2 depending only on whether you counted in euros or dollars.
   - **The yen figure was wrong here and in `transform/co2_intensity.py` once,
     and it was wrong in the way a plausible number is.** It said the

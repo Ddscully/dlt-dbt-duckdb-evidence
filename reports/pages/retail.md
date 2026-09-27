@@ -206,8 +206,9 @@ reports/README.md.
     seriesColors={{'Ordered once': '#c0932e', 'Ordered again': '#2a78d6'}}
 />
 
-Nobody sits below the diagonal: a customer who ordered once is worth exactly their
-first order. Above it, customers whose first order was in the top fifth went on to
+Customers who ordered once make up the diagonal: they are worth their first order,
+less anything they sent back, so the 12% who returned something sit just below it.
+Above it, customers whose first order was in the top fifth went on to
 be worth about ten times the bottom fifth. **[The first order →](/retail/first-order)**
 
 ## Also on this data

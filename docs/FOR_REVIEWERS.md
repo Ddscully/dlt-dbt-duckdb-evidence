@@ -411,7 +411,7 @@ eight tables each feeding a named model. Of the rest:
   plugins retired on a count of zero invocations (two across 187 session
   transcripts, two more across 211),
   `pytest-cov` added and dropped the same day for buying nothing, and a semantic
-  layer still unbuilt because eleven pages written by one person do not have the
+  layer still unbuilt because a site written by one person does not have the
   coordination problem it solves.
 
 ---

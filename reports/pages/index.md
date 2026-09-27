@@ -115,6 +115,13 @@ where good_key = '72071190-semi-finished-products-of-iron-or-non-al'
 order by cbam_cost_2026_eur_per_t
 ```
 
+```sql cbam_steel_gap
+-- A gap in euros, not a ratio: the cheapest source is a scrap route, so a ratio
+-- mostly measures how small the denominator is (compliance-models skill).
+select max(cbam_cost_2026_eur_per_t) - min(cbam_cost_2026_eur_per_t) as gap_eur
+from ${cbam_steel}
+```
+
 <BarChart
     data={cbam_steel}
     x=country_display_name
@@ -130,8 +137,9 @@ order by cbam_cost_2026_eur_per_t
     title="Border cost per tonne of semi-finished steel, 2026"
 />
 
-The same product costs six times as much at the EU border from Indonesia as from
-the US. What importers of steel, cement, aluminium, fertiliser and hydrogen owe.
+Between the cheapest and the dearest of these six sources, the same tonne of steel costs <Value data={cbam_steel_gap} column=gap_eur fmt='€#,##0'/> more at the EU border in 2026.
+
+What importers of steel, cement, aluminium, fertiliser and hydrogen owe.
 
 </Group>
 
@@ -194,21 +202,8 @@ the answer by six figures.
 ### [Currency →](/currency)
 
 ```sql eur_usd
-with paired as (
-    select country_iso3
-    from warehouse.eu_electricity_prices_semiannual
-    where period in ('2021-S1', '2022-S2')
-    group by country_iso3
-    having count(*) = 2
-)
-
-select
-    period_start_date,
-    avg(electricity_price_eur_kwh) as euros,
-    avg(electricity_price_usd_kwh) as dollars
-from warehouse.eu_electricity_prices_semiannual
-where country_iso3 in (select country_iso3 from paired)
-group by period_start_date
+select period_start_date, eur_kwh as euros, usd_kwh as dollars
+from warehouse.eu_price_panel
 order by period_start_date
 ```
 

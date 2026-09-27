@@ -81,11 +81,11 @@ label goes away — so the axis is named in the subtitle instead.
 -->
 
 
-The hard lower edge running diagonally across the chart is not an artefact. A
-customer who ordered once has a lifetime value **equal** to their first order by
-definition, so all 1,504 of them sit exactly on the line *y = x*, and nobody can
-sit below it. The gold band is that floor; the blue cloud above it is everyone
-who came back.
+The hard edge running diagonally across the chart is not an artefact. A
+customer who ordered once is worth their first order **less whatever they sent
+back**, so 1,326 of the 1,504 sit exactly on the line *y = x*, the other 178 fall
+below it, and none can rise above it. The gold band is that line; the blue cloud
+above it is everyone who came back, and returns pull only 21 of them below it.
 
 ### Why the correlation coefficient is the wrong number here
 

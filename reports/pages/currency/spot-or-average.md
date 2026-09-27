@@ -118,44 +118,24 @@ electricity prices, beside GDP in dollars. The FX table is what lets the two be
 compared, and the comparison matters.
 
 ```sql eur_vs_usd
-with paired as (
-    select country_iso3
-    from warehouse.eu_electricity_prices_semiannual
-    where period in ('2021-S1', '2022-S2')
-    group by country_iso3
-    having count(*) = 2
-)
+-- One fixed set of countries for every half-year (eu_price_panel.sql): an
+-- average over whoever reported would move as countries joined.
 select
     period_start_date,
-    avg(electricity_price_eur_kwh) as price_in_euros,
-    avg(electricity_price_usd_kwh) as price_in_dollars,
-    min(usd_per_eur_period_avg) as usd_per_eur
-from warehouse.eu_electricity_prices_semiannual
-where country_iso3 in (select country_iso3 from paired)
-group by period_start_date
+    eur_kwh as price_in_euros,
+    usd_kwh as price_in_dollars
+from warehouse.eu_price_panel
 order by period_start_date
 ```
 
 ```sql crisis
-with paired as (
-    select country_iso3
-    from warehouse.eu_electricity_prices_semiannual
+with ends as (
+    select period, eur_kwh, usd_kwh, usd_per_eur, n_countries
+    from warehouse.eu_price_panel
     where period in ('2021-S1', '2022-S2')
-    group by country_iso3
-    having count(*) = 2
-),
-ends as (
-    select
-        period,
-        avg(electricity_price_eur_kwh) as eur_kwh,
-        avg(electricity_price_usd_kwh) as usd_kwh,
-        min(usd_per_eur_period_avg) as usd_per_eur
-    from warehouse.eu_electricity_prices_semiannual
-    where country_iso3 in (select country_iso3 from paired) and period in ('2021-S1', '2022-S2')
-    group by period
 )
 select
-    (select count(*) from paired) as n_countries,
+    max(n_countries) as n_countries,
     100.0 * (max(eur_kwh) filter (where period = '2022-S2')
         / max(eur_kwh) filter (where period = '2021-S1') - 1) as eur_rise_pct,
     100.0 * (max(usd_kwh) filter (where period = '2022-S2')
@@ -168,10 +148,10 @@ from ends
 <Grid cols=3>
     <BigValue data={crisis} value=eur_rise_pct fmt='0.0"%"' title="Price rise, 2021-S1 to 2022-S2, in EUR"/>
     <BigValue data={crisis} value=usd_rise_pct fmt='0.0"%"' title="... the same rise, in USD"/>
-    <BigValue data={crisis} value=n_countries title="Countries, present in both halves"/>
+    <BigValue data={crisis} value=n_countries title="Countries, priced every half-year since 2015"/>
 </Grid>
 
-Across the <Value data={crisis} column=n_countries/> countries Eurostat covers in both halves, the average household electricity price rose <Value data={crisis} column=eur_rise_pct fmt='0.0"%"'/> in euros and <Value data={crisis} column=usd_rise_pct fmt='0.0"%"'/> in dollars over the same eighteen months. The euro fell from <Value data={crisis} column=fx_before fmt='0.000'/> to <Value data={crisis} column=fx_after fmt='0.000'/> against the dollar while that was happening.
+Across the <Value data={crisis} column=n_countries/> countries Eurostat has priced in every half-year since 2015, the average household electricity price rose <Value data={crisis} column=eur_rise_pct fmt='0.0"%"'/> in euros and <Value data={crisis} column=usd_rise_pct fmt='0.0"%"'/> in dollars over the same eighteen months. The euro fell from <Value data={crisis} column=fx_before fmt='0.000'/> to <Value data={crisis} column=fx_after fmt='0.000'/> against the dollar while that was happening.
 
 <LineChart
     data={eur_vs_usd}
@@ -184,8 +164,8 @@ Across the <Value data={crisis} column=n_countries/> countries Eurostat covers i
 
 <Alert status=info>
 
-**So what.** Both numbers are right. A household paying in euros did face a 35% rise,
-and a dollar-denominated buyer of the same electricity did face 13.5%. A chart
+**So what.** Both numbers are right. A household paying in euros did face a 36% rise,
+and a dollar-denominated buyer of the same electricity did face 14%. A chart
 titled "European electricity prices" with no stated currency is reporting the
 exchange rate alongside the energy market. This warehouse already carried that
 warning in prose, from the case where Japan cut emissions 21% between 2010 and

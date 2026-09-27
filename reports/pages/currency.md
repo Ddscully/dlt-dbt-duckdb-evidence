@@ -1,6 +1,6 @@
 ---
 title: Currency
-description: The ECB's daily euro reference rates, what the 30% of days with no rate cost you, and why the same electricity price rose 35% or 13.5% depending on which currency you counted in.
+description: The ECB's daily euro reference rates, what the 30% of days with no rate cost you, and why the same electricity price rose about 36% or 14% depending on which currency you counted in.
 sidebar_position: 4
 ---
 
@@ -103,39 +103,29 @@ limit 1
 
 A balance converts at the closing rate and a flow at the period average. For {inputs.ccy.label} the two differ most in <Value data={worst} column=period_label/> by <Value data={worst} column=period_end_vs_avg_pct fmt='0.0"%"'/> of the average, which is often more than the margin of the business doing the converting. **[Spot or average →](/currency/spot-or-average)**
 
-## The same price rose 35% in euros and 13.5% in dollars
+## The same price, counted in euros and in dollars
 
 ```sql eur_vs_usd
--- Both currencies indexed to the first half of 2021, over the countries Eurostat
--- covers in both 2021-S1 and 2022-S2, so the gap between the lines is the
--- exchange rate alone.
-with paired as (
-    select country_iso3
-    from warehouse.eu_electricity_prices_semiannual
-    where period in ('2021-S1', '2022-S2')
-    group by country_iso3
-    having count(*) = 2
-),
-
-avg_price as (
-    select
-        period,
-        period_start_date,
-        avg(electricity_price_eur_kwh) as eur_kwh,
-        avg(electricity_price_usd_kwh) as usd_kwh
-    from warehouse.eu_electricity_prices_semiannual
-    where country_iso3 in (select country_iso3 from paired)
-    group by period, period_start_date
-),
-
-base as (select eur_kwh, usd_kwh from avg_price where period = '2021-S1')
+-- Both currencies indexed to the first half of 2021, over one fixed set of
+-- countries (eu_price_panel.sql), so the gap between the lines is the exchange
+-- rate alone.
+with base as (select eur_kwh, usd_kwh from warehouse.eu_price_panel where period = '2021-S1')
 
 select a.period_start_date, 'Priced in euros' as currency, 100 * a.eur_kwh / b.eur_kwh as price_index
-from avg_price a cross join base b
+from warehouse.eu_price_panel a cross join base b
 union all
 select a.period_start_date, 'Priced in dollars', 100 * a.usd_kwh / b.usd_kwh
-from avg_price a cross join base b
+from warehouse.eu_price_panel a cross join base b
 order by 1
+```
+
+```sql crisis_rise
+select
+    100.0 * (max(eur_kwh) filter (where period = '2022-S2')
+        / max(eur_kwh) filter (where period = '2021-S1') - 1) as eur_rise_pct,
+    100.0 * (max(usd_kwh) filter (where period = '2022-S2')
+        / max(usd_kwh) filter (where period = '2021-S1') - 1) as usd_rise_pct
+from warehouse.eu_price_panel
 ```
 
 <LineChart
@@ -150,6 +140,8 @@ order by 1
 >
     <ReferenceLine y=100 label=" "/>
 </LineChart>
+
+From the first half of 2021 to the second half of 2022 the same electricity rose <Value data={crisis_rise} column=eur_rise_pct fmt='0"%"'/> in euros and <Value data={crisis_rise} column=usd_rise_pct fmt='0"%"'/> in dollars.
 
 The euro fell against the dollar while European electricity got dearer, so a
 dollar-based buyer of the same kilowatt-hour saw a much smaller rise. Both numbers

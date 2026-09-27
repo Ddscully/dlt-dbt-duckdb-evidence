@@ -11,6 +11,8 @@ barely moves its border cost. The reason is the regulation, not the statistics:
 it mostly does not count electricity at all.**
 
 ```sql electricity_share
+-- Country-specific values only: a row that copies the catch-all value is one
+-- number repeated, 471 times for cement, and would weight the averages towards it.
 select
     product_group,
     avg(direct_t_co2e_per_t)                                    as avg_direct,
@@ -24,7 +26,8 @@ select
              || ' of ' || count(*)::varchar || ' rows'
     end                                                         as indirect_coverage
 from warehouse.cbam_exposure
-where not is_fallback_table
+where is_country_specific
+  and not is_fallback_table
   and total_t_co2e_per_t > 0
 group by 1
 order by pct_electricity desc
@@ -36,7 +39,8 @@ select
         / sum(total_t_co2e_per_t)  as pct_electricity_overall,
     count(*)                       as n_rows
 from warehouse.cbam_exposure
-where not is_fallback_table
+where is_country_specific
+  and not is_fallback_table
   and total_t_co2e_per_t > 0
 ```
 
@@ -55,9 +59,9 @@ where not is_fallback_table
 
 Indirect emissions, the carbon in the electricity the plant drew, are published
 only for **cement and fertilisers**. For aluminium and hydrogen the annex carries
-no indirect column at all, and for iron and steel it is present on 33 of the
-6,472 rows. Where it does count it is small: 7.5% of a cement tonne and 5.5% of a
-fertiliser one.
+no indirect column at all, and for iron and steel it is present on 27 of the
+6,229 country-specific rows. Where it does count it is small: 5.8% of a cement
+tonne and 5.5% of a fertiliser one.
 
 ## Primary aluminium: the border cost against the grid
 

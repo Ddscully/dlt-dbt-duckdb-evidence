@@ -142,7 +142,9 @@ calls, so the recipe and the graph can't drift into running different builds.
   `marts.fct_country_weather_year`, as the control variable for "was it just a
   colder year". Its warming chart is a `<Heatmap>` of each capital against its own
   average, not a line: the archive has a gap between 2007 and 2012, and a heatmap
-  draws nothing where there is no year, where a line would interpolate across it.
+  leaves an empty cell where a line would interpolate across it. Its x axis is a
+  category, so the empty cell exists only because the query gives every missing
+  year a null row; without them the gap closes up and 2007 sits beside 2012.
 
 The coverage and pipeline pages render an explanatory branch rather than an
 error when their data is empty, the way `restatements.md` does, because the

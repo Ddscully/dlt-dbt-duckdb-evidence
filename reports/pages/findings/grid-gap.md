@@ -1,6 +1,6 @@
 ---
 title: 8. The grid gap
-description: The spread of national grid carbon intensity since 2000, across the same eighty countries every year.
+description: The spread of national grid carbon intensity since 2000, across the same countries every year.
 sidebar_position: 8
 ---
 
@@ -37,16 +37,17 @@ stats as (
         year,
         quantile_cont(carbon_intensity_elec_g_kwh, 0.1) as p10,
         quantile_cont(carbon_intensity_elec_g_kwh, 0.5) as p50,
-        quantile_cont(carbon_intensity_elec_g_kwh, 0.9) as p90
+        quantile_cont(carbon_intensity_elec_g_kwh, 0.9) as p90,
+        count(*)                                        as n_countries
     from warehouse.emissions_energy
     where country_iso3 in (select country_iso3 from eligible)
       and year between 2000 and (select elec_year from ${latest_years})
     group by year
 )
 
-select year, '90th percentile (dirtier grids)' as grid, p90 as g_kwh from stats
-union all select year, 'Median', p50 from stats
-union all select year, '10th percentile (cleaner grids)', p10 from stats
+select year, '90th percentile (dirtier grids)' as grid, p90 as g_kwh, n_countries from stats
+union all select year, 'Median', p50, n_countries from stats
+union all select year, '10th percentile (cleaner grids)', p10, n_countries from stats
 order by year
 ```
 
@@ -64,9 +65,11 @@ order by year
     yFmt="#,##0"
     yMin=0
     title="National grid carbon intensity, 10th, 50th and 90th percentiles"
-    subtitle="The same 80 countries every year, grids above 10 TWh, gCO₂ per kWh"
+    subtitle="The same countries every year, grids above 10 TWh, gCO₂ per kWh"
     yAxisTitle="gCO₂ per kWh"
 />
+
+The panel is <Value data={grid_percentiles} column=n_countries/> countries, each with a grid above 10 TWh in every year since 2000.
 
 The three lines fall roughly in parallel, so the distance between them barely
 changes. The dirtiest grids have come down by about a tenth, and the cleanest

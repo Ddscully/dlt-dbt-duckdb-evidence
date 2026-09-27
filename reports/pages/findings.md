@@ -374,16 +374,17 @@ stats as (
         year,
         quantile_cont(carbon_intensity_elec_g_kwh, 0.1) as p10,
         quantile_cont(carbon_intensity_elec_g_kwh, 0.5) as p50,
-        quantile_cont(carbon_intensity_elec_g_kwh, 0.9) as p90
+        quantile_cont(carbon_intensity_elec_g_kwh, 0.9) as p90,
+        count(*)                                        as n_countries
     from warehouse.emissions_energy
     where country_iso3 in (select country_iso3 from eligible)
       and year between 2000 and (select elec_year from ${latest_years})
     group by year
 )
 
-select year, '90th percentile (dirtier grids)' as grid, p90 as g_kwh from stats
-union all select year, 'Median', p50 from stats
-union all select year, '10th percentile (cleaner grids)', p10 from stats
+select year, '90th percentile (dirtier grids)' as grid, p90 as g_kwh, n_countries from stats
+union all select year, 'Median', p50, n_countries from stats
+union all select year, '10th percentile (cleaner grids)', p10, n_countries from stats
 order by year
 ```
 
@@ -401,8 +402,10 @@ order by year
     yFmt="#,##0"
     yMin=0
     title="Spread of national grids"
-    subtitle="gCO₂ per kWh, 10th, 50th and 90th percentiles of the same 80 countries each year"
+    subtitle="gCO₂ per kWh, 10th, 50th and 90th percentiles of the same countries each year"
 />
+
+The same <Value data={grid_percentiles} column=n_countries/> countries in every year, so the sample cannot move the lines.
 
 The typical grid is cleaner, but the lines fall in parallel, so a site on a dirty
 grid carries much the same penalty as it did in 2000. **[Grid gap →](/findings/grid-gap)**

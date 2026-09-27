@@ -131,13 +131,15 @@ For this good the 2026 cost runs from <Value data={ranked_span} column=cheapest_
 ## Electricity is almost none of it
 
 ```sql electricity_split
--- Averages over every country-specific value, excluding the catch-all table.
+-- Averages over every country-specific value. The catch-all rows are left out,
+-- and so are the rows that copy their value: they are one number repeated,
+-- 471 times for cement, and would weight the average towards it.
 select
     product_group,
     'Burned in the process (direct)' as source,
     avg(direct_t_co2e_per_t) as t_co2e
 from warehouse.cbam_exposure
-where not is_fallback_table and total_t_co2e_per_t > 0
+where is_country_specific and not is_fallback_table and total_t_co2e_per_t > 0
 group by product_group
 union all
 select
@@ -145,7 +147,7 @@ select
     'Electricity drawn (indirect)',
     avg(coalesce(indirect_t_co2e_per_t, 0))
 from warehouse.cbam_exposure
-where not is_fallback_table and total_t_co2e_per_t > 0
+where is_country_specific and not is_fallback_table and total_t_co2e_per_t > 0
 group by product_group
 ```
 

@@ -132,18 +132,34 @@ release. **[Emissions →](/weather/emissions)**
 -- Each capital against its own average over the complete years, so a cold
 -- capital and a warm one share a scale. Only one grid cell per country, so read a
 -- row against itself, never one row against another.
+--
+-- The x axis is a category, so a year with no row would simply not be drawn and
+-- the archive's gap would close up. Every year in the range gets a row, and a
+-- missing one carries a null anomaly, which `nullsZero=false` leaves blank.
 with complete as (
     select
         country_name,
-        cast(cast(year as integer) as varchar) as year_label,
+        cast(year as integer) as year,
         temp_mean_c,
         avg(temp_mean_c) over (partition by country_iso3) as country_mean
     from warehouse.country_weather_year
     where year_is_complete
+),
+
+grid as (
+    select c.country_name, y.year
+    from (select distinct country_name from complete) c
+    cross join (
+        select unnest(generate_series(min(year), max(year))) as year from complete
+    ) y
 )
 
-select country_name, year_label, temp_mean_c - country_mean as anomaly_c
-from complete
+select
+    g.country_name,
+    cast(g.year as varchar)         as year_label,
+    c.temp_mean_c - c.country_mean as anomaly_c
+from grid g
+left join complete c on c.country_name = g.country_name and c.year = g.year
 ```
 
 ```sql trend
@@ -172,7 +188,7 @@ from by_year
     max={2}
     colorPalette={['#2a78d6', '#f5f5f5', '#d95926']}
     title="Mean temperature against each capital's own average, °C"
-    subtitle="Blue colder, red warmer; complete calendar years only"
+    subtitle="Blue colder, red warmer, grey where the archive has no year; complete calendar years only"
 />
 
 {#if trend[0].n_years >= 8}

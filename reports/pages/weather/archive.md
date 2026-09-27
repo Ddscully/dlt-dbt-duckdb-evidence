@@ -45,14 +45,29 @@ from per_country
 ```
 
 ```sql hdd_by_year
+-- A row for every year in the range, null where the archive has none: the x axis
+-- is a category, so a missing year would otherwise close up rather than show.
+with by_year as (
+    select
+        cast(year as integer) as year,
+        avg(hdd_total) as hdd_total,
+        avg(temp_mean_c) as mean_c
+    from warehouse.country_weather_year
+    where year_is_complete
+    group by 1
+),
+
+years as (
+    select unnest(generate_series(min(year), max(year))) as year from by_year
+)
+
 select
-    cast(cast(year as integer) as varchar) as year_label,
-    avg(hdd_total) as hdd_total,
-    avg(temp_mean_c) as mean_c
-from warehouse.country_weather_year
-where year_is_complete
-group by 1
-order by 1
+    cast(y.year as varchar) as year_label,
+    b.hdd_total,
+    b.mean_c
+from years y
+left join by_year b on b.year = y.year
+order by y.year
 ```
 
 {#if trend[0].n_years >= 8}
@@ -82,6 +97,8 @@ refetching it, so this section gets stronger every month rather than resetting.
 Bars rather than a line is not a style choice. The years here are whichever ones
 have been fetched, a line chart interpolates across any that have not, and an
 invented segment between two real observations is indistinguishable from data.
+Each missing year still gets its slot on the axis, empty, so 2007 does not sit
+beside 2012 as if they were consecutive.
 
 ```sql latest_year_detail
 select

@@ -108,7 +108,7 @@ gitignored; `just clean` reclaims the build output, and `just clean deep` the
 
 ## The dashboard and the data
 
-[![The Evidence dashboard: the Findings page, with the site navigation, three headline figures and a scatter of the year each large emitter's CO₂ peaked](./docs/assets/dashboard.png)](https://ddscully.github.io/dlt-dbt-duckdb-evidence/findings)
+[![The Evidence dashboard: the Nine Findings page, with the site navigation, three headline figures, six large emitters' CO₂ as a share of their peak year, and the grids that got cleaner since 2005](./docs/assets/dashboard.png)](https://ddscully.github.io/dlt-dbt-duckdb-evidence/findings)
 
 The [dashboard](https://ddscully.github.io/dlt-dbt-duckdb-evidence/) holds six
 analyses, from CBAM border costs to retail customer retention, each ending in a

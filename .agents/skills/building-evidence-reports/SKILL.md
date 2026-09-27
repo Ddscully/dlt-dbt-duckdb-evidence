@@ -286,8 +286,9 @@ one click away.**
   `BarChart` coloured by the variable that explains it, with
   `echartsOptions={{xAxis: {axisLabel: {show: false}}}}` and the names in the
   tooltip (`cbam.md`); a panel of units over years is a `<Heatmap>` against each
-  unit's own mean (`weather.md`), which also draws nothing for a missing year
-  where a line would interpolate. Keep a `DataTable` for the reader who wants the
+  unit's own mean (`weather.md`), which leaves an empty cell for a missing year
+  where a line would interpolate — but only if the query gives that year a null
+  row, because a category axis closes up a year that has no row at all. Keep a `DataTable` for the reader who wants the
   numbers, below the chart rather than instead of it.
 - **`AreaMap` needs two local files** in `static/`, which Evidence copies to the
   site root: a GeoJSON (`world-countries.geojson`, keyed on `iso3`) and a blank
@@ -404,9 +405,9 @@ filed here, because all three are about the site rather than about Dagster.
 - **`site_pages_all_rendered` is blocking, and it checks file *size*.**
   `evidence build` exits 0 for a site missing a page, and nothing downstream reads
   `reports/build/` — so a route that emitted only the SvelteKit shell would
-  materialise green and deploy. The eleven pages render at 19–92 kB; the floor is
-  8 kB. The two smallest are the ones carrying the least SQL — the routing front
-  page (19 kB) and Restatements (20 kB) — so it is prose-only pages, not chart
+  materialise green and deploy. The forty pages render at 34–61 kB; the floor is
+  8 kB. The two smallest are the ones carrying the least SQL — Scope 2's limits
+  page (34 kB) and Restatements (35 kB) — so it is prose-only pages, not chart
   pages, that would ever bring the floor into play.
 - **`explore`, `settings` and `api` are reserved route names.** Evidence's own
   template ships `pages/explore/` (the SQL console and schema browser) and

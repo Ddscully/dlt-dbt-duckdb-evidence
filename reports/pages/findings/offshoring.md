@@ -95,11 +95,12 @@ order by ord desc
 />
 
 The UK's consumption emissions fell by 279 Mt against 263 Mt territorially, and
-Germany's by 277 Mt against 274 Mt. Only Italy and France cut consumption by less,
-and by 13 Mt and 8 Mt, under a tenth of their cuts. Japan, the US and Canada all
-cut more on consumption than territorially. Where offshoring does show, it is
-elsewhere: Mexico's territorial emissions were flat while its consumption
-emissions rose by about 50 Mt.
+Germany's by 277 Mt against 274 Mt. Japan, the US and Canada all cut more on
+consumption than territorially, and Italy and France cut it by 13 Mt and 8 Mt
+less, under a tenth of their cuts. Where offshoring does show, it is at the
+bottom of the chart: Poland's consumption emissions fell by 22 Mt against 39 Mt
+territorially, and Mexico's and Australia's territorial emissions were flat while
+their consumption emissions rose by about 50 Mt and 20 Mt.
 
 The same subtraction answers the "China is just the world's factory" reading:
 China's consumption emissions rose by about 6,200 Mt since 2005, almost exactly as
