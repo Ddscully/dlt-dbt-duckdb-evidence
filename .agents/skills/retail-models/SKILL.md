@@ -163,7 +163,7 @@ one; the page is `retail.md`.
 - **`dim_retail_customer.first_order_gbp` is the page's only forward-looking
   number, and the statistic that describes it is not the obvious one.** Pearson
   *r* against lifetime value is 0.641 and is almost entirely one customer: drop
-  the single largest first order (£33,168 → £235,833) and it falls to **0.397**;
+  the single largest first order (£33,168 → £235,833) and it falls to **0.398**;
   under £5,000 it is 0.344. The **rank** correlation does not move — 0.592,
   0.592, 0.590 across the same three cuts — so that is what the page quotes,
   with the quintile medians (£191 → £410 → £714 → £905 → £1,885, repeat rate

@@ -84,9 +84,9 @@ design: the spine is the complete cross join, the fact is the part of it any
 source reports. The difference is the subject of the [coverage page](/coverage).
 
 The two `history` tables, `snap_co2_estimates` and `snap_grid_emission_factors`,
-are the ones a rebuild cannot reproduce. Every other row above is derivable from
-the sources. Those two are accumulated state, and deleting the warehouse destroys
-them for good.
+are the only ones above a rebuild cannot reproduce; every other row is derivable
+from the sources. They are accumulated state, as is `analytics.pipeline_runs`
+below, and deleting the warehouse destroys all three for good.
 
 ## Test coverage
 
@@ -125,11 +125,12 @@ order by tests desc
     <Column id=tests title="Count" fmt="0"/>
 </DataTable>
 
-The distribution is deliberate. `accepted_range` dominates because the failure
-mode this warehouse actually has is a plausible-looking wrong number, not a
-missing one: a unit error, a percentage over 100, a year outside a source's
-range. The `unique_combination_of_columns` tests are the grain contract,
-`(country_iso3, year)` on every fact-shaped model, which is what catches a
+The distribution is deliberate. After `not_null`, `accepted_range` is the largest
+group, because the failure mode this warehouse actually has is a plausible-looking
+wrong number, not a missing one: a unit error, a percentage over 100, a year
+outside a source's range. The `unique_combination_of_columns` tests are the grain
+contract, `(country_iso3, year)` on the country facts and the declared grain on
+every other fact-shaped model, which is what catches a
 duplicate on either side of a join fanning rows out downstream.
 
 `dbt_project.yml` also sets `+store_failures: true` project-wide, so a test does
@@ -213,7 +214,7 @@ The most recent build ran <Value data={run_totals} column=latest_nodes fmt="#,##
 cost several times what building every model costs — the price of
 `store_failures` being on project-wide and of running unit tests inside
 `dbt build` rather than excluding them from production runs. Both are deliberate
-and both are argued in the docs; neither had ever been measured.
+and both are argued in the docs; this table is what measures them.
 
 The seconds do not sum to the per-node total. dbt reports `compile` and
 `execute` as named phases and counts work outside both in the figure it calls
@@ -272,5 +273,5 @@ are two sections up, measured from the warehouse where they are true.
 <small>Written by <code>transform/pipeline_status.py</code> (<code>just
 pipeline-status</code>, part of <code>just run</code> and the Dagster asset
 <code>analytics/pipeline_status</code>). The first three sections are a snapshot
-taken at build time; <em>What the build costs</em> is a history, and the only
-thing on this page a rebuild cannot reproduce.</small>
+taken at build time; <em>What the build costs</em> is a history, carried between
+releases like the two snapshots.</small>

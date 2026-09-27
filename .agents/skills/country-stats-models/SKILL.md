@@ -201,9 +201,13 @@ carries it forward is `publishing-a-release`.
 - **Territorial vs. consumption-based emissions.** `co2_mt` is what a country
   burns; `consumption_co2` adds the carbon embodied in imports and subtracts
   exports (~120 countries, one year behind). It exists so "the cut was just
-  offshored" can be measured rather than caveated: the UK's territorial fall
-  since 2005 is 46% and its consumption fall 36%, so about a fifth of the
-  headline is trade moving and the rest isn't. `trade_co2_share` is deliberately
+  offshored" can be measured rather than caveated — **in tonnes, not by comparing
+  the two percentage changes.** The UK's territorial fall since 2005 is 46% and
+  its consumption fall 36%, which reads as a fifth of the cut moving abroad; in Mt
+  the consumption fall is the *larger* (279 against 263), because a net
+  importer's consumption total starts from a bigger base. Finding 4 once shipped
+  the percentage reading; the test is the change in
+  `consumption_co2 - co2_mt`. `trade_co2_share` is deliberately
   untested — the real range is about -98% to +1023% (Singapore imports ten times
   what it emits), so a 0–100 bound would fail on reality, not on a bug.
 - **Two carbon-intensity columns, different bases.**

@@ -63,7 +63,7 @@ from fb inner join listed on fb.good_key = listed.good_key
     <BigValue data={fallback_penalty} value=median_ratio fmt='0.00"×"' title="Fallback vs. median country"/>
 </Grid>
 
-For <Value data={fallback_penalty} column=n_worse/> of the <Value data={fallback_penalty} column=n_goods/> goods, the fallback value is worse than the median listed country, by a median factor of <Value data={fallback_penalty} column=median_ratio fmt='0.00'/>. That is the mechanism working as designed, since the defaults exist to make collecting real supplier data pay for itself.
+For <Value data={fallback_penalty} column=n_worse/> of the <Value data={fallback_penalty} column=n_goods/> goods, the fallback value is worse than the median listed country; at the median it is <Value data={fallback_penalty} column=median_ratio fmt='0.00'/> times that country's value. That is the mechanism working as designed, since the defaults exist to make collecting real supplier data pay for itself.
 
 ## The same tonne, a different border cost
 
@@ -137,7 +137,10 @@ select
     count(*)                                                    as n,
     min(cbam_cost_2026_eur_per_t)                               as cheapest,
     max(cbam_cost_2026_eur_per_t)                               as dearest,
-    max(cbam_cost_2026_eur_per_t) / nullif(min(cbam_cost_2026_eur_per_t), 0) as spread,
+    -- A gap in euros, not a ratio: the ratio divides by the cheapest source, which
+    -- is often one scrap-route country near zero (63× for the default good) and
+    -- for one good is zero, so it measured the denominator rather than the spread.
+    max(cbam_cost_2026_eur_per_t) - min(cbam_cost_2026_eur_per_t) as gap,
     arg_min(country_display_name, cbam_cost_2026_eur_per_t)      as cheapest_country,
     arg_max(country_display_name, cbam_cost_2026_eur_per_t)      as dearest_country
 from warehouse.cbam_exposure
@@ -145,7 +148,7 @@ where good_key = '${inputs.good.value}'
   and not is_fallback_table
 ```
 
-Across <Value data={ranked_span} column=n/> sourcing countries the 2026 cost runs from <Value data={ranked_span} column=cheapest_country/> at <Value data={ranked_span} column=cheapest fmt='€#,##0.00'/> per tonne up to <Value data={ranked_span} column=dearest_country/> at <Value data={ranked_span} column=dearest fmt='€#,##0.00'/>, a spread of <Value data={ranked_span} column=spread fmt='0.0"×"'/> on an identical tonne of product.
+Across <Value data={ranked_span} column=n/> sourcing countries the 2026 cost runs from <Value data={ranked_span} column=cheapest_country/> at <Value data={ranked_span} column=cheapest fmt='€#,##0.00'/> per tonne up to <Value data={ranked_span} column=dearest_country/> at <Value data={ranked_span} column=dearest fmt='€#,##0.00'/> per tonne, a difference of <Value data={ranked_span} column=gap fmt='€#,##0.00'/> for an identical product.
 
 <BarChart
     data={ranked}
@@ -185,7 +188,7 @@ on them belongs to the catch-all, not to the country: 221 of the 11,037 rows
 this dropdown can reach fall back, and 36 of them display a route the country
 never earned. The catch-all row itself is in the table too, one per good, and
 says `Annex fallback (catch-all row)` — it is the rule those 221 are copies of,
-not a 253rd place goods are made. Pick *Cement · 2523 90 00 90 — Other hydraulic cements* to see the
+not one more country goods are made in. Pick *Cement · 2523 90 00 90 — Other hydraulic cements* to see the
 shape of it: 24 of that good's 100 sourcing countries carry one identical
 tonnage between them, against 39 distinct values across the other 76. They are
 still what an importer owes; they are not evidence about how that country makes
@@ -351,7 +354,8 @@ is almost entirely insensitive to.
 There is no clean free public API for EU ETS spot, so this page does not pretend
 to quote one. The tonnage is fixed by the regulation; the euro figure is that
 tonnage times a price you choose. Below is the same selected good at the cheapest
-and dearest source, across the range EUAs have actually traded in.
+and dearest source, from €60 to €120 a tonne: roughly the range EUAs have traded
+in since 2022, with room above it.
 
 ```sql sensitivity
 with bounds as (

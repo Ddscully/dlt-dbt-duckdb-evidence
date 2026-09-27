@@ -63,8 +63,8 @@ order by series, year
 Three features of that chart have each bitten a query in this repo:
 
 1. **The renewables ceiling.** `renewables_share_pct` flatlines at 79 countries
-   in every year since 1965. OWID's broad-coverage series is the *electricity*
-   mix, not the primary-energy mix, which is why the findings and explore pages
+   in every year since 1990. OWID's broad-coverage series is the *electricity*
+   mix, not the primary-energy mix, which is why the findings page and the country explorer
    use `carbon_intensity_elec_g_kwh` and `low_carbon_share_elec_pct` (about 210
    countries) wherever coverage matters.
 2. **The last-year cliff.** `primary_energy_twh` falls off a cliff in the most
@@ -73,9 +73,10 @@ Three features of that chart have each bitten a query in this repo:
    per-metric latest year from `sources/warehouse/latest_years.sql` for exactly
    this reason.
 3. **The sources end at different times.** Read the `To` column below rather
-   than the chart, which is capped for legibility. EU electricity prices already
-   run a year ahead of everything else and consumption-based CO₂ a year behind,
-   so the mart's `max(year)` is the leader, not the consensus.
+   than the chart, which is capped for legibility. GDP and EU electricity prices
+   already run a year beyond the emissions series, with the grid series partly
+   there, while consumption-based CO₂ ends a year before the emissions series. The mart's
+   `max(year)` is the leader, not the consensus.
 
 ```sql column_coverage
 select 'co2_mt' as column_name, count(distinct country_iso3) as countries,
@@ -234,7 +235,7 @@ missing on purpose:
 - **World Bank aggregates**: `WLD`, `EUU`, `OED` and the rest. WDI returns them
   in the same series as real countries; the dimension doesn't carry them, so the
   inner join to the spine keeps them out of every rollup on this site.
-- **Antarctica.** OWID emits about 0.2 Mt of emissions for it. A null `region`
+- **Antarctica.** OWID reports about 0.2 Mt of emissions for it. A null `region`
   should mean "not a country", and Antarctica is where that reading holds.
   Taiwan and ten small territories are the opposite case: they *are* countries
   the World Bank simply doesn't list, and `dbt/seeds/country_overrides.csv` puts
