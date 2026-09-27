@@ -65,19 +65,36 @@ calls, so the recipe and the graph can't drift into running different builds.
   a name) and draws on `static/blank-tile.png` rather than Evidence's default
   basemap, which is CARTO's tile server: every visitor would otherwise fetch map
   tiles from a third party.
-- `pages/countries.md`: the country explorer, driven by a year selector: clean
-  electricity vs. life expectancy (bubble), CO₂ intensity by income group over
-  time (line), a grid carbon-intensity ranking and a most-efficient table. Its
-  last section is the exception: EU prices half by half, from the semi-annual
-  fact, deliberately covering the whole series rather than the selected year,
-  because the annual average the other charts use hides moves of 300%+ inside a
-  single year.
+- **Every analysis page has the same shape**: an overview (`pages/<name>.md`)
+  that leads with charts, a sentence or two under each and a link, and a folder of
+  the same name (`pages/<name>/`) holding the detail pages the links point to,
+  with the argument, the "So what" box, the tables and the method. A page and a
+  folder of the same name coexist: the folder's pages route beneath it
+  (`/findings/income/`) and sit under the page's heading in the sidebar, ordered
+  by `sidebar_position`. A page with no folder (Coverage, Restatements, Pipeline)
+  is listed under Home instead; `Sidebar.svelte` does that, and no frontmatter
+  changes it. A detail page carries its own copy of any input it uses, because
+  inputs are per page.
+- **A file in `static/` is at the site root, so a page below the root reaches it
+  with `../`.** A bare `geoJsonUrl="world-countries.geojson"` works on the home
+  page and 404s on `/scope2/`, where it resolves to `/scope2/world-countries.geojson`;
+  the map then draws its legend and no countries, with nothing in the build log.
+  `../` still resolves under the Pages base path, because every route ends in `/`.
+- `pages/countries.md` and `pages/countries/`: the country explorer, driven by a
+  year selector (a world map of grid intensity, clean electricity against life
+  expectancy, EU prices against the low-carbon share, the most carbon-efficient
+  economies) and a country selector (one country's CO₂ per person and grid
+  intensity over time), with CO₂ intensity by income group over time. Its detail
+  pages explain the income grouping, and chart EU prices half by half from the
+  semi-annual fact, because the annual average the explorer uses hides moves of
+  300%+ inside a single year. The country selector is keyed on `country_iso3`: a
+  name like Côte d'Ivoire would close the quoted string in the page's SQL.
 - `pages/findings.md` and `pages/findings/`: the nine findings. The overview is
   one chart and a caption of a sentence or two per finding, each linking to its
-  own page under `findings/`, which carries the argument, the "So what" box, the
-  table and the method. A page and a folder of the same name coexist: the folder's
-  pages route beneath it (`/findings/income/`) and sit under a "Nine Findings"
-  heading in the sidebar, ordered by `sidebar_position`.
+  own page under `findings/`.
+- `pages/coverage.md`, `pages/pipeline.md` and `pages/restatements.md` are
+  single pages, their explanations folded into `<Details>` blocks under each
+  chart or table rather than split out.
 - `pages/coverage.md`: what each source actually covers, built by left-joining
   `marts.fct_emissions_energy` onto the `dim_country_year` spine so a gap is a
   row rather than an absence. Read this before writing a `where` clause against
@@ -88,14 +105,15 @@ calls, so the recipe and the graph can't drift into running different builds.
   (`just pipeline-status`, part of `just run`).
 - `pages/restatements.md`: what OWID has revised since this warehouse first
   loaded it, off the dbt snapshot.
-- `pages/scope2.md`: the same grid carbon-intensity series the other pages chart,
-  read as the location-based Scope 2 emission factor it also is —
-  `marts.dim_grid_emission_factors` as a reference table with its vintage and
-  lineage, a worked example over twelve *invented* sites
-  (`marts.fct_example_scope2_emissions`), and the three caveats a practitioner
-  checks. It is the one page whose data is partly fabricated, which is stated in
-  an `<Alert>` directly above the table rather than in a footnote.
-- `pages/cbam.md`: what a tonne of an imported CBAM good costs at the EU border,
+- `pages/scope2.md` and `pages/scope2/`: the same grid carbon-intensity series the
+  other pages chart, read as the location-based Scope 2 emission factor it also
+  is. The overview maps `marts.dim_grid_emission_factors`, charts its vintages and
+  shows the worked example over twelve *invented* sites
+  (`marts.fct_example_scope2_emissions`); the reference table, the stale and
+  restated factors, the example in full and the three caveats are detail pages.
+  The fabricated sites are stated in an `<Alert>` directly above each chart of
+  them rather than in a footnote.
+- `pages/cbam.md` and `pages/cbam/`: what a tonne of an imported CBAM good costs at the EU border,
   by where it was made — `marts.fct_cbam_exposure`, i.e. Annex I of Implementing
   Regulation (EU) 2025/2621 times a carbon price. The one page driven by a
   *string* input: the `<Dropdown>` picks a `good_key`, so its SQL interpolates as
@@ -103,7 +121,7 @@ calls, so the recipe and the graph can't drift into running different builds.
   Evidence hands the value back as a raw SQL fragment, not a bound parameter.
   Its `goods_list` query also groups by the two selected columns, so
   `order by product_group` is a binder error; order by the label instead.
-- `pages/currency.md`: the ECB's daily euro reference rates — the gap in the
+- `pages/currency.md` and `pages/currency/`: the ECB's daily euro reference rates — the gap in the
   calendar, the carry-forward that fills it, spot against average, and the EU
   electricity price restated in dollars. Two things it demonstrates that no other
   page needed:
@@ -115,14 +133,16 @@ calls, so the recipe and the graph can't drift into running different builds.
     hand-written quotes in `'${inputs.ccy.value}'` are the cbam.md pattern again,
     and the selection is named in prose as `{inputs.ccy.label}` — a `<Value>`
     would show the first row of a query rather than what the reader picked.
-- `pages/retail.md`: one retailer's invoice lines, the only page below country
-  grain. What counts as revenue once stock write-offs and bad-debt adjustments
+- `pages/retail.md` and `pages/retail/`: one retailer's invoice lines, the only
+  pages below country grain. What counts as revenue once stock write-offs and bad-debt adjustments
   are separated out, a cohort retention heatmap, RFM segments from
   `analytics.retail_rfm`, and returns matched to their sale by inference. Its
   heatmap is where the `*_pct` auto-format trap below was found.
-- `pages/weather.md`: capital-city degree days from
+- `pages/weather.md` and `pages/weather/`: capital-city degree days from
   `marts.fct_country_weather_year`, as the control variable for "was it just a
-  colder year".
+  colder year". Its warming chart is a `<Heatmap>` of each capital against its own
+  average, not a line: the archive has a gap between 2007 and 2012, and a heatmap
+  draws nothing where there is no year, where a line would interpolate across it.
 
 The coverage and pipeline pages render an explanatory branch rather than an
 error when their data is empty, the way `restatements.md` does, because the

@@ -4,24 +4,11 @@ description: What a tonne of an imported CBAM good costs at the EU border, by wh
 sidebar_position: 1
 ---
 
-From 1 January 2026 an importer bringing cement, fertiliser, aluminium, hydrogen
-or iron and steel into the EU must surrender **CBAM certificates** for the carbon
-embedded in it. The first annual declaration, covering 2026 imports, is due in
-2027.
-
-Where the importer cannot get verified emissions data from the installation that
-actually made the goods, they fall back to a **country-specific default value**
-published in Annex I of [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621),
-plus a mark-up. That annex is a country × good carbon-intensity table. Multiplied
-by a carbon price it becomes a euro figure with a statutory deadline, and that
-multiplication is all this page does.
-
-The values here are Annex I **as corrected by [Implementing Regulation (EU)
-2026/1740](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740)**,
-which replaced Annexes I and IV in full on 3 August 2026 and applies retroactively
-from 1 January. The numbers themselves barely moved — 66 of 10,503 comparable
-rows, mostly down by a percent or two — but the table changed shape, and most of
-the original annex's defects were fixed at source.
+From 2026 an EU importer of steel, cement, aluminium, fertiliser or hydrogen pays
+for the carbon embedded in it. Without data from the plant that made the goods,
+the bill falls back to a country default published in
+[Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621),
+as corrected in August 2026. This page prices those defaults.
 
 ```sql headline
 select
@@ -29,8 +16,7 @@ select
     -- The fallback table is a rule, not a place, so it is not a sourcing country.
     count(distinct country_or_territory)
         filter (where not is_fallback_table)                 as n_countries,
-    max(ets_price_eur_per_t)                                as ets_price,
-    count(*)                                                as n_rows
+    max(ets_price_eur_per_t)                                as ets_price
 from warehouse.cbam_exposure
 ```
 
@@ -60,15 +46,10 @@ from fb inner join listed on fb.good_key = listed.good_key
     <BigValue data={headline} value=n_goods title="Goods priced"/>
     <BigValue data={headline} value=n_countries title="Sourcing countries"/>
     <BigValue data={headline} value=ets_price fmt='€#,##0' title="Carbon price assumed"/>
-    <BigValue data={fallback_penalty} value=median_ratio fmt='0.00"×"' title="Fallback vs. median country"/>
+    <BigValue data={fallback_penalty} value=median_ratio fmt='0.00"×"' title="Unlisted vs. median country"/>
 </Grid>
 
-For <Value data={fallback_penalty} column=n_worse/> of the <Value data={fallback_penalty} column=n_goods/> goods, the fallback value is worse than the median listed country; at the median it is <Value data={fallback_penalty} column=median_ratio fmt='0.00'/> times that country's value. That is the mechanism working as designed, since the defaults exist to make collecting real supplier data pay for itself.
-
-## The same tonne, a different border cost
-
-Pick a good. The ranking below is what the regulation says an importer owes per
-tonne of it, depending only on which country it was made in.
+## The same tonne costs very different amounts at the border
 
 ```sql goods_list
 select
@@ -79,7 +60,7 @@ where is_country_specific and not is_fallback_table
 group by 1, 2
 having count(*) >= 25
 -- `order by product_group` would be a binder error: the select list is the two
--- grouped columns, so the only orderable thing here is the label — which starts
+-- grouped columns, so the only orderable thing here is the label, which starts
 -- with the product group anyway.
 order by label
 ```
@@ -87,59 +68,37 @@ order by label
 <Dropdown data={goods_list} name=good value=value label=label defaultValue="72071190-semi-finished-products-of-iron-or-non-al" title="Good"/>
 
 ```sql ranked
+-- One bar per sourcing country, coloured by what the annex says about how the
+-- good is made. The route letters are the annex's own: E is scrap into an
+-- electric arc furnace, C and F are iron ore through a blast furnace. A row the
+-- annex left blank carries the catch-all value, route included, so it is
+-- coloured as that and not as a route the country never earned.
 select
     country_display_name,
-    region,
-    production_route_code,
-    -- Rendered, not just selected. Where the annex prints "-" for a listed
-    -- country the resolution rule copies the fallback row onto it *whole* —
-    -- tonnage, certificates, cost and the production route with them — so
-    -- 221 of the 11,037 rows this dropdown can reach, across 40 of its 252
-    -- goods, are the catch-all value wearing a country's name. 36 of them show
-    -- a route letter the country never earned. Nothing in the numbers
-    -- distinguishes those rows from a country-specific one, which is the whole
-    -- reason this column is on the table below rather than only in the query.
-    --
-    -- **`is_fallback_table` is tested first, and the order is the whole
-    -- correctness of the column.** `is_country_specific` means "the annex
-    -- printed a value in *this* row", not "this row is a country" — and the
-    -- annex does print one for "Other countries and territories", so all 260
-    -- fallback rows satisfy it. Asking `is_country_specific` first therefore
-    -- labelled the one row that is definitionally not a country
-    -- `Country-specific`, in the column that exists to say otherwise. The two
-    -- other uses of the flag on this page conjoin `not is_fallback_table` and
-    -- were always right; this one stood alone and was wrong from the day it
-    -- shipped. The row count above moved with the fix for the same reason: the
-    -- table displays the 252 fallback rows (one per good) and 10,785 was the
-    -- count with them taken out.
     case
-        when is_fallback_table then 'Annex fallback (catch-all row)'
-        when is_country_specific then 'Country-specific'
-        else 'Annex fallback'
-    end                                                     as value_basis,
-    total_t_co2e_per_t,
-    certificates_2026_t_co2e_per_t,
-    cbam_cost_2026_eur_per_t,
-    cbam_cost_2028_eur_per_t
+        when is_fallback_table then 'Catch-all row'
+        when not is_country_specific then 'No country value (catch-all copied)'
+        when production_route_code = 'E' then 'Route E: scrap, electric furnace'
+        when production_route_code in ('C', 'F', 'C/F') then 'Route C/F: ore, blast furnace'
+        when production_route_code is null then 'No route in the annex'
+        else 'Route ' || production_route_code
+    end                                                     as route,
+    cbam_cost_2026_eur_per_t
 from warehouse.cbam_exposure
 where good_key = '${inputs.good.value}'
 order by cbam_cost_2026_eur_per_t
 ```
 
 ```sql ranked_span
--- The fallback table stays on the chart below, where it is a useful reference
--- line, but it is not a sourcing country and must not be counted as one or
--- become the "cheapest source" of anything. The mart enforces the same rule on
--- `excess_over_cleanest_source_t_co2e_per_t` now — kept out of the window and
--- null on its own row — so this filter and that one are one policy stated in
--- two places, rather than a page working around a model that disagrees.
+-- The catch-all row is not a sourcing country, so it cannot be the cheapest or
+-- dearest source of anything; the mart keeps it out of its own window for the
+-- same reason.
 select
     count(*)                                                    as n,
     min(cbam_cost_2026_eur_per_t)                               as cheapest,
     max(cbam_cost_2026_eur_per_t)                               as dearest,
     -- A gap in euros, not a ratio: the ratio divides by the cheapest source, which
-    -- is often one scrap-route country near zero (63× for the default good) and
-    -- for one good is zero, so it measured the denominator rather than the spread.
+    -- is often one scrap-route country near zero and for one good is zero.
     max(cbam_cost_2026_eur_per_t) - min(cbam_cost_2026_eur_per_t) as gap,
     arg_min(country_display_name, cbam_cost_2026_eur_per_t)      as cheapest_country,
     arg_max(country_display_name, cbam_cost_2026_eur_per_t)      as dearest_country
@@ -148,321 +107,145 @@ where good_key = '${inputs.good.value}'
   and not is_fallback_table
 ```
 
-Across <Value data={ranked_span} column=n/> sourcing countries the 2026 cost runs from <Value data={ranked_span} column=cheapest_country/> at <Value data={ranked_span} column=cheapest fmt='€#,##0.00'/> per tonne up to <Value data={ranked_span} column=dearest_country/> at <Value data={ranked_span} column=dearest fmt='€#,##0.00'/> per tonne, a difference of <Value data={ranked_span} column=gap fmt='€#,##0.00'/> for an identical product.
-
 <BarChart
     data={ranked}
     x=country_display_name
     y=cbam_cost_2026_eur_per_t
-    swapXY=true
-    title="CBAM cost per tonne, 2026"
+    series=route
+    seriesColors={{
+        'Route E: scrap, electric furnace': ['#1baf7a', '#199e70'],
+        'Route C/F: ore, blast furnace': ['#b5530a', '#c7641b'],
+        'No route in the annex': ['#2a78d6', '#3987e5'],
+        'No country value (catch-all copied)': ['#b8bcc4', '#c8ccd3'],
+        'Catch-all row': ['#5c6068', '#6c7078']
+    }}
+    sort=false
     yFmt='€#,##0'
+    echartsOptions={{xAxis: {axisLabel: {show: false}}}}
+    title="Border cost per tonne in 2026, one bar per sourcing country"
+    subtitle="Cheapest to dearest; hover a bar for the country"
 />
 
-<DataTable data={ranked} rows=12 search=true>
-    <Column id=country_display_name title="Sourcing country"/>
-    <Column id=production_route_code title="Route"/>
-    <Column id=value_basis title="Value basis" align=left/>
-    <Column id=total_t_co2e_per_t title="tCO₂e/t, before mark-up" fmt='0.000'/>
-    <Column id=certificates_2026_t_co2e_per_t title="Certificates 2026" fmt='0.000'/>
-    <Column id=cbam_cost_2026_eur_per_t title="€/t 2026" fmt='€#,##0.00'/>
-    <Column id=cbam_cost_2028_eur_per_t title="€/t 2028" fmt='€#,##0.00'/>
-</DataTable>
+For this good the 2026 cost runs from <Value data={ranked_span} column=cheapest_country/> at <Value data={ranked_span} column=cheapest fmt='€#,##0'/> a tonne to <Value data={ranked_span} column=dearest_country/> at <Value data={ranked_span} column=dearest fmt='€#,##0'/> a tonne, a gap of <Value data={ranked_span} column=gap fmt='€#,##0'/> on an identical product. For steel the colours sort almost perfectly: the production route, not the country, sets the price. **[Every country, with its route and value →](/cbam/by-country)**
 
-<Alert status=info>
+## Electricity is almost none of it
 
-**So what.** For steel the spread is not mainly about the national grid. It is
-about the **production route**. The `Route` column is the annex's own indicator:
-`E` is scrap into an electric arc furnace, `C` and `F` are ore through a blast
-furnace. Sorting by cost sorts by route almost perfectly, and the countries at
-the clean end are not the ones with clean grids. This is the opposite of the
-[Scope 2](/scope2) story, where the grid was the whole answer, and it is why a
-procurement team screening suppliers on country-level carbon data alone will pick
-the wrong lanes.
-
-**Read the `Value basis` column before the route.** Where the annex prints "-"
-for a listed country, the regulation sends that whole line to the "other
-countries and territories" table — tonnage, certificates, cost *and* the
-production route together. Those rows say `Annex fallback`, and the route letter
-on them belongs to the catch-all, not to the country: 221 of the 11,037 rows
-this dropdown can reach fall back, and 36 of them display a route the country
-never earned. The catch-all row itself is in the table too, one per good, and
-says `Annex fallback (catch-all row)` — it is the rule those 221 are copies of,
-not one more country goods are made in. Pick *Cement · 2523 90 00 90 — Other hydraulic cements* to see the
-shape of it: 24 of that good's 100 sourcing countries carry one identical
-tonnage between them, against 39 distinct values across the other 76. They are
-still what an importer owes; they are not evidence about how that country makes
-the good.
-
-</Alert>
-
-## Why the national grid barely enters the number
-
-The section above says the grid is not the story. This one says why, and the
-reason is not statistical: the regulation mostly does not count electricity at
-all.
-
-```sql electricity_share
+```sql electricity_split
+-- Averages over every country-specific value, excluding the catch-all table.
 select
     product_group,
-    avg(direct_t_co2e_per_t)                                    as avg_direct,
-    avg(indirect_t_co2e_per_t)                                  as avg_indirect,
-    100.0 * sum(coalesce(indirect_t_co2e_per_t, 0))
-        / sum(total_t_co2e_per_t)                               as pct_electricity,
-    case
-        when count(indirect_t_co2e_per_t) = 0        then 'Not published'
-        when count(indirect_t_co2e_per_t) = count(*) then 'Every row'
-        else count(indirect_t_co2e_per_t)::varchar
-             || ' of ' || count(*)::varchar || ' rows'
-    end                                                         as indirect_coverage
+    'Burned in the process (direct)' as source,
+    avg(direct_t_co2e_per_t) as t_co2e
 from warehouse.cbam_exposure
-where not is_fallback_table
-  and total_t_co2e_per_t > 0
-group by 1
-order by pct_electricity desc
-```
-
-```sql electricity_overall
-select
-    100.0 * sum(coalesce(indirect_t_co2e_per_t, 0))
-        / sum(total_t_co2e_per_t)  as pct_electricity_overall,
-    count(*)                       as n_rows
-from warehouse.cbam_exposure
-where not is_fallback_table
-  and total_t_co2e_per_t > 0
-```
-
-<Grid cols=2>
-    <BigValue data={electricity_overall} value=pct_electricity_overall fmt='0.0"%"' title="Electricity's share of all priced carbon"/>
-    <BigValue data={electricity_overall} value=n_rows fmt="#,##0" title="Country × good values priced"/>
-</Grid>
-
-<DataTable data={electricity_share} rows=5 rowNumbers=false>
-    <Column id=product_group title="Product group"/>
-    <Column id=avg_direct title="Direct tCO₂e/t" fmt='0.00'/>
-    <Column id=avg_indirect title="Indirect (electricity) tCO₂e/t" fmt='0.00'/>
-    <Column id=pct_electricity title="Electricity's share" fmt='0.0"%"'/>
-    <Column id=indirect_coverage title="Indirect value published for" align=left/>
-</DataTable>
-
-Indirect emissions — the carbon in the electricity the plant drew — are published
-only for **cement and fertilisers**. For aluminium and hydrogen the annex carries
-no indirect column at all, and for iron and steel it is present on 33 of the
-6,472 rows above. Even where it does count, it is small: 7.5% of a cement tonne and 5.5% of a
-fertiliser one. Across the whole annex, electricity is under **1%** of the carbon
-being priced.
-
-That leaves a testable prediction: if the grid barely enters the number, a
-country's border cost should barely follow its grid. It doesn't.
-
-```sql grid_vs_default
--- The grid factor is OWID's (`grid_factor_t_co2_per_mwh`), context rather than
--- the factor the annex used, which is the question being asked: does the grid a
--- country runs on show up in what its goods pay at all?
-select
-    product_group,
-    count(*)                                               as n_values,
-    corr(grid_factor_t_co2_per_mwh, total_t_co2e_per_t)     as correlation
-from warehouse.cbam_exposure
-where is_country_specific
-  and not is_fallback_table
-  and grid_factor_t_co2_per_mwh is not null
+where not is_fallback_table and total_t_co2e_per_t > 0
 group by product_group
-order by correlation desc
-```
-
-<DataTable data={grid_vs_default} rows=5 rowNumbers=false>
-    <Column id=product_group title="Product group"/>
-    <Column id=n_values title="Country × good values" fmt="#,##0"/>
-    <Column id=correlation title="Correlation with the country's grid factor" fmt="0.00"/>
-</DataTable>
-
-Iron and steel and cement follow the grid somewhat. For steel the priced value is
-almost entirely direct emissions, as the table above shows, so whatever links a
-country's steel to its grid, it is not the carbon in the electricity. Aluminium
-does not follow the grid at all.
-
-```sql primary_aluminium
--- Route K is primary aluminium, made by electrolysis; L, the other route the
--- annex prints for this good, is secondary aluminium from scrap. Holding the
--- route fixed keeps it out of the comparison, which matters because in steel
--- the route is the whole spread (see above).
+union all
 select
-    country_display_name,
-    grid_factor_t_co2_per_mwh,
-    grid_factor_year,
-    cbam_cost_2026_eur_per_t
+    product_group,
+    'Electricity drawn (indirect)',
+    avg(coalesce(indirect_t_co2e_per_t, 0))
 from warehouse.cbam_exposure
-where good_key = '7601-unwrought-aluminium'
-  and is_country_specific
-  and not is_fallback_table
-  and production_route_code = 'K'
-  and grid_factor_t_co2_per_mwh is not null
+where not is_fallback_table and total_t_co2e_per_t > 0
+group by product_group
 ```
 
-```sql primary_aluminium_summary
-select
-    count(*)                                                            as n_countries,
-    corr(grid_factor_t_co2_per_mwh, cbam_cost_2026_eur_per_t)            as correlation,
-    arg_min(country_display_name, grid_factor_t_co2_per_mwh)            as cleanest_grid_country,
-    arg_min(cbam_cost_2026_eur_per_t, grid_factor_t_co2_per_mwh)        as cleanest_grid_cost,
-    arg_max(country_display_name, grid_factor_t_co2_per_mwh)            as dirtiest_grid_country,
-    arg_max(cbam_cost_2026_eur_per_t, grid_factor_t_co2_per_mwh)        as dirtiest_grid_cost,
-    arg_max(country_display_name, cbam_cost_2026_eur_per_t)             as dearest_country,
-    max(cbam_cost_2026_eur_per_t)                                       as dearest_cost,
-    arg_max(grid_factor_t_co2_per_mwh, cbam_cost_2026_eur_per_t)        as dearest_grid
-from ${primary_aluminium}
-```
-
-<ScatterPlot
-    data={primary_aluminium}
-    x=grid_factor_t_co2_per_mwh
-    y=cbam_cost_2026_eur_per_t
-    xFmt="0.00"
-    yFmt='€#,##0'
-    yMin={0}
-    xAxisTitle="Grid emission factor (tCO₂ / MWh)"
-    yAxisTitle="CBAM cost per tonne, 2026"
-    tooltipTitle=country_display_name
-    title="Primary aluminium: the border cost against the grid it was smelted on"
-    subtitle="Unwrought aluminium, production route K, one point per sourcing country."
+<BarChart
+    data={electricity_split}
+    x=product_group
+    y=t_co2e
+    series=source
+    seriesColors={{
+        'Burned in the process (direct)': ['#b5530a', '#c7641b'],
+        'Electricity drawn (indirect)': ['#2a78d6', '#3987e5']
+    }}
+    type=stacked100
+    swapXY=true
+    labels=true
+    labelFmt="0%"
+    chartAreaHeight=200
+    title="What the priced carbon is, by product group"
 />
 
-Primary aluminium is made by electrolysis, and the annex publishes no indirect value for it. Across the <Value data={primary_aluminium_summary} column=n_countries/> countries with a primary-aluminium value, <Value data={primary_aluminium_summary} column=cleanest_grid_country/> has the cleanest grid and pays <Value data={primary_aluminium_summary} column=cleanest_grid_cost fmt='€#,##0'/> a tonne while <Value data={primary_aluminium_summary} column=dirtiest_grid_country/> has the dirtiest and pays <Value data={primary_aluminium_summary} column=dirtiest_grid_cost fmt='€#,##0'/> a tonne, with a correlation of <Value data={primary_aluminium_summary} column=correlation fmt="0.00"/> between the two across them.
+The annex counts electricity only for cement and fertilisers, and even there it
+is under a tenth. So a country's grid barely moves its border cost: primary
+aluminium costs about the same whether it was smelted on the cleanest grid or the
+dirtiest. **[Why the grid barely counts →](/cbam/grid)**
 
-The dearest source of all is <Value data={primary_aluminium_summary} column=dearest_country/> at <Value data={primary_aluminium_summary} column=dearest_cost fmt='€#,##0'/> a tonne, on a grid of <Value data={primary_aluminium_summary} column=dearest_grid fmt="0.00"/> tCO₂ per MWh.
-
-<Alert status=info>
-
-**So what.** A country's grid can be among the dirtiest in the world and barely
-move its CBAM bill, because the bill is overwhelmingly the carbon burned *in the
-process* — the coke in a blast furnace, the calcination of limestone — not the
-carbon behind the meter. So the weak correlation between a country's grid factor
-and its border cost is a fact about the regulation and not a quirk of this
-dataset. The two carbon numbers this site publishes answer different questions
-and are not substitutes: a grid factor is the right input to a Scope 2 disclosure
-and the wrong input to a sourcing decision on steel.
-
-**Who acts:** whoever is building a supplier-screening or carbon-cost model.
-**Cost of getting it wrong:** ranking suppliers on grid data that the border cost
-is almost entirely insensitive to.
-
-</Alert>
-
-## The price is a parameter, not a forecast
-
-There is no clean free public API for EU ETS spot, so this page does not pretend
-to quote one. The tonnage is fixed by the regulation; the euro figure is that
-tonnage times a price you choose. Below is the same selected good at the cheapest
-and dearest source, from €60 to €120 a tonne: roughly the range EUAs have traded
-in since 2022, with room above it.
+## The euro figure is a price you choose
 
 ```sql sensitivity
 with bounds as (
     select
-        arg_min(country_display_name, cbam_cost_2026_eur_per_t) as cheapest_country,
-        arg_max(country_display_name, cbam_cost_2026_eur_per_t) as dearest_country,
-        min(certificates_2026_t_co2e_per_t)                     as cheapest_t,
-        max(certificates_2026_t_co2e_per_t)                     as dearest_t
+        min(certificates_2026_t_co2e_per_t) as cheapest_t,
+        max(certificates_2026_t_co2e_per_t) as dearest_t
     from warehouse.cbam_exposure
     where good_key = '${inputs.good.value}'
       and not is_fallback_table
 ),
 prices as (select unnest([60, 75, 90, 105, 120]) as eur_per_t_co2)
-select
-    prices.eur_per_t_co2,
-    bounds.cheapest_country,
-    bounds.cheapest_t * prices.eur_per_t_co2                    as cheapest_eur_per_t,
-    bounds.dearest_country,
-    bounds.dearest_t * prices.eur_per_t_co2                     as dearest_eur_per_t,
-    (bounds.dearest_t - bounds.cheapest_t) * prices.eur_per_t_co2 as gap_eur_per_t
+select prices.eur_per_t_co2, 'Dearest source' as source, bounds.dearest_t * prices.eur_per_t_co2 as eur_per_t
 from prices cross join bounds
-order by prices.eur_per_t_co2
+union all
+select prices.eur_per_t_co2, 'Cheapest source', bounds.cheapest_t * prices.eur_per_t_co2
+from prices cross join bounds
+order by 1
 ```
 
-<DataTable data={sensitivity}>
-    <Column id=eur_per_t_co2 title="Carbon price €/tCO₂e" fmt='€#,##0'/>
-    <Column id=cheapest_country title="Cheapest source"/>
-    <Column id=cheapest_eur_per_t title="€/t of good" fmt='€#,##0.00'/>
-    <Column id=dearest_country title="Dearest source"/>
-    <Column id=dearest_eur_per_t title="€/t of good" fmt='€#,##0.00'/>
-    <Column id=gap_eur_per_t title="Gap" fmt='€#,##0.00'/>
-</DataTable>
+<LineChart
+    data={sensitivity}
+    x=eur_per_t_co2
+    y=eur_per_t
+    series=source
+    seriesColors={{
+        'Dearest source': ['#b5530a', '#c7641b'],
+        'Cheapest source': ['#1baf7a', '#199e70']
+    }}
+    markers=true
+    xFmt='€#,##0'
+    yFmt='€#,##0'
+    yMin=0
+    echartsOptions={{xAxis: {min: 'dataMin', max: 'dataMax'}}}
+    xAxisTitle="Carbon price per tonne of CO₂"
+    title="Cost per tonne of the selected good, at €60 to €120 of carbon"
+/>
 
-## The mark-up escalates, and not uniformly
+There is no free public feed for the EU carbon price, so the page does not
+pretend to quote one. The tonnage is fixed by law; the euros scale with whatever
+price you assume, and the gap between suppliers scales with it.
 
-The defaults are applied with a mark-up that rises over the phase-in: **10% in
-2026, 20% in 2027, 30% from 2028**. Fertilisers are the exception at 1%, in all
-three years.
+## The bill rises every year to 2028
 
 ```sql markups
-select
-    product_group,
-    count(*)                                            as n_rows,
-    avg(markup_2026_pct)                                as markup_pct,
-    median(cbam_cost_2026_eur_per_t)                    as median_2026,
-    median(cbam_cost_2028_eur_per_t)                    as median_2028
-from warehouse.cbam_exposure
-group by 1
-order by median_2026 desc
+-- Years as text: three numeric ticks on a value axis come out as 2,026.5.
+select product_group, '2026' as import_year, median(cbam_cost_2026_eur_per_t) as median_eur, 1 as ord from warehouse.cbam_exposure group by 1
+union all
+select product_group, '2027', median(cbam_cost_2027_eur_per_t), 2 from warehouse.cbam_exposure group by 1
+union all
+select product_group, '2028', median(cbam_cost_2028_eur_per_t), 3 from warehouse.cbam_exposure group by 1
+order by ord
 ```
 
-<DataTable data={markups}>
-    <Column id=product_group title="Product group"/>
-    <Column id=n_rows title="Rows" fmt='#,##0'/>
-    <Column id=markup_pct title="2026 mark-up" fmt='0.0"%"'/>
-    <Column id=median_2026 title="Median €/t, 2026" fmt='€#,##0.00'/>
-    <Column id=median_2028 title="Median €/t, 2028" fmt='€#,##0.00'/>
-</DataTable>
+<LineChart
+    data={markups}
+    x=import_year
+    y=median_eur
+    series=product_group
+    sort=false
+    markers=true
+    yFmt='€#,##0'
+    title="Median border cost per tonne, by year of import"
+/>
 
-The mark-up is set per product group, not as one rate, and the difference
-matters: a flat 10/20/30% would overstate every one of the 2,457 fertiliser rows
-by nine points in 2026 and twenty-seven by 2028. The schedule itself comes from
-the articles rather than the annex, as the limits below explain.
-
-## What this is not
+The defaults carry a mark-up of 10% in 2026, 20% in 2027 and 30% from 2028, so
+the cost of *not* collecting supplier data grows each year. Fertilisers are the
+exception, at a flat 1%. **[Method and limits →](/cbam/method)**
 
 <Alert status=warning>
 
-**A screening tool, not a filing.** Every number here is an *administrative
-default*: an estimate of a country's average, deliberately marked up so that
-obtaining verified installation data is the cheaper path. A real importer with
-supplier data will use that instead and will usually pay less. What this ranks is
-which sourcing lanes are worth the effort of going to get that data.
+**A screening tool, not a filing.** These are administrative defaults, marked up
+on purpose so that verified supplier data is the cheaper route. They rank which
+sourcing lanes are worth collecting that data for.
 
 </Alert>
 
-Four more limits, stated plainly because a practitioner will check them first:
-
-- **A CN code alone does not always identify a row.** In the original annex,
-  2523 10 00 was both white clinker and grey clinker, whose default
-  values differ by more than a factor of two. The correction gives those two
-  10-digit TARIC codes — 2523 10 00 10 and 2523 10 00 90 — so that particular
-  trap is closed, but the annex still prints 4- and 6-digit headings above the
-  rows that carry the numbers, and classification to the right description
-  remains the importer's problem.
-- **The annex's defects are reproduced rather than corrected.** The seed
-  transcribes the regulation as it stands, defects included. A legal instrument
-  is not this project's to tidy up, and the correction is the argument for that:
-  the original annex's quirks were fixed by the body that wrote it rather than by
-  us.
-- **The mark-up is asserted, not read off the annex.** The corrected annex
-  publishes only direct, indirect and total, so the phase-in — 10 / 20 / 30%
-  for cement, iron and steel, aluminium and hydrogen, a flat 1% for fertilisers —
-  comes from a seed stating what the articles say. Same numbers, weaker provenance, and worth
-  knowing which it is.
-- **The grid factor shown elsewhere in this warehouse is not the annex's.** The
-  regulation's own electricity emission factors come from IEA data under a
-  non-commercial licence, which this project deliberately does not redistribute.
-  Where the annex publishes a direct/indirect split at all, which covers cement
-  and fertilisers and almost none of iron and steel, the indirect part is
-  electricity, but it cannot be reconciled against the OWID-derived factors on
-  the [Scope 2](/scope2) page. They sit beside each other; they are not the same
-  measurement.
-
-The underlying table is `marts.fct_cbam_exposure`, and the transcribed annex is
-the `cbam_default_values` and `cbam_goods` seeds, with the phase-in rates in
-`cbam_markup_schedule`. The mart ships in the
-[data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest)
-both as Parquet and inside the DuckDB file; the two seeds are in the DuckDB
-file's `main` schema only.
+<small>Source: <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621">Implementing Regulation (EU) 2025/2621</a>, Annex I, as corrected by <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740">Implementing Regulation (EU) 2026/1740</a>. Modelled as <code>marts.fct_cbam_exposure</code>.</small>

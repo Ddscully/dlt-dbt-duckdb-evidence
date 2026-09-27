@@ -4,25 +4,19 @@ description: Grid emission factors packaged as a reference table, with the vinta
 sidebar_position: 2
 ---
 
-The **location-based Scope 2 emission factor** under the GHG Protocol: the number
-a company multiplies its metered kWh by to produce the purchased-electricity line
-of a CSRD, SECR or CDP disclosure.
-
-This page is that factor for every country, with the four things a reporter needs
-beside it: the unit meter data actually arrives in, the year it belongs to, how
-stale that year is, and whether it has been restated since it was first
-published.
+The **location-based Scope 2 emission factor** is the number a company multiplies
+its metered electricity by for the purchased-electricity line of a CSRD, SECR or
+CDP disclosure. This is that factor for every country, with its vintage and its
+revision history.
 
 ```sql headline
 -- The double cast is not redundant. Evidence's DuckDB extractor writes every
 -- numeric column to parquet as DOUBLE, so a page-level `cast(year as varchar)`
--- runs over a double and produces '2025.0'. Casting back to integer first is what
--- makes a year render as a year. See reports/README.md.
+-- runs over a double and produces '2025.0'. See reports/README.md.
 select
     count(*)                                                as n_countries,
     cast(cast(max(latest_available_year) as integer) as varchar) as newest_vintage,
-    count(*) filter (where latest_factor_lag_years = 0)      as n_at_frontier,
-    count(*) filter (where latest_factor_lag_years >= 2)     as n_stale
+    count(*) filter (where latest_factor_lag_years = 0)      as n_at_frontier
 from warehouse.grid_emission_factors
 where is_latest_available
 ```
@@ -50,77 +44,58 @@ where is_latest_available
     <BigValue data={spread} value=ratio fmt='0"×"' title="Spread across grids >10 TWh"/>
 </Grid>
 
-Across the <Value data={spread} column=n_countries/> countries with a grid above 10 TWh, the current factor runs from <Value data={spread} column=cleanest_country/> at <Value data={spread} column=cleanest fmt="0.0"/> up to <Value data={spread} column=dirtiest_country/> at <Value data={spread} column=dirtiest fmt="#,##0"/> grams of CO₂ per kWh.
+## The same site reports a different number on address alone
 
-That is a wider spread than the 24× quoted on the [findings](/findings) page,
-which uses a 150 TWh floor instead of 10. Same series, different cut. Which floor
-to apply is itself a reporting decision, not a detail.
-
-<Alert status=info>
-
-**So what.** An identical site reports a wildly different Scope 2 figure on
-address alone, and under CSRD that figure is audited. Companies buy this table
-today from consultancies and from the IEA, whose emission-factor product is
-paywalled at four figures.
-
-**Who acts:** sustainability reporting, and site selection long before them.
-**Cost of getting it wrong:** a factor of the wrong vintage, or the wrong unit,
-inside a number an assurance provider signs.
-
-</Alert>
-
-## The reference table
-
-The current factor for every country that has one. Which year that is differs
-from country to country, and the vintage section below is why.
-
-```sql latest_factors
+```sql factor_map
+-- Capped at 900 g for the colour, so a few diesel islands above 1,000 do not
+-- wash out the continents; the tooltip shows the real factor.
 select
+    country_iso3,
     country_name,
-    region,
-    year,
     emission_factor_g_co2_per_kwh,
-    emission_factor_t_co2_per_mwh,
-    low_carbon_share_elec_pct,
-    electricity_generation_twh,
-    latest_factor_lag_years
+    cast(cast(year as integer) as varchar)          as factor_year,
+    least(emission_factor_g_co2_per_kwh, 900)       as "gCO₂ per kWh"
 from warehouse.grid_emission_factors
 where is_latest_available
-order by emission_factor_g_co2_per_kwh
 ```
 
-<DataTable data={latest_factors} rows=12 search=true>
-    <Column id=country_name title="Country"/>
-    <Column id=year title="Year" fmt="0"/>
-    <Column id=emission_factor_g_co2_per_kwh title="gCO₂ / kWh" fmt="#,##0.0"/>
-    <Column id=emission_factor_t_co2_per_mwh title="tCO₂e / MWh" fmt="0.0000"/>
-    <Column id=low_carbon_share_elec_pct title="Low-carbon %" fmt="0"/>
-    <Column id=electricity_generation_twh title="Grid (TWh)" fmt="#,##0.0"/>
-    <Column id=latest_factor_lag_years title="Years behind" fmt="0"/>
-</DataTable>
+<!-- `../`, because this page is served at `<base>/<page>/` and the two files sit
+at the site root; a bare name resolves against the page and 404s. -->
+<AreaMap
+    data={factor_map}
+    areaCol=country_iso3
+    geoJsonUrl="../world-countries.geojson"
+    geoId=iso3
+    value="gCO₂ per kWh"
+    valueFmt="#,##0"
+    colorPalette={['#d6e6f7', '#8fb8e6', '#eda100', '#b5530a', '#5a2403']}
+    basemap="../blank-tile.png"
+    startingLat=30
+    startingLong=10
+    startingZoom=1
+    height=420
+    title="Latest grid emission factor, gCO₂ per kWh (900 or more shown as 900)"
+    tooltip={[
+        {id: 'country_name', showColumnName: false, valueClass: 'font-semibold'},
+        {id: 'emission_factor_g_co2_per_kwh', title: 'gCO₂ per kWh', fmt: '#,##0'},
+        {id: 'factor_year', title: 'Year'}
+    ]}
+/>
 
-Two units for one number, on purpose. `gCO₂/kWh` is how the series is published
-and how a reader holds it. `tCO₂e/MWh` is the unit meter data arrives in, and
-making a reporter do the divide-by-1000 in a spreadsheet is how a filing acquires
-a factor-of-1000 error.
+<style>
+    :global(.leaflet-container) { background: transparent !important; }
+</style>
 
-## Vintage: "the latest factor" is not one year
+Among grids over 10 TWh the factor runs from <Value data={spread} column=cleanest_country/> at <Value data={spread} column=cleanest fmt="0.0"/> g per kWh to <Value data={spread} column=dirtiest_country/> at <Value data={spread} column=dirtiest fmt="#,##0"/> g. Under CSRD that figure is audited, and companies buy this table from consultancies and the IEA. **[The reference table →](/scope2/factors)**
 
-A reporter needs *the most recent published factor for country X*, and that
-resolves to a different year for different countries. Filtering the table to a
-single latest year would silently drop more than half the world.
+## "The latest factor" is not one year
 
 ```sql vintage
 -- Double cast again: the category axis takes a string, and the string has to be
--- made from an integer or it reads '2024.0'.
---
--- The bars are how many countries stop at each year; the line is the decision.
--- Cumulative *descending*, because "cut at year X" means "accept a factor from X
--- or later", so the coverage of a cut-off is everything at or above it.
+-- made from an integer or it reads '2024.0'. Cumulative *descending*, because
+-- "cut at year X" means "accept a factor from X or later".
 with by_year as (
-    select
-        latest_available_year,
-        count(*) as n_countries
+    select latest_available_year, count(*) as n_countries
     from warehouse.grid_emission_factors
     where is_latest_available
     group by latest_available_year
@@ -144,266 +119,71 @@ order by latest_available_year
     y2Fmt='0"%"'
     y2Min={0}
     sort=false
-    xAxisTitle="Vintage"
+    color="#2a78d6"
+    title="Countries by year of their newest factor, and the coverage of each cut-off"
     yAxisTitle="Countries"
     y2AxisTitle="Covered by this cut-off"
 />
 
-The bars are the distribution; the line is the thing a reporter has to decide.
-Insisting on a 2025 factor covers **43%** of countries. Accepting 2024 or later
-covers **94%**, and the two years below that add the last six points.
-So the cut-off is not a tidy "use the latest year". It is a choice about how much
-of the world you are willing to leave out of a filing, and tightening it by one
-year costs fifty points of coverage.
+Insisting on this year's factor covers under half the world; accepting last year's
+covers almost all of it. The cut-off is a choice about how much of the world a
+filing leaves out. **[Vintage and restatements →](/scope2/vintage)**
 
-Twelve countries are two years or more behind the frontier, and grid size is no
-protection: Ukraine's most recent published factor is 2022, on a 111 TWh grid.
-
-```sql stale
-select
-    country_name,
-    region,
-    latest_available_year,
-    latest_factor_lag_years,
-    emission_factor_g_co2_per_kwh,
-    electricity_generation_twh
-from warehouse.grid_emission_factors
-where is_latest_available
-  and latest_factor_lag_years >= 2
-order by electricity_generation_twh desc
-```
-
-<DataTable data={stale} rows=12>
-    <Column id=country_name title="Country"/>
-    <Column id=latest_available_year title="Newest factor" fmt="0"/>
-    <Column id=latest_factor_lag_years title="Years behind" fmt="0"/>
-    <Column id=emission_factor_g_co2_per_kwh title="gCO₂ / kWh" fmt="#,##0.0"/>
-    <Column id=electricity_generation_twh title="Grid (TWh)" fmt="#,##0.0"/>
-</DataTable>
-
-## Worked example: twelve sites, one year
+## Where the power is used is not where the emissions land
 
 <Alert status=warning>
 
-**The twelve sites below are invented.** They describe a hypothetical manufacturer on four
-continents, seeded in `dbt/seeds/example_scope2_sites.csv`. They are the only
-fabricated data in this warehouse. The factors they are multiplied by are real.
+**The twelve sites here are invented**, the only fabricated data in this
+warehouse. The factors they are multiplied by are real.
 
 </Alert>
 
-```sql group_totals
-select
-    sum(annual_electricity_mwh)                                        as mwh,
-    sum(scope2_t_co2e)                                                 as t_actual,
-    sum(scope2_at_best_grid_t_co2e)                                    as t_best,
-    sum(scope2_at_worst_grid_t_co2e)                                   as t_worst,
-    sum(scope2_at_worst_grid_t_co2e) / sum(scope2_at_best_grid_t_co2e) as ratio,
-    count(*)                                                           as n_sites
-from warehouse.example_scope2_emissions
-```
-
-```sql group_extremes
-select
-    arg_min(country_name, emission_factor_g_co2_per_kwh) as cleanest_country,
-    min(emission_factor_g_co2_per_kwh)                   as cleanest_factor,
-    arg_max(country_name, emission_factor_g_co2_per_kwh) as dirtiest_country,
-    max(emission_factor_g_co2_per_kwh)                   as dirtiest_factor
-from warehouse.example_scope2_emissions
-```
-
-<Grid cols=3>
-    <BigValue data={group_totals} value=mwh fmt="#,##0" title="Electricity purchased (MWh)"/>
-    <BigValue data={group_totals} value=t_actual fmt="#,##0" title="Scope 2, location-based (tCO₂e)"/>
-    <BigValue data={group_totals} value=ratio fmt='0.0"×"' title="Dirtiest grid vs cleanest, same demand"/>
-</Grid>
-
-```sql sites
+```sql site_gap
 select
     site_name,
-    site_type,
-    country_name,
-    annual_electricity_mwh,
-    factor_year,
-    emission_factor_g_co2_per_kwh,
-    scope2_t_co2e,
-    share_of_group_pct,
-    100 * annual_electricity_mwh / sum(annual_electricity_mwh) over () as share_of_mwh_pct
+    share_of_group_pct
+        - 100 * annual_electricity_mwh / sum(annual_electricity_mwh) over () as gap_pts,
+    case
+        when share_of_group_pct
+            > 100 * annual_electricity_mwh / sum(annual_electricity_mwh) over ()
+            then 'More of the emissions than of the power'
+        else 'Less of the emissions than of the power'
+    end as direction
 from warehouse.example_scope2_emissions
-order by scope2_t_co2e desc
-```
-
-<DataTable data={sites} rows=12>
-    <Column id=site_name title="Site"/>
-    <Column id=country_name title="Country"/>
-    <Column id=annual_electricity_mwh title="MWh / yr" fmt="#,##0"/>
-    <Column id=factor_year title="Factor year" fmt="0"/>
-    <Column id=emission_factor_g_co2_per_kwh title="gCO₂ / kWh" fmt="#,##0.0"/>
-    <Column id=scope2_t_co2e title="tCO₂e" fmt="#,##0"/>
-    <Column id=share_of_group_pct title="Share of total" fmt='0.0"%"'/>
-</DataTable>
-
-That is the entire calculation: MWh × tCO₂e/MWh, summed. What it produces is a
-group total whose shape has almost nothing to do with where the electricity is
-used.
-
-```sql site_shares_long
-select site_name, 'Share of electricity used' as measure, share_of_mwh_pct as pct
-from ${sites}
-union all
-select site_name, 'Share of emissions reported', share_of_group_pct
-from ${sites}
+order by gap_pts desc
 ```
 
 <BarChart
-    data={site_shares_long}
+    data={site_gap}
     x=site_name
-    y=pct
-    series=measure
+    y=gap_pts
+    series=direction
     seriesColors={{
-        'Share of electricity used': ['#1baf7a', '#199e70'],
-        'Share of emissions reported': ['#eda100', '#c98500']
+        'More of the emissions than of the power': ['#eb6834', '#d95926'],
+        'Less of the emissions than of the power': ['#2a78d6', '#3987e5']
     }}
-    type=grouped
     swapXY=true
     sort=false
-    yFmt="0"
-    xAxisTitle="Site"
-    yAxisTitle="Share of group total (%)"
+    yFmt='0" pts"'
+    title="Each site's share of reported emissions minus its share of electricity used"
+    subtitle="Percentage points, one hypothetical manufacturer"
 />
 
-Lyon and Göteborg together draw 17% of the group's electricity and account for
-1.7% of its reported emissions. Lyon alone draws three times the power of the
-Durban depot, 54 GWh against 18, and reports less than a fifth of its tonnes,
-because France's grid runs at 41 gCO₂/kWh and South Africa's at 699. At the other
-end of the table, Pune is 11% of the electricity and 18% of the footprint.
-
-```sql scenarios
--- Short labels: the category axis clips long ones from the left, so
--- "All on the group's cleanest grid" renders missing its first character.
-select 'As sited today' as scenario, t_actual as t_co2e, 1 as ord from ${group_totals}
-union all
-select 'All on cleanest grid', t_best, 2 from ${group_totals}
-union all
-select 'All on dirtiest grid', t_worst, 3 from ${group_totals}
-order by ord
-```
-
-<BarChart
-    data={scenarios}
-    x=scenario
-    y=t_co2e
-    swapXY=true
-    sort=false
-    color="#eb6834"
-    labels=true
-    labelFmt="#,##0"
-    xAxisTitle="Scope 2, location-based (tCO₂e)"
-    yAxisTitle="Scenario"
-/>
-
-The same <Value data={group_totals} column=mwh fmt="#,##0"/> MWh, moved nowhere except on paper: every site placed on the cleanest grid in the set, <Value data={group_extremes} column=cleanest_country/> at <Value data={group_extremes} column=cleanest_factor fmt="0.0"/> g/kWh, then every site on the dirtiest, <Value data={group_extremes} column=dirtiest_country/> at <Value data={group_extremes} column=dirtiest_factor fmt="#,##0"/> g/kWh.
-
-Both ends are countries this company already operates in, so the ratio between
-them is not hypothetical. It is the accumulated cost of siting decisions already
-taken, sitting in a number that has to be published.
-
-## Has the factor been restated?
-
-A disclosure is filed against the factor published *at the time*. When the
-publisher revises that year afterwards, the filing does not become wrong. It
-becomes a filing against a superseded factor, which is something you have to be
-able to demonstrate. This warehouse keeps every version of every factor from 2015
-on, so the number you filed against is still there to point at.
-
-```sql restatements
-select
-    country_name,
-    year,
-    first_published_factor_g_co2_per_kwh as first_factor,
-    emission_factor_g_co2_per_kwh        as current_factor,
-    emission_factor_g_co2_per_kwh
-        - first_published_factor_g_co2_per_kwh as change_g,
-    factor_version_count,
-    last_revised_at
-from warehouse.grid_emission_factors
-where is_restated
-order by abs(
-    emission_factor_g_co2_per_kwh - first_published_factor_g_co2_per_kwh
-) desc
-limit 20
-```
-
-{#if restatements.length > 0}
-
-<DataTable data={restatements} rows=20>
-    <Column id=country_name title="Country"/>
-    <Column id=year title="Factor year" fmt="0"/>
-    <Column id=first_factor title="As first published" fmt="#,##0.0"/>
-    <Column id=current_factor title="Now" fmt="#,##0.0"/>
-    <Column id=change_g title="Change (g/kWh)" fmt="#,##0.0" contentType=delta/>
-    <Column id=factor_version_count title="Versions" fmt="0"/>
-</DataTable>
-
-Each of these is a country-year whose factor moved after this warehouse first
-recorded it. A Scope 2 line filed on the earlier number is reconcilable to the
-later one only because both are still here.
-
-{:else}
-
-**Nothing restated yet**, and on a warehouse built from scratch that is the honest
-answer rather than a broken query: a snapshot can only record a revision it was
-present for. The first run stores version 1 of every factor, and a row becomes
-restated the first time a later run finds a different number.
-
-That version history is the one part of this table a rebuild cannot reproduce, so
-every build carries it forward from the previous
-[data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases)
-instead of recomputing it. The [Restatements page](/restatements) does the same
-for OWID's CO₂ estimates, and describes the mechanism.
-
-{/if}
-
-## What this factor is not
-
-The three caveats a practitioner checks first. Naming them is not a hedge: a
-factor handed over without them is what fails assurance.
+Lyon and Göteborg draw 17% of the group's electricity and report under 2% of its
+emissions; Pune, Katowice and Suzhou report far more than they draw. The
+calculation is only MWh times the factor; the grid does the rest. **[The worked example →](/scope2/worked-example)**
 
 <Alert status=warning>
 
-**Location-based only.** This is the grid average where a site sits. A
-market-based factor reflects the contracts a company actually holds, such as
-RECs, Guarantees of Origin, PPAs and supplier-specific residual mixes, and no
-public
-dataset carries those. A company reporting both bases will find the two lines
-differ substantially, and only this one can be built from open data.
-
-**An annual average, not hourly matching.** A site drawing power overnight on a
-wind-heavy grid, or at a summer peak met by gas, is not on the annual mean. 24/7
-carbon-free-energy accounting needs hourly generation data; a yearly grain
-structurally cannot express it.
-
-**Production-based, not consumption-based.** OWID's series is the carbon
-intensity of electricity *generated* in a country. It ignores trade, so a country
-that imports much of its power is assigned only what it generates itself: one
-importing a neighbour's hydro looks dirtier than the mix it consumes, and one
-importing coal power looks cleaner.
+**Location-based, annual and production-based.** No contracts, no hourly
+matching, no electricity trade: each is a reason this factor differs from what a
+company's market-based line or a 24/7 claim would say. **[What the factor is not →](/scope2/limits)**
 
 </Alert>
-
-One more, from the warehouse and not from the standard: five territories in
-OWID's energy data (Guadeloupe, Martinique, Réunion, French Guiana and the
-Falklands) are not countries in this warehouse's country list, so they carry no
-factor here. That list is what counts as a country throughout, and it is also
-what keeps World Bank groupings like "World" and "European Union" out of every
-total. The [coverage page](/coverage) is where absences are rows.
-
----
 
 <small>Source: <a href="https://github.com/owid/energy-data">OWID Energy</a>
 (<code>carbon_intensity_elec</code>), modelled as
 <code>marts.dim_grid_emission_factors</code> and snapshotted as
-<code>history.snap_grid_emission_factors</code> (SCD2, <code>check</code>
-strategy, 2015 onwards). The GHG Protocol
+<code>history.snap_grid_emission_factors</code>. The GHG Protocol
 <a href="https://ghgprotocol.org/scope-2-guidance">Scope 2 Guidance</a> is the
-standard this page refers to. Nothing here is advice on how to file; it is the
-input to the calculation, with its limits stated.</small>
+standard this page refers to. Nothing here is advice on how to file.</small>

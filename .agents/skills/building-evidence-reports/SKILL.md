@@ -214,7 +214,7 @@ where year = ${inputs.year.value}
   lines are the price; a following paragraph with no component is unaffected.
   - **It is every mark, not just links** — `**bold**` and `` `code` `` go
     literal the same way, and the asymmetry inside one paragraph is what makes
-    it hard to see: `currency.md`'s staleness alert opens with `**…**` that
+    it hard to see: `currency/spot-or-average.md`'s staleness alert opens with `**…**` that
     renders as `<strong>` and closes, four wrapped lines later, with marks that
     do not. Same block, same syntax, different treatment, no error.
   - **Inside an `<Alert>` it is easier to miss again**, because the callout
@@ -259,8 +259,8 @@ where year = ${inputs.year.value}
 
 ## How a page is laid out
 
-The findings and the home page set the pattern the other pages follow: **charts
-first, reasoning underneath or one click away.**
+Every analysis page follows one pattern: **charts first, reasoning underneath or
+one click away.**
 
 - **Lead with the answer.** A bold sentence or two stating the finding, then the
   chart that shows it. A chart's `title` states what it shows, and `subtitle`
@@ -269,8 +269,12 @@ first, reasoning underneath or one click away.**
   the "So what" box, the table and the method go further down, in `<Details>`, or
   on a page of their own.
 - **A long page splits into an overview and sub-pages.** `pages/findings.md` sits
-  beside a `pages/findings/` folder: the folder's pages route beneath it and get
-  their own sidebar group. `sidebar_link: false` does *not* hide a sub-page in
+  beside a `pages/findings/` folder, and `cbam`, `scope2`, `retail`, `currency`,
+  `weather` and `countries` do the same: the folder's pages route beneath it and
+  get their own sidebar group. A page with no folder is listed under Home, so the
+  method pages (Coverage, Restatements, Pipeline) stay single pages with their
+  explanations in `<Details>` blocks. Inputs are per page, so a sub-page that
+  needs the overview's dropdown declares its own. `sidebar_link: false` does *not* hide a sub-page in
   this version (`Sidebar.svelte` reads `.length` on an object, so the check never
   fires), so give sub-pages a short `title` and a `sidebar_position` instead. A
   sub-page counts towards its folder's exposure (`evidence_findings`), which
@@ -278,12 +282,20 @@ first, reasoning underneath or one click away.**
 - **Pick the chart for the comparison.** A share of a whole is a `stacked100` bar;
   two points in time per country is a slope (`LineChart` over two categories);
   composition over time is an `AreaChart`; each series against its own peak or
-  base year is an indexed line. Keep a `DataTable` for the reader who wants the
+  base year is an indexed line; a ranking over many categories is a vertical
+  `BarChart` coloured by the variable that explains it, with
+  `echartsOptions={{xAxis: {axisLabel: {show: false}}}}` and the names in the
+  tooltip (`cbam.md`); a panel of units over years is a `<Heatmap>` against each
+  unit's own mean (`weather.md`), which also draws nothing for a missing year
+  where a line would interpolate. Keep a `DataTable` for the reader who wants the
   numbers, below the chart rather than instead of it.
 - **`AreaMap` needs two local files** in `static/`, which Evidence copies to the
   site root: a GeoJSON (`world-countries.geojson`, keyed on `iso3`) and a blank
   `basemap` tile, or every visitor fetches tiles from CARTO. Reference both
-  relatively so they resolve under the Pages base path. The map's `min`/`max` set
+  relatively so they resolve under the Pages base path: bare names on the home
+  page, `../world-countries.geojson` on any other page. A bare name on `/scope2/`
+  asks for `/scope2/world-countries.geojson`, and the map renders its legend and
+  no countries, with a clean build log. The map's `min`/`max` set
   the colour scale but the legend still prints the data's own range, so cap the
   value in SQL instead.
 
@@ -315,7 +327,7 @@ snapshot closes a version, which needs a later run to find a different number.
 Seen while neither snapshot had closed one since it began
 (`snap_co2_estimates` on 2026-07-30, `snap_grid_emission_factors` on
 2026-08-09). Both pages render that state on purpose — `restatements.md` and
-`scope2.md` put their revision tables inside `{#if … .length > 0}` — so the build
+`scope2/vintage.md` put their revision tables inside `{#if … .length > 0}` — so the build
 passes `--strict` and every page renders. It stops once either snapshot records a
 revision. The same warning on a column that *should* hold values is the empty
 extract it describes.

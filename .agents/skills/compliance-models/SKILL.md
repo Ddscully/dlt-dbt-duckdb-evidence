@@ -285,7 +285,7 @@ mutation in this table:
   `is_fallback_table` is the column that identifies it. Reads oddly, so it is
   pinned rather than left to be rediscovered.
 - **A fallen-back row is indistinguishable from a country's own value unless the
-  page says so, and `reports/pages/cbam.md` now does.**
+  page says so, and `reports/pages/cbam/by-country.md` now does.**
   It once selected `is_country_specific` and rendered every other
   column but that one, so 221 of the 10,785 rows the dropdown can reach — over 40
   of its 252 goods — showed a tonnage, a cost and (on 36 of them) a production

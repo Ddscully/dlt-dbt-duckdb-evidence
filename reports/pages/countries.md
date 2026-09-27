@@ -4,12 +4,9 @@ description: CO₂, energy mix and human development across countries, built fro
 sidebar_position: 7
 ---
 
-Emissions, energy mix, electricity prices and living standards for every country,
-for any year you pick. Nothing here is a fixed conclusion. The charts re-query on
-each selection, so this is the page for checking a country or a year yourself.
-
-For the write-ups that draw conclusions from the same data, see the
-[nine findings](/findings).
+Every country, for any year you pick, and any one country over time. Nothing here
+is a fixed conclusion; the [nine findings](/findings) draw those from the same
+data.
 
 ```sql latest_years
 select * from warehouse.latest_years
@@ -17,10 +14,8 @@ select * from warehouse.latest_years
 
 ```sql years
 -- The mart sits on a country-year spine, so its latest year is whichever source
--- is furthest ahead (Eurostat prices, 2025), and that year carries prices and
--- nothing else. Offer only the years where the charts on this page have a broad
--- enough sample to be worth drawing, which is the electricity series (~210
--- countries), not the primary-energy one (79 from 2024 on).
+-- is furthest ahead (Eurostat prices), and that year carries prices and little
+-- else. Offer only the years the electricity series (~210 countries) covers.
 select distinct year
 from warehouse.emissions_energy
 where year >= 1990
@@ -31,18 +26,83 @@ order by year desc
 
 <Dropdown data={years} name=year value=year defaultValue={years[0].year} title="Year"/>
 
-## Clean electricity vs. life expectancy ({inputs.year.label})
+```sql kpis
+-- Every measure over the same denominator: the countries reporting all three in
+-- the selected year.
+select
+    count(*)                            as n_countries,
+    avg(life_expectancy)                as avg_life_expectancy,
+    avg(carbon_intensity_elec_g_kwh)    as avg_grid_intensity,
+    avg(low_carbon_share_elec_pct)      as avg_low_carbon
+from warehouse.emissions_energy
+where year = ${inputs.year.value}
+  and life_expectancy is not null
+  and carbon_intensity_elec_g_kwh is not null
+  and low_carbon_share_elec_pct is not null
+```
+
+<Grid cols=4>
+    <BigValue data={kpis} value=n_countries title="Countries reporting all three"/>
+    <BigValue data={kpis} value=avg_life_expectancy fmt="0.0" title="Avg life expectancy (yrs)"/>
+    <BigValue data={kpis} value=avg_grid_intensity fmt="#,##0" title="Avg grid (gCO₂/kWh)"/>
+    <BigValue data={kpis} value=avg_low_carbon fmt='0.0"%"' title="Avg low-carbon electricity"/>
+</Grid>
+
+## Carbon intensity of the grid, {inputs.year.label}
+
+```sql grid_map
+-- Capped at 900 g for the colour; the tooltip shows the real figure.
+select
+    country_iso3,
+    country_name,
+    carbon_intensity_elec_g_kwh,
+    coal_share_elec_pct,
+    least(carbon_intensity_elec_g_kwh, 900) as "gCO₂ per kWh"
+from warehouse.emissions_energy
+where year = ${inputs.year.value}
+  and carbon_intensity_elec_g_kwh is not null
+```
+
+<!-- `../`, because this page is served at `<base>/<page>/` and the two files sit
+at the site root; a bare name resolves against the page and 404s. -->
+<AreaMap
+    data={grid_map}
+    areaCol=country_iso3
+    geoJsonUrl="../world-countries.geojson"
+    geoId=iso3
+    value="gCO₂ per kWh"
+    valueFmt="#,##0"
+    colorPalette={['#d6e6f7', '#8fb8e6', '#eda100', '#b5530a', '#5a2403']}
+    basemap="../blank-tile.png"
+    startingLat=30
+    startingLong=10
+    startingZoom=1
+    height=400
+    title="gCO₂ per kWh generated (900 or more shown as 900)"
+    tooltip={[
+        {id: 'country_name', showColumnName: false, valueClass: 'font-semibold'},
+        {id: 'carbon_intensity_elec_g_kwh', title: 'gCO₂ per kWh', fmt: '#,##0'},
+        {id: 'coal_share_elec_pct', title: 'Coal share %', fmt: '0'}
+    ]}
+/>
+
+<style>
+    :global(.leaflet-container) { background: transparent !important; }
+</style>
+
+Coal-heavy grids sit near 800 g, nuclear and hydro grids under 50. Gas ranges from
+about 400 with modern plant to 700 with old plant or oil, which is why grids with
+no coal can still be dark.
+
+## Clean electricity and life expectancy, {inputs.year.label}
 
 ```sql clean_elec_vs_life
 select
     country_name,
     income_group,
-    region,
     low_carbon_share_elec_pct as low_carbon_share,
-    carbon_intensity_elec_g_kwh,
     life_expectancy,
-    population,
-    co2_per_capita
+    population
 from warehouse.emissions_energy
 where year = ${inputs.year.value}
   and low_carbon_share_elec_pct is not null
@@ -66,190 +126,18 @@ where year = ${inputs.year.value}
     tooltipTitle=country_name
 />
 
-Each bubble is a country, sized by population and coloured by World Bank income
-group. The x-axis is the low-carbon share of *electricity* (renewables plus
-nuclear) rather than the renewables share of all energy: same idea, roughly 210
-countries instead of 79, because OWID's broad-coverage series is the electricity
-mix. Read the spread rather than a trend line. A high low-carbon share is as
-easily one big hydroelectric dam in a low-income country as a deliberate
-build-out in a rich one.
+Bubbles are sized by population. Read the spread, not a trend: a high low-carbon
+share is as easily one large dam in a low-income country as a deliberate build-out
+in a rich one.
 
-```sql kpis
--- Every measure here is counted over the same denominator: the countries that
--- report all three in the selected year. Averaging life expectancy over 217
--- countries next to a renewables figure over 79 put two different worlds in the
--- same row of tiles.
-select
-    count(*)                            as n_countries,
-    avg(life_expectancy)                as avg_life_expectancy,
-    avg(carbon_intensity_elec_g_kwh)    as avg_grid_intensity,
-    avg(low_carbon_share_elec_pct)      as avg_low_carbon
-from warehouse.emissions_energy
-where year = ${inputs.year.value}
-  and life_expectancy is not null
-  and carbon_intensity_elec_g_kwh is not null
-  and low_carbon_share_elec_pct is not null
-```
-
-<Grid cols=4>
-    <BigValue data={kpis} value=n_countries title="Countries reporting all three"/>
-    <BigValue data={kpis} value=avg_life_expectancy fmt="0.0" title="Avg life expectancy (yrs)"/>
-    <BigValue data={kpis} value=avg_grid_intensity fmt="#,##0" title="Avg grid (gCO₂/kWh)"/>
-    <BigValue data={kpis} value=avg_low_carbon fmt='0.0"%"' title="Avg low-carbon electricity"/>
-</Grid>
-
-## Carbon intensity of the economy, over time
-
-```sql co2_intensity_by_income
--- Each country in the group it held *that year*, and each group's emissions over
--- its real output. See sources/warehouse/co2_intensity_by_income.sql for why
--- neither today's classification nor an average of country ratios will do.
-select
-    year,
-    income_group,
-    kg_co2_per_usd
-from warehouse.co2_intensity_by_income
-where basis = 'as_classified'
-  and year >= 1990
-order by year
-```
-
-<LineChart
-    data={co2_intensity_by_income}
-    x=year
-    y=kg_co2_per_usd
-    yFmt="0.00"
-    series=income_group
-    seriesColors={{
-        'High income': ['#2a78d6', '#3987e5'],
-        'Upper middle income': ['#eda100', '#c98500'],
-        'Lower middle income': ['#e87ba4', '#d55181'],
-        'Low income': ['#008300', '#008300']
-    }}
-    yAxisTitle="kg CO₂ per $ GDP"
-/>
-
-How much CO₂ a dollar of each income group's output carries: the group's
-emissions divided by its GDP in constant 2015 dollars, with every country counted
-in the group the World Bank placed it in *that year*. That makes some of the
-movement membership rather than intensity: the low-income line steps down each
-time a large emitter leaves the group, China in 1997 (it was back for 1998),
-India in 2007, and Vietnam and Uzbekistan in 2009.
-
-Both halves of that sentence are choices, and each one changes the chart. The
-classification moves: about half of the economies classified in 1990 are in a
-different group today. And an average of country ratios weights Bhutan like
-China, where a ratio of totals weights each economy by its size. This chart used
-to make both choices the other way, grouping every year by today's
-classification and averaging country by country, and that version told a
-different story.
-
-```sql income_basis_first_year
-select min(year) as first_year
-from warehouse.co2_intensity_by_income
-where basis = 'as_classified'
-  and year >= 1990
-```
-
-```sql income_basis_compare
--- The chart's first year on both bases, in income-ladder order. `today_mean` is
--- what the chart used to plot; `as_classified` is what it plots now.
-select
-    t.income_group,
-    t.mean_country_kg_co2_per_usd as today_mean,
-    c.kg_co2_per_usd              as as_classified,
-    case t.income_group
-        when 'High income' then 1
-        when 'Upper middle income' then 2
-        when 'Lower middle income' then 3
-        when 'Low income' then 4
-    end                           as rung
-from warehouse.co2_intensity_by_income as t
-inner join warehouse.co2_intensity_by_income as c
-    on t.year = c.year and t.income_group = c.income_group
-where t.basis = 'today'
-  and c.basis = 'as_classified'
-  and t.year = (select first_year from ${income_basis_first_year})
-order by rung
-```
-
-```sql income_basis_tops
-select
-    cast(cast(max(t.year) as integer) as varchar)          as year_label,
-    arg_max(t.income_group, t.mean_country_kg_co2_per_usd) as today_top,
-    max(t.mean_country_kg_co2_per_usd)                     as today_top_value,
-    arg_max(c.income_group, c.kg_co2_per_usd)              as classified_top,
-    max(c.kg_co2_per_usd)                                  as classified_top_value
-from warehouse.co2_intensity_by_income as t
-inner join warehouse.co2_intensity_by_income as c
-    on t.year = c.year and t.income_group = c.income_group
-where t.basis = 'today'
-  and c.basis = 'as_classified'
-  and t.year = (select first_year from ${income_basis_first_year})
-```
-
-<DataTable data={income_basis_compare} rows=4 rowNumbers=false>
-    <Column id=income_group title="Income group"/>
-    <Column id=today_mean title="Today's groups, country average (kg/$)" fmt="0.00"/>
-    <Column id=as_classified title="Groups as classified, by output (kg/$)" fmt="0.00"/>
-</DataTable>
-
-In <Value data={income_basis_tops} column=year_label/> the old chart ranked <Value data={income_basis_tops} column=today_top/> the most carbon-intensive group, at <Value data={income_basis_tops} column=today_top_value fmt="0.00"/> kg per dollar. Grouped as classified that year and weighted by output, the most carbon-intensive was <Value data={income_basis_tops} column=classified_top/> at <Value data={income_basis_tops} column=classified_top_value fmt="0.00"/> kg per dollar.
-
-The top of the corrected ranking is mostly two countries. China was classified
-low income until 1998 and India until 2006, and weighted by output they dominate
-that group's figure through the 1990s. The old chart filed both under the groups
-they hold today and then averaged each group country by country, so China counted
-as one economy in fifty-odd, in a group it would not reach for another twenty
-years. Every other income-group rollup on this site cuts to a single recent year,
-where today's classification is the right one; over a trend it is not.
-
-## Carbon intensity of the grid ({inputs.year.label})
-
-```sql grid_intensity
-select
-    country_name,
-    income_group,
-    carbon_intensity_elec_g_kwh,
-    coal_share_elec_pct,
-    low_carbon_share_elec_pct,
-    electricity_generation_twh
-from warehouse.emissions_energy
-where year = ${inputs.year.value}
-  and carbon_intensity_elec_g_kwh is not null
-  and electricity_generation_twh > 50
-order by carbon_intensity_elec_g_kwh desc
-limit 15
-```
-
-<BarChart
-    data={grid_intensity}
-    x=country_name
-    y=carbon_intensity_elec_g_kwh
-    swapXY=true
-    sort=false
-    color="#eb6834"
-    labels=true
-    labelFmt="#,##0"
-    xAxisTitle="gCO₂ per kWh generated"
-    yAxisTitle="Country"
-/>
-
-Grams of CO₂ per kWh generated, for countries with a grid big enough for the
-number to be stable (over 50 TWh). Coal-heavy grids sit near 800, and nuclear and
-hydro grids under 50. Gas grids range from about 400 with modern plant to 600–700
-with older plant or oil in the mix, which is why grids with no coal at all appear
-in this chart.
-
-## Does cleaner electricity mean cheaper power? (Europe, {inputs.year.label})
+## Electricity prices in Europe, {inputs.year.label}
 
 ```sql eu_price_vs_clean
 select
     country_name,
     income_group,
     low_carbon_share_elec_pct as low_carbon_share,
-    electricity_price_eur_kwh,
-    population
+    electricity_price_eur_kwh
 from warehouse.emissions_energy
 where year = ${inputs.year.value}
   and electricity_price_eur_kwh is not null
@@ -259,8 +147,7 @@ where year = ${inputs.year.value}
 ```sql partial_price_years
 -- Eurostat publishes each year in two halves and the annual column averages
 -- whichever have landed, so some country-years are a half-year in an annual
--- costume. Report the count rather than dropping them: in 2007 that would be 23
--- of the 27 priced countries.
+-- costume. Report the count rather than dropping them.
 select count(*) as n_partial
 from warehouse.emissions_energy
 where year = ${inputs.year.value}
@@ -278,51 +165,111 @@ where year = ${inputs.year.value}
         'Lower middle income': ['#e87ba4', '#d55181'],
         'Low income': ['#008300', '#008300']
     }}
+    yFmt="0.00"
     xAxisTitle="Low-carbon share of electricity (%)"
-    yAxisTitle="Household electricity price (€/kWh)"
+    yAxisTitle="Household price, € per kWh"
     tooltipTitle=country_name
 />
 
-Household electricity prices (including all taxes, from Eurostat) against each
-country's low-carbon share of electricity. Eurostat's series reaches beyond the EU
-to the EEA and the candidate countries. The relationship is messy; grid,
-tax and policy choices dominate. The electricity share is used rather than the
-primary-energy one because it keeps almost every priced country in the chart,
-where the primary-energy share would drop about a quarter of them.
+Household prices with all taxes, against the low-carbon share. Cleaner power does
+not mean cheaper power: tax, network and policy choices dominate. **[What the annual average hides →](/countries/half-years)**
 
 {#if partial_price_years.length > 0 && partial_price_years[0].n_partial > 0}
 
-One caveat on the prices in {inputs.year.label}:
-<Value data={partial_price_years} column=n_partial/> of the countries plotted have
-only one of the year's two half-years published, so their figure is that half
-rather than an average of both. The last section on this page is about what that
-averaging costs.
+In {inputs.year.label}, <Value data={partial_price_years} column=n_partial/> of the countries plotted have only one of the year's two half-years published, so their figure is that half alone.
 
 {/if}
 
-## Most expensive electricity in Europe ({inputs.year.label})
+## One country over time
 
-```sql eu_prices
-select
-    country_name,
-    electricity_price_eur_kwh,
-    low_carbon_share_elec_pct,
-    carbon_intensity_elec_g_kwh
+```sql country_list
+-- Keyed on the code, not the name: a name with an apostrophe (Côte d'Ivoire)
+-- would end the string literal in the query below.
+select distinct country_iso3, country_name
 from warehouse.emissions_energy
-where year = ${inputs.year.value}
-  and electricity_price_eur_kwh is not null
-order by electricity_price_eur_kwh desc
-limit 10
+where region is not null and co2_mt is not null
+order by country_name
 ```
 
-<DataTable data={eu_prices} rows=10>
-    <Column id=country_name title="Country"/>
-    <Column id=electricity_price_eur_kwh title="€ / kWh" fmt="0.000"/>
-    <Column id=low_carbon_share_elec_pct title="Low-carbon %" fmt="0.0"/>
-    <Column id=carbon_intensity_elec_g_kwh title="gCO₂ / kWh" fmt="#,##0"/>
-</DataTable>
+<Dropdown data={country_list} name=country value=country_iso3 label=country_name defaultValue="GBR" title="Country"/>
 
-## Most carbon-efficient economies ({inputs.year.label})
+```sql one_country
+select
+    year,
+    co2_per_capita,
+    carbon_intensity_elec_g_kwh
+from warehouse.emissions_energy
+where country_iso3 = '${inputs.country.value}'
+  and year >= 1990
+  and (co2_per_capita is not null or carbon_intensity_elec_g_kwh is not null)
+order by year
+```
+
+<Grid cols=2>
+
+<LineChart
+    data={one_country}
+    x=year
+    y=co2_per_capita
+    xFmt="0"
+    yFmt="0.0"
+    yMin=0
+    lineColor="#b5530a"
+    echartsOptions={{xAxis: {min: 'dataMin', max: 'dataMax'}}}
+    title="CO₂ per person, tonnes"
+/>
+
+<LineChart
+    data={one_country}
+    x=year
+    y=carbon_intensity_elec_g_kwh
+    xFmt="0"
+    yFmt="#,##0"
+    yMin=0
+    lineColor="#2a78d6"
+    echartsOptions={{xAxis: {min: 'dataMin', max: 'dataMax'}}}
+    title="Grid carbon intensity, gCO₂ per kWh"
+/>
+
+</Grid>
+
+## Carbon intensity of the economy, by income group
+
+```sql co2_intensity_by_income
+-- Each country in the group it held *that year*, and each group's emissions over
+-- its real output. See sources/warehouse/co2_intensity_by_income.sql.
+select
+    year,
+    income_group,
+    kg_co2_per_usd
+from warehouse.co2_intensity_by_income
+where basis = 'as_classified'
+  and year >= 1990
+order by year
+```
+
+<LineChart
+    data={co2_intensity_by_income}
+    x=year
+    y=kg_co2_per_usd
+    yFmt="0.00"
+    xFmt="0"
+    series=income_group
+    seriesColors={{
+        'High income': ['#2a78d6', '#3987e5'],
+        'Upper middle income': ['#eda100', '#c98500'],
+        'Lower middle income': ['#e87ba4', '#d55181'],
+        'Low income': ['#008300', '#008300']
+    }}
+    echartsOptions={{xAxis: {min: 'dataMin', max: 'dataMax'}}}
+    title="kg of CO₂ per dollar of real GDP"
+/>
+
+Every country is counted in the group the World Bank placed it in *that year*, so
+the low-income line steps down each time a large emitter leaves the group: China
+in 1997, India in 2007. **[Why the grouping matters →](/countries/income-groups)**
+
+## The most carbon-efficient economies, {inputs.year.label}
 
 ```sql cleanest
 select
@@ -341,102 +288,20 @@ limit 10
 <DataTable data={cleanest} rows=10>
     <Column id=country_name title="Country"/>
     <Column id=income_group title="Income group"/>
-    <Column id=co2_per_gdp_const_usd title="CO₂ / $ GDP" fmt="0.000"/>
+    <Column id=co2_per_gdp_const_usd title="kg CO₂ / $ GDP" fmt="0.000" contentType=bar/>
     <Column id=gdp_per_capita_usd title="GDP per capita" fmt="usd0"/>
     <Column id=population_m title="Population (m)" fmt="#,##0"/>
 </DataTable>
 
-Lowest CO₂ per dollar of real GDP, among countries of over 5 million people.
-Without a size floor this table is a list of financial and tourism micro-states
-(Macao, Bermuda, Malta) whose ranking says more about having no industry than
-about having clean industry.
-
-Even with the floor, read it carefully. Low CO₂ per dollar has three very
-different causes: a genuinely low-carbon economy such as Sweden or France, running
-on nuclear and hydro; an economy whose industrial production happens somewhere
-else, which finding 4 on the [findings page](/findings) measures; and an economy
-that uses little commercial energy at all. Ireland's
-number is also inflated by the multinational profit-shifting that distorts its
-GDP denominator.
-
-## What the annual average costs
-
-*This section covers the whole series rather than the selected year.*
-
-```sql volatile_countries
--- The countries with the largest single half-over-half move in cents, not
--- percent: a percent ranking promotes small markets moving off a low base.
-select country_name
-from warehouse.eu_electricity_prices_semiannual
-group by country_name
-order by max(abs(change_vs_previous_half_eur_kwh)) desc nulls last
-limit 6
-```
-
-```sql semiannual_prices
-select
-    period_start_date,
-    country_name,
-    electricity_price_eur_kwh
-from warehouse.eu_electricity_prices_semiannual
-where country_name in (select country_name from ${volatile_countries})
-order by period_start_date
-```
-
-<LineChart
-    data={semiannual_prices}
-    x=period_start_date
-    y=electricity_price_eur_kwh
-    series=country_name
-    yAxisTitle="€ / kWh (household, all taxes)"
-    xAxisTitle="Half-year"
-    yFmt="0.00"
-/>
-
-Eurostat publishes household prices **twice a year**, and every chart above uses
-an annual average of the two halves. That average is not a neutral summary, which
-is why the warehouse keeps the published half-years beside it. The difference is
-the 2021–23 energy crisis: the mean absolute half-over-half change was **19%**
-across countries in 2022 and 13% in 2023, against 3–4% through the 2010s.
-
-The spikes above are single half-years. Averaged into an annual figure they
-become a smooth rise, which reads as a gradual squeeze rather than the step
-change households actually saw.
-
-```sql biggest_half_moves
-select
-    country_name,
-    period,
-    electricity_price_eur_kwh,
-    electricity_price_eur_kwh - change_vs_previous_half_eur_kwh as previous_price,
-    change_vs_previous_half_pct,
-    avg(electricity_price_eur_kwh) over (partition by country_iso3, year) as annual_average
-from warehouse.eu_electricity_prices_semiannual
-where change_vs_previous_half_eur_kwh is not null
-order by abs(change_vs_previous_half_pct) desc
-limit 8
-```
-
-<DataTable data={biggest_half_moves} rows=8>
-    <Column id=country_name title="Country"/>
-    <Column id=period title="Half-year" align=left/>
-    <Column id=previous_price title="Previous half" fmt="0.000"/>
-    <Column id=electricity_price_eur_kwh title="This half" fmt="0.000"/>
-    <!-- Two clauses: a bare +0"%" renders -77% as "-+77%". -->
-    <Column id=change_vs_previous_half_pct title="Change" fmt='+0"%";-0"%"'/>
-    <Column id=annual_average title="Year's average" fmt="0.000"/>
-</DataTable>
-
-The Netherlands is the clearest case, and the one that should make you distrust
-any annual number here: €0.034/kWh in 2022-S1 against €0.142 in S2, as that
-year's energy-tax cuts landed in the first half. The annual average of €0.088 is
-a price no Dutch household paid in either half. The low figure is real and
-published, not a loading error, which is why the tests on this column allow it.
+Countries over 5 million people; without the floor this is a list of financial
+micro-states. Low CO₂ per dollar has three causes: clean power (Sweden, France),
+industry that happens elsewhere ([finding 4](/findings/offshoring)), or little
+commercial energy use at all. Ireland's figure is also flattered by profit-shifting
+into its GDP.
 
 ---
 
 <small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
 <a href="https://github.com/owid/energy-data">OWID Energy</a>,
 <a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>,
-<a href="https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204">Eurostat electricity prices</a>.
-Built with dbt, DuckDB, Polars & Evidence.</small>
+<a href="https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204">Eurostat electricity prices</a>.</small>

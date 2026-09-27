@@ -5,9 +5,8 @@ sidebar_position: 10
 sidebar_badge: Ops
 ---
 
-Operational state of the pipeline behind this site: when each source last loaded,
-how many rows survived each layer, and the current result of every data-quality
-test.
+When each source last loaded, how many rows each layer holds, and the current
+result of every data-quality test.
 
 ```sql test_summary
 select
@@ -48,6 +47,8 @@ order by rows desc
     <Column id=loaded_at title="Loaded" fmt="yyyy-mm-dd hh:mm"/>
 </DataTable>
 
+<Details title="What the load time measures">
+
 `loaded_at` comes from dlt's `_dlt_load_id`, a unix epoch stamped at ingest. It
 measures **our load, not the publisher's release**: a stale timestamp here means
 the pipeline stopped running, not that OWID stopped publishing. That is also why
@@ -62,6 +63,8 @@ graph splits it further, loading retail first and the year-range World Bank and
 weather resources in a step of their own. Each row is the latest load that wrote
 to that table, so an incremental table that received nothing new keeps an older
 time.
+
+</Details>
 
 ## What each layer holds
 
@@ -79,6 +82,8 @@ order by layer, table_name
     <Column id=year_max title="To" fmt="0"/>
 </DataTable>
 
+<Details title="Why the spine is larger than the fact, and which tables cannot be rebuilt">
+
 `marts.dim_country_year` is larger than the fact it feeds, and that is the
 design: the spine is the complete cross join, the fact is the part of it any
 source reports. The difference is the subject of the [coverage page](/coverage).
@@ -87,6 +92,8 @@ The two `history` tables, `snap_co2_estimates` and `snap_grid_emission_factors`,
 are the only ones above a rebuild cannot reproduce; every other row is derivable
 from the sources. They are accumulated state, as is `analytics.pipeline_runs`
 below, and deleting the warehouse destroys all three for good.
+
+</Details>
 
 ## Test coverage
 
@@ -114,16 +121,25 @@ order by n_tests desc
 </DataTable>
 
 ```sql tests_by_type
-select test_type, count(*) as tests
+-- `n_tests`, never `tests`: see the comment on tests_by_model.
+select test_type, count(*) as n_tests
 from warehouse.pipeline_tests
 group by test_type
-order by tests desc
+order by n_tests desc
 ```
 
-<DataTable data={tests_by_type} rows=6>
-    <Column id=test_type title="Test type"/>
-    <Column id=tests title="Count" fmt="0"/>
-</DataTable>
+<BarChart
+    data={tests_by_type}
+    x=test_type
+    y=n_tests
+    swapXY=true
+    sort=false
+    color="#2a78d6"
+    labels=true
+    title="dbt tests by type"
+/>
+
+<Details title="Why the tests are distributed this way">
 
 The distribution is deliberate. After `not_null`, `accepted_range` is the largest
 group, because the failure mode this warehouse actually has is a plausible-looking
@@ -142,6 +158,8 @@ The bounds are calibrated to fail on bugs and not on reality, which sometimes
 means *not* testing a column. `trade_co2_share` has no range test because its
 real range runs from about −98% to +1023%, and `income_group` is nullable on
 purpose because the World Bank does not classify every territory.
+
+</Details>
 
 ## Currently failing
 
@@ -208,11 +226,12 @@ The most recent build ran <Value data={run_totals} column=latest_nodes fmt="#,##
     <Column id=slowest_node_s title="Slowest node" fmt="#,##0.00"/>
 </DataTable>
 
-<Alert status=info>
+The data-quality layer *is* the build: tests and unit tests cost several times
+what building every model costs.
 
-**So what.** The data-quality layer *is* the build. Tests and unit tests together
-cost several times what building every model costs — the price of
-`store_failures` being on project-wide and of running unit tests inside
+<Details title="Why, and why the seconds do not add up">
+
+That is the price of `store_failures` being on project-wide and of running unit tests inside
 `dbt build` rather than excluding them from production runs. Both are deliberate
 and both are argued in the docs; this table is what measures them.
 
@@ -220,7 +239,7 @@ The seconds do not sum to the per-node total. dbt reports `compile` and
 `execute` as named phases and counts work outside both in the figure it calls
 execution time, so both are stored rather than one derived from the other.
 
-</Alert>
+</Details>
 
 ```sql cost_trend
 select
@@ -252,7 +271,7 @@ same machinery that keeps the snapshot revisions and the weather archive.
 
 {/if}
 
-## Where these numbers come from
+<Details title="Where these numbers come from">
 
 None of this is instrumentation added for the purpose. dlt stamps `_dlt_load_id`
 on every landing row, dbt stores each failing test row in a `dbt_test__audit`
@@ -267,6 +286,8 @@ them, and `analytics.pipeline_runs` is that artifact appended to a table. What i
 deliberately does not carry is a row count per model: dbt-duckdb returns a bare
 `OK` rather than a count for anything but a seed, and the row counts that matter
 are two sections up, measured from the warehouse where they are true.
+
+</Details>
 
 ---
 
