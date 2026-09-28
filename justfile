@@ -164,6 +164,14 @@ metric +args:
 ask +question:
     uv run python -m agent.loop {{ quote(question) }}
 
+# For an MCP client to launch, not to run by hand: it speaks JSON-RPC on stdin
+# and stdout, and waits for a client (docs/FINANCE_AGENT.md). Restart it after
+# `just dbt-parse`, since it reads the metrics at start.
+# Serve the analyst's tools over MCP on stdio (read-only)
+[group('inspect')]
+mcp-server:
+    uv run python -m agent.mcp_server
+
 # Report what the DuckLake landing zone holds — tables, rows, snapshots (read-only)
 [group('inspect')]
 lakehouse:

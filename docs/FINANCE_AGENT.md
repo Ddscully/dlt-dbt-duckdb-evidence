@@ -31,7 +31,9 @@ Periods aligned: the data covers 2009-12-01 to 2011-12-09, so each year is compa
 The last paragraph is not the model's: the loop appends it
 ([below](#what-the-loop-guarantees-and-what-it-does-not)).
 `just explain-change 2010 2011`, `just metric …` and `just describe-model …`
-print the tools' own output, with no model involved.
+print the tools' own output, with no model involved, and `just mcp-server`
+serves the same three tools to an MCP client such as Claude Code or Claude
+Desktop ([below](#from-an-mcp-client)).
 
 ## Running it on a laptop, with Ollama
 
@@ -81,6 +83,53 @@ vLLM, a LiteLLM proxy and the hosted APIs all take that form; only Ollama has
 been run against here. The model must support tool calling, and the request
 asks for temperature 0, so a run can be repeated. The client is the standard
 library's `urllib` rather than a vendor SDK, so the loop adds no dependency.
+
+## From an MCP client
+
+`agent/mcp_server.py` serves the three tools over the Model Context Protocol, on
+stdio: the client launches it, and nothing listens on a port
+([0016](decisions/0016-the-mcp-server.md)). The warehouse and the dbt manifests
+are needed as for the loop, and the `dev` dependency group, which `just setup`
+installs. In Claude Code, from the repo root:
+
+```sh
+claude mcp add warehouse -- uv run --directory "$PWD" python -m agent.mcp_server
+```
+
+That registers it for you in this directory only (`--scope local`, the
+default), and writes nothing into the repo. The tools appear as
+`mcp__warehouse__query_metric` and so on. In Claude Desktop, the same command
+goes in `claude_desktop_config.json`, with the repo's absolute path:
+
+```json
+{
+  "mcpServers": {
+    "warehouse": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/repo", "python", "-m", "agent.mcp_server"]
+    }
+  }
+}
+```
+
+The server finds `data/warehouse.duckdb` from the package's location, whatever
+directory the client starts it in, and `WAREHOUSE_PATH` points it elsewhere.
+Restart it after `just dbt-parse`: it reads the metrics once, at start.
+
+**What holds, compared with `just ask`.** The figures and the refusals are the
+same tools', with the same schemas: the server sends each tool's schema from
+`agent/tools.py` unchanged, and `tests/test_mcp_server.py` fails if the two
+differ. The two guarantees that run on the loop's side do not: the client's own
+model writes the answer, so nothing appends the note or checks the numbers.
+The server sends a tool's note as a second block, `Quote this note verbatim in
+the answer: …`, and the one model measured did quote it, but nothing makes it.
+
+**It holds no connection between calls.** Each call opens the warehouse
+read-only and closes it, so a build can run while a client is connected, and a
+call made while the build holds the file answers `error: the warehouse is
+locked, most likely by a build; try again when it finishes` in about a
+hundredth of a second. A connection held for the client's session would make
+every build fail for as long as the client stayed open.
 
 ## The metrics
 
@@ -180,10 +229,11 @@ figure: with every total already on its own row, there was nothing to add up. To
 
 ## Adding a tool
 
-A `Tool` in `agent/loop.py` is its OpenAI `tools` schema and a
+A `Tool` in `agent/tools.py` is its OpenAI `tools` schema and a
 `run(args) -> ToolResult`. `ToolResult.text` is what the model reads, and
 `ToolResult.note`, when set, is what every answer carries verbatim. Add the tool
-to `warehouse_tools(con, catalog)`, and write its text the way `render` writes
+to `warehouse_tools(con, catalog)`, which both the loop and the MCP server
+offer, and write its text the way `render` writes
 the bridge: every figure a reader could want already computed and labelled, so
 the model has nothing to add up. A `ValueError` or `TypeError` from `run` goes
 back to the model as `error: …`, for it to relay or to retry with other
@@ -195,3 +245,18 @@ arguments.
 has to follow the rules `tests/test_semantic_layer.py` holds, which are in the
 `contracts-and-data-quality` skill: a measure is a bare column, and a sum reads
 only an `additive` one.
+
+### From an MCP client
+
+Claude Code as the client (`claude -p`, with `sonnet` as the model), started
+outside the repo, so none of its instructions applied, with its built-in tools
+off and this server alone loaded. Both notes were quoted verbatim, and no answer
+held a number missing from the tool output (checked with the loop's check,
+`agent.loop.unverified`).
+
+| Question | Calls | What the answer got wrong |
+|---|---|---|
+| net revenue by quarter in 2011 | `query_metric`, by quarter, 2011 | nothing: the four quarters and the `all` row, and the Q4 note |
+| which region bought the most in 2010, and its average order value | `query_metric` by region, then again for the average order value filtered to that region | nothing |
+| can `unit_price` be added up | `describe_model` | nothing: no, because it is non-additive, with the metric to use instead |
+| why did revenue fall from 2010 to 2011 | `explain_change`, in EUR by default | nothing: the aligned −3.19% with the note, and each subtotal with its own bars |

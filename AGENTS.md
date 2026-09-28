@@ -75,7 +75,8 @@ ingest/     dlt — `sources/` is one module per publisher; `pipeline.py` is
 lake/       the DuckLake landing zone
 dbt/        staging → intermediate → marts
 transform/  the Polars derived metrics
-agent/      the analyst's tools over the marts, and a model loop that calls them
+agent/      the analyst's tools over the marts, a model loop that calls them,
+            and an MCP server that serves them to any MCP client
 orchestration/  the Dagster asset graph over all of the above
 publish/    the boundary outward: the Evidence site, the release, and the
             previous release's carried state

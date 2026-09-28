@@ -224,7 +224,7 @@ def query_metric(
     if not metrics or unknown:
         raise ValueError(
             f"unknown metric {', '.join(unknown) or '(none given)'}; the metrics are "
-            + ", ".join(layer.metrics)
+            + ", ".join(sorted(layer.metrics))
         )
     bad = [g for g in group_by if g not in GROUP_BY]
     if bad:

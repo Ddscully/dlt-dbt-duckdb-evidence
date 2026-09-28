@@ -42,6 +42,10 @@ dev = [
     # The official CLI wheel (the `duckdb` library ships no binary), locked here
     # rather than installed by curl or `uvx`, so `just sql` tracks uv.lock.
     "duckdb-cli>=1.5.5",    # `just sql`; the CLI binary, via `uv run duckdb`
+    # The MCP server (agent/mcp_server.py) runs on the client's machine over
+    # stdio, so the image does not need it; here, so `just test` and CI run its
+    # tests. 2.x's server API is not 1.x's.
+    "mcp>=2.2",             # `just mcp-server`
 ]
 # `uv sync --group orchestration` — the Dagster asset graph in orchestration/.
 # The pipeline still runs without these (`just run`).

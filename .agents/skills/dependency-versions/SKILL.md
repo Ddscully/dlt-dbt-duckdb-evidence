@@ -202,6 +202,12 @@ linter, formatter and type checker those pins serve behave is
   `agent/metrics.py` imports it: pyarrow's lesson, applied before the loss. Its
   engine is not a documented API and moves with dbt-core, so after a dbt-core
   bump run `tests/test_semantic_layer.py`, which compiles every metric.
+- **`mcp` is in the `dev` group, not a runtime dependency**: the MCP server
+  (`agent/mcp_server.py`) runs on the client's machine over stdio, never in the
+  image, and in `dev` `just test` and CI run its tests without a flag. It
+  brought 12 packages, `cryptography` among them. 2.x's server API is not 1.x's
+  (`Server(on_list_tools=…, on_call_tool=…)` callbacks, not decorators), so read
+  the installed SDK, not memory of 1.x, before changing the server.
 - **There are three dependency groups, and `deploy` is the one no recipe but its
   own installs.** `dev` and `orchestration` are what `just setup` syncs;
   `deploy` (`dagster-postgres` and `dagster-docker`, and with them
