@@ -58,6 +58,8 @@ NOT_A_SITE_INPUT = (
     # Seed builders' output is checked in (dbt/** covers it); the rest are live
     # or read-only.
     "scripts/**",
+    # The analyst's tools read the built marts; nothing in the asset graph calls them.
+    "agent/**",
     # Backing services: no runner starts them; the setup action places the
     # landing zone on disk regardless.
     "compose.yaml",

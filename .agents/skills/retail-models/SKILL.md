@@ -1,6 +1,6 @@
 ---
 name: retail-models
-description: The dbt retail group — fct_retail_order_line, the retail dimensions, cohorts, returns and analytics.retail_rfm, built on UCI Online Retail II. Use when editing any retail_* model, the RFM Polars transform or reports/pages/retail.md, and before trusting a revenue, return or retention number out of them.
+description: The dbt retail group — fct_retail_order_line, the retail dimensions, cohorts, returns and analytics.retail_rfm, built on UCI Online Retail II. Use when editing any retail_* model, the RFM Polars transform, the revenue bridge in agent/bridge.py or reports/pages/retail.md, and before trusting a revenue, return or retention number out of them.
 ---
 
 # Retail transactions (the `retail_*` models, `analytics.retail_rfm`, `reports/pages/retail.md`)
@@ -195,6 +195,41 @@ one; the page is `retail.md`.
     two sections below it, which is worth reading as a pair. A near-continuous
     currency column has almost no ties to split; `frequency` has 1,626 customers
     on one value.
+
+### The revenue bridge (`agent/bridge.py`, `just explain-change`)
+
+`explain_change(con, year_a, year_b, currency)` explains a change in net
+revenue as volume, mix, price, new SKUs, discontinued SKUs, returns and FX,
+then one step from net revenue to everything invoiced. It is deterministic
+Python over `fct_retail_order_line`, written to be called by an agent, never
+reimplemented by one. The bar set and what it was chosen over are
+[`docs/decisions/0014-the-revenue-bridge-bars.md`](../../../docs/decisions/0014-the-revenue-bridge-bars.md).
+
+- **The window comes from the fact's first and last `invoice_date`, never from
+  a year's own last sale.** 2010's last sale is 23 Dec because the business
+  closes over New Year; read as the end of coverage, a closure becomes missing
+  data. 2010 against 2011 is compared over 1 Jan–9 Dec: net revenue falls
+  **3.19% in EUR, not the 6.86% the full years show**, and pro-rating 2011
+  instead reads +0.43%
+  ([`docs/decisions/0013-compare-aligned-periods.md`](../../../docs/decisions/0013-compare-aligned-periods.md)).
+- **Every aggregate becomes a `Fraction`**, so the bars sum to the change with
+  `==`. As floats the GBP bars miss by about 1e-9, which makes the identity
+  useless as a test.
+- **The identity cannot catch a wrong formula**: price is what is left after
+  volume and mix, so the bars sum to the change whatever those compute.
+  Pricing year b's units at year b's prices leaves the sum test green; only
+  `tests/test_bridge.py`'s hand-worked values go red.
+- **`render` prints every subtotal a reader would want**, and
+  `alignment_note(bridge)` is the sentence an answer must carry when the years
+  were cut. Against a local 8B model through Ollama, the first version's
+  output got every bar copied correctly and two sums of bars invented; with
+  the subtotals printed it invented none. Neither version got the model to
+  repeat the unaligned figure, so a caller that paraphrases the bridge appends
+  the note itself.
+- **The answer for 2010 → 2011 is mostly churn**: continuing SKUs sold fewer
+  units (volume −€2.23m) at slightly lower prices (−€0.26m) with a richer mix
+  (+€0.59m), and new SKUs (+€2.74m) replaced most of it.
+
 ### Where retail touches the rest of the warehouse
 
 - **`country_iso3` is what makes "retail" and "the country domain" one

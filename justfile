@@ -133,6 +133,13 @@ dbt-docs: dbt-deps
 dbt-docs-serve: dbt-docs
     cd dbt && uv run dbt docs serve
 
+# Deterministic Python over marts.fct_retail_order_line; periods short of a full
+# year are aligned to the window both cover, and the output says so.
+# Why net revenue moved between two years — volume, mix, price, SKU churn, returns, FX (read-only)
+[group('inspect')]
+explain-change year_a year_b currency="EUR":
+    uv run python -m agent.bridge {{year_a}} {{year_b}} --currency {{currency}}
+
 # Report what the DuckLake landing zone holds — tables, rows, snapshots (read-only)
 [group('inspect')]
 lakehouse:
