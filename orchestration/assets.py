@@ -526,7 +526,8 @@ def wdi_indicators_all_present() -> dg.AssetCheckResult:
     Counted through `stg_wdi`'s own filter, because the World Bank has served two
     200 responses that land raw rows and still empty the column: an empty series
     for a bad code, and a stale cached copy with every `countryiso3code` empty.
-    Reads the lakehouse: on a fresh checkout the warehouse does not exist yet.
+    The fetch re-requests the second at another page size and raises on a second
+    stale copy, so this is the backstop for it. Reads the lakehouse: on a fresh checkout the warehouse does not exist yet.
     """
     con = read_only_connection(LAKEHOUSE_DIR)
     try:

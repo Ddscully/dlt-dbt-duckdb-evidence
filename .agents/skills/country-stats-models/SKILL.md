@@ -167,9 +167,20 @@ carries it forward is `publishing-a-release`.
   the series (`lastupdated` 2022-07-22, 1990-2020, 8,091 rows) whose every
   `countryiso3code` is empty; any other `per_page` got the current one. The rows
   land, `stg_wdi` drops all of them, and `gdp_constant_usd` is null everywhere —
-  which surfaced as an empty `analytics.co2_intensity` two layers down.
-  `wdi_indicators_all_present` counts only rows `stg_wdi` keeps, so it fails at
-  `raw`.
+  which surfaced as an empty `analytics.co2_intensity` two layers down. It came
+  back for other series on 22 and 27 September, always on the full-series URL.
+  - **The fetch now asks again, once.** `_fetch_wdi_indicator` treats a series
+    with rows but no three-letter code as stale, prints a line naming its
+    `lastupdated`, and re-requests it at `WB_STALE_RETRY_PER_PAGE`. A second
+    stale copy raises with the indicator, edition and URL — which the run log
+    never showed while only the check could fail, because Dagster does not
+    print a check's metadata.
+  - **The retry changes a value, not the order.** The origin's cache key
+    ignores query-parameter order and Cloudflare's does not, so a reordered URL
+    gets past the edge to the same stale origin copy.
+  - `wdi_indicators_all_present` still counts only rows `stg_wdi` keeps, so it
+    fails at `raw` on what the retry cannot see: an empty series, or a copy
+    with *some* codes.
   - **Two caches hold it, a day each.** The origin keeps a response for 24 hours
     and sends the time it has left as `max-age`. Each Cloudflare edge then keeps
     what it fetched for 24 hours from its own fetch, ignoring that `max-age`, so
