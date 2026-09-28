@@ -2,7 +2,7 @@
 # they call, and the Node toolchain the Evidence site needs.
 #
 # `CMD` is `just serve` — the same recipe a host would run. That is deliberate:
-# `docs/RUNNING_AS_A_SERVICE.md` §2's first reason against a container was that
+# the first reason against a container, in docs/decisions/0005, was that
 # an image restates the service, so it drifts from the recipe. It restates the
 # *toolchain* instead, and the recipe stays the one definition of what running
 # means.
@@ -34,7 +34,8 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 #
 # PROJECT_ROOT because `modern_data_stack.paths` raises rather than guessing,
 # and DAGSTER_HOME because `deploy/dagster.yaml` is the instance this image runs
-# (storage in Postgres; see docs/RUNNING_AS_A_SERVICE.md §3).
+# (storage in Postgres; see docs/RUNNING_AS_A_SERVICE.md, "The state that
+# must outlive a restart").
 #
 # **`/app/.venv/bin` on PATH is load-bearing, and not a convenience.** Every
 # recipe reaches the venv through `uv run`, so nothing in the justfile needs it

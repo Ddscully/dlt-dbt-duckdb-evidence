@@ -118,7 +118,7 @@ file there, then `npm run sources`.
 `EVIDENCE_SOURCE__<source>__<option>` over it, so
 `EVIDENCE_SOURCE__warehouse__filename` redirects a build without touching the
 committed file. That is the lever a scratch-warehouse build needs — see
-[`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md).
+[`docs/PUBLISH_AND_SWAP.md`](../../../docs/PUBLISH_AND_SWAP.md#pointing-the-site-at-a-scratch-warehouse--measured).
 
 **It must be relative to `sources/warehouse/`, and an absolute path fails in the
 worst way.** The DuckDB connector resolves it with `path.join(sourceDirectory,

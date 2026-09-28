@@ -152,6 +152,7 @@ change later, and the invariants that fail silently.
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column and what the release does to it |
 | [`docs/REUSING_THIS_STACK.md`](./docs/REUSING_THIS_STACK.md) | adapting the stack to a different dataset |
 | [`docs/RUNNING_AS_A_SERVICE.md`](./docs/RUNNING_AS_A_SERVICE.md) | running the graph and dashboard as an always-on service |
+| [`docs/PUBLISH_AND_SWAP.md`](./docs/PUBLISH_AND_SWAP.md) | the unbuilt design for building into a scratch warehouse and swapping it in |
 | [`docs/decisions/`](./docs/decisions/README.md) | why each design choice was made, and what was rejected |
 
 [`docs/course/`](./docs/course/) teaches the warehouse to analytics engineers

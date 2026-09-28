@@ -222,7 +222,7 @@ linter, formatter and type checker those pins serve behave is
   `tests/test_docker_launcher.py`, which importorskips `dagster_docker` and
   otherwise skips in silence. The mirror of that: against a venv it built, a plain
   `just setup` uninstalls those packages again (measured with
-  `--dry-run`), which `docs/RUNNING_AS_A_SERVICE.md` §8 records as a way to break
+  `--dry-run`), which `docs/RUNNING_AS_A_SERVICE.md`'s invariants record as a way to break
   a running service.
 - **Dropping harlequin is what unblocked dbt 1.11, and the mechanism is an exact
   pin.** harlequin pins `click==8.1.8`; dbt-core 1.11 requires `click>=8.3.0`,

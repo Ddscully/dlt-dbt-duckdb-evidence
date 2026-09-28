@@ -14,7 +14,7 @@
 # webserver has no authentication at all, so none of them may face a network.
 # `site` is the static Evidence build served by nginx, which opens no database
 # and is the one thing here meant to be looked at — it binds every interface,
-# exactly as `just serve` does (docs/RUNNING_AS_A_SERVICE.md §6).
+# exactly as `just serve` does (docs/RUNNING_AS_A_SERVICE.md, "Exposure").
 #
 # Image tags are pinned exactly. Dependabot's `docker-compose` ecosystem watches
 # the ones here and its `docker` ecosystem watches the `Dockerfile`'s: two
@@ -41,7 +41,8 @@ volumes:
     name: mds_data
   # dlt's state — the WDI watermark and the ECB's last fixing. Its own volume
   # because it is the piece a deployment most easily loses: dlt resolves it from
-  # $HOME unless DLT_DATA_DIR says otherwise (docs/RUNNING_AS_A_SERVICE.md §3).
+  # $HOME unless DLT_DATA_DIR says otherwise (docs/RUNNING_AS_A_SERVICE.md,
+  # "The state that must outlive a restart").
   mds_dlt:
     name: mds_dlt
   # The built site, written by a run container and read by nginx.
@@ -118,7 +119,7 @@ services:
   # Runs do *not* execute here: `deploy/dagster.yaml`'s DockerRunLauncher gives
   # each one its own container from this same image, which is why the docker
   # socket is mounted. That socket is root-equivalent on the host — see
-  # docs/RUNNING_AS_A_SERVICE.md §6 before exposing any of this.
+  # docs/RUNNING_AS_A_SERVICE.md, "Exposure", before exposing any of this.
   dagster:
     build: .
     image: mds:local
@@ -154,7 +155,8 @@ services:
       # Explicit, because dlt resolves its state directory from $HOME and would
       # otherwise put the watermarks inside the container's own filesystem,
       # where they die with it. XDG_DATA_HOME does not work: it loses to an
-      # existing ~/.dlt (docs/RUNNING_AS_A_SERVICE.md §3).
+      # existing ~/.dlt (docs/RUNNING_AS_A_SERVICE.md, "The state that must
+      # outlive a restart").
       DLT_DATA_DIR: /app/state/dlt
       INGEST_CACHE_DIR: /app/data/cache
       # Where the finished site is copied for nginx to serve. A mount point, so
@@ -168,7 +170,8 @@ services:
       - mds_dagster:/dagster-storage
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      # Localhost only: Dagster has no authentication (§6).
+      # Localhost only: Dagster has no authentication (RUNNING_AS_A_SERVICE.md,
+      # "Exposure").
       - "127.0.0.1:3000:3000"
     depends_on:
       postgres:
@@ -185,7 +188,8 @@ services:
       - mds_site:/usr/share/nginx/html:ro
     # Every interface, unlike the other ports, and deliberately: the site is
     # static, and its source queries only aggregate over `customer_id`
-    # (RUNNING_AS_A_SERVICE.md §6). Public site means public tables, though.
+    # (RUNNING_AS_A_SERVICE.md, "Exposure"). Public site means public tables,
+    # though.
     ports:
       - "8081:80"
     depends_on:

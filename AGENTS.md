@@ -48,10 +48,10 @@ before undoing a choice, and move history there rather than into a doc.
 - **[`PRACTICES.md`](docs/PRACTICES.md) restates figures from five other files**,
   kept in step by hand. Counts of tests, mart models, labels and contracted
   columns stay out of prose, which `tests/test_documented_counts.py` enforces.
-- **[`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) mostly describes
-  what the repo has not built.** Its §2 exists as `just serve` and as the compose
-  stack built on it; §4 onward is still design, and nothing checks the paths
-  `docs/` cites.
+- **[`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) is what is built**
+  (`just serve` and the compose stack on it), and
+  [`PUBLISH_AND_SWAP.md`](docs/PUBLISH_AND_SWAP.md) is a design nothing
+  implements; nothing checks the paths `docs/` cites.
 
 Three lessons that apply well beyond where they were learned:
 

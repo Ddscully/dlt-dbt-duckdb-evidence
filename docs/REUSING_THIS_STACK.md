@@ -224,8 +224,8 @@ Then delete:
 - `docs/course/`, and seven of the eighteen skills: country stats, compliance,
   retail, currency and calendar, weather, unit-tested models, course authoring;
 - the docs about this warehouse's data. What stays is `STYLE_GUIDE.md`,
-  `ORCHESTRATION.md`, `RUNNING_AS_A_SERVICE.md`, and `WAREHOUSE.md` for its bus
-  matrix block;
+  `ORCHESTRATION.md`, `RUNNING_AS_A_SERVICE.md`, `PUBLISH_AND_SWAP.md`, and
+  `WAREHOUSE.md` for its bus matrix block;
 - about a quarter of `AGENTS.md` (§9).
 
 Several of the files that survive unchanged still name the example in comments

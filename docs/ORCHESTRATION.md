@@ -128,7 +128,7 @@ Only `dagster.yaml` is checked in. The *container* stack points `DAGSTER_HOME`
 at `deploy/` instead and keeps run, event and schedule storage in Postgres,
 which is the same instance in every other respect except that it launches each
 run in its own container — so a host must not borrow it
-([`docs/RUNNING_AS_A_SERVICE.md`](RUNNING_AS_A_SERVICE.md) §3 and §10,
+([`RUNNING_AS_A_SERVICE.md`](RUNNING_AS_A_SERVICE.md#standing-it-up),
 [decision 0011](decisions/0011-deploy-is-the-containers-instance.md)). The two
 files are held in step by `tests/test_dagster_instance.py`. [AGENTS.md](../AGENTS.md#orchestration-orchestration)
 covers the traps: asset-key matching between dlt and dbt, `load_retail` running

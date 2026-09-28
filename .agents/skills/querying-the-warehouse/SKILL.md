@@ -104,8 +104,8 @@ at path + "duckdb:…/catalog.duckdb"Could not set lock on file
 ```
 
 The way out is not a connection flag: it is to stop writing to the file anyone
-reads. [`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md)
-§4 designs that — build into a scratch warehouse and swap it in — for a
+reads. [`docs/PUBLISH_AND_SWAP.md`](../../../docs/PUBLISH_AND_SWAP.md)
+designs that — build into a scratch warehouse and swap it in — for a
 deployment that has to serve reads and rebuild on a schedule.
 
 ## Schema names have no prefix
