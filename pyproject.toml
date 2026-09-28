@@ -16,6 +16,9 @@ dependencies = [
     # `dependency-versions` skill.
     "pyarrow>=17",        # DuckDB's Arrow bridge — needed by the ingest and both transforms
     "dbt-duckdb>=1.9",    # T: dbt adapter targeting the DuckDB file
+    # dbt-core 1.12 already requires it; declared because `agent/metrics.py`
+    # imports it, so a dbt-core upgrade cannot remove it without a lock diff.
+    "metricflow>=0.213",  # compiles the dbt semantic layer's metrics to SQL
 ]
 
 [dependency-groups]

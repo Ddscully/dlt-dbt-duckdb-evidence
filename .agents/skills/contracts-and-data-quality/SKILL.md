@@ -1,6 +1,6 @@
 ---
 name: contracts-and-data-quality
-description: The dbt metadata layer and its gates — data tests and dbt_utils, store_failures, groups and access, enforced contracts, per-page exposures, the meta additivity labels, the versioned fct_emissions_energy and its enforced deprecation, and the bus matrix. Use when editing dbt/models/_groups.yml, dbt/models/_exposures.yml or any marts _*.yml, adding or changing a data test, contract, access level, meta label or model version, selecting marts assets by key, or when dbt parse fails on a deprecation or access error.
+description: The dbt metadata layer and its gates — data tests and dbt_utils, store_failures, groups and access, enforced contracts, per-page exposures, the meta additivity labels, the retail metrics in dbt's semantic layer, the versioned fct_emissions_energy and its enforced deprecation, and the bus matrix. Use when editing dbt/models/_groups.yml, dbt/models/_exposures.yml or any marts _*.yml, adding or changing a data test, contract, access level, meta label, metric or model version, selecting marts assets by key, or when dbt parse fails on a deprecation or access error.
 ---
 
 # Data-quality gates, contracts, ownership and versions
@@ -107,6 +107,30 @@ account of the same ground is `docs/DATA_QUALITY.md`.
   - A `meta:` block can sit below a comment or a `description:`, so a line-wise
     insert that only skips comments writes a second `meta:` key — which PyYAML
     silently resolves to the last, and `check-yaml` does not flag.
+- **The retail metrics are dbt's semantic layer**
+  (`dbt/models/marts/retail/_retail_metrics.yml`), compiled by MetricFlow's
+  Python engine in `agent/metrics.py` (`just metric`), and MetricFlow never
+  reads `meta`: it sums whatever a measure names. `tests/test_semantic_layer.py`
+  holds the yml to the labels instead, so a new metric follows three rules:
+  - **A measure is a bare column** (no `expr`, or one naming a column), and a
+    subset is chosen with the *metric's* `filter:` — a `case when` in the
+    measure hides the column from the label lookup.
+  - **`agg: sum` only over an `additive` column**; `count_distinct` over
+    anything, which the tool's `all` row handles, since MetricFlow does not roll
+    distinct counts up.
+  - **No entity or dimension reads a `direct_identifier` column**:
+    `customer_id` is counted, never grouped by.
+  - Give each simple metric `fill_nulls_with: 0`, or a group with no rows for
+    it reads as unknown: a region with no returns had no return rate, not 0%.
+  - A joined dimension is `<entity>__<dimension>` — `country__region`, not
+    `order_line__country__region` — and the compiled SQL names
+    `"warehouse"."marts".…`, so an in-memory test database must be attached as
+    `warehouse` (`tests/retail_fact.py`).
+  - `dim_date` is the time spine, and MetricFlow refuses to compile without one.
+    A request grouped by year does not read it.
+  - **Not the `mf` CLI**: it reads `dbt/target/semantic_manifest.json` whatever
+    `DBT_TARGET_PATH` says, so it can answer from a stale or a fixture parse
+    ([0015](../../../docs/decisions/0015-metrics-in-the-semantic-layer.md)).
 - **`fct_emissions_energy` is versioned** because nothing in the repo refs it and
   the release ships it: v2 renames `co2_per_gdp` to `co2_kg_per_gdp_ppp_2011`. v2
   is aliased back to the bare relation name, and v1 is a view over v2 that puts

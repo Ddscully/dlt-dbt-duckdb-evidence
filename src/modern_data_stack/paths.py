@@ -122,6 +122,17 @@ def dbt_manifest_path() -> str:
     return os.environ.get("DBT_MANIFEST_PATH") or str(dbt_dir() / "target" / "manifest.json")
 
 
+def dbt_semantic_manifest_path() -> str:
+    """dbt's semantic manifest: the metrics and semantic models, as MetricFlow reads them.
+
+    dbt writes it beside the manifest on every parse, so it follows the manifest
+    wherever `DBT_MANIFEST_PATH` points; gitignored like it.
+    """
+    return os.environ.get("DBT_SEMANTIC_MANIFEST_PATH") or str(
+        Path(dbt_manifest_path()).with_name("semantic_manifest.json")
+    )
+
+
 def dbt_run_results_path() -> str:
     """dbt's run results, written by every invocation that executes nodes.
 

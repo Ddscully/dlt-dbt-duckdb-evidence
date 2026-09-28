@@ -1,6 +1,6 @@
 ---
 name: retail-models
-description: The dbt retail group — fct_retail_order_line, the retail dimensions, cohorts, returns and analytics.retail_rfm, built on UCI Online Retail II. Use when editing any retail_* model, the RFM Polars transform, the revenue bridge in agent/bridge.py or reports/pages/retail.md, and before trusting a revenue, return or retention number out of them.
+description: The dbt retail group — fct_retail_order_line, the retail dimensions, cohorts, returns and analytics.retail_rfm, built on UCI Online Retail II. Use when editing any retail_* model, the RFM Polars transform, the revenue bridge in agent/bridge.py, the retail metrics or reports/pages/retail.md, and before trusting a revenue, return or retention number out of them.
 ---
 
 # Retail transactions (the `retail_*` models, `analytics.retail_rfm`, `reports/pages/retail.md`)
@@ -227,6 +227,10 @@ reimplemented by one. The bar set and what it was chosen over are
   repeat the unaligned figure, so a caller that paraphrases the bridge appends
   the note itself — `agent/loop.py` does (`just ask`,
   [`docs/FINANCE_AGENT.md`](../../../docs/FINANCE_AGENT.md)).
+- **Totals and breakdowns go through `just metric`** (`agent/metrics.py`), over
+  the metrics in `_retail_metrics.yml`, not through a new `sum`; what each mart's
+  columns mean is `just describe-model <model>`. The metric rules are
+  `contracts-and-data-quality`.
 - **The answer for 2010 → 2011 is mostly churn**: continuing SKUs sold fewer
   units (volume −€2.23m) at slightly lower prices (−€0.26m) with a richer mix
   (+€0.59m), and new SKUs (+€2.74m) replaced most of it.

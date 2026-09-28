@@ -40,7 +40,9 @@ from dataclasses import dataclass
 
 import duckdb
 
+from agent import metrics
 from agent.bridge import AMOUNT_COLUMNS, alignment_note, explain_change, render
+from agent.catalog import Catalog, describe_model, load_catalog
 from modern_data_stack.paths import warehouse_path
 
 BASE_URL = "http://localhost:11434/v1"  # Ollama's OpenAI-compatible endpoint
@@ -51,7 +53,10 @@ SYSTEM = (
     "You answer questions about a UK online retailer's revenue, from its invoices. "
     "Call a tool for every figure. Write each figure exactly as the tool printed it: "
     "do not add figures together, round them, or convert their units. If no tool gives "
-    "a figure the question needs, say so rather than estimate it. Keep the answer short."
+    "a figure the question needs, say so rather than estimate it. Keep the answer short. "
+    "Use describe_model for what a table's columns mean and which may be summed, "
+    "query_metric for totals and breakdowns, and explain_change for why revenue moved "
+    "between two years."
 )
 
 Message = dict
@@ -97,8 +102,13 @@ class Answer:
         return "\n\n".join(parts)
 
 
-def warehouse_tools(con: duckdb.DuckDBPyConnection) -> list[Tool]:
-    """The tools over the marts, bound to one read-only connection."""
+def warehouse_tools(con: duckdb.DuckDBPyConnection, catalog: Catalog | None = None) -> list[Tool]:
+    """The tools over the marts, bound to one read-only connection.
+
+    `describe_model` and `query_metric` need the dbt manifests, so they are
+    offered only with a `catalog`. Their schemas' choices are read from the
+    manifests, so a metric added in yml is offered without a code change.
+    """
 
     def run_explain_change(args: dict) -> ToolResult:
         missing = sorted({"year_a", "year_b"} - set(args))
@@ -130,7 +140,118 @@ def warehouse_tools(con: duckdb.DuckDBPyConnection) -> list[Tool]:
             },
         },
     }
-    return [Tool(explain_change_schema, run_explain_change)]
+    tools = [Tool(explain_change_schema, run_explain_change)]
+    if catalog is not None:
+        tools += _catalog_tools(con, catalog)
+    return tools
+
+
+def _names(value) -> list[str]:
+    """`"year"` or `["year"]` as a list: small models send a lone name bare."""
+    names = [value] if isinstance(value, str) else list(value)
+    if not all(isinstance(name, str) for name in names):
+        raise ValueError(f"expected names as strings, not {value!r}")
+    return names
+
+
+def _years(value) -> tuple[int, int] | None:
+    """`2011`, `[2011]` or `[2010, 2011]`, as a (first, last) pair."""
+    if value is None:
+        return None
+    years = [value] if isinstance(value, int | str) else list(value)
+    try:
+        if len(years) not in (1, 2):
+            raise ValueError
+        return int(years[0]), int(years[-1])
+    except ValueError:
+        raise ValueError(f"years is [first, last] or a single year, not {value!r}") from None
+
+
+def _catalog_tools(con: duckdb.DuckDBPyConnection, catalog: Catalog) -> list[Tool]:
+    layer = catalog.layer
+
+    def run_describe_model(args: dict) -> ToolResult:
+        if "model" not in args:
+            raise TypeError("describe_model needs model")
+        return ToolResult(describe_model(catalog, str(args["model"])))
+
+    def run_query_metric(args: dict) -> ToolResult:
+        if not args.get("metrics"):
+            raise TypeError("query_metric needs metrics")
+        where = args.get("where") or None
+        if where is not None and not isinstance(where, dict):
+            raise ValueError(
+                f'where is an object, e.g. {{"region": "North America"}}, not {where!r}'
+            )
+        table = metrics.query_metric(
+            con,
+            layer,
+            _names(args["metrics"]),
+            group_by=_names(args.get("group_by") or []),
+            years=_years(args.get("years")),
+            where=where,
+        )
+        return ToolResult(metrics.render(table), metrics.coverage_note(table))
+
+    describe_model_schema = {
+        "type": "function",
+        "function": {
+            "name": "describe_model",
+            "description": (
+                "Describe a warehouse table: what one row is, what it means, which "
+                "metrics read it, and each column's type and whether summing it means "
+                "anything."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"model": {"type": "string", "enum": list(catalog.describable)}},
+                "required": ["model"],
+            },
+        },
+    }
+    metric_list = "; ".join(
+        f"{name}: {' '.join(spec.get('description', '').split())}"
+        for name, spec in sorted(layer.metrics.items())
+    )
+    query_metric_schema = {
+        "type": "function",
+        "function": {
+            "name": "query_metric",
+            "description": (
+                "Totals of retail metrics, optionally broken down by period or place, "
+                "with an 'all' row. Metrics: " + metric_list
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "metrics": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": sorted(layer.metrics)},
+                    },
+                    "group_by": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(metrics.GROUP_BY)},
+                        "description": "at most one of year, quarter and month",
+                    },
+                    "years": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "[first, last] calendar years, inclusive",
+                    },
+                    "where": {
+                        "type": "object",
+                        "properties": {name: {"type": "string"} for name in metrics.FILTERS},
+                        "description": "an exact country name or World Bank region",
+                    },
+                },
+                "required": ["metrics"],
+            },
+        },
+    }
+    return [
+        Tool(describe_model_schema, run_describe_model),
+        Tool(query_metric_schema, run_query_metric),
+    ]
 
 
 def _call(tools: dict[str, Tool], name: str, arguments: str | dict) -> ToolResult:
@@ -228,9 +349,13 @@ def main() -> None:
     args = parser.parse_args()
     chat = openai_chat(args.base_url, args.model, os.environ.get("AGENT_API_KEY"))
     try:
+        catalog = load_catalog()
+    except FileNotFoundError as exc:
+        sys.exit(str(exc))
+    try:
         # Read-only: fails while a build holds the file, by DuckDB's design.
         with duckdb.connect(warehouse_path(), read_only=True) as con:
-            answer = ask(args.question, chat, warehouse_tools(con))
+            answer = ask(args.question, chat, warehouse_tools(con, catalog))
     except urllib.error.HTTPError as exc:  # the server's reason, e.g. a model not pulled
         sys.exit(f"{args.base_url} refused: {exc.code} {exc.read().decode(errors='replace')}")
     except urllib.error.URLError as exc:

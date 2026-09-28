@@ -198,6 +198,10 @@ linter, formatter and type checker those pins serve behave is
   - The lesson generalises past this package: a dependency that arrives as some
     dev tool's grand-transitive is indistinguishable from a declared one until
     the dev tool leaves.
+- **`metricflow` is declared although dbt-core already requires it**, because
+  `agent/metrics.py` imports it: pyarrow's lesson, applied before the loss. Its
+  engine is not a documented API and moves with dbt-core, so after a dbt-core
+  bump run `tests/test_semantic_layer.py`, which compiles every metric.
 - **There are three dependency groups, and `deploy` is the one no recipe but its
   own installs.** `dev` and `orchestration` are what `just setup` syncs;
   `deploy` (`dagster-postgres` and `dagster-docker`, and with them

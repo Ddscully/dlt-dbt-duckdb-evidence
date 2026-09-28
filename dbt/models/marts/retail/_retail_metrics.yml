@@ -1,0 +1,207 @@
+# The retail metrics: what `query_metric` (agent/metrics.py) can be asked for.
+#
+# A metric's meaning lives here and nowhere else. MetricFlow compiles a request
+# for one to SQL, and the agent runs that SQL on its own read-only connection.
+#
+# MetricFlow sums whatever it is told to, so the additivity labels in
+# `_retail.yml` govern this file, and tests/test_semantic_layer.py holds it to
+# them:
+#   - every measure is a bare column of its model, so its label can be looked up;
+#     a subset is chosen with the metric's `filter:`, never with a measure `expr`;
+#   - `agg: sum` only over a column labelled `additive`;
+#   - no entity or dimension reads a `direct_identifier` column: `customer_id` is
+#     counted, never grouped by.
+#
+# Every simple metric has `fill_nulls_with: 0`: a group with no returns returned
+# nothing, and a return rate of "unknown" where the answer is 0%.
+#
+# `income_group` is deliberately not a dimension: it is today's World Bank
+# classification, and these sales are from 2009 to 2011.
+
+semantic_models:
+  - name: order_lines
+    description: One row per invoice line, from `fct_retail_order_line`.
+    model: ref('fct_retail_order_line')
+    defaults:
+      agg_time_dimension: invoice_date
+    entities:
+      - name: order_line
+        type: primary
+        expr: invoice || '/' || line_number::varchar
+      - name: country
+        type: foreign
+        expr: country_iso3
+    dimensions:
+      - name: invoice_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: invoice_type
+        type: categorical
+      - name: is_revenue_line
+        type: categorical
+    measures:
+      - name: line_amount_gbp
+        agg: sum
+      - name: line_amount_eur
+        agg: sum
+      - name: line_amount_usd
+        agg: sum
+      - name: quantity
+        agg: sum
+      - name: invoices
+        agg: count_distinct
+        expr: invoice
+      - name: customer_ids
+        agg: count_distinct
+        expr: customer_id
+
+  - name: countries
+    description: The conformed country dimension, for grouping sales by country or region.
+    model: ref('dim_country')
+    entities:
+      - name: country
+        type: primary
+        expr: country_iso3
+    dimensions:
+      - name: country_name
+        type: categorical
+      - name: region
+        type: categorical
+
+metrics:
+  - name: net_revenue_gbp
+    label: Net revenue (GBP)
+    description: >
+      Product sales less customer returns, in pounds: the revenue figure every
+      retail model uses. Excludes shipping, fees, discounts, write-offs and
+      adjustments.
+    type: simple
+    type_params:
+      measure:
+        name: line_amount_gbp
+        fill_nulls_with: 0
+    filter: "{{ Dimension('order_line__is_revenue_line') }}"
+
+  - name: net_revenue_eur
+    label: Net revenue (EUR)
+    description: >
+      Net revenue with each line converted to euros at its own day's ECB rate,
+      so it moves with the exchange rate as well as with sales.
+    type: simple
+    type_params:
+      measure:
+        name: line_amount_eur
+        fill_nulls_with: 0
+    filter: "{{ Dimension('order_line__is_revenue_line') }}"
+
+  - name: net_revenue_usd
+    label: Net revenue (USD)
+    description: >
+      Net revenue with each line converted to US dollars at its own day's ECB
+      rate.
+    type: simple
+    type_params:
+      measure:
+        name: line_amount_usd
+        fill_nulls_with: 0
+    filter: "{{ Dimension('order_line__is_revenue_line') }}"
+
+  - name: gross_revenue_gbp
+    label: Gross revenue (GBP)
+    description: >
+      Product sales before returns, in pounds.
+    type: simple
+    type_params:
+      measure:
+        name: line_amount_gbp
+        fill_nulls_with: 0
+    filter: |
+      {{ Dimension('order_line__is_revenue_line') }}
+      and {{ Dimension('order_line__invoice_type') }} = 'sale'
+
+  - name: returns_gbp
+    label: Returns (GBP)
+    description: >
+      Product returns in pounds, negative as the source signs them, so gross
+      revenue plus returns is net revenue.
+    type: simple
+    type_params:
+      measure:
+        name: line_amount_gbp
+        fill_nulls_with: 0
+    filter: |
+      {{ Dimension('order_line__is_revenue_line') }}
+      and {{ Dimension('order_line__invoice_type') }} = 'cancellation'
+
+  - name: units_sold
+    label: Units sold
+    description: >
+      Product units on sale invoices, before returns.
+    type: simple
+    type_params:
+      measure:
+        name: quantity
+        fill_nulls_with: 0
+    filter: |
+      {{ Dimension('order_line__is_revenue_line') }}
+      and {{ Dimension('order_line__invoice_type') }} = 'sale'
+
+  - name: orders
+    label: Orders
+    description: >
+      Distinct sale invoices with at least one product on them.
+    type: simple
+    type_params:
+      measure:
+        name: invoices
+        fill_nulls_with: 0
+    filter: |
+      {{ Dimension('order_line__is_revenue_line') }}
+      and {{ Dimension('order_line__invoice_type') }} = 'sale'
+
+  - name: customers
+    label: Customers
+    description: >
+      Distinct signed-in customers who bought a product. Sales nobody signed in
+      for have no customer, so this undercounts buyers. A distinct count: one
+      customer buying in two periods is one customer across both.
+    type: simple
+    type_params:
+      measure:
+        name: customer_ids
+        fill_nulls_with: 0
+    filter: |
+      {{ Dimension('order_line__is_revenue_line') }}
+      and {{ Dimension('order_line__invoice_type') }} = 'sale'
+
+  - name: average_order_value_gbp
+    label: Average order value (GBP)
+    description: >
+      Net revenue divided by orders, recomputed from both for every group rather
+      than averaged across groups.
+    type: ratio
+    type_params:
+      numerator: net_revenue_gbp
+      denominator: orders
+
+  - name: average_selling_price_gbp
+    label: Average selling price (GBP)
+    description: >
+      Gross revenue divided by units sold: the average price of a unit sold,
+      weighted by units.
+    type: ratio
+    type_params:
+      numerator: gross_revenue_gbp
+      denominator: units_sold
+
+  - name: return_rate_pct
+    label: Return rate (%)
+    description: >
+      Returns as a percentage of gross revenue, by value.
+    type: derived
+    type_params:
+      expr: -100 * returns_gbp / gross_revenue_gbp
+      metrics:
+        - name: returns_gbp
+        - name: gross_revenue_gbp

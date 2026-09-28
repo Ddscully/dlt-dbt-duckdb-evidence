@@ -135,6 +135,8 @@ models:
     config:
       contract:
         enforced: true
+    time_spine:
+      standard_granularity_column: date_day
     description: >
       The calendar: one row per day, 1999-01-01 to the end of the year the FX
       series reaches, dense and gapless by construction. 10,227 rows today, and
@@ -167,6 +169,7 @@ models:
     columns:
       - name: date_day
         data_type: DATE
+        granularity: day
         description: >
           The calendar day, and the dimension's natural key. Whole years from the first
           year of the ECB series (1999) to the end of the last, so a year-to-date query
