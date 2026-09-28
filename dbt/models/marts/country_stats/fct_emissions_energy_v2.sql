@@ -59,6 +59,7 @@ select
     e.electricity_generation_twh,
     e.carbon_intensity_elec_g_kwh,
     e.low_carbon_share_elec_pct,
+    e.renewables_share_elec_pct,
     e.solar_share_elec_pct,
     e.wind_share_elec_pct,
     e.nuclear_share_elec_pct,

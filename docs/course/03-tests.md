@@ -207,7 +207,7 @@ sed -i '/name: co2_per_capita/,+3 s/{min_value: 0}/{min_value: 0, max_value: 50}
 just course-rebuild
 ```
 
-**Observe.** `PASS=561 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
+**Observe.** `PASS=564 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
 the reviewer's evidence checks out:
 
 ```bash

@@ -173,6 +173,7 @@ EXTRA_ADDITIVITY: dict[tuple[str, str, str], str] = {
     ("analytics", "co2_intensity", "electricity_generation_twh"): "additive",
     ("analytics", "co2_intensity", "carbon_intensity_elec_g_kwh"): "non_additive",
     ("analytics", "co2_intensity", "low_carbon_share_elec_pct"): "non_additive",
+    ("analytics", "co2_intensity", "renewables_share_elec_pct"): "non_additive",
     ("analytics", "co2_intensity", "solar_share_elec_pct"): "non_additive",
     ("analytics", "co2_intensity", "wind_share_elec_pct"): "non_additive",
     ("analytics", "co2_intensity", "nuclear_share_elec_pct"): "non_additive",
