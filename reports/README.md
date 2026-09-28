@@ -114,7 +114,7 @@ calls, so the recipe and the graph can't drift into running different builds.
   The fabricated sites are stated in an `<Alert>` directly above each chart of
   them rather than in a footnote.
 - `pages/cbam.md` and `pages/cbam/`: what a tonne of an imported CBAM good costs at the EU border,
-  by where it was made — `marts.fct_cbam_exposure`, i.e. Annex I of Implementing
+  before any deduction, by where it was made — `marts.fct_cbam_exposure`, i.e. Annex I of Implementing
   Regulation (EU) 2025/2621 times a carbon price. The one page driven by a
   *string* input: the `<Dropdown>` picks a `good_key`, so its SQL interpolates as
   `where good_key = '${inputs.good.value}'` with the quotes written by hand —

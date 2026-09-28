@@ -1,14 +1,17 @@
 ---
 title: CBAM Exposure
-description: What a tonne of an imported CBAM good costs at the EU border, by where it was made. Annex I's default values, priced at a carbon price you choose.
+description: What a tonne of an imported CBAM good costs at the EU border before any deduction, by where it was made. Annex I's default values, priced at a carbon price you choose.
 sidebar_position: 1
 ---
 
 From 2026 an EU importer of steel, cement, aluminium, fertiliser or hydrogen pays
 for the carbon embedded in it. Without data from the plant that made the goods,
-the bill falls back to a country default published in
+the emissions counted fall back to a country default published in
 [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621),
-as corrected in August 2026. This page prices those defaults.
+as corrected in August 2026. This page prices those defaults. The figures are
+gross: they come before the deductions for EU ETS free allocation and for any
+carbon price paid where the good was made, which this page does not model, so
+they are more than an importer will owe.
 
 ```sql headline
 select
@@ -49,7 +52,7 @@ from fb inner join listed on fb.good_key = listed.good_key
     <BigValue data={fallback_penalty} value=median_ratio fmt='0.00"×"' title="Unlisted vs. median country"/>
 </Grid>
 
-## The same tonne costs very different amounts at the border
+## The same tonne carries very different gross costs at the border
 
 ```sql goods_list
 select
@@ -122,11 +125,11 @@ where good_key = '${inputs.good.value}'
     sort=false
     yFmt='€#,##0'
     echartsOptions={{xAxis: {axisLabel: {show: false}}}}
-    title="Border cost per tonne in 2026, one bar per sourcing country"
+    title="Gross border cost per tonne in 2026, one bar per sourcing country"
     subtitle="Cheapest to dearest; hover a bar for the country"
 />
 
-For this good the 2026 cost runs from <Value data={ranked_span} column=cheapest_country/> at <Value data={ranked_span} column=cheapest fmt='€#,##0'/> a tonne to <Value data={ranked_span} column=dearest_country/> at <Value data={ranked_span} column=dearest fmt='€#,##0'/> a tonne, a gap of <Value data={ranked_span} column=gap fmt='€#,##0'/> on an identical product. For steel the colours sort almost perfectly: the production route, not the country, sets the price. **[Every country, with its route and value →](/cbam/by-country)**
+For this good the 2026 gross cost runs from <Value data={ranked_span} column=cheapest_country/> at <Value data={ranked_span} column=cheapest fmt='€#,##0'/> a tonne to <Value data={ranked_span} column=dearest_country/> at <Value data={ranked_span} column=dearest fmt='€#,##0'/> a tonne, a gap of <Value data={ranked_span} column=gap fmt='€#,##0'/> on an identical product. For steel the colours sort almost perfectly: the production route, not the country, sets the price. **[Every country, with its route and value →](/cbam/by-country)**
 
 ## Electricity is almost none of it
 
@@ -169,7 +172,7 @@ group by product_group
 />
 
 The annex counts electricity only for cement and fertilisers, and even there it
-is under a tenth. So a country's grid barely moves its border cost: primary
+is under a tenth. So a country's grid barely moves its gross border cost: primary
 aluminium costs about the same whether it was smelted on the cleanest grid or the
 dirtiest. **[Why the grid barely counts →](/cbam/grid)**
 
@@ -208,7 +211,7 @@ order by 1
     yMin=0
     echartsOptions={{xAxis: {min: 'dataMin', max: 'dataMax'}}}
     xAxisTitle="Carbon price per tonne of CO₂"
-    title="Cost per tonne of the selected good, at €60 to €120 of carbon"
+    title="Gross cost per tonne of the selected good, at €60 to €120 of carbon"
 />
 
 There is no free public feed for the EU carbon price, so the page does not
@@ -235,18 +238,21 @@ order by ord
     sort=false
     markers=true
     yFmt='€#,##0'
-    title="Median border cost per tonne, by year of import"
+    title="Median gross border cost per tonne, by year of import"
 />
 
 The defaults carry a mark-up of 10% in 2026, 20% in 2027 and 30% from 2028, so
 the cost of *not* collecting supplier data grows each year. Fertilisers are the
-exception, at a flat 1%. **[Method and limits →](/cbam/method)**
+exception, at a flat 1%. Free allocation phases out over the same years, so the
+deduction for it shrinks, and what an importer actually owes rises faster than
+the mark-ups alone suggest. **[Method and limits →](/cbam/method)**
 
 <Alert status=warning>
 
 **A screening tool, not a filing.** These are administrative defaults, marked up
-on purpose so that verified supplier data is the cheaper route. They rank which
-sourcing lanes are worth collecting that data for.
+on purpose so that verified supplier data is the cheaper route, and they come
+before the deductions for free allocation and for a carbon price paid at origin.
+They rank which sourcing lanes are worth collecting that data for.
 
 </Alert>
 

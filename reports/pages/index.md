@@ -134,12 +134,12 @@ from ${cbam_steel}
     yFmt='€#,##0'
     chartAreaHeight=160
     yMax={800}
-    title="Border cost per tonne of semi-finished steel, 2026"
+    title="Gross border cost per tonne of semi-finished steel, 2026"
 />
 
-Between the cheapest and the dearest of these six sources, the same tonne of steel costs <Value data={cbam_steel_gap} column=gap_eur fmt='€#,##0'/> more at the EU border in 2026.
+Between the cheapest and the dearest of these six sources, the same tonne of steel carries <Value data={cbam_steel_gap} column=gap_eur fmt='€#,##0'/> more in gross CBAM cost in 2026.
 
-What importers of steel, cement, aluminium, fertiliser and hydrogen owe.
+What the CBAM defaults put on imports of steel, cement, aluminium, fertiliser and hydrogen, before deductions.
 
 </Group>
 

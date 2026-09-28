@@ -17,11 +17,14 @@ CBAM covers it, and which countries it exempts is set by the regulation's
 articles, which this tool does not know.
 
 **The figures are gross.** An importer surrenders fewer certificates than the
-defaults imply, in step with the EU ETS allowances EU producers still receive
-free: a benchmark per good, times a factor that phases out from 2026 to 2034.
-Those benchmarks are provisional until 1 January 2027, and nothing in the
-warehouse models the deduction, so every result carries a note saying the
-figure is before it. `docs/decisions/0017-the-cbam-scenario.md` has the reasons.
+defaults imply, after two deductions. One is in step with the EU ETS allowances
+EU producers still receive free: a benchmark per good, times a factor that
+phases out from 2026 to 2034, and those benchmarks are provisional until
+1 January 2027. The other is for any carbon price effectively paid where the
+good was made (Article 9 of Regulation (EU) 2023/956), whose rules were not yet
+adopted when this was written. Nothing in the warehouse models either, so every
+result carries a note saying the figure is before both.
+`docs/decisions/0017-the-cbam-scenario.md` has the reasons.
 
 **The arithmetic is `Decimal`.** The mart's doubles carry noise (China's 2027
 aluminium certificates read `3.5999999999999996`); the annex prints three
@@ -279,8 +282,9 @@ def scenario_note(result: Scenario | Candidates) -> str | None:
     if not isinstance(result, Scenario):
         return None
     return (
-        f"These are gross figures, before the deduction for EU ETS free allocation, "
-        f"which this tool does not model, so they are not what an importer will owe. "
+        f"These are gross figures, before the deductions for EU ETS free allocation "
+        f"and for any carbon price paid where the good was made, which this tool "
+        f"does not model, so they are not what an importer will owe. "
         f"They use the regulation's default values, not any supplier's verified "
         f"emissions, and €{_number(result.price)} per tonne of CO2e is an assumed price."
     )

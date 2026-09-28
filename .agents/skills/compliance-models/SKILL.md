@@ -206,11 +206,18 @@ time series.
   page draws its EUR 60-120 sensitivity from one build and a release consumer can
   re-price without rebuilding.
 - **`agent/scenario.py` is that re-pricing for the finance agent** (`just
-  scenario`, the `run_scenario` tool), and its figures are **gross of the EU ETS
-  free-allocation deduction**, which nothing in the repo models: the benchmarks
-  were provisional when it was built. Its note says so on every answer, and the
-  mart's own "certificates surrendered" wording does not yet
+  scenario`, the `run_scenario` tool), and its figures are **gross of two
+  deductions** nothing in the repo models: EU ETS free allocation, whose
+  benchmarks were provisional when it was built, and a carbon price paid in the
+  country of origin (Article 9 of Regulation (EU) 2023/956), whose rules were
+  not yet adopted. Its note says so on every answer, as the mart's descriptions
+  and the CBAM pages do
   ([`docs/decisions/0017-the-cbam-scenario.md`](../../../docs/decisions/0017-the-cbam-scenario.md)).
+- **Whether the deductions keep the ranking between sources is open.** The
+  free-allocation deduction is set per good, which suggests the gaps survive,
+  but the benchmarks may differ by production route, which differs by country
+  here, and a net obligation floors at zero, which compresses the low end. Say
+  only that the *levels* are gross until the deductions are modelled.
   It rounds half up in `Decimal`, so 840 of the mart's 34,995 euro figures come
   out a penny higher there: each is exactly half a penny, held just below by the
   double.
@@ -327,7 +334,7 @@ mutation in this table:
 ### Reading it
 
 - **The story is production route, not grid** — the opposite of the Scope 2 page.
-  Semi-finished steel costs about €11 a tonne from Azerbaijan and €677 from
+  Semi-finished steel carries a gross cost of about €11 a tonne from Azerbaijan and €677 from
   Indonesia, and sorting by cost
   sorts almost perfectly by the annex's route indicator (`E` scrap/EAF against
   `C`/`F` ore/BF-BOF), not by the country's grid — the correlation between a

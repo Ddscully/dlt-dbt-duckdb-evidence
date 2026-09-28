@@ -1,13 +1,14 @@
 ---
 title: Method and limits
-description: The CBAM mark-up schedule, the annex correction, and the four limits a practitioner checks first.
+description: The CBAM mark-up schedule, the annex correction, and the five limits a practitioner checks first.
 sidebar_position: 3
 ---
 
 [← CBAM Exposure](/cbam)
 
 **Every number in this section is an administrative default, marked up on purpose.
-A real importer with supplier data will usually pay less.**
+A real importer with supplier data will usually pay less, and every importer's
+obligation is further reduced by two deductions this section does not model.**
 
 ## The annex and its correction
 
@@ -65,6 +66,13 @@ sourcing lanes are worth the effort of going to get that data.
 
 </Alert>
 
+- **The figures are gross.** What an importer surrenders is reduced by two
+  deductions that nothing here models: one for the EU ETS allowances EU producers
+  of the good still receive free (a benchmark per good, times a factor that
+  phases out from 2026 to 2034), and one for any carbon price effectively paid
+  where the good was made, under Article 9 of Regulation (EU) 2023/956. When this
+  was written the benchmarks were provisional and the Article 9 rules not yet
+  adopted, so neither can be applied yet with confidence.
 - **A CN code alone does not always identify a row.** In the original annex,
   2523 10 00 was both white clinker and grey clinker, whose default values differ
   by more than a factor of two. The correction gives those two 10-digit TARIC

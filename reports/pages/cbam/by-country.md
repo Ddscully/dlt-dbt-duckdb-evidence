@@ -1,13 +1,13 @@
 ---
 title: By country
-description: Every sourcing country's CBAM default for one good, with its production route, the basis of its value and its cost in 2026 and 2028.
+description: Every sourcing country's CBAM default for one good, with its production route, the basis of its value and its gross cost in 2026 and 2028.
 sidebar_position: 1
 ---
 
 [← CBAM Exposure](/cbam)
 
-**For any good, what the regulation says an importer owes per tonne, depending only
-on where it was made, and which of those values are really the catch-all table
+**For any good, what the regulation's default values put on a tonne, before the
+deductions, depending only on where it was made, and which of those values are really the catch-all table
 wearing a country's name.**
 
 ```sql goods_list
@@ -93,8 +93,8 @@ labelled `Annex fallback (catch-all row)`.
 
 Pick *Cement · 2523 90 00 90 — Other hydraulic cements* to see the shape of it:
 24 of that good's 100 sourcing countries carry one identical tonnage between them,
-against 39 distinct values across the other 76. They are still what an importer
-owes; they are not evidence about how that country makes the good.
+against 39 distinct values across the other 76. They are still the values an importer
+without supplier data must use; they are not evidence about how that country makes the good.
 
 ```sql fallback_penalty
 with fb as (

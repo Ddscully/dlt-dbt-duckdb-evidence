@@ -115,7 +115,8 @@ def test_the_note_says_the_figures_are_gross(con):
     result = run_scenario(con, "7601", 2027, 100)
     note = scenario_note(result)
     assert note is not None
-    assert note.startswith("These are gross figures, before the deduction for EU ETS free")
+    assert note.startswith("These are gross figures, before the deductions for EU ETS free")
+    assert "carbon price paid where the good was made" in note
     assert "€100 per tonne of CO2e is an assumed price" in note
 
 
