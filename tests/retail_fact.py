@@ -1,18 +1,19 @@
-"""An in-memory `marts.fct_retail_order_line` and `marts.dim_country`, for the tests of `agent/`.
+"""A `marts.fct_retail_order_line` and `marts.dim_country`, for the tests of `agent/`.
 
-A module of its own rather than a helper in `test_bridge.py`, because three test
+A module of its own rather than a helper in `test_bridge.py`, because four test
 files build one: the bridge's hand-worked values, the agent loop's run over the
-real tool, and the metrics'. Only the columns `agent/` and MetricFlow's SQL read
+real tool, the metrics', and the MCP server's. Only the columns `agent/` and MetricFlow's SQL read
 exist. The EUR rates are powers-of-two fractions so hand-worked values stay
 exact; USD is GBP × 1.5.
 
-The database is attached as `warehouse`, because MetricFlow's SQL names its
-tables `"warehouse"."marts".…`, after the real file.
+The database is named `warehouse`, because MetricFlow's SQL names its tables
+`"warehouse"."marts".…`, after the real file.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 
 import duckdb
 
@@ -42,9 +43,19 @@ def fee(day: str, gbp: float) -> tuple:
     return (day, "cancellation", "fee", "BANK CHARGES", False, -1, gbp, None, None, "GBR")
 
 
-def warehouse(lines: list[tuple]) -> duckdb.DuckDBPyConnection:
-    con = duckdb.connect()
-    con.execute("attach ':memory:' as warehouse; use warehouse; create schema marts")
+def warehouse(lines: list[tuple], path: Path | None = None) -> duckdb.DuckDBPyConnection:
+    """The fact, in memory, or with `path` (a file named `warehouse.duckdb`) on disk.
+
+    A file is for a test that needs a second process to see the database: the
+    lock is across processes. The caller closes the connection it gets back.
+    """
+    if path is None:
+        con = duckdb.connect()
+        con.execute("attach ':memory:' as warehouse; use warehouse")
+    else:
+        assert path.name == "warehouse.duckdb", "MetricFlow's SQL names the catalog `warehouse`"
+        con = duckdb.connect(str(path))
+    con.execute("create schema marts")
     con.execute(
         """create table marts.fct_retail_order_line (
             invoice_date date, invoice_type varchar, item_type varchar,

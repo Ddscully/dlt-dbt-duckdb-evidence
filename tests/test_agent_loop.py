@@ -16,7 +16,8 @@ import pytest
 from retail_fact import sale, warehouse
 
 from agent.bridge import alignment_note, explain_change, render
-from agent.loop import NoAnswer, Tool, ToolResult, ask, unverified, warehouse_tools
+from agent.loop import NoAnswer, ask, unverified
+from agent.tools import Tool, ToolResult, warehouse_tools
 
 NOTE = "Periods aligned: each year is compared over 1 Jan to 9 Dec only."
 BRIDGE = "Net revenue, EUR, 2010 to 2011: €10,744.6k to €10,401.3k (-3.19%, -€343.3k)."

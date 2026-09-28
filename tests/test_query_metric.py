@@ -131,7 +131,7 @@ def test_money_is_printed_to_the_penny(layer):
 
 
 def test_the_loop_offers_every_metric_the_yml_defines(catalog):
-    from agent.loop import warehouse_tools
+    from agent.tools import warehouse_tools
 
     tools = {tool.name: tool for tool in warehouse_tools(warehouse(LINES), catalog)}
     assert list(tools) == ["explain_change", "describe_model", "query_metric"]

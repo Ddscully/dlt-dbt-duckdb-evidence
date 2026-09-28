@@ -226,7 +226,9 @@ reimplemented by one. The bar set and what it was chosen over are
   the subtotals printed it invented none. Neither version got the model to
   repeat the unaligned figure, so a caller that paraphrases the bridge appends
   the note itself — `agent/loop.py` does (`just ask`,
-  [`docs/FINANCE_AGENT.md`](../../../docs/FINANCE_AGENT.md)).
+  [`docs/FINANCE_AGENT.md`](../../../docs/FINANCE_AGENT.md)). `just mcp-server`,
+  whose client writes the answer, cannot: it sends the note as a second block
+  that asks to be quoted verbatim.
 - **Totals and breakdowns go through `just metric`** (`agent/metrics.py`), over
   the metrics in `_retail_metrics.yml`, not through a new `sum`; what each mart's
   columns mean is `just describe-model <model>`. The metric rules are
