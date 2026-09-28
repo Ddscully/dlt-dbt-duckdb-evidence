@@ -152,8 +152,8 @@ is one load's worth of rewrites, the price of keeping the weather diff's pair
 `just ingest`, the backfills and `load_retail` do not expire; their snapshots
 go at the next of those two.
 
-Warehouse contents: 1,647,099 staging rows and 1,959,307 mart rows — of which
-1,067,371 are the retail order lines, 667,809 the three FX tables and 43,138 the
+Warehouse contents: 1,648,214 staging rows and 1,960,177 mart rows — of which
+1,067,371 are the retail order lines, 668,679 the three FX tables and 43,138 the
 wide country-year fact — plus 9,821 snapshot rows across the two `history`
 tables.
 
@@ -265,7 +265,7 @@ number before.
    full-refresh at 265k rows. The argument is the shape of the curve, not the
    saving.
 4. **The Evidence site.** It ships Parquet to the browser and queries it with
-   DuckDB-WASM. Lovely at 94 MB, wrong at 94 GB — that becomes a pre-aggregated
+   DuckDB-WASM. That works at 94 MB and not at 94 GB — that becomes a pre-aggregated
    serving layer.
 
 What *doesn't* break, which is the more interesting half: dlt already merges
@@ -338,7 +338,7 @@ below, and the profile is the point.
 | Metadata completeness | **Established** | Every model carries a description and an owner, a contract types every mart column, and every one of those columns carries a description that ships in the release — `tests/test_additivity.py` fails on a blank one. The `analytics` tables are the gap: Polars writes them, so dbt describes none of their columns. |
 | Quality observability | **Established** | Data and unit tests with failing rows stored per test, Dagster asset checks, freshness thresholds on every source but the closed retail archive, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
 | Access governance | **Absent** | Structurally, not by neglect — see below. |
-| Lineage traceability | **Established** | One graph from dlt through dbt and Polars to the site; 10 exposures answer "what breaks if I change this" per page; the bus matrix is derived from the manifest rather than drawn. |
+| Lineage traceability | **Established** | One graph from dlt through dbt and Polars to the site; 11 exposures answer "what breaks if I change this" per page; the bus matrix is derived from the manifest rather than drawn. |
 | Organizational ownership | **Ad hoc** | Ownership is declared and enforced for all 33 models. There is one owner, who is also the only contributor. |
 
 **Access governance is Absent and cannot be otherwise here, which is the most
@@ -399,7 +399,7 @@ eight tables each feeding a named model. Of the rest:
 - **Cost delusion (Wrath)** — no, and §3 is the answer: the dollar figure is
   zero, said plainly, with the note that this is a property of the scale rather
   than a virtue of the design. The disk cost that *is* real — a landing zone
-  growing ~39 MiB per ingest with nothing expiring snapshots — is named there
+  that grew ~39 MiB per ingest until snapshot expiry shipped — is named there
   rather than left flattering.
 - **Governance as afterthought (Pride)** — **partly, and the record shows it.**
   The personal-data classification arrived well after the data it
@@ -411,8 +411,9 @@ eight tables each feeding a named model. Of the rest:
   plugins retired on a count of zero invocations (two across 187 session
   transcripts, two more across 211),
   `pytest-cov` added and dropped the same day for buying nothing, and a semantic
-  layer still unbuilt because a site written by one person does not have the
-  coordination problem it solves.
+  layer left unbuilt until something that aggregates on its own, the finance
+  agent's `query_metric`, needed one: a site written by one person does not have
+  the coordination problem it solves.
 
 ---
 

@@ -37,7 +37,7 @@ still lands, carrying nulls in the columns the others don't fill.
 Eurostat publishes half-yearly. `fct_eu_electricity_prices_semiannual` holds the
 published halves alongside the annual average that joins to everything else.
 Averaging is what the annual grain costs, and it costs a lot: half-over-half
-price moves averaged 19% across countries in 2022 against 3–4% through the 2010s.
+price moves averaged 19% across countries in 2022 against 3–5% through the 2010s.
 Both grains are in the warehouse for that reason.
 
 The ECB's series is daily and has no country in it at all, which is what forced
@@ -65,7 +65,7 @@ a full reload every run is the honest default, and it keeps dlt re-inferring the
 schema so an upstream type change fails loudly.
 
 The other four merge: the ECB rates, the retail log, the weather archive and
-WDI. WDI is the biggest pull (~190k rows across 11 indicators) and loads with `merge` on `(indicator, country_iso3, year)` over a
+WDI. WDI is the biggest pull (~190k rows across 11 indicators) and loads with `merge` on `(indicator, country_code, year)` over a
 five-year window. That window is a lookback and not "everything newer than last
 time", because the World Bank restates years it has already published.
 

@@ -164,8 +164,8 @@ select * from warehouse.latest_years
 ...then `(select co2_year from ${latest_years})` inside a query.
 
 **It is not `max(year)`.** The mart sits on a country-year spine, so its max year
-is whichever source runs furthest ahead: Eurostat prices, currently a year beyond
-everything else. Coverage also falls off at different rates per column.
+is whichever source runs furthest ahead: Eurostat's prices and the World Bank's
+series, currently a year beyond OWID's. Coverage also falls off at different rates per column.
 `primary_energy_twh` drops from ~210 countries to 79 in the latest year, while
 `co2_mt` holds at 214, so cutting an energy chart to the latest CO₂ year silently
 discards two thirds of its sample. Each family gets its own floor; see the
@@ -297,8 +297,8 @@ ran from 0.0000000001 to 10,000,000,000 to fit them, flattening the other 4,866
 points into one band.
 
 Threshold on a real unit, `>= 0.01` for money, not on zero. The same arithmetic
-is why a `first_order_gbp <= net_revenue_gbp` dbt test fails on 272 rows that are
-equal; see the `retail-models` skill.
+is why a `first_order_gbp <= net_revenue_gbp` dbt test fails on about 5% of customers
+whose two figures are equal; see the `retail-models` skill.
 
 ## Years render as `2025.0` unless you cast twice
 

@@ -83,7 +83,7 @@ export copies the file as `warehouse.duckdb` and not `snapshot-2026-07-30.duckdb
 
 **The copy is made with `COPY FROM DATABASE`, not `cp`.** It's consistent
 whatever state the source was left in (a crashed run leaves a `.wal` beside it)
-and compacted, which is most of why 32 MB of warehouse ships as 29 MB. The copy
+and compacted: the blocks a build freed stay behind in the source file. The copy
 is made **twice**: once to snapshot the source, and again after the
 pseudonymisation below has rewritten a column across a million rows. `CHECKPOINT`
 would not do — DuckDB reuses freed blocks but never returns them to the

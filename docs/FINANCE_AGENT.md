@@ -48,8 +48,7 @@ Desktop ([below](#from-an-mcp-client)).
    reads `dbt/target/manifest.json` and `semantic_manifest.json`, which every
    dbt command writes; without them it stops and says to run `just dbt-parse`.
 2. **Ollama, serving on port 11434, with a model that can call tools.** As a
-   container, which is how it runs on the machine the measurements below come
-   from:
+   container:
 
    ```sh
    docker run -d --gpus all -v ollama:/root/.ollama -p 11434:11434 --name ollama ollama/ollama
@@ -215,7 +214,7 @@ These are gross figures, before the deductions for EU ETS free allocation and fo
   much cheaper one source was, both local models and Claude subtracted for
   themselves until it was.
 - **A fallen-back country is marked as one.** The annex prints "-" for about one
-  row in eight, and the mart copies the fallback onto it, so its figure is the
+  row in fifteen, and the mart copies the fallback onto it, so its figure is the
   fallback's and not the country's own.
 - **A country the annex does not list for the good is never priced.** Which
   unlisted countries CBAM exempts is set by the regulation's articles, which

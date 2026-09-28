@@ -24,13 +24,13 @@ carry the descriptions and the contracts.
 | `non_personal` | Shares a name with a classified column and is deliberately not one. | Nothing, but it's stated rather than left blank. |
 
 The third label exists because of one pair. `dim_retail_customer.net_revenue_gbp`
-is revenue per *customer* and singles out 97.4% of them on its own;
+is revenue per *customer* and singles out 97.1% of them on its own;
 `dim_retail_product.net_revenue_gbp` is revenue per *product* and identifies
 nobody. Same name, opposite answer, and the only way to tell them apart is for
 someone to have said so. `tests/test_privacy.py` fails if a retail column shares
 a name with a classified one and carries no label of its own. That's the rule
-that keeps the classification from rotting, without labelling ninety columns
-nobody would ever read.
+that keeps the classification from rotting, without labelling every retail
+column for nobody to read.
 
 Classification starts at the **source**, not at staging: `raw.retail_invoice_lines`
 is where the identifier enters, and every copy downstream of it is found by name
@@ -51,7 +51,7 @@ identified customers, `just disclosure-risk` to reproduce:
 | `country, first_order_date` | 8.3% (490) |
 | **`country, first_order_date, first_order_gbp`** | **99.6%** |
 | `first_order_gbp, net_revenue_gbp, n_orders` (a customer extract with the id removed) | **98.6%** |
-| `net_revenue_gbp` alone | 97.4% |
+| `net_revenue_gbp` alone | 97.1% |
 
 **The share is quoted and the count is not, and that isn't a rounding
 preference.** The three rows above that involve a money column aren't
@@ -211,5 +211,5 @@ Every finding here ends in one.
   which is a property of this dataset rather than a design.
 * **Nothing outside retail is classified.** Every other source here is published
   national statistics: country-year aggregates with no person in them. A label of
-  `non_personal` on all 300 of those columns would be paperwork, and the test
+  `non_personal` on every one of those columns would be paperwork, and the test
   only requires one where a name collides with something that is.

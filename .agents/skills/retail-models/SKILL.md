@@ -180,7 +180,7 @@ one; the page is `retail.md`.
     `net_revenue_gbp`, which is already null for 28 customers, so this is the
     model's existing convention rather than a new one.
   - **`first_order_gbp <= net_revenue_gbp` is true by construction and fails as
-    a test, on 272 rows.** Every one is a one-order customer where the two
+    a test, on about 5% of customers.** Every one is a one-order customer where the two
     columns are the same money summed in a different order; the excess tops out
     at 1.8e-12. Comparing two independently-summed doubles for containment is a
     float-equality test wearing an inequality. The shipped test is

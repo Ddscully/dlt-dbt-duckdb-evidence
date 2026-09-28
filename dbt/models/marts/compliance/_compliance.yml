@@ -461,7 +461,7 @@ models:
         data_type: BOOLEAN
         description: >
           False where the annex prints "-" for this country and good and the
-          value below came from the fallback table — roughly one row in eight, so
+          value below came from the fallback table — roughly one row in fifteen, so
           a model that only handled *unlisted* countries would leave that many
           rows with a null cost.
         data_tests: [not_null]

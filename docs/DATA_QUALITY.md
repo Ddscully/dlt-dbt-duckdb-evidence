@@ -14,7 +14,8 @@ For the pytest side, see [`tests/README.md`](../tests/README.md).
 | `not_null` / `unique` / `accepted_values` | The country dimension: one row per ISO3, a region for every row, income groups from the World Bank's four. |
 | `contract: {enforced: true}` on every mart model | The *schema* contract, which the grain contract never saw: every column with a declared type, checked at build time. A column changing type or disappearing under the published Parquet files fails the build instead of arriving in someone's download. |
 | `publish/compare_releases.py`, in `release-data.yml` | A table that shrank between releases. Every gate above reads one build, so a join that drops a third of the countries passes them all: the smaller table is still unique, in range and non-null. The release compares each published table's rows and year span with the previous release's `manifest.json`, and stops on a loss of more than 1% of the rows or of a year at either end. |
-| `dbt source freshness` (`just dbt-freshness`) | Whether the warehouse is stale. dlt stamps every row with `_dlt_load_id`, a unix epoch, so this measures when the *pipeline* last ran (warn at 7 days, error at 30) and not when the publishers last updated. |
+| `dbt source freshness` (`just dbt-freshness`) | Whether the warehouse is stale. dlt stamps every row with `_dlt_load_id`, a unix epoch, so this measures when the *pipeline* last ran (warn at 7 days, error at 30; 2 and 7 for the ECB rates, which publish
+on business days) and not when the publishers last updated. |
 
 Every test runs with `store_failures`, into a `dbt_test__audit` schema. A red
 check hands you `select * from dbt_test__audit.<test_name>` and the offending
@@ -23,7 +24,8 @@ rows, not a count.
 The tests are calibrated to fail on a bug and not on reality. `income_group` is
 left nullable because the `country_overrides` territories genuinely have no World
 Bank classification, and `co2_per_capita` has a floor but no ceiling because
-small petrostates legitimately reach 780 t/person. Before tightening a bound,
+small territories and petrostates legitimately reach hundreds of tonnes a
+person (783 for Sint Maarten in 1954, 365 for Kuwait). Before tightening a bound,
 check the actual distribution: CI builds a 17-country fixture slice, which will
 happily pass a threshold the full 200+ would break.
 
@@ -33,7 +35,7 @@ The dbt *unit* tests cover these models — `dim_date`,
 `stg_retail_lines`, `stg_weather_daily`, `fct_cbam_exposure`,
 `fct_country_weather_year`, `fct_fx_rates_daily`, `fct_fx_rates_periods`,
 `fct_retail_returns`, `fct_retail_customer_cohorts`, `dim_retail_customer` and
-the two intermediate models, `int_cbam_default_factors` and
+two of the three intermediate models, `int_cbam_default_factors` and
 `int_retail_return_matches`. They run a model against fixed input rows and
 compare the entire output, rather than asserting a property of whatever the
 warehouse happens to hold — which is what lets them reach two things a data test
@@ -45,10 +47,10 @@ not: January scoring Q2 under a July year start passes every test in the
 project. `stg_retail_lines` is the same problem in a different shape — it is two
 `case` expressions and two boolean flags built off them, and `accepted_values`
 proves an answer is in the list, never that it is the right member of it.
-Misclassifying `AMAZONFEE` as a product moves net revenue by £260,764 with all
-19 of that model's data tests green; dropping the `upper()` from `stock_code`
+Misclassifying `AMAZONFEE` as a product moves net revenue by £260,764 with every
+one of that model's data tests green; dropping the `upper()` from `stock_code`
 sends all 100 voucher lines, which arrive lowercase, into product with the same
-19 green.
+tests green.
 
 `fct_cbam_exposure` is the hardest of them. Its numbers are transcribed from a
 legal instrument, so there is nothing independent to check them against and its

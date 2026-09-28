@@ -504,7 +504,8 @@ equality" is a rule that would have talked you out of a good test.
 `first_order_gbp` and `net_revenue_gbp` are two independent `sum()`s over the
 same doubles in different orders. Floating-point addition is not associative and
 DuckDB's parallel aggregation fixes no order, so the two disagree in the last
-bits on 272 rows: a float-equality test wearing an inequality
+bits for about 5% of customers, a count that moves between builds: a
+float-equality test wearing an inequality
 (`docs/DATA_PROTECTION.md` measures the same instability at 5,781 vs 5,785
 distinct values between builds).
 
@@ -697,7 +698,7 @@ needs it.
 
 The cost is real and is stated in the yml rather than discovered: the mean
 absolute half-over-half change was **19% across countries in 2022** and 13% in
-2023, against 3–4% through the 2010s, and the Netherlands went €0.034/kWh in
+2023, against 3–5% through the 2010s, and the Netherlands went €0.034/kWh in
 2022-S1 to €0.142 in S2 as that year's energy-tax cuts landed in the first half:
 an annual average of €0.088 that no Dutch household was ever billed.
 

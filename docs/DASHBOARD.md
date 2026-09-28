@@ -43,8 +43,8 @@ page loads a Snowplow tracker for everyone who opens it.
 
 ## How it is built and deployed
 
-`.github/workflows/pages.yml` builds it as a single `publish_site` job. The site
-is a node in the asset graph (`reports/evidence_site`), so the workflow
+`.github/workflows/pages.yml` builds it by materializing one Dagster job,
+`publish_site`, and deploys the result. The site is a node in the asset graph (`reports/evidence_site`), so the workflow
 materializes it instead of running npm itself. It builds against the **live**
 sources rather than the fixtures — a published dashboard showing the 17-country
 slice the tests run on would be worse than none — weekly, on demand, and on any push to

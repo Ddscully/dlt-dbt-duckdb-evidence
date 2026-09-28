@@ -341,7 +341,7 @@ facts make that work:
   downstream of `analytics/pipeline_status` finds the file quiescent.
 - **The build path is fixed at daemon start, not chosen per run.**
   `transform/co2_intensity.py` binds `DUCKDB_PATH = warehouse_path()` **at
-  import**, and `orchestration/assets.py` imports that constant, so the code
+  import**, and `orchestration/assets.py` binds its own the same way, so the code
   location reads `WAREHOUSE_PATH` once when it loads. A run cannot vary it. It
   does not need to: point the daemon's `WAREHOUSE_PATH` at the build file, let
   every run write there, and let the swap asset promote it to the path readers

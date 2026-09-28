@@ -344,10 +344,10 @@ def test_the_group_filter_still_reaches_the_mart_models():
 def test_a_column_named_like_a_classified_one_is_never_left_unlabelled():
     """The rule that gives the classification teeth.
 
-    Labelling all 90-odd retail columns would be paperwork nobody reads. What
+    Labelling every retail column would be paperwork nobody reads. What
     actually rots is narrower and specific: `dim_retail_product.net_revenue_gbp`
     is revenue per *product* and carries no personal data, while
-    `dim_retail_customer.net_revenue_gbp` singles out 97.4% of customers on its
+    `dim_retail_customer.net_revenue_gbp` singles out 97.1% of customers on its
     own. Same name, opposite answer — so the distinction has to be written down
     rather than inferred from one of them being blank.
     """
@@ -405,7 +405,7 @@ def test_the_polars_output_is_classified_where_dbt_cannot_see_it():
     assert rfm["customer_id"] == "direct_identifier"
     assert rfm["monetary_gbp"] == "quasi_identifier", (
         "`monetary_gbp` is `dim_retail_customer.net_revenue_gbp` under another name, "
-        "and it identifies 97.4% of customers on its own"
+        "and it identifies 97.1% of customers on its own"
     )
 
 

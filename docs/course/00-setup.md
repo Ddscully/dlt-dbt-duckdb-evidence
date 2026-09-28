@@ -125,8 +125,8 @@ without rebuilding the index. WDI is 16, not 17, because one fixture country has
 no World Bank series at all.
 
 A threshold those 17 countries pass, the full 200+ will break. `co2_per_capita`
-has a floor and no ceiling because small petrostates legitimately reach
-780 t/person: a ceiling calibrated on the sandbox would have looked reasonable
+has a floor and no ceiling because small territories and petrostates
+legitimately reach hundreds of tonnes a person (783 for Sint Maarten in 1954): a ceiling calibrated on the sandbox would have looked reasonable
 and failed in production. Module 03 is about exactly this.
 
 ---

@@ -24,8 +24,8 @@ deliberately breaking something and counting what noticed.
 covers; the fact inner-joins that and then left-joins each source onto it. That
 is what makes coverage answerable: left-join a fact onto the spine and a gap
 comes back as a row you can count instead of an absence you have to notice. The
-spine is ~63k rows against the mart's ~43k, and eleven small territories reach
-the mart with World Bank data and no OWID emissions at all.
+spine is ~63k rows against the mart's ~43k, and thirteen places, most of them small territories,
+reach the mart with World Bank data and no OWID emissions at all.
 → [`dbt/models/marts/country_stats/dim_country_year.sql`](../dbt/models/marts/country_stats/dim_country_year.sql),
 [`fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql)
 
@@ -71,7 +71,7 @@ declared with a reason each.
 **Model the grain the publisher used, and only then aggregate.** Eurostat
 publishes electricity prices every half-year. Averaging that to a year is not
 free: the mean absolute half-over-half change was 19% across countries in 2022
-against 3–4% through the 2010s, and the Netherlands went from €0.034/kWh in
+against 3–5% through the 2010s, and the Netherlands went from €0.034/kWh in
 2022-S1 to €0.142 in S2 as that year's energy-tax cuts landed. The annual
 average, €0.088, is a price nobody paid. Both grains are modelled, and the
 annual one exists to join prices to emissions, not to chart.
@@ -161,7 +161,7 @@ flipping one model to `private` fails `dbt parse` naming its consumer, not
 `dbt build` an hour later.
 → [`dbt/models/_groups.yml`](../dbt/models/_groups.yml)
 
-**Declare who is reading, per page rather than per site.** Ten exposures — each
+**Declare who is reading, per page rather than per site.** Eleven exposures — each
 page that reads a model, and the release — so
 `dbt ls --select +exposure:evidence_retail` answers "what breaks if I change
 this" for one dashboard page.

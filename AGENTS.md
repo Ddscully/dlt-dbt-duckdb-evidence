@@ -260,7 +260,7 @@ classified in the ymls and pseudonymised at the export, never in a model; the
 measurements and the mechanism are `publishing-a-release`, and the reasoning is
 [`docs/DATA_PROTECTION.md`](docs/DATA_PROTECTION.md). In any task:
 
-- **Deleting the id does not anonymise a customer-grain extract**: 97.4% of
+- **Deleting the id does not anonymise a customer-grain extract**: 97.1% of
   customers are unique on `net_revenue_gbp` alone.
 - **Hash with `||`, never `concat()`**, which skips NULLs and would give every
   anonymous row the same pseudonym.
