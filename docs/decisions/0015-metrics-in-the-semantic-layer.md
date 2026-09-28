@@ -1,6 +1,6 @@
 # 0015. Metrics are defined in dbt's semantic layer and compiled by MetricFlow's engine, run on our own connection
 
-Status: accepted 2026-09-28
+Status: accepted 2026-09-28 (#115)
 
 ## Context
 
