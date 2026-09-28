@@ -22,6 +22,11 @@ from ingest import http
 # Below the documented maximum of 32,000, whose pages occasionally time out.
 WB_PER_PAGE = 10_000
 
+# The page size a stale WDI series is asked for again. Any other value will do:
+# it only has to make a URL neither cache in front of the API has seen. See
+# `_fetch_wdi_indicator`.
+WB_STALE_RETRY_PER_PAGE = 5_000
+
 
 def wb_country_url(page: int = 1) -> str:
     """The WB /country request URL for one page (also used by the recorder)."""
@@ -105,6 +110,8 @@ def wdi_url(
     page: int = 1,
     start_year: int | None = None,
     end_year: int | None = None,
+    *,
+    per_page: int = WB_PER_PAGE,
 ) -> str:
     """The WDI request URL for one indicator page (also used by the recorder).
 
@@ -112,11 +119,11 @@ def wdi_url(
     incremental load cheap — see `wdi_start_year`. Without it the request is the
     whole series, 1960 onwards. `end_year` closes the window at something other
     than today, which is what a partition backfill asks for; the incremental
-    path leaves it open-ended.
+    path leaves it open-ended. `per_page` changes only for a stale series.
     """
     url = (
         f"https://api.worldbank.org/v2/country/all/indicator/{code}"
-        f"?format=json&per_page={WB_PER_PAGE}&page={page}"
+        f"?format=json&per_page={per_page}&page={page}"
     )
     if start_year is not None:
         # Both ends, the API tolerating a future one; UTC, so a recorded fixture's
@@ -146,19 +153,61 @@ def wdi_full_reload_requested() -> bool:
     return os.environ.get("INGEST_WDI_FULL", "").lower() in {"1", "true", "yes"}
 
 
+def _is_stale(rows: list[dict]) -> bool:
+    """Rows, and not one with a three-letter `countryiso3code`: a stale copy.
+
+    What the World Bank has served for a single URL, for up to two days: an old
+    edition of the series with every code empty. A current series has the code
+    on all but a few aggregates; an empty series (a bad indicator code) has no
+    rows, and is `wdi_indicators_all_present`'s to report.
+    """
+    return bool(rows) and not any(len(row["country_iso3"] or "") == 3 for row in rows)
+
+
 def _fetch_wdi_indicator(
     code: str, start_year: int | None = None, end_year: int | None = None
 ) -> list[dict]:
-    """All rows for one WDI indicator, paginating until `meta.pages` is exhausted."""
+    """All rows for one WDI indicator, asked for again once if the copy is stale.
+
+    The stale copy is cached per URL, twice: the origin keeps it for a day, and
+    each Cloudflare edge for a day from its own fetch. The origin ignores the
+    order of query parameters, so the retry changes a value, `per_page`, which
+    is a URL new to both. A second stale copy raises, naming the edition, rather
+    than landing rows that `stg_wdi` would drop.
+    """
+    rows, meta = _fetch_wdi_pages(code, start_year, end_year, WB_PER_PAGE)
+    if not _is_stale(rows):
+        return rows
+    print(
+        f"wb_wdi: {code} served a stale copy (lastupdated {meta.get('lastupdated')}); "
+        f"asking again with per_page={WB_STALE_RETRY_PER_PAGE}"
+    )
+    rows, meta = _fetch_wdi_pages(code, start_year, end_year, WB_STALE_RETRY_PER_PAGE)
+    if _is_stale(rows):
+        raise RuntimeError(
+            f"World Bank served a stale copy of {code} at two page sizes "
+            f"(lastupdated {meta.get('lastupdated')}, {len(rows)} rows, "
+            f"no countryiso3code): {wdi_url(code, 1, start_year, end_year)}"
+        )
+    return rows
+
+
+def _fetch_wdi_pages(
+    code: str, start_year: int | None, end_year: int | None, per_page: int
+) -> tuple[list[dict], dict]:
+    """Every page of one request, until `meta.pages` is exhausted, and the first
+    page's `meta`."""
     rows_out: list[dict] = []
+    first_meta: dict = {}
     page = 1
     while True:
-        payload = http.get_json(wdi_url(code, page, start_year, end_year))
+        payload = http.get_json(wdi_url(code, page, start_year, end_year, per_page=per_page))
         # World Bank returns [metadata, [records...]]; anything else is an
         # error object served with a 200.
         if not (isinstance(payload, list) and len(payload) == 2):
             raise RuntimeError(f"unexpected World Bank payload for {code}: {payload!r:.300}")
         meta, rows = payload
+        first_meta = first_meta or meta
         rows_out.extend(
             {
                 "indicator": code,
@@ -173,7 +222,7 @@ def _fetch_wdi_indicator(
         if page >= int(meta.get("pages", 1)):
             break
         page += 1
-    return rows_out
+    return rows_out, first_meta
 
 
 @dlt.resource(

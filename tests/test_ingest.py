@@ -211,16 +211,79 @@ def test_wb_wdi_normalises_row_shape(monkeypatch):
 def test_wb_wdi_merge_key_survives_the_aggregate_rows(monkeypatch):
     """The World Bank's aggregate series ("Arab World", "World") carry an empty
     `countryiso3code`, so keying the merge on it would collide five rows onto
-    `(indicator, '', year)` and keep one at random."""
+    `(indicator, '', year)` and keep one at random. A country row beside them,
+    as in every real series: a page of nothing but empty codes is a stale copy."""
     aggregates = [
         {"country": {"id": "1A", "value": "Arab World"}, "countryiso3code": "", "date": "2020"},
         {"country": {"id": "WLD", "value": "World"}, "countryiso3code": "", "date": "2020"},
+        _wdi_row("USA", "2020", 1.0),
     ]
     monkeypatch.setattr(http, "get_json", lambda url, **kw: _wdi_page(1, 1, aggregates))
     monkeypatch.setattr(worldbank, "WB_WDI_INDICATORS", {"SP.POP.TOTL": "population"})
 
     keys = {tuple(row[col] for col in worldbank.WDI_PRIMARY_KEY) for row in worldbank.wb_wdi()}
-    assert len(keys) == 2
+    assert len(keys) == 3
+
+
+def _stale_row(date: str) -> dict:
+    """A row of the stale copy the World Bank has served: an old edition, with
+    the country's name and World Bank id but an empty `countryiso3code`."""
+    return {"country": {"id": "US", "value": "United States"}, "countryiso3code": "", "date": date}
+
+
+def _serve_by_page_size(monkeypatch, pages: dict[int, list]) -> list[str]:
+    """Serve a page keyed on the URL's `per_page`, recording the URLs asked for."""
+    calls: list[str] = []
+
+    def fake_get_json(url, **kwargs):
+        calls.append(url)
+        return pages[int(url.split("per_page=")[1].split("&")[0])]
+
+    monkeypatch.setattr(http, "get_json", fake_get_json)
+    monkeypatch.setattr(worldbank, "WB_WDI_INDICATORS", {"NY.GDP.MKTP.KD": "gdp_constant_usd"})
+    return calls
+
+
+def test_wb_wdi_asks_again_at_another_page_size_when_served_a_stale_copy(monkeypatch):
+    """The copy is cached per URL, so the retry has to be a URL neither cache has
+    seen. Its rows replace the stale ones rather than joining them."""
+    stale = [{"lastupdated": "2022-07-22", "page": 1, "pages": 1}, [_stale_row("2020")]]
+    calls = _serve_by_page_size(
+        monkeypatch,
+        {
+            worldbank.WB_PER_PAGE: stale,
+            worldbank.WB_STALE_RETRY_PER_PAGE: _wdi_page(1, 1, [_wdi_row("USA", "2024", 1.0)]),
+        },
+    )
+
+    rows = list(worldbank.wb_wdi())
+    assert [(r["country_iso3"], r["year"]) for r in rows] == [("USA", 2024)]
+    assert [f"per_page={worldbank.WB_STALE_RETRY_PER_PAGE}&" in url for url in calls] == [
+        False,
+        True,
+    ]
+
+
+def test_wb_wdi_raises_naming_the_edition_when_both_page_sizes_are_stale(monkeypatch):
+    """Landing the rows would pass the fetch and empty the column in `stg_wdi`; the
+    error says which indicator and which edition, which the check cannot."""
+    stale = [{"lastupdated": "2018-09-19", "page": 1, "pages": 1}, [_stale_row("2017")]]
+    _serve_by_page_size(
+        monkeypatch,
+        {worldbank.WB_PER_PAGE: stale, worldbank.WB_STALE_RETRY_PER_PAGE: stale},
+    )
+
+    with pytest.raises(ResourceExtractionError, match=r"NY\.GDP\.MKTP\.KD.*2018-09-19"):
+        list(worldbank.wb_wdi())
+
+
+def test_wb_wdi_does_not_retry_an_empty_series(monkeypatch):
+    """A bad indicator code returns no rows at all. That is not a stale copy, and
+    asking again would only double the request; the asset check reports it."""
+    calls = _serve_by_page_size(monkeypatch, {worldbank.WB_PER_PAGE: _wdi_page(1, 1, [])})
+
+    assert list(worldbank.wb_wdi()) == []
+    assert len(calls) == 1
 
 
 def test_wdi_url_asks_for_the_whole_series_by_default():
