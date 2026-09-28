@@ -309,8 +309,8 @@ is the argument for shipping a parameter beside its result generally: the
 one-line check `electricity_price_usd_kwh <> electricity_price_eur_kwh *
 usd_per_eur_period_avg` goes 0 → 1,373 rows, with no access to the model. It is
 also shippable as a dbt test — **0 of 1,373 rows fail on float residue**, which
-is the boundary against `first_order_gbp <= net_revenue_gbp` (272 rows, and
-rejected for it): that pair compares two independent `sum()`s, this one
+is the boundary against `first_order_gbp <= net_revenue_gbp` (about 5% of
+customers, and rejected for it): that pair compares two independent `sum()`s, this one
 reproduces a single scalar multiplication of two stored doubles and is bit-exact.
 **"Never compare floats for equality" is really "floats are order-dependent under
 aggregation".**

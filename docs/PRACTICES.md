@@ -1,5 +1,21 @@
 # Practices this repo demonstrates
 
+- **Model the data honestly**: facts on an explicit spine, one spelling per key,
+  the publisher's grain before any average
+  ([§1](#1-model-the-data-honestly)).
+- **Make a table promise something**: a grain test, an enforced contract, an
+  additivity label and an owner on every mart model
+  ([§2](#2-make-a-table-promise-something)).
+- **Write tests that can see a wrong answer**, and prove each one by breaking the
+  model it guards ([§3](#3-write-tests-that-can-see-a-wrong-answer)).
+- **Guard the failures that stay green**: every hand-maintained list is tested
+  against the thing it copies ([§4](#4-guard-the-failures-that-stay-green)).
+- **One graph across four tools**, with offline CI and a live nightly
+  ([§5](#5-one-graph-across-four-tools)).
+- **Treat publication as a boundary**: a compatibility ceiling, carried state,
+  personal data measured and pseudonymised, licences as a modelling constraint
+  ([§6](#6-the-boundary-outward)).
+
 This warehouse is a working pipeline over seven public feeds. It is also a
 demonstration of a set of data-engineering practices, and this page is the index
 to that second reading: what each practice is, the failure it prevents, and where
@@ -24,8 +40,8 @@ deliberately breaking something and counting what noticed.
 covers; the fact inner-joins that and then left-joins each source onto it. That
 is what makes coverage answerable: left-join a fact onto the spine and a gap
 comes back as a row you can count instead of an absence you have to notice. The
-spine is ~63k rows against the mart's ~43k, and eleven small territories reach
-the mart with World Bank data and no OWID emissions at all.
+spine is ~63k rows against the mart's ~43k, and thirteen places, most of them small territories,
+reach the mart with World Bank data and no OWID emissions at all.
 → [`dbt/models/marts/country_stats/dim_country_year.sql`](../dbt/models/marts/country_stats/dim_country_year.sql),
 [`fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql)
 
@@ -71,7 +87,7 @@ declared with a reason each.
 **Model the grain the publisher used, and only then aggregate.** Eurostat
 publishes electricity prices every half-year. Averaging that to a year is not
 free: the mean absolute half-over-half change was 19% across countries in 2022
-against 3–4% through the 2010s, and the Netherlands went from €0.034/kWh in
+against 3–5% through the 2010s, and the Netherlands went from €0.034/kWh in
 2022-S1 to €0.142 in S2 as that year's energy-tax cuts landed. The annual
 average, €0.088, is a price nobody paid. Both grains are modelled, and the
 annual one exists to join prices to emissions, not to chart.
@@ -161,7 +177,7 @@ flipping one model to `private` fails `dbt parse` naming its consumer, not
 `dbt build` an hour later.
 → [`dbt/models/_groups.yml`](../dbt/models/_groups.yml)
 
-**Declare who is reading, per page rather than per site.** Ten exposures — each
+**Declare who is reading, per page rather than per site.** Eleven exposures — each
 page that reads a model, and the release — so
 `dbt ls --select +exposure:evidence_retail` answers "what breaks if I change
 this" for one dashboard page.

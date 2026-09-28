@@ -796,7 +796,7 @@ models:
       per (country_iso3, year, half), 2007 onwards. The country-stats group's
       only sub-annual fact, and the reason it exists is that the annual average
       is lossy — the mean absolute half-over-half change was 19% across
-      countries in 2022 and 13% in 2023, against 3-4% through the 2010s.
+      countries in 2022 and 13% in 2023, against 3-5% through the 2010s.
 
       Built on `dim_country_year` for its dimension attributes, so like every
       other fact here it can only carry countries the dimension knows. The USD

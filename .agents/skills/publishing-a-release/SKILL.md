@@ -46,7 +46,7 @@ it cost to learn:
 
 - **Deleting the id does not anonymise a customer-grain extract.** 98.6% of
   customers are unique on `(first_order_gbp, net_revenue_gbp, n_orders)` with no
-  id at all; 97.4% on `net_revenue_gbp` alone. A near-continuous money column at
+  id at all; 97.1% on `net_revenue_gbp` alone. A near-continuous money column at
   person grain is an identifier, which is why `quasi_identifier` is a label with
   no action attached: generalising it would delete the analysis it exists for.
   `just disclosure-risk` reprints the table.
@@ -80,7 +80,7 @@ it cost to learn:
   moment the data leaves the machine it is on.
 - **The coverage test is scoped to name collisions.**
   `dim_retail_product.net_revenue_gbp` identifies nobody and
-  `dim_retail_customer.net_revenue_gbp` identifies 97.4% — same name, opposite
+  `dim_retail_customer.net_revenue_gbp` identifies 97.1% — same name, opposite
   answer — so `tests/test_privacy.py` requires a label wherever a name collides
   with a classified one, and nowhere else.
 - **The site is a second way out.** A `select *` source query ships every column

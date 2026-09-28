@@ -230,9 +230,12 @@ def test_the_decision_index_lists_every_record():
 
 
 # A cross-file markdown anchor, e.g. [AGENTS.md](../AGENTS.md#agent-skills). Only
-# `#fragment` links — a bare link is covered by the citation test above, and a
-# same-file `#anchor` can't survive a rename anyway.
+# `#fragment` links — a bare link is covered by the citation test above.
 _ANCHOR_LINK = re.compile(r"\]\((\.{0,2}[/A-Za-z0-9_.-]*\.md)#([A-Za-z0-9_-]+)\)")
+
+# A same-file anchor, e.g. the In brief list's [Schemas](#schemas). It restates a
+# heading of the same file, so a renamed heading leaves it dead with nothing red.
+_SAME_FILE_ANCHOR = re.compile(r"\]\(#([A-Za-z0-9_-]+)\)")
 
 # Anything that is not a letter, digit, space, hyphen or underscore — what
 # GitHub's slug drops, e.g. `## The lakehouse (`lake/lakehouse.py`)` anchors as
@@ -253,8 +256,10 @@ def anchor_links() -> list[tuple[pathlib.Path, pathlib.Path, str]]:
     """Every (source, target file, fragment) in tracked markdown."""
     out = []
     for doc in tracked_markdown():
-        for target, fragment in _ANCHOR_LINK.findall(doc.read_text()):
+        text = doc.read_text()
+        for target, fragment in _ANCHOR_LINK.findall(text):
             out.append((doc, (doc.parent / target).resolve(), fragment))
+        out.extend((doc, doc, fragment) for fragment in _SAME_FILE_ANCHOR.findall(text))
     return out
 
 
@@ -263,7 +268,7 @@ def headings_in(path: pathlib.Path) -> set[str]:
     return {slug(m.group(1).strip()) for m in _ANY_HEADING.finditer(path.read_text())}
 
 
-def test_every_cross_file_anchor_resolves():
+def test_every_anchor_resolves():
     """A heading that moves leaves the link green in review and dead on click.
 
     The citation tests above check backticked paths and `just` recipes; a
@@ -291,8 +296,8 @@ def test_the_anchor_scan_still_finds_anchors():
     """
     assert anchor_links(), (
         "the anchor scan found no `](file.md#fragment)` links at all — "
-        "`_ANCHOR_LINK` has stopped matching, so `test_every_cross_file_anchor_"
-        "resolves` is now green because it is looking at nothing"
+        "`_ANCHOR_LINK` has stopped matching, so `test_every_anchor_resolves` "
+        "is now green because it is looking at nothing"
     )
 
 

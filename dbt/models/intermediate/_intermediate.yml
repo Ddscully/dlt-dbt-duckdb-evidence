@@ -48,7 +48,7 @@ models:
       with the regulation's row-level fallback rule applied — where a country is
       unlisted, or listed with no total for a good, all three tonnage columns
       and the production route come from the "Other countries and territories"
-      row. About one listed-country row in eight has no value, so the second
+      row. About one listed-country row in fifteen has no value, so the second
       half of the rule matters. The fallback is chosen per row, on whether the
       country has a total, never per column: mixing columns from two rows builds
       a row the regulation never states.

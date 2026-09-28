@@ -1,5 +1,20 @@
 # Style guide
 
+- **Rules marked [lint] fail `just lint`; [convention] rules are enforced in
+  review** ([SQL formatting](#sql-formatting)).
+- **SQL is lowercase, four-space indented, trailing-comma, with explicit `as`
+  and named `group by` columns**, wrapped at 120 ([SQL formatting](#sql-formatting)).
+- **Every `ref()` and `source()` sits in an import CTE**, and no table name is
+  hardcoded, because those calls are what build the asset graph
+  ([Model structure](#model-structure)).
+- **The staging layer breaks all five of dbt Labs' staging rules on purpose**,
+  and each departure is written down
+  ([Deliberate deviations](#deliberate-deviations-from-dbts-structure-guide)).
+- **A join key has one name in every model that carries it**, units live in
+  column names, and percentages are stored 0–100 ([Naming](#naming)).
+- **Test the grain contract, not everything**
+  ([Tests and documentation](#tests-and-documentation)).
+
 How SQL and models are written in this repo. Adapted from dbt Labs'
 [How we style our dbt projects](https://docs.getdbt.com/best-practices/how-we-style/0-how-we-style-our-dbt-projects),
 trimmed to what actually applies to a DuckDB-backed project and reconciled with

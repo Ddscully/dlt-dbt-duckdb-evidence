@@ -31,9 +31,10 @@ account of the same ground is `docs/DATA_QUALITY.md`.
   red check gives `select * from dbt_test__audit.<test_name>` for the rows.
 - **Tests are calibrated to fail on bugs, not on reality.** `income_group` is
   nullable on purpose (the `country_overrides` territories have no World Bank
-  classification) and `co2_per_capita` has no ceiling (small petrostates reach
-  780 t/person). Check the full distribution before tightening a bound — the
-  17-country fixture slice passes thresholds the full data breaks.
+  classification) and `co2_per_capita` has no ceiling (small territories and
+  petrostates reach hundreds of tonnes a person: 783 for Sint Maarten in
+  1954). Check the full distribution before tightening a bound — the 17-country
+  fixture slice passes thresholds the full data breaks.
 - **The unit tests exist because a data test cannot see a wrong answer that is
   a legal one.** Change `dim_date`'s
   `fiscal_quarter` from `/3 + 1` to `/ 4` and every fiscal quarter is wrong while

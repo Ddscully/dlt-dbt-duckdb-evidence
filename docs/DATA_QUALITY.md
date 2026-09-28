@@ -1,5 +1,21 @@
 # Data-quality gates, contracts and ownership
 
+- **Six gates guard a build**: the grain, value ranges, the country dimension,
+  enforced contracts on every mart model, a release-to-release shrink check and
+  source freshness ([The gates](#the-gates)).
+- **Every test stores its failing rows**, so a red check hands you the rows,
+  not a count ([The gates](#the-gates)).
+- **Unit tests reach what a data test cannot**: a legal answer that is the wrong
+  one, and logic no data in the warehouse exercises ([Unit tests](#unit-tests)).
+- **Every numeric mart column says whether it may be summed**, and a test holds
+  the labels to a closed vocabulary
+  ([Which measures may be summed](#which-measures-may-be-summed)).
+- **Four groups by domain own every model**, dbt enforces who may depend on it at
+  parse time, and each dashboard page is an exposure
+  ([Groups, exposures and versions](#groups-exposures-and-versions)).
+- **`fct_emissions_energy_v1` dies on 2026-11-01, enforced**: from that date
+  `dbt parse` fails ([Groups, exposures and versions](#groups-exposures-and-versions)).
+
 `just dbt-build` runs the data tests and unit tests alongside the models, and the
 site's Pipeline page counts the data tests. Dagster surfaces them as asset checks
 on the models they guard.
@@ -14,7 +30,8 @@ For the pytest side, see [`tests/README.md`](../tests/README.md).
 | `not_null` / `unique` / `accepted_values` | The country dimension: one row per ISO3, a region for every row, income groups from the World Bank's four. |
 | `contract: {enforced: true}` on every mart model | The *schema* contract, which the grain contract never saw: every column with a declared type, checked at build time. A column changing type or disappearing under the published Parquet files fails the build instead of arriving in someone's download. |
 | `publish/compare_releases.py`, in `release-data.yml` | A table that shrank between releases. Every gate above reads one build, so a join that drops a third of the countries passes them all: the smaller table is still unique, in range and non-null. The release compares each published table's rows and year span with the previous release's `manifest.json`, and stops on a loss of more than 1% of the rows or of a year at either end. |
-| `dbt source freshness` (`just dbt-freshness`) | Whether the warehouse is stale. dlt stamps every row with `_dlt_load_id`, a unix epoch, so this measures when the *pipeline* last ran (warn at 7 days, error at 30) and not when the publishers last updated. |
+| `dbt source freshness` (`just dbt-freshness`) | Whether the warehouse is stale. dlt stamps every row with `_dlt_load_id`, a unix epoch, so this measures when the *pipeline* last ran (warn at 7 days, error at 30; 2 and 7 for the ECB rates, which publish
+on business days) and not when the publishers last updated. |
 
 Every test runs with `store_failures`, into a `dbt_test__audit` schema. A red
 check hands you `select * from dbt_test__audit.<test_name>` and the offending
@@ -23,7 +40,8 @@ rows, not a count.
 The tests are calibrated to fail on a bug and not on reality. `income_group` is
 left nullable because the `country_overrides` territories genuinely have no World
 Bank classification, and `co2_per_capita` has a floor but no ceiling because
-small petrostates legitimately reach 780 t/person. Before tightening a bound,
+small territories and petrostates legitimately reach hundreds of tonnes a
+person (783 for Sint Maarten in 1954, 365 for Kuwait). Before tightening a bound,
 check the actual distribution: CI builds a 17-country fixture slice, which will
 happily pass a threshold the full 200+ would break.
 
@@ -33,7 +51,7 @@ The dbt *unit* tests cover these models — `dim_date`,
 `stg_retail_lines`, `stg_weather_daily`, `fct_cbam_exposure`,
 `fct_country_weather_year`, `fct_fx_rates_daily`, `fct_fx_rates_periods`,
 `fct_retail_returns`, `fct_retail_customer_cohorts`, `dim_retail_customer` and
-the two intermediate models, `int_cbam_default_factors` and
+two of the three intermediate models, `int_cbam_default_factors` and
 `int_retail_return_matches`. They run a model against fixed input rows and
 compare the entire output, rather than asserting a property of whatever the
 warehouse happens to hold — which is what lets them reach two things a data test
@@ -45,17 +63,23 @@ not: January scoring Q2 under a July year start passes every test in the
 project. `stg_retail_lines` is the same problem in a different shape — it is two
 `case` expressions and two boolean flags built off them, and `accepted_values`
 proves an answer is in the list, never that it is the right member of it.
-Misclassifying `AMAZONFEE` as a product moves net revenue by £260,764 with all
-19 of that model's data tests green; dropping the `upper()` from `stock_code`
+Misclassifying `AMAZONFEE` as a product moves net revenue by £260,764 with every
+one of that model's data tests green; dropping the `upper()` from `stock_code`
 sends all 100 voucher lines, which arrive lowercase, into product with the same
-19 green.
+tests green.
 
 `fct_cbam_exposure` is the hardest of them. Its numbers are transcribed from a
 legal instrument, so there is nothing independent to check them against and its
-data tests are almost all `not_null` and generous ranges. The two that are
-not — the production-route test and the one holding the fallback out of the
-excess window — both came out of mutations rather than out of review. What a
-unit test reaches instead is the rules: hardcoding the phase-in mark-up at
+data tests are almost all `not_null` and generous ranges. What a unit test
+reaches instead is the rules, and each rule below was broken with every data test
+on the model green.
+
+<details>
+<summary>How this was measured</summary>
+
+The two data tests that are more than `not_null` and a range — the
+production-route test and the one holding the fallback out of the excess
+window — both came out of mutations rather than out of review. Hardcoding the phase-in mark-up at
 10/20/30% moves the fertiliser average from €105.76 to €115.18 a tonne —
 fertilisers carry a flat 1% food-security carve-out — with every data test on
 the model green, and measuring `excess_over_cleanest_source` against the product
@@ -66,6 +90,8 @@ columns untested: turning that left join inner deletes 261 rows including all
 260 fallback rows, and replacing `where is_latest_available` with the current
 year strips the factor off 2,584 more — **PASS=22, ERROR=0** either way, because
 this model has no row-count test and a missing factor is a legal null.
+
+</details>
 
 **Logic no data reaches.** `fiscal_year_start_month` is a project var and the
 warehouse only ever builds `4`, so eleven of the twelve fiscal policies the model
@@ -80,7 +106,14 @@ filter has already excluded all 3,457). Each is posed by a fixture instead: a
 blank country, and a write-off carrying a customer id, which an unfiltered
 purchase universe turns into a matched sale with a negative quantity.
 
-In `fct_cbam_exposure` the fallback rule is the same story: the regulation sends
+In `fct_cbam_exposure` the fallback rule is the same story, and so is the
+fallback's place in the excess window: neither can be broken in the current
+warehouse, so a fixture poses each.
+
+<details>
+<summary>How this was measured</summary>
+
+The regulation sends
 a listed country with no value for a good to the "other countries" row *as a
 whole line*, and resolving it column by column instead produces a figure that
 exists nowhere in the regulation — but the row that once proved it was corrected
@@ -100,6 +133,8 @@ fallback below both listed countries is the only possible witness to that
 window, which is what the test does. The other half of the same policy — that
 the fallback row carries no excess of its own — *is* observable, 260 nulls of
 it, and is the one thing here a data test can hold.
+
+</details>
 
 Fixtures live in `dbt/tests/fixtures/` (dbt's `test-paths`, not the pytest
 fixtures). `dim_date` needs CSV files there because it generates its own rows —

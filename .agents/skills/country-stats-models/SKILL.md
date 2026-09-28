@@ -104,7 +104,7 @@ carries it forward is `publishing-a-release`.
   indicator, so a newly added code still pulls its whole series) is *not* the
   fetch floor: `wdi_start_year()` subtracts `WDI_LOOKBACK_YEARS`, because the
   World Bank revises years it has already published. Merging on
-  `(indicator, country_iso3, year)` is what makes the partial fetch safe. Two
+  `(indicator, country_code, year)` is what makes the partial fetch safe. Two
   things it gives up, both deliberate: a country-year the World Bank *withdraws*
   stays in `raw.wb_wdi` until a full reload, and a restatement older than the
   window is never seen — `just ingest-wdi-full` (`INGEST_WDI_FULL=1`) re-fetches
@@ -288,7 +288,7 @@ carries it forward is `publishing-a-release`.
   `(country_iso3, year, half)`; `stg_eu_electricity_prices` averages it to annual
   so it can join the country-year spine. Averaging is what the annual grain costs,
   and the cost is large enough to model around: the mean absolute half-over-half
-  change was 19% across countries in 2022 and 13% in 2023 against 3–4% through the
+  change was 19% across countries in 2022 and 13% in 2023 against 3–5% through the
   2010s, and the Netherlands went €0.034/kWh in 2022-S1 to €0.142 in S2 (+320%) as
   that year's energy-tax cuts landed in the first half. The annual €0.088 is a
   price nobody paid. Chart prices *over time* off

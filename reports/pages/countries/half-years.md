@@ -42,7 +42,7 @@ Eurostat publishes household prices **twice a year**, and the price charts in th
 an annual average of the two halves. That average is not a neutral summary, which
 is why the warehouse keeps the published half-years beside it. The difference is
 the 2021–23 energy crisis: the mean absolute half-over-half change was **19%**
-across countries in 2022 and 13% in 2023, against 3–4% through the 2010s.
+across countries in 2022 and 13% in 2023, against 3–5% through the 2010s.
 
 The spikes above are single half-years. Averaged into an annual figure they
 become a smooth rise, which reads as a gradual squeeze rather than the step

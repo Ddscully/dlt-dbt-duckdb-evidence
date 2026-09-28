@@ -279,7 +279,8 @@ def test_every_image_tag_is_pinned():
     """No `latest`, no bare name, no floating alias. Dependabot watches these —
     `docker-compose` for compose.yaml, `docker` for both Dockerfiles — and a
     moving tag is one it cannot bump, which is the "unwatched pin" that
-    `docs/RUNNING_AS_A_SERVICE.md` §2 predicted a container would add.
+    `docs/decisions/0005-just-serve-first-container-second.md` predicted a
+    container would add.
 
     **The two minimums differ because upstream's release schemes do.** The
     Dockerfile's images are language runtimes, where `X.Y.Z` is the exact tag

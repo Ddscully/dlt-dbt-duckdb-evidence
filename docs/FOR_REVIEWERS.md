@@ -5,6 +5,18 @@ someone evaluating it as *work* tends to ask, in roughly that order. Every numbe
 here was measured on this machine or read out of the repo's own CI history, none
 of it estimated.
 
+- **Judge the engineering; the analysis has not had the same scrutiny**, and one
+  mart ships fabricated data on purpose ([§0](#0-what-this-is-not-yet)).
+- **The freshness SLA is declared in code and alerted by a nightly workflow**
+  against the live sources ([§2](#2-what-is-the-freshness-sla-and-what-happens-when-it-is-missed)).
+- **A full run takes about a minute on a laptop and costs nothing in dollars**;
+  disk is the real cost, and expiry holds it
+  ([§3](#3-what-does-a-run-cost-and-how-long-does-it-take)).
+- **At 1000× the Polars step gives first, but the single-writer lock is the limit
+  to plan around**, because it binds at any size ([§4](#4-what-breaks-at-1000)).
+- **Scored against an outside rubric, access governance is Absent and cannot be
+  otherwise on an embedded database** ([§6](#6-scored-against-somebody-elses-rubric)).
+
 **The 90-second tour**, if you only open five files:
 
 | File | Why |
@@ -23,9 +35,7 @@ of it estimated.
 gone deliberately into an initial stack and a set of working methods: ingestion,
 modelling, contracts, tests, lineage, orchestration and a publication boundary.
 That is what the numbers on this page measure, and what the repo asks to be read
-as. It was built largely during a period of promotional access to Claude, so the
-throughput reflects the tooling available at the time rather than a sustained
-engineering effort.
+as. It was built largely with Claude Code, during a period of promotional access.
 
 **What has not had the same scrutiny is the analysis itself.** The pipeline is
 correct in the sense that it does what it says: the transformations are tested,
@@ -152,8 +162,8 @@ is one load's worth of rewrites, the price of keeping the weather diff's pair
 `just ingest`, the backfills and `load_retail` do not expire; their snapshots
 go at the next of those two.
 
-Warehouse contents: 1,647,099 staging rows and 1,959,307 mart rows — of which
-1,067,371 are the retail order lines, 667,809 the three FX tables and 43,138 the
+Warehouse contents: 1,648,214 staging rows and 1,960,177 mart rows — of which
+1,067,371 are the retail order lines, 668,679 the three FX tables and 43,138 the
 wide country-year fact — plus 9,821 snapshot rows across the two `history`
 tables.
 
@@ -167,8 +177,14 @@ last 40:
 | `pages` | **271 s** | 164–712 | 40 | live build + the Evidence site + deploy |
 | `release-data` | **171 s** | 109–247 | 6 | live build + export + a dated GitHub release |
 
-**`ci` has now gone stale twice in this table, which is the point of keeping
-it.** It first read 92 s — measured before the retail source, the
+**The medians go stale, which is why the range and `n` ship beside them.**
+Nothing guards a timing: `tests/test_documented_counts.py` anchors on a test
+noun, and a duration has none.
+
+<details>
+<summary>How this table went stale, twice</summary>
+
+`ci` first read 92 s — measured before the retail source, the
 weather source and the DuckLake move, so 66% low. Corrected to 153 s, it is
 191 s eight days later: in that window the offline graph gained a mart, a seed
 and the tests that came with them. The two live workflows barely moved, because
@@ -181,6 +197,8 @@ two corrections. The range and `n` ship beside the median for that reason: a
 single number invites exactly the quiet decay that produced the 92 s, and the
 live workflows' spread (`nightly` reaching 999 s, `pages` 712 s) is a property of
 the public APIs rather than noise to be averaged away.
+
+</details>
 
 **The dollar cost is zero**, and I'd rather say that plainly than dress it up:
 GitHub Actions' free tier, no cloud warehouse, no credentials, no bill. That is a
@@ -265,7 +283,7 @@ number before.
    full-refresh at 265k rows. The argument is the shape of the curve, not the
    saving.
 4. **The Evidence site.** It ships Parquet to the browser and queries it with
-   DuckDB-WASM. Lovely at 94 MB, wrong at 94 GB — that becomes a pre-aggregated
+   DuckDB-WASM. That works at 94 MB and not at 94 GB — that becomes a pre-aggregated
    serving layer.
 
 What *doesn't* break, which is the more interesting half: dlt already merges
@@ -338,7 +356,7 @@ below, and the profile is the point.
 | Metadata completeness | **Established** | Every model carries a description and an owner, a contract types every mart column, and every one of those columns carries a description that ships in the release — `tests/test_additivity.py` fails on a blank one. The `analytics` tables are the gap: Polars writes them, so dbt describes none of their columns. |
 | Quality observability | **Established** | Data and unit tests with failing rows stored per test, Dagster asset checks, freshness thresholds on every source but the closed retail archive, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
 | Access governance | **Absent** | Structurally, not by neglect — see below. |
-| Lineage traceability | **Established** | One graph from dlt through dbt and Polars to the site; 10 exposures answer "what breaks if I change this" per page; the bus matrix is derived from the manifest rather than drawn. |
+| Lineage traceability | **Established** | One graph from dlt through dbt and Polars to the site; 11 exposures answer "what breaks if I change this" per page; the bus matrix is derived from the manifest rather than drawn. |
 | Organizational ownership | **Ad hoc** | Ownership is declared and enforced for all 33 models. There is one owner, who is also the only contributor. |
 
 **Access governance is Absent and cannot be otherwise here, which is the most
@@ -399,7 +417,7 @@ eight tables each feeding a named model. Of the rest:
 - **Cost delusion (Wrath)** — no, and §3 is the answer: the dollar figure is
   zero, said plainly, with the note that this is a property of the scale rather
   than a virtue of the design. The disk cost that *is* real — a landing zone
-  growing ~39 MiB per ingest with nothing expiring snapshots — is named there
+  that grew ~39 MiB per ingest until snapshot expiry shipped — is named there
   rather than left flattering.
 - **Governance as afterthought (Pride)** — **partly, and the record shows it.**
   The personal-data classification arrived well after the data it
@@ -411,8 +429,9 @@ eight tables each feeding a named model. Of the rest:
   plugins retired on a count of zero invocations (two across 187 session
   transcripts, two more across 211),
   `pytest-cov` added and dropped the same day for buying nothing, and a semantic
-  layer still unbuilt because a site written by one person does not have the
-  coordination problem it solves.
+  layer left unbuilt until something that aggregates on its own, the finance
+  agent's `query_metric`, needed one: a site written by one person does not have
+  the coordination problem it solves.
 
 ---
 

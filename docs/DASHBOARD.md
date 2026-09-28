@@ -2,28 +2,20 @@
 
 ### 👉 [ddscully.github.io/dlt-dbt-duckdb-evidence](https://ddscully.github.io/dlt-dbt-duckdb-evidence/)
 
-Eleven top-level pages, built from the modelled layers with [Evidence](https://evidence.dev/).
-Each analysis page is an overview that leads with its charts, a sentence or two
-under each, and links down to detail pages that carry the argument, the tables
-and the method.
-No year is hardcoded: every page reads the latest year each metric family can
-actually populate from
-[`reports/sources/warehouse/latest_years.sql`](../reports/sources/warehouse/latest_years.sql),
-because coverage does not end in the same year for all of them.
-
-Each page that reads a model is declared as a dbt exposure in
-[`dbt/models/_exposures.yml`](../dbt/models/_exposures.yml), so
-`dbt ls --select +exposure:<name>` answers "what breaks if I change this" for one
-page. Building the site locally is [`reports/README.md`](../reports/README.md);
-what the pages are *for* is below.
-
-The same site carries dbt's docs at
-[`/dbt/`](https://ddscully.github.io/dlt-dbt-duckdb-evidence/dbt/), linked from
-Home as the data catalogue: every model and column with its description,
-contract, tests and lineage, without a clone. `publish/build_report.py` writes
-them as one self-contained file (`dbt docs generate --static`) after Evidence
-builds, with dbt's visitor tracking switched off — left at dbt's default, the
-page loads a Snowplow tracker for everyone who opens it.
+- **Eleven top-level pages**, each analysis page an overview that leads with
+  its charts and links down to detail pages carrying the argument, the tables
+  and the method ([The pages](#the-pages)).
+- **No page hardcodes a year**: each reads the latest year its metric family can
+  actually populate
+  ([`reports/README.md`](../reports/README.md#no-hardcoded-years)).
+- **Every page that reads a model is a dbt exposure**, so
+  `dbt ls --select +exposure:<name>` answers "what breaks if I change this" for
+  one page ([Beside the pages](#beside-the-pages)).
+- **dbt's docs ship at `/dbt/` as the data catalogue**, with dbt's visitor
+  tracking switched off ([Beside the pages](#beside-the-pages)).
+- **The site is rebuilt from the live sources** weekly, on demand and on any
+  push that touches what it is built from
+  ([How it is built and deployed](#how-it-is-built-and-deployed)).
 
 ## The pages
 
@@ -41,10 +33,24 @@ page loads a Snowplow tracker for everyone who opens it.
 | **Restatements** | Which CO₂ estimates OWID has revised since this warehouse first loaded them, off the dbt snapshot. |
 | **Pipeline** | dlt load times per source, rows and year spans per layer, and every data test with its stored failure count, from the observability tables that `transform/pipeline_status.py` writes. |
 
+## Beside the pages
+
+Each page that reads a model is declared as a dbt exposure in
+[`dbt/models/_exposures.yml`](../dbt/models/_exposures.yml). Building the site
+locally is [`reports/README.md`](../reports/README.md).
+
+The same site carries dbt's docs at
+[`/dbt/`](https://ddscully.github.io/dlt-dbt-duckdb-evidence/dbt/), linked from
+Home as the data catalogue: every model and column with its description,
+contract, tests and lineage, without a clone. `publish/build_report.py` writes
+them as one self-contained file (`dbt docs generate --static`) after Evidence
+builds, with dbt's visitor tracking switched off — left at dbt's default, the
+page loads a Snowplow tracker for everyone who opens it.
+
 ## How it is built and deployed
 
-`.github/workflows/pages.yml` builds it as a single `publish_site` job. The site
-is a node in the asset graph (`reports/evidence_site`), so the workflow
+`.github/workflows/pages.yml` builds it by materializing one Dagster job,
+`publish_site`, and deploys the result. The site is a node in the asset graph (`reports/evidence_site`), so the workflow
 materializes it instead of running npm itself. It builds against the **live**
 sources rather than the fixtures — a published dashboard showing the 17-country
 slice the tests run on would be worse than none — weekly, on demand, and on any push to

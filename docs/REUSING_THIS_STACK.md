@@ -1,5 +1,25 @@
 # Reusing this stack
 
+The checklist, in the order to do it:
+
+1. **Copy the tree, or start from the template.** `src/modern_data_stack/` is
+   the domain-neutral third; delete the example's sources, models, pages and
+   docs ([§1](#1-what-youre-actually-reusing)).
+2. **Rename the project, and keep the package** unless you mean to rename every
+   import ([§5](#5-renaming-the-project)).
+3. **Decide the grain, what makes an entity exist, which resources merge, and
+   what is state**, before writing code
+   ([§3](#3-four-decisions-to-make-before-writing-code)).
+4. **Wire one source end to end before the second**, because the string-matched
+   names between the layers fail silently
+   ([§2](#2-the-names-that-join-the-layers), [§6](#6-build-order)).
+5. **Carry over the invariants that fail silently**
+   ([§4](#4-invariants-that-fail-silently)).
+6. **Drop the optional layers you do not need**; the landing zone is not one
+   of them ([§7](#7-what-to-drop-if-you-want-less)).
+7. **Plan around the single-writer lock, not the row count**
+   ([§8](#8-where-this-shape-stops-being-the-right-one)).
+
 How to start a *new* project on this shape (dlt → DuckLake → dbt → Polars →
 Evidence, orchestrated by Dagster), using this repo as the reference
 implementation.
@@ -18,24 +38,14 @@ It's the layer above: what carries over to a different dataset, what has to be
 rewritten, and the handful of decisions that are expensive to change later.
 
 **Most of what makes this repo work is not transferable code.** The pipeline is
-~4,000 lines and the part with nothing domain-specific in it is maybe a third:
-the layout, the wiring conventions, the CI shape, the lint config. The rest is a
+~7,800 lines of Python and the part with nothing domain-specific in it is maybe
+a third: the layout, the wiring conventions, the CI shape, the lint config. The rest is a
 worked example. The fastest way to reuse it is to copy the tree, keep the
 skeleton and delete the emissions.
 
 That third is already separated out, so you don't have to go looking for it:
 it's `src/modern_data_stack/`, it takes its configuration as arguments, and the
 project modules that call it hold the constants.
-
-**This document was executed** against `c054e53`: a clone
-followed it literally, with one unrelated source (monthly gold prices, a month
-grain and no country), until CI's `build` job passed. The "a third" held up for
-the code. The lists below did not, and they are corrected from that run: the
-package rename touched 63 files rather than six, `orchestration/assets.py` was
-56% example, and three defects passed every local check and would have failed
-only in CI or at the first release (the `*.csv` fixture in §4, since fixed
-here, the export's personal-data refusal in §7, the lakehouse release check in
-§7).
 
 ## 1. What you're actually reusing
 
@@ -99,7 +109,7 @@ keep the split a split:
   `[tool.pytest.ini_options]` blocks. The `extend-select` list and
   `combine-as-imports` are both load-bearing; the comments say why.
 - `dbt/macros/generate_schema_name.sql` — clean schema names (`marts`, not
-  `main_marts`). Six lines, and every schema reference in the project depends on it.
+  `main_marts`). Seven lines, and every schema reference in the project depends on it.
 - `dbt/profiles.yml` — rename the profile, keep the `env_var('WAREHOUSE_PATH', …)`
   pattern. **Add `ci` and `prod` targets if you are moving off DuckDB**, and
   that is the one place this project's shape does not carry over. There is a
@@ -121,7 +131,7 @@ keep the split a split:
   mapped model at import time, so a stale entry stops the whole graph with
   `RuntimeError: generator raised StopIteration`, naming no model. The four
   `pipeline_*` entries in the second are generic.
-- `scripts/record_fixtures.py` — 333 lines, almost all per-source trimming; one
+- `scripts/record_fixtures.py` — 330 lines, almost all per-source trimming; one
   untrimmed CSV needs about thirty.
 - `orchestration/assets.py` — **more than half of it is the example**: on the
   dry run it went from 801 lines (at `c054e53`) to 352. What carries over is
@@ -214,8 +224,8 @@ Then delete:
 - `docs/course/`, and seven of the eighteen skills: country stats, compliance,
   retail, currency and calendar, weather, unit-tested models, course authoring;
 - the docs about this warehouse's data. What stays is `STYLE_GUIDE.md`,
-  `ORCHESTRATION.md`, `RUNNING_AS_A_SERVICE.md`, and `WAREHOUSE.md` for its bus
-  matrix block;
+  `ORCHESTRATION.md`, `RUNNING_AS_A_SERVICE.md`, `PUBLISH_AND_SWAP.md`, and
+  `WAREHOUSE.md` for its bus matrix block;
 - about a quarter of `AGENTS.md` (§9).
 
 Several of the files that survive unchanged still name the example in comments
@@ -340,7 +350,7 @@ project. These are the ones that recur in anything built this way:
   has validated a page against a dropped column's old schema; clearing
   `reports/.evidence/` (`just report-clean`) after any mart change fixes it.
 - **`evidence build` exits 0 for a site missing a page.** Check rendered file
-  *size*, not exit status: the smallest page here renders at about 19 kB and
+  *size*, not exit status: the smallest page here renders at about 34 kB and
   the check's floor is 8 kB, which catches a route that emitted nothing but the framework shell.
 - **A column named `tests` or `rows` silently draws no bars** in an Evidence chart.
   No error, no warning, and the same column is fine in a table three lines below.
@@ -350,7 +360,7 @@ project. These are the ones that recur in anything built this way:
 ## 5. Renaming the project
 
 **The name is three names in one string**: the Python package
-(`src/modern_data_stack/`, imported by 36 files), the dbt project and profile,
+(`src/modern_data_stack/`, imported by 48 files), the dbt project and profile,
 and the dlt pipeline name (which also names dlt's state directory). The package
 is decoupled from the other two, so renaming the project need not touch it — but
 only because of one key, below. The dry run renamed all three to
@@ -459,10 +469,10 @@ question is not what it costs but which layer gives first, and the answer is not
 the one people reach for.
 
 **What it holds now**, measured alongside the figures in
-`FOR_REVIEWERS.md` §3, which this agrees with by construction. 3.7M rows across
-the modelled layers in a 282 MB DuckDB file, plus a 111 MiB DuckLake landing
-zone — that one grows about 39 MiB per full ingest and nothing expires the
-snapshots, which is its own answer to what a run costs. The largest relation is
+`FOR_REVIEWERS.md` §3, which this agrees with by construction. 3.6M rows across
+the modelled layers in a 282 MB DuckDB file, plus a DuckLake landing zone that
+snapshot expiry holds to about 100 MiB: the live Parquet and one load's
+rewrites. The largest relation is
 `fct_retail_order_line` at 1,067,371 rows. A full `dbt build`, every test
 included, takes **24.5 s** of dbt's own time on four threads. `analytics.pipeline_runs` records that per build, so the trend is a query rather
 than a memory.

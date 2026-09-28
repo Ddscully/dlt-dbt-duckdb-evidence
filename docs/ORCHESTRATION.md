@@ -1,5 +1,21 @@
 # Orchestration
 
+- **Dagster models the whole pipeline as one asset graph**, derived from the dlt
+  source and dbt's manifest, so nothing declares the order by hand
+  ([The graph](#the-graph)).
+- **Nothing enforces the order between jobs**: `load_retail` has to run before
+  `full_refresh` ([Running it](#running-it)).
+- **Backfills of WDI and weather are run config, not partitions**, because a
+  partitioned job's Materialize button is a backfill ([Running it](#running-it)).
+- **Runs go one at a time through a queue, and `just materialize` bypasses it**
+  ([Running it](#running-it)).
+- **Three jobs exist for two reasons**: the site needs Node, and retail is
+  month-partitioned ([Three jobs, and why](#three-jobs-and-why)).
+- **`daily_refresh` ships stopped**; start it yourself
+  ([What that buys](#what-that-buys-over-the-shell-chain)).
+
+## The graph
+
 `just run` chains the steps in a shell, which works right up until you want to
 know *why* a table is stale, or to rebuild only what a change touched. Dagster
 models the same pipeline as one asset graph:
@@ -38,6 +54,8 @@ Polars asset names its upstream mart; and the Evidence site declares one dep per
 table its source queries read, with a unit test that fails if a source query
 starts reading a table that isn't in the list. Change a `ref()` and the graph
 moves with it.
+
+## Running it
 
 ```bash
 just dagster                              # UI on :3000: graph, runs, freshness, checks
@@ -93,7 +111,7 @@ four workflows run through those recipes.
 
 | Gain | How |
 |---|---|
-| **Selective rebuilds** | `raw/wb_wdi*` reloads one API and rebuilds only what depends on it. dlt loads only that resource, so the other six keep their data. (`*` is all downstream; a bare `+` is only one layer.) |
+| **Selective rebuilds** | `raw/wb_wdi*` reloads one API and rebuilds only what depends on it. dlt loads only that resource, so the other seven keep their data. (`*` is all downstream; a bare `+` is only one layer.) |
 | **Re-runnable backfills** | `raw/wb_wdi` takes a year range (1960 → now) as run config, so a World Bank restatement older than the five-year lookback is a unit of work you can point at instead of a 190k-row full reload. A range is one request per indicator, and `merge` on `(indicator, country_code, year)` makes re-running a year a no-op. The weather archive deepens the same way. Neither is a partition, because a partitioned job's Materialize button is a backfill ([decision 0002](decisions/0002-yearly-sources-as-run-config.md)). Retail is partitioned by month, where every partition together is one read of one file. The split is on the *window* and not on load disposition: the ECB rates merge too, but their whole series since 1999 is one three-second request, so a window there would buy nothing. |
 | **Freshness policies** | Raw assets warn after 2 days and fail after 7; modelled assets are expected by 08:00 UTC daily. A schedule that quietly stops firing turns assets stale in the UI instead of leaving no trace. |
 | **Asset checks** | dbt's data tests show up as checks on the model they guard, next to eight Python checks dbt cannot express: every WDI indicator present, the mart reaching a recent year, the FX rates reaching the present, dense ranks with no gaps, RFM scores not splitting ties, the weather revisions derivable from the lake, every site page rendered, and the dbt build that just ran appearing in `analytics.pipeline_runs`. |
@@ -110,7 +128,7 @@ Only `dagster.yaml` is checked in. The *container* stack points `DAGSTER_HOME`
 at `deploy/` instead and keeps run, event and schedule storage in Postgres,
 which is the same instance in every other respect except that it launches each
 run in its own container — so a host must not borrow it
-([`docs/RUNNING_AS_A_SERVICE.md`](RUNNING_AS_A_SERVICE.md) §3 and §10,
+([`RUNNING_AS_A_SERVICE.md`](RUNNING_AS_A_SERVICE.md#standing-it-up),
 [decision 0011](decisions/0011-deploy-is-the-containers-instance.md)). The two
 files are held in step by `tests/test_dagster_instance.py`. [AGENTS.md](../AGENTS.md#orchestration-orchestration)
 covers the traps: asset-key matching between dlt and dbt, `load_retail` running

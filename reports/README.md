@@ -1,5 +1,22 @@
 # Evidence dashboard
 
+- **Build the warehouse first, and let the sources run before the build**:
+  `npm run build` renders against whatever Parquet `.evidence/` already holds
+  ([Develop / build](#develop--build)).
+- **The site is the last asset in the Dagster graph**, with one dependency per
+  table its source queries read ([The site is a Dagster asset](#the-site-is-a-dagster-asset)).
+- **Every analysis page is an overview plus a folder of detail pages**
+  ([How it's wired](#how-its-wired)).
+- **No page hardcodes a year**; `latest_years.sql` gives each metric family its
+  own ([No hardcoded years](#no-hardcoded-years)).
+- **Evidence has silent traps**: reserved page and column names, scatters over
+  3,000 points, log axes, years as `2025.0`, and `*_pct` columns multiplied by 100
+  ([Reserved page names](#reserved-page-names) and the sections after it).
+- **Chart colours come from a validated palette**, with fixed `seriesColors` for
+  categories that recur ([Chart colors](#chart-colors)).
+- **Pages must be enabled once by hand, and the base path is injected at build
+  time** ([Deploying to GitHub Pages](#deploying-to-github-pages)).
+
 [Evidence.dev](https://evidence.dev) is "BI as code": SQL + markdown compile to a
 static site, deployable free to GitHub Pages.
 
@@ -164,8 +181,8 @@ select * from warehouse.latest_years
 ...then `(select co2_year from ${latest_years})` inside a query.
 
 **It is not `max(year)`.** The mart sits on a country-year spine, so its max year
-is whichever source runs furthest ahead: Eurostat prices, currently a year beyond
-everything else. Coverage also falls off at different rates per column.
+is whichever source runs furthest ahead: Eurostat's prices and the World Bank's
+series, currently a year beyond OWID's. Coverage also falls off at different rates per column.
 `primary_energy_twh` drops from ~210 countries to 79 in the latest year, while
 `co2_mt` holds at 214, so cutting an energy chart to the latest CO₂ year silently
 discards two thirds of its sample. Each family gets its own floor; see the
@@ -226,25 +243,9 @@ change. `DataTable` is unaffected, so a column can be fine in a table on the sam
 page and barless in a chart three lines below it. If a chart renders labels but
 no marks, rename the column before debugging anything else.
 
-**One false alarm.** A headless screenshot with too small a
-`--virtual-time-budget` produces the *identical* symptom (axis, categories and
-value labels, no bars) and does it to a different chart on each run, because the
-budget expires part-way through rendering a long page. `scope2.md` has three
-charts, and 25 s left one of them blank each time, varying. 60 s renders all
-three, repeatably. Before believing a chart is broken, shoot it twice: a real
-failure is the same chart every time.
-
-**And a false alarm that survives shooting twice.** The virtual clock can also
-stop while a chart is still in ECharts' entry animation, which freezes it at
-frame 0, the same frame every time. A bar chart shows its value labels stacked
-against the axis at zero and no bars; a line or area chart shows only its first x
-value, as a vertical spike. The findings sub-pages hit it on three charts,
-repeatably, at 60 s and 90 s budgets alike, and a clean rebuild changed nothing.
-`printEchartsConfig=true` on the chart printed a correct config, and a screenshot
-taken over CDP after a real-time wait (no virtual time at all) showed every chart
-drawn. So when the labels sit at zero rather than at the bar ends, suspect the
-clock before the page, and confirm in real time, as `building-evidence-reports`
-describes.
+A chart that renders labels and no bars in a *headless screenshot* may be the
+screenshot's clock rather than the page; the `building-evidence-reports` skill
+has how to tell them apart.
 
 ## A scatter over 3,000 points stops rendering
 
@@ -297,8 +298,8 @@ ran from 0.0000000001 to 10,000,000,000 to fit them, flattening the other 4,866
 points into one band.
 
 Threshold on a real unit, `>= 0.01` for money, not on zero. The same arithmetic
-is why a `first_order_gbp <= net_revenue_gbp` dbt test fails on 272 rows that are
-equal; see the `retail-models` skill.
+is why a `first_order_gbp <= net_revenue_gbp` dbt test fails on about 5% of customers
+whose two figures are equal; see the `retail-models` skill.
 
 ## Years render as `2025.0` unless you cast twice
 

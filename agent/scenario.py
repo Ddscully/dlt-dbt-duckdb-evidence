@@ -10,7 +10,7 @@ rebuild, for one good at a time.
 A result shows the good's cheapest, median and dearest *listed* source, the
 annex's "other countries and territories" table (the fallback), and any
 countries asked for. Each named country is marked as carrying its own value
-or the fallback's, since the annex prints "-" for about one row in eight and
+or the fallback's, since the annex prints "-" for about one row in fifteen and
 the mart copies the fallback onto it. A country the annex does not list for the
 good is not priced at all: the fallback applies to an unlisted country only if
 CBAM covers it, and which countries it exempts is set by the regulation's

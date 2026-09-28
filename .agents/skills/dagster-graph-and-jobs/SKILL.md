@@ -43,7 +43,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
     the instance loaded.
   - **A `DAGSTER_HOME` without it falls back to ten**, with one startup notice. A
     symlink to the checked-in file works
-    ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §5, §8).
+    ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md#invariants-that-fail-silently-in-a-service)).
   - **There are two instance configs, and they must agree.** `deploy/dagster.yaml`
     is the deployed one (`DAGSTER_HOME=<repo>/deploy`), differing from
     `.dagster/dagster.yaml` in putting run, event and schedule storage in
@@ -97,7 +97,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   `dagster schedule start -m …` prints success and flips a row the daemon does
   not read, and `dagster job launch -m …` returns 0 and then fails the run with
   `DagsterCodeLocationNotFoundError`. Both measured
-  ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md) §8).
+  ([`docs/RUNNING_AS_A_SERVICE.md`](../../../docs/RUNNING_AS_A_SERVICE.md#invariants-that-fail-silently-in-a-service)).
 - **Some commands *require* `-m`, and the two rules do not collide.** The split
   is which click options a command carries. `dagster asset list` takes
   `python_pointer_options` alone (`-m`, `-f`, `--package-name`), so a bare

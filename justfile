@@ -352,7 +352,8 @@ materialize-preview selection: dbt-parse
 
 # `dbt-parse` first, or the location fails to load instead of reporting what is
 # unregistered — which also makes this no check on a *running* service
-# (RUNNING_AS_A_SERVICE.md §7). No `-m` (§8).
+# (RUNNING_AS_A_SERVICE.md, "Standing it up"). No `-m` ("Invariants that fail
+# silently in a service").
 # Check the code location loads and every definition is registered
 [group('dagster')]
 validate: dbt-parse
@@ -458,12 +459,13 @@ report-clean: dbt-deps
 
 # `env(...)` so a deployment's EnvironmentFile wins. `publish/build_report.py`
 # empties reports/build on every run, so the site is down while it rebuilds —
-# §4 of the design swaps a symlink instead.
+# docs/PUBLISH_AND_SWAP.md designs a symlink swap instead.
 export SITE_ROOT := env("SITE_ROOT", justfile_directory() / "reports/build")
 
 # Every choice here — no `dagster dev`, `dbt-parse`, the bind addresses, `wait -n`,
-# killing recorded PIDs — is §2 of docs/RUNNING_AS_A_SERVICE.md. The
-# `daily_refresh` schedule ships STOPPED (§10).
+# killing recorded PIDs — is docs/RUNNING_AS_A_SERVICE.md, "`just serve`, and
+# the container built on it". The `daily_refresh` schedule ships STOPPED
+# ("Standing it up").
 # Run the graph and the dashboard as one always-on service (blocks; ctrl-c to stop)
 [group('service')]
 serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
@@ -519,9 +521,9 @@ compose-test-pipeline:
     docker compose run --rm --no-deps dagster just test-pipeline
 
 # Returns once the run is *queued*: its exit code says nothing about the run, and
-# a second launch does not wait for the first to succeed (RUNNING_AS_A_SERVICE.md
-# §10). No `where`: the run uses the `mds_data` volume, not the host's warehouse.
-# No `-m` (§8).
+# a second launch does not wait for the first to succeed (RUNNING_AS_A_SERVICE.md,
+# "The compose variant"). No `where`: the run uses the `mds_data` volume, not the
+# host's warehouse. No `-m` ("Invariants that fail silently in a service").
 # Queue a job on the compose stack's daemon (needs `just compose-up`)
 [group('service')]
 compose-launch job:

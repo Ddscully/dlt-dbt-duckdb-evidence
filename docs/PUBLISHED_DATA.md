@@ -2,6 +2,26 @@
 
 ### 👉 [Latest snapshot](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest)
 
+- **The whole warehouse ships monthly as a dated GitHub release**: the DuckDB
+  file, a Parquet per modelled table, the weather archive and a manifest
+  ([What a release holds](#what-a-release-holds)).
+- **The manifest says which columns may be summed and what each one means**,
+  which a Parquet file cannot ([What a release holds](#what-a-release-holds)).
+- **No published table shrinks between releases unnoticed**: a loss of rows or
+  of a year stops the release ([What a release holds](#what-a-release-holds)).
+- **DuckDB queries it where it sits over HTTPS**, and `releases/latest` always
+  resolves to the newest ([Querying it](#querying-it)).
+- **Attach it as `warehouse`**, or the `intermediate` views fail while the tables
+  work ([What to know before building on it](#what-to-know-before-building-on-it)).
+- **`customer_id` is pseudonymised and the release is still not anonymous**:
+  treat the retail tables as personal data
+  ([What to know before building on it](#what-to-know-before-building-on-it)).
+- **The file opens on any DuckDB from `v0.10.0`**, and the export refuses to
+  publish a newer storage format
+  ([What to know before building on it](#what-to-know-before-building-on-it)).
+
+## What a release holds
+
 The dashboard is one consumer of the warehouse. The warehouse itself is published
 too, so you can use the joined data without running any of this. Each release
 carries:
@@ -83,7 +103,7 @@ export copies the file as `warehouse.duckdb` and not `snapshot-2026-07-30.duckdb
 
 **The copy is made with `COPY FROM DATABASE`, not `cp`.** It's consistent
 whatever state the source was left in (a crashed run leaves a `.wal` beside it)
-and compacted, which is most of why 32 MB of warehouse ships as 29 MB. The copy
+and compacted: the blocks a build freed stay behind in the source file. The copy
 is made **twice**: once to snapshot the source, and again after the
 pseudonymisation below has rewritten a column across a million rows. `CHECKPOINT`
 would not do — DuckDB reuses freed blocks but never returns them to the

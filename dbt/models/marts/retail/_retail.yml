@@ -511,7 +511,7 @@ models:
           returned is net.
       - name: net_revenue_gbp
         data_type: DOUBLE
-        # A quasi-identifier: on its own it is unique for 97.4% of the 5,881
+        # A quasi-identifier: on its own it is unique for 97.1% of the 5,881
         # customers, and with `first_order_gbp` and `n_orders` for 98.6%. Shares,
         # not counts — the counts move between builds, since `sum()` over doubles
         # has no fixed order. A near-continuous money column at person grain is an

@@ -1,6 +1,29 @@
 # The warehouse
 
-What the pipeline loads, how it's laid out, and the DuckLake landing zone it lands in.
+- **Seven sources land as eight tables and one seed.** Six of the tables are
+  keyed by country; the ECB's rates have no country, and the retail log sits
+  below one ([Data sources](#data-sources)).
+- **The country-year facts hang off an explicit spine**, so a country-year that
+  only one source reports still lands, with nulls where the others are silent
+  ([Data sources](#data-sources)).
+- **Four sources keep a finer grain than the country-year**, and Eurostat's
+  half-years ship beside the annual average because the average hides the 2022
+  price shock ([Four sources keep a finer grain](#four-sources-keep-a-finer-grain-of-their-own)).
+- **A load is two dlt `run()` calls**: the `replace` resources refresh, and the
+  `merge` resources keep their watermarks
+  ([Two write dispositions](#two-write-dispositions-two-load-calls)).
+- **`raw` lives in the DuckLake catalog, everything dbt builds in
+  `data/warehouse.duckdb`**, and three tables across them can never be rebuilt
+  ([Schemas](#schemas)).
+- **The bus matrix is generated from the manifest, never written**, so a fact
+  added without a conformed key shows up as a hole ([The bus matrix](#the-bus-matrix)).
+- **Deleting `data/lakehouse/` is the one destructive act in the repo**: it is
+  the only copy of every landing table ([The lakehouse](#the-lakehouse-datalakehouse)).
+- **The Parquet can move to a bucket and the catalog to Postgres**, one variable
+  each, chosen before the first ingest
+  ([bucket](#the-parquet-in-an-s3-compatible-bucket),
+  [Postgres](#the-catalog-in-postgres)).
+
 The [README](../README.md) has the short version.
 
 ## Data sources
@@ -37,7 +60,7 @@ still lands, carrying nulls in the columns the others don't fill.
 Eurostat publishes half-yearly. `fct_eu_electricity_prices_semiannual` holds the
 published halves alongside the annual average that joins to everything else.
 Averaging is what the annual grain costs, and it costs a lot: half-over-half
-price moves averaged 19% across countries in 2022 against 3–4% through the 2010s.
+price moves averaged 19% across countries in 2022 against 3–5% through the 2010s.
 Both grains are in the warehouse for that reason.
 
 The ECB's series is daily and has no country in it at all, which is what forced
@@ -65,7 +88,7 @@ a full reload every run is the honest default, and it keeps dlt re-inferring the
 schema so an upstream type change fails loudly.
 
 The other four merge: the ECB rates, the retail log, the weather archive and
-WDI. WDI is the biggest pull (~190k rows across 11 indicators) and loads with `merge` on `(indicator, country_iso3, year)` over a
+WDI. WDI is the biggest pull (~190k rows across 11 indicators) and loads with `merge` on `(indicator, country_code, year)` over a
 five-year window. That window is a lookback and not "everything newer than last
 time", because the World Bank restates years it has already published.
 
@@ -118,8 +141,7 @@ resolution is a seed rather than a join on name.
 
 **"Mart" means the subject area, not the file.** There are four marts — the
 groups in `dbt/models/_groups.yml` — and the relations in the `marts/` layer are
-**mart models**. Counting models and calling them marts is how a stale count once
-survived two additions to the layer. `+group:` is set on the folder in
+**mart models**. `+group:` is set on the folder in
 `dbt_project.yml`, and `+schema: marts` on all four, so relation names, the
 release layout and the asset keys ignore the nesting.
 
@@ -153,15 +175,10 @@ Two rules decide what a mark means. A uniqueness test carrying a `where` is not
 a grain — `dim_grid_emission_factors` asserts one row per country *where
 `is_latest_available`*, and reading that as a grain would make a country-year
 reference table look like a conformed country dimension. And conformance is
-**exact column-name matching**, deliberately: an alias list would have rendered
-the FX models' two spellings of the currency key as a tidy row of marks, and
-those marks were the defect. On its first render `fct_fx_rates_periods`
-conformed to **nothing** and `fct_fx_rates_published` only to `dim_date`, both
-because they said `quote_currency` where `dim_currency` publishes
-`currency_code`; `fct_retail_returns` was missing `date_key` while
-`fct_retail_order_line`, at the identical grain, carried it. All three are
-closed — the table is what found them, and an alias list would
-have hidden two of them permanently.
+**exact column-name matching**, deliberately: an alias list would render a key
+spelled two ways as a tidy row of marks, which hides exactly the defect the
+matrix exists to show. It found three on its first render
+([`PRACTICES.md`](PRACTICES.md#1-model-the-data-honestly) has them).
 
 Regenerate with `just bus-matrix`.
 
@@ -276,39 +293,39 @@ store: `LAKEHOUSE_S3_ENDPOINT` and the standard `AWS_ACCESS_KEY_ID` and
 `just where` prints the data path the recipes will use. Unset, everything above
 holds unchanged.
 
-Measured against SeaweedFS in Docker, which is a service in
-[`compose.yaml`](../compose.yaml), on a named volume so the bucket survives a
-restart:
+To try it locally, SeaweedFS is a service in [`compose.yaml`](../compose.yaml),
+on a named volume so the bucket survives a restart:
 
 ```sh
 just compose-up         # Postgres and SeaweedFS
 cp .env.example .env    # then uncomment the S3 block
 ```
 
+<details>
+<summary>How this was measured</summary>
+
 `just test-pipeline`, Dagster's `load_retail` then `publish_site`, and `just sql`
-all ran against it, with every `raw` row count identical to a run on disk.
+all ran against SeaweedFS, with every `raw` row count identical to a run on disk.
+
+</details>
 
 - **Choose before the first `just ingest`.** The catalog records its data path
   and DuckLake refuses to attach it with any other, so setting the variable over
   an existing landing zone fails with `DATA_PATH parameter … does not match`.
   Moving one means copying the Parquet and rewriting that record, and nothing
   here does it.
-- **Every connection needs the endpoint and keys.** DuckDB reads no endpoint from
-  the environment, and with no secret it sends the request to AWS, access key id
-  included. So they are spelled three times: `storage_secret()` in
-  `lake/lakehouse.py` (dlt and every Python reader), the `secrets:` block in
-  `dbt/profiles.yml`, and `just sql`.
 - **The release stays on disk.** `just export-data` refuses while the variable
   is set, and so does `just restore-history` when the release carries the landing
   zone. Allowed to run, the export failed partway, after copying the warehouse,
   customer ids not yet pseudonymised, into its output directory.
-- **Throwaway runs keep the storage, not the place.** `just test-pipeline` writes
-  its fixture Parquet under `test-pipeline/` in the same bucket; the course
-  sandbox and the test suite are always on disk.
 - **A green `just lakehouse` does not prove the keys**, and nor does a
   `count(*)`: both come from catalog statistics and read no Parquet, so they
   answer with a wrong key. Reading a column fails with a 403 as it should:
   `select max(capital_city) from lakehouse.raw.wb_country` in `just sql`.
+
+How each reader is given the endpoint and keys, and where the fixture runs put
+their Parquet, are the [`the-lakehouse`](../.agents/skills/the-lakehouse/SKILL.md)
+skill.
 
 ### The catalog in Postgres
 
@@ -324,8 +341,8 @@ and the Parquet each move on their own; unset, everything above holds unchanged.
 reaches Python, the DuckDB CLI, dbt and dlt, with no secret in a URL, in dbt's
 rendered profile or in the process list.
 
-Measured against the `postgres:17.11` service in
-[`compose.yaml`](../compose.yaml), which also creates the `dagster` database the
+To try it locally, the `postgres:17.11` service in
+[`compose.yaml`](../compose.yaml) also creates the `dagster` database the
 container stack keeps its run storage in:
 
 ```sh
@@ -333,9 +350,14 @@ just compose-up               # Postgres and SeaweedFS, both on 127.0.0.1
 cp .env.example .env          # then uncomment the Postgres block
 ```
 
-A live load of the public indicators took 41 s, `just sql` read a column value
-back through the catalog, and `just test-pipeline` ran the whole pipeline
-against it.
+<details>
+<summary>How this was measured</summary>
+
+A live load of the public indicators took 41 s against that service, `just sql`
+read a column value back through the catalog, and `just test-pipeline` ran the
+whole pipeline against it.
+
+</details>
 
 - **Choose before the first `just ingest`**, for the reason the data path has:
   the catalog records its data path and refuses any other.
@@ -343,10 +365,6 @@ against it.
   `postgres` — through `just extensions`. DuckDB would autoload the
   last two, but a bare `load` fails on a machine that has never downloaded one,
   and it fails at the attach rather than at the query.
-- **A fixture run takes its own schema, not its own database.** `LAKEHOUSE_DIR`
-  separates two catalog files and separates nothing inside one Postgres
-  database, so `just test-pipeline` gives itself `test_pipeline_<tmp>` and drops
-  it when it succeeds. A failed run leaves the schema to be looked at.
 - **The release stays on disk.** `just export-data` and `just restore-history`
   refuse while the variable is set, as they already do for a bucket data path:
   a release publishes a catalog *file* built beside its Parquet.

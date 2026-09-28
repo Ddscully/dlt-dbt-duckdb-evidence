@@ -48,10 +48,10 @@ before undoing a choice, and move history there rather than into a doc.
 - **[`PRACTICES.md`](docs/PRACTICES.md) restates figures from five other files**,
   kept in step by hand. Counts of tests, mart models, labels and contracted
   columns stay out of prose, which `tests/test_documented_counts.py` enforces.
-- **[`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) mostly describes
-  what the repo has not built.** Its §2 exists as `just serve` and as the compose
-  stack built on it; §4 onward is still design, and nothing checks the paths
-  `docs/` cites.
+- **[`RUNNING_AS_A_SERVICE.md`](docs/RUNNING_AS_A_SERVICE.md) is what is built**
+  (`just serve` and the compose stack on it), and
+  [`PUBLISH_AND_SWAP.md`](docs/PUBLISH_AND_SWAP.md) is a design nothing
+  implements; nothing checks the paths `docs/` cites.
 
 Three lessons that apply well beyond where they were learned:
 
@@ -260,7 +260,7 @@ classified in the ymls and pseudonymised at the export, never in a model; the
 measurements and the mechanism are `publishing-a-release`, and the reasoning is
 [`docs/DATA_PROTECTION.md`](docs/DATA_PROTECTION.md). In any task:
 
-- **Deleting the id does not anonymise a customer-grain extract**: 97.4% of
+- **Deleting the id does not anonymise a customer-grain extract**: 97.1% of
   customers are unique on `net_revenue_gbp` alone.
 - **Hash with `||`, never `concat()`**, which skips NULLs and would give every
   anonymous row the same pseudonym.
