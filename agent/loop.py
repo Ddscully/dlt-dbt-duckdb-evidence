@@ -37,6 +37,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 
 import duckdb
 
@@ -86,15 +87,16 @@ _LIST_MARKER = re.compile(r"^\s*\d+[.)]\s", re.MULTILINE)
 def _numbers(text: str) -> list[str]:
     found = []
     for token in _NUMBER.findall(_LIST_MARKER.sub("", text)):
-        token = token.replace(",", "")
-        found.append(token if "." in token else str(int(token)))
+        # By value, so a model's "€56,156" quotes the tool's "€56,156.00".
+        found.append(f"{Decimal(token.replace(',', '')).normalize():f}")
     return found
 
 
 def unverified(answer: str, sources: Sequence[str]) -> tuple[str, ...]:
     """The numbers in `answer` that appear in none of `sources`, in order, once each.
 
-    Signs are ignored ("fell 3.19%" quotes "-3.19%"), and so is the unit, so a
+    Signs are ignored ("fell 3.19%" quotes "-3.19%"), numbers compare by value
+    ("56,156" quotes "56,156.00"), and the unit is ignored too, so a
     figure copied onto the wrong bar passes: this catches invented arithmetic,
     not misattribution.
     """

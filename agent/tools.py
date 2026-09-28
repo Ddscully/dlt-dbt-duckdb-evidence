@@ -22,18 +22,21 @@ from dataclasses import dataclass
 
 import duckdb
 
-from agent import metrics
+from agent import metrics, scenario
 from agent.bridge import AMOUNT_COLUMNS, alignment_note, explain_change, render
 from agent.catalog import Catalog, describe_model
 
 INSTRUCTIONS = (
-    "You answer questions about a UK online retailer's revenue, from its invoices. "
+    "You answer questions about a UK online retailer's revenue, from its invoices, and "
+    "about the EU carbon border cost (CBAM) of imported steel, aluminium, cement, "
+    "fertilisers and hydrogen. "
     "Call a tool for every figure. Write each figure exactly as the tool printed it: "
     "do not add figures together, round them, or convert their units. If no tool gives "
     "a figure the question needs, say so rather than estimate it. Keep the answer short. "
     "Use describe_model for what a table's columns mean and which may be summed, "
-    "query_metric for totals and breakdowns, and explain_change for why revenue moved "
-    "between two years."
+    "query_metric for totals and breakdowns, explain_change for why revenue moved "
+    "between two years, and run_scenario for what CBAM costs per tonne of a good at a "
+    "carbon price."
 )
 
 
@@ -91,10 +94,62 @@ def warehouse_tools(con: duckdb.DuckDBPyConnection, catalog: Catalog | None = No
             },
         },
     }
+
+    def run_run_scenario(args: dict) -> ToolResult:
+        missing = sorted({"good", "year", "ets_price_eur_per_t"} - set(args))
+        if missing:
+            raise TypeError(f"run_scenario needs {' and '.join(missing)}")
+        result = scenario.run_scenario(
+            con,
+            str(args["good"]),
+            args["year"],
+            args["ets_price_eur_per_t"],
+            countries=_names(args.get("countries") or []),
+            tonnes=args.get("tonnes"),
+        )
+        return ToolResult(scenario.render(result), scenario.scenario_note(result))
+
+    run_scenario_schema = {
+        "type": "function",
+        "function": {
+            "name": "run_scenario",
+            "description": (
+                "What CBAM, the EU carbon border tax, costs per tonne of one imported good "
+                "at a carbon price you choose: the cheapest, median and dearest source the "
+                "regulation lists, its fallback for other countries, and any countries "
+                "named. The figures are gross, before the free-allocation deduction. A "
+                "term that matches several goods returns them to choose from."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "good": {
+                        "type": "string",
+                        "description": "a CN code, a good_key, or words from the good's description",
+                    },
+                    "year": {"type": "integer", "enum": list(scenario.YEARS)},
+                    "ets_price_eur_per_t": {
+                        "type": "number",
+                        "description": "the carbon price to assume, EUR per tonne of CO2e",
+                    },
+                    "countries": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "countries of origin to show, by name or ISO3 code",
+                    },
+                    "tonnes": {
+                        "type": "number",
+                        "description": "tonnes of the good, to cost a shipment",
+                    },
+                },
+                "required": ["good", "year", "ets_price_eur_per_t"],
+            },
+        },
+    }
     tools = [Tool(explain_change_schema, run_explain_change)]
     if catalog is not None:
         tools += _catalog_tools(con, catalog)
-    return tools
+    return [*tools, Tool(run_scenario_schema, run_run_scenario)]
 
 
 def _names(value) -> list[str]:

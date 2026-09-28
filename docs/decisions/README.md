@@ -62,3 +62,4 @@ Status: accepted YYYY-MM-DD (#PR) | superseded by NNNN
 | [0014](0014-the-revenue-bridge-bars.md) | The revenue bridge prices continuing SKUs, and gives churn, returns and non-product lines bars of their own | accepted 2026-09-28 |
 | [0015](0015-metrics-in-the-semantic-layer.md) | Metrics are defined in dbt's semantic layer and compiled by MetricFlow's engine, run on our own connection | accepted 2026-09-28 |
 | [0016](0016-the-mcp-server.md) | The analyst's tools are served over MCP on stdio, from the loop's own schemas, with a connection per call | accepted 2026-09-28 |
+| [0017](0017-the-cbam-scenario.md) | The CBAM scenario re-prices the mart's certificates for one good, gross of the free-allocation deduction, and says so | accepted 2026-09-28 |

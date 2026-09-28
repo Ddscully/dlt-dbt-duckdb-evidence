@@ -64,6 +64,9 @@ def test_a_figure_no_tool_printed_is_flagged():
     text = "Revenue fell 3.19% (€343.3k), and the four falling bars came to roughly -7 pts."
     assert unverified(text, [BRIDGE]) == ("7",)
     assert unverified("1. It fell 3.19%.\n2. From €10,744.6k.", [BRIDGE]) == ()
+    # By value: a shipment's cost quoted without its pennies is the tool's figure.
+    assert unverified("It costs €56,156.", ["€56,156.00 for 500 t"]) == ()
+    assert unverified("It costs €56,157.", ["€56,156.00 for 500 t"]) == ("56157",)
 
     chat = Scripted(call("c1", year_a=2010, year_b=2011), reply(text))
     answer = ask("Why did revenue fall?", chat, [stub_tool(ToolResult(BRIDGE))])
