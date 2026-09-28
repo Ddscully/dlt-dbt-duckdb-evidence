@@ -1,6 +1,6 @@
 # 0014. The revenue bridge prices continuing SKUs, and gives churn, returns and non-product lines bars of their own
 
-Status: accepted 2026-09-28
+Status: accepted 2026-09-28 (#113)
 
 ## Context
 

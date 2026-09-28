@@ -1,6 +1,6 @@
 # 0013. Two years of different coverage are compared over the window both cover, and the answer says so
 
-Status: accepted 2026-09-28
+Status: accepted 2026-09-28 (#113)
 
 ## Context
 
