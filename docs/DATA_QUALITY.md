@@ -160,6 +160,16 @@ inheriting means a mart rename silently takes the copy's label with it.
 `staging` stays outside on purpose — it is a cleaning copy of a source whose
 measures are declared one layer up.
 
+The retail metrics in dbt's semantic layer (`_retail_metrics.yml`) are the
+labels' first consumer that aggregates on its own. MetricFlow sums whatever a
+measure names and never reads `meta`, so `tests/test_semantic_layer.py` holds
+the yml to the labels: every measure is a bare column, so its label can be
+looked up, a `sum` reads only an `additive` one, and no entity or dimension
+reads a `direct_identifier` column. Distinct counts are the other half:
+MetricFlow does not roll them up, so `agent/metrics.py` takes a grouped
+query's total from a second, ungrouped one
+([0015](decisions/0015-metrics-in-the-semantic-layer.md)).
+
 ## Groups, exposures and versions
 
 Around the tests sits the part that says who each model is *for*.

@@ -163,7 +163,7 @@ globs, holding dbt Labs' skills to this repo's paths.
 | `retail-models` | the `retail` group — returns inference, cohorts, RFM |
 | `currency-and-calendar` | the ECB rates, `dim_date`, spot against average |
 | `weather-models` | Open-Meteo's budget, ERA5, the degree-day conventions |
-| `contracts-and-data-quality` | data tests, groups, contracts, exposures, additivity, versions |
+| `contracts-and-data-quality` | data tests, groups, contracts, exposures, additivity, the semantic layer's metrics, versions |
 | `unit-testing-dbt-models` | the unit-tested models and the mutation method |
 | `pipeline-observability` | `transform/pipeline_status.py` and the `pipeline_*` tables |
 | `the-lakehouse` | the DuckLake catalog |

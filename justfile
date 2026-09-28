@@ -140,6 +140,23 @@ dbt-docs-serve: dbt-docs
 explain-change year_a year_b currency="EUR":
     uv run python -m agent.bridge {{year_a}} {{year_b}} --currency {{currency}}
 
+# Reads dbt/target/manifest.json (`just dbt-parse`): the grain from the
+# uniqueness tests, and each column's type, additivity label and description.
+# What one row of a retail mart is, and which of its columns may be summed (read-only)
+[group('inspect')]
+describe-model model:
+    uv run python -m agent.catalog {{model}}
+
+# The metrics are dbt's semantic layer (dbt/models/marts/retail/_retail_metrics.yml),
+# compiled by MetricFlow and run read-only. `--by year|quarter|month|country|region`,
+# `--years 2010 2011`, `--where "region=Europe & Central Asia"`; the arguments are
+# passed as typed, so a quoted value keeps its spaces.
+# Totals and breakdowns of the retail metrics, with an "all" row (read-only)
+[group('inspect')]
+[positional-arguments]
+metric +args:
+    uv run python -m agent.metrics "$@"
+
 # Any OpenAI-compatible server: AGENT_BASE_URL and AGENT_MODEL, defaulting to a
 # local Ollama (docs/FINANCE_AGENT.md). Quote the question: `?` is a shell glob.
 # Ask a model about revenue; it answers only with the tools' figures (read-only)

@@ -1350,6 +1350,7 @@ dependencies = [
     { name = "dbt-duckdb" },
     { name = "dlt", extra = ["duckdb"] },
     { name = "duckdb" },
+    { name = "metricflow" },
     { name = "polars" },
     { name = "pyarrow" },
 ]
@@ -1381,6 +1382,7 @@ requires-dist = [
     { name = "dbt-duckdb", specifier = ">=1.9" },
     { name = "dlt", extras = ["duckdb"], specifier = ">=1.5" },
     { name = "duckdb", specifier = ">=1.1" },
+    { name = "metricflow", specifier = ">=0.213" },
     { name = "polars", specifier = ">=1.17" },
     { name = "pyarrow", specifier = ">=17" },
 ]
