@@ -1,6 +1,6 @@
 # 0017. The CBAM scenario re-prices the mart's certificates for one good, gross of the free-allocation deduction, and says so
 
-Status: accepted 2026-09-28
+Status: accepted 2026-09-28 (#117)
 
 ## Context
 
