@@ -1,6 +1,6 @@
 # 0016. The analyst's tools are served over MCP on stdio, from the loop's own schemas, with a connection per call
 
-Status: accepted 2026-09-28
+Status: accepted 2026-09-28 (#116)
 
 ## Context
 
