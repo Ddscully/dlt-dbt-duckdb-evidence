@@ -1,5 +1,26 @@
 # Asking a model about revenue
 
+- **A language model answers from four tools and computes nothing itself**:
+  the revenue bridge, the semantic-layer metrics, the model catalogue and a CBAM
+  price scenario ([the tools](#asking-a-model-about-revenue)).
+- **It runs on a laptop against Ollama**, or against any server that speaks the
+  OpenAI chat-completions API
+  ([Running it](#running-it-on-a-laptop-with-ollama),
+  [another server](#pointing-it-at-another-server)).
+- **The same tools serve any MCP client over stdio**, holding no connection to
+  the warehouse between calls ([From an MCP client](#from-an-mcp-client)).
+- **The loop guarantees three things whatever the model writes**: figures come
+  from tools, a tool's note is appended verbatim, and every number is checked
+  against the tool output
+  ([What the loop guarantees](#what-the-loop-guarantees-and-what-it-does-not)).
+- **What no check catches is a real figure on the wrong bar**, and prose that
+  contradicts the tool
+  ([What the loop guarantees](#what-the-loop-guarantees-and-what-it-does-not)).
+- **The CBAM figures are gross**, before free allocation and any carbon price
+  paid at origin ([A carbon-price scenario](#a-carbon-price-scenario)).
+- **Measured on two local models and Claude**, the only wrong answers were the
+  smaller model's misattributions ([Measured](#measured)).
+
 `just ask "…"` puts a question to a language model that has the warehouse's
 analysis tools and nothing else. The model chooses a tool and its arguments and
 writes the answer; the tools compute every figure in it. There are four:
@@ -261,6 +282,9 @@ Warehouse built 2026-09-28; Ollama in the container above. Every run called
 one tool once, the right one, with the right arguments, and none had a number
 flagged.
 
+<details>
+<summary>The runs</summary>
+
 | Model | Question | What the answer got wrong |
 |---|---|---|
 | `granite4.1:8b` (5.3 GB), about a minute | 2010 → 2011, EUR | two subtotals given to one of their bars: the continuing-SKU total, −17.69 pts, as volume's, and the churn total, +€1,954.8k, as new SKUs' |
@@ -280,15 +304,37 @@ flagged.
 | `gemma4:26b-a4b-it-q4_K_M`, about a minute | the cement question | nothing |
 | `gemma4:26b-a4b-it-q4_K_M`, about two minutes | the urea question | nothing: the same choice, with its CN code named |
 
+</details>
+
 The two failures are the two kinds the checks cannot see, and both are the
 smaller model's. On the metric and table questions neither model wrote a wrong
 figure: with every total already on its own row, there was nothing to add up.
-The CBAM questions' first runs found two defects of the tool's, since fixed:
-asked how much cheaper one source was, every model subtracted for itself, so
-the tool now prints the gap; and a cost quoted as €56,156 was flagged against
-the tool's €56,156.00, so the check now compares numbers by value. Granite's
-wrong row on the aluminium question is the misattribution again. To compare models on a question, run it twice with
+Granite's wrong row on the aluminium question is the misattribution again. To
+compare models on a question, run it twice with
 `AGENT_MODEL` changed; the scripted-model tests are what hold the loop itself.
+
+### Through the MCP server
+
+Claude Code as the client (`claude -p`, with `sonnet` as the model), started
+outside the repo, so none of its instructions applied, with its built-in tools
+off and this server alone loaded. Every note it was sent was quoted verbatim, and no answer
+held a number missing from the tool output (checked with the loop's check,
+`agent.loop.unverified`).
+
+<details>
+<summary>The runs</summary>
+
+| Question | Calls | What the answer got wrong |
+|---|---|---|
+| net revenue by quarter in 2011 | `query_metric`, by quarter, 2011 | nothing: the four quarters and the `all` row, and the Q4 note |
+| which region bought the most in 2010, and its average order value | `query_metric` by region, then again for the average order value filtered to that region | nothing |
+| can `unit_price` be added up | `describe_model` | nothing: no, because it is non-additive, with the metric to use instead |
+| why did revenue fall from 2010 to 2011 | `explain_change`, in EUR by default | nothing: the aligned −3.19% with the note, and each subtotal with its own bars |
+| a tonne of unwrought aluminium from China, 2027, at €100 | `run_scenario` | nothing |
+| the cheapest source of grey portland cement in 2026, and how much cheaper than the dearest, at €90 | `run_scenario` | nothing |
+| 500 t of urea from Egypt, 2028, at €80 | `run_scenario` twice: six urea goods listed, then one chosen | nothing; it added the cheapest, median and dearest sources unasked |
+
+</details>
 
 ## Adding a tool
 
@@ -308,21 +354,3 @@ arguments.
 has to follow the rules `tests/test_semantic_layer.py` holds, which are in the
 `contracts-and-data-quality` skill: a measure is a bare column, and a sum reads
 only an `additive` one.
-
-### From an MCP client
-
-Claude Code as the client (`claude -p`, with `sonnet` as the model), started
-outside the repo, so none of its instructions applied, with its built-in tools
-off and this server alone loaded. Every note it was sent was quoted verbatim, and no answer
-held a number missing from the tool output (checked with the loop's check,
-`agent.loop.unverified`).
-
-| Question | Calls | What the answer got wrong |
-|---|---|---|
-| net revenue by quarter in 2011 | `query_metric`, by quarter, 2011 | nothing: the four quarters and the `all` row, and the Q4 note |
-| which region bought the most in 2010, and its average order value | `query_metric` by region, then again for the average order value filtered to that region | nothing |
-| can `unit_price` be added up | `describe_model` | nothing: no, because it is non-additive, with the metric to use instead |
-| why did revenue fall from 2010 to 2011 | `explain_change`, in EUR by default | nothing: the aligned −3.19% with the note, and each subtotal with its own bars |
-| a tonne of unwrought aluminium from China, 2027, at €100 | `run_scenario` | nothing |
-| the cheapest source of grey portland cement in 2026, and how much cheaper than the dearest, at €90 | `run_scenario` | nothing |
-| 500 t of urea from Egypt, 2028, at €80 | `run_scenario` twice: six urea goods listed, then one chosen | nothing; it added the cheapest, median and dearest sources unasked |

@@ -1,5 +1,21 @@
 # Data-quality gates, contracts and ownership
 
+- **Six gates guard a build**: the grain, value ranges, the country dimension,
+  enforced contracts on every mart model, a release-to-release shrink check and
+  source freshness ([The gates](#the-gates)).
+- **Every test stores its failing rows**, so a red check hands you the rows,
+  not a count ([The gates](#the-gates)).
+- **Unit tests reach what a data test cannot**: a legal answer that is the wrong
+  one, and logic no data in the warehouse exercises ([Unit tests](#unit-tests)).
+- **Every numeric mart column says whether it may be summed**, and a test holds
+  the labels to a closed vocabulary
+  ([Which measures may be summed](#which-measures-may-be-summed)).
+- **Four groups by domain own every model**, dbt enforces who may depend on it at
+  parse time, and each dashboard page is an exposure
+  ([Groups, exposures and versions](#groups-exposures-and-versions)).
+- **`fct_emissions_energy_v1` dies on 2026-11-01, enforced**: from that date
+  `dbt parse` fails ([Groups, exposures and versions](#groups-exposures-and-versions)).
+
 `just dbt-build` runs the data tests and unit tests alongside the models, and the
 site's Pipeline page counts the data tests. Dagster surfaces them as asset checks
 on the models they guard.
@@ -54,10 +70,16 @@ tests green.
 
 `fct_cbam_exposure` is the hardest of them. Its numbers are transcribed from a
 legal instrument, so there is nothing independent to check them against and its
-data tests are almost all `not_null` and generous ranges. The two that are
-not — the production-route test and the one holding the fallback out of the
-excess window — both came out of mutations rather than out of review. What a
-unit test reaches instead is the rules: hardcoding the phase-in mark-up at
+data tests are almost all `not_null` and generous ranges. What a unit test
+reaches instead is the rules, and each rule below was broken with every data test
+on the model green.
+
+<details>
+<summary>How this was measured</summary>
+
+The two data tests that are more than `not_null` and a range — the
+production-route test and the one holding the fallback out of the excess
+window — both came out of mutations rather than out of review. Hardcoding the phase-in mark-up at
 10/20/30% moves the fertiliser average from €105.76 to €115.18 a tonne —
 fertilisers carry a flat 1% food-security carve-out — with every data test on
 the model green, and measuring `excess_over_cleanest_source` against the product
@@ -68,6 +90,8 @@ columns untested: turning that left join inner deletes 261 rows including all
 260 fallback rows, and replacing `where is_latest_available` with the current
 year strips the factor off 2,584 more — **PASS=22, ERROR=0** either way, because
 this model has no row-count test and a missing factor is a legal null.
+
+</details>
 
 **Logic no data reaches.** `fiscal_year_start_month` is a project var and the
 warehouse only ever builds `4`, so eleven of the twelve fiscal policies the model
@@ -82,7 +106,14 @@ filter has already excluded all 3,457). Each is posed by a fixture instead: a
 blank country, and a write-off carrying a customer id, which an unfiltered
 purchase universe turns into a matched sale with a negative quantity.
 
-In `fct_cbam_exposure` the fallback rule is the same story: the regulation sends
+In `fct_cbam_exposure` the fallback rule is the same story, and so is the
+fallback's place in the excess window: neither can be broken in the current
+warehouse, so a fixture poses each.
+
+<details>
+<summary>How this was measured</summary>
+
+The regulation sends
 a listed country with no value for a good to the "other countries" row *as a
 whole line*, and resolving it column by column instead produces a figure that
 exists nowhere in the regulation — but the row that once proved it was corrected
@@ -102,6 +133,8 @@ fallback below both listed countries is the only possible witness to that
 window, which is what the test does. The other half of the same policy — that
 the fallback row carries no excess of its own — *is* observable, 260 nulls of
 it, and is the one thing here a data test can hold.
+
+</details>
 
 Fixtures live in `dbt/tests/fixtures/` (dbt's `test-paths`, not the pytest
 fixtures). `dim_date` needs CSV files there because it generates its own rows —

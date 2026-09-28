@@ -1,5 +1,21 @@
 # Orchestration
 
+- **Dagster models the whole pipeline as one asset graph**, derived from the dlt
+  source and dbt's manifest, so nothing declares the order by hand
+  ([The graph](#the-graph)).
+- **Nothing enforces the order between jobs**: `load_retail` has to run before
+  `full_refresh` ([Running it](#running-it)).
+- **Backfills of WDI and weather are run config, not partitions**, because a
+  partitioned job's Materialize button is a backfill ([Running it](#running-it)).
+- **Runs go one at a time through a queue, and `just materialize` bypasses it**
+  ([Running it](#running-it)).
+- **Three jobs exist for two reasons**: the site needs Node, and retail is
+  month-partitioned ([Three jobs, and why](#three-jobs-and-why)).
+- **`daily_refresh` ships stopped**; start it yourself
+  ([What that buys](#what-that-buys-over-the-shell-chain)).
+
+## The graph
+
 `just run` chains the steps in a shell, which works right up until you want to
 know *why* a table is stale, or to rebuild only what a change touched. Dagster
 models the same pipeline as one asset graph:
@@ -38,6 +54,8 @@ Polars asset names its upstream mart; and the Evidence site declares one dep per
 table its source queries read, with a unit test that fails if a source query
 starts reading a table that isn't in the list. Change a `ref()` and the graph
 moves with it.
+
+## Running it
 
 ```bash
 just dagster                              # UI on :3000: graph, runs, freshness, checks

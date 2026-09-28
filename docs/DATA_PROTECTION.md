@@ -1,5 +1,22 @@
 # Personal data: classification, pseudonymisation and what it buys
 
+- **One column identifies a person, `customer_id`**, and it is classified in the
+  ymls where the descriptions and contracts live ([The vocabulary](#the-vocabulary)).
+- **Deleting the id does not anonymise the extract**: 98.6% of customers are
+  unique on three money columns with no id at all
+  ([the measurement](#what-the-labels-are-worth-the-measurement)).
+- **The id is replaced by a salted, stable pseudonym at the export**, and a
+  missing salt is refused ([Pseudonymisation, and the salt](#pseudonymisation-and-the-salt)).
+- **The policy runs on the published copy, not in a model**, because the copy
+  holds identifiers no model declares
+  ([Why the boundary and not the model](#why-the-boundary-and-not-the-model)).
+- **It finds the column by name across every schema, then verifies the rewrite**
+  ([The columns nobody would have declared](#the-columns-nobody-would-have-declared)).
+- **DuckDB has no access control at all**, so the enforcement point is the
+  boundary ([Access control](#access-control-what-duckdb-cannot-do)).
+- **The other columns ship unchanged, knowingly**: the source is already public
+  under CC BY 4.0 ([The decisions](#the-decisions)).
+
 One column in this warehouse identifies a person: `customer_id`, the pseudonym a
 UK gift wholesaler's till assigned to a shopper between December 2009 and
 December 2011. No name, no address, nothing to contact anyone with. It's still
@@ -7,10 +24,9 @@ personal data (pseudonymised data explicitly is, under GDPR Recital 26), and
 at first nothing in this project said so, nothing masked it, and every
 published release shipped it in the clear from five different schemas.
 
-This page is what was done about that, written to be read in the order the work
-went: classify, measure, then decide. The measuring is the part that changed the
-design, because it's what shows the obvious answer, hashing the id, to be the
-smallest part of the problem.
+The sections go classify, measure, then decide. The measuring is the part that
+changed the design, because it's what shows the obvious answer, hashing the id,
+to be the smallest part of the problem.
 
 ## The vocabulary
 
@@ -55,7 +71,12 @@ identified customers, `just disclosure-risk` to reproduce:
 
 **The share is quoted and the count is not, and that isn't a rounding
 preference.** The three rows above that involve a money column aren't
-reproducible between builds: two consecutive rebuilds of `dim_retail_customer`
+reproducible between builds.
+
+<details>
+<summary>How this was measured</summary>
+
+Two consecutive rebuilds of `dim_retail_customer`
 from byte-identical sources gave 5,781 and 5,785 distinct values of
 `net_revenue_gbp`. It's `sum()` over doubles. Floating-point addition isn't
 associative and DuckDB's parallel aggregation doesn't fix an order, so the last
@@ -67,6 +88,8 @@ quoting one build.
 (The boundary is worth knowing precisely: `fct_retail_order_line`'s money
 columns are per-row arithmetic rather than aggregates, so they are identical
 between builds. It's aggregation over floats that's unstable, not floats.)
+
+</details>
 
 **A near-continuous money column at person grain is an identifier whatever it's
 called.** Deleting `customer_id` from an extract moves the number from 100% to

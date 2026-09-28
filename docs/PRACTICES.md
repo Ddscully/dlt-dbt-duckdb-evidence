@@ -1,5 +1,21 @@
 # Practices this repo demonstrates
 
+- **Model the data honestly**: facts on an explicit spine, one spelling per key,
+  the publisher's grain before any average
+  ([§1](#1-model-the-data-honestly)).
+- **Make a table promise something**: a grain test, an enforced contract, an
+  additivity label and an owner on every mart model
+  ([§2](#2-make-a-table-promise-something)).
+- **Write tests that can see a wrong answer**, and prove each one by breaking the
+  model it guards ([§3](#3-write-tests-that-can-see-a-wrong-answer)).
+- **Guard the failures that stay green**: every hand-maintained list is tested
+  against the thing it copies ([§4](#4-guard-the-failures-that-stay-green)).
+- **One graph across four tools**, with offline CI and a live nightly
+  ([§5](#5-one-graph-across-four-tools)).
+- **Treat publication as a boundary**: a compatibility ceiling, carried state,
+  personal data measured and pseudonymised, licences as a modelling constraint
+  ([§6](#6-the-boundary-outward)).
+
 This warehouse is a working pipeline over seven public feeds. It is also a
 demonstration of a set of data-engineering practices, and this page is the index
 to that second reading: what each practice is, the failure it prevents, and where

@@ -239,13 +239,15 @@ section here. The mutation method these guards were written with is in the
   `compliance-models` skill. The two citation tests could not see it: they check
   backticked *paths* and `just` recipes, and the path in the `](…)` link was
   still correct — it was the `#fragment` after it that named a heading no longer
-  there. `test_every_cross_file_anchor_resolves` slugs every heading in the
-  target file the way GitHub does (lowercase, drop anything outside
-  `[a-z0-9 _-]`, spaces to hyphens, which is why `## The lakehouse
-  (`lake/lakehouse.py`)` anchors as `#the-lakehouse-lakelakehousepy`).
-  - **The vacuity guard is non-emptiness and deliberately not a count.** There
-    are four anchors in the tree and deleting one is a normal edit, so a floor
-    would go red on a correct change.
+  there. `test_every_anchor_resolves` slugs every heading in the target file,
+  or in the same file for a bare `#fragment` link, the way GitHub does
+  (lowercase, drop anything outside `[a-z0-9 _-]`, spaces to hyphens, which is
+  why `## The lakehouse (`lake/lakehouse.py`)` anchors as
+  `#the-lakehouse-lakelakehousepy`). The same-file pass exists for the docs'
+  In brief lists, each bullet of which links a heading of its own file.
+  - **The vacuity guard is non-emptiness and deliberately not a count.**
+    Deleting an anchor is a normal edit, so a floor would go red on a correct
+    change.
   - **A second assertion was written, mutated, and dropped.** It required at
     least one `../`-relative anchor, on the theory that only that form exercises
     the `doc.parent / target` join. Resolving from the repo root instead fails

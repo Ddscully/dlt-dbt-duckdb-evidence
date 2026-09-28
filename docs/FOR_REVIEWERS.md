@@ -5,6 +5,18 @@ someone evaluating it as *work* tends to ask, in roughly that order. Every numbe
 here was measured on this machine or read out of the repo's own CI history, none
 of it estimated.
 
+- **Judge the engineering; the analysis has not had the same scrutiny**, and one
+  mart ships fabricated data on purpose ([§0](#0-what-this-is-not-yet)).
+- **The freshness SLA is declared in code and alerted by a nightly workflow**
+  against the live sources ([§2](#2-what-is-the-freshness-sla-and-what-happens-when-it-is-missed)).
+- **A full run takes about a minute on a laptop and costs nothing in dollars**;
+  disk is the real cost, and expiry holds it
+  ([§3](#3-what-does-a-run-cost-and-how-long-does-it-take)).
+- **At 1000× the Polars step gives first, but the single-writer lock is the limit
+  to plan around**, because it binds at any size ([§4](#4-what-breaks-at-1000)).
+- **Scored against an outside rubric, access governance is Absent and cannot be
+  otherwise on an embedded database** ([§6](#6-scored-against-somebody-elses-rubric)).
+
 **The 90-second tour**, if you only open five files:
 
 | File | Why |
@@ -23,9 +35,7 @@ of it estimated.
 gone deliberately into an initial stack and a set of working methods: ingestion,
 modelling, contracts, tests, lineage, orchestration and a publication boundary.
 That is what the numbers on this page measure, and what the repo asks to be read
-as. It was built largely during a period of promotional access to Claude, so the
-throughput reflects the tooling available at the time rather than a sustained
-engineering effort.
+as. It was built largely with Claude Code, during a period of promotional access.
 
 **What has not had the same scrutiny is the analysis itself.** The pipeline is
 correct in the sense that it does what it says: the transformations are tested,
@@ -167,8 +177,14 @@ last 40:
 | `pages` | **271 s** | 164–712 | 40 | live build + the Evidence site + deploy |
 | `release-data` | **171 s** | 109–247 | 6 | live build + export + a dated GitHub release |
 
-**`ci` has now gone stale twice in this table, which is the point of keeping
-it.** It first read 92 s — measured before the retail source, the
+**The medians go stale, which is why the range and `n` ship beside them.**
+Nothing guards a timing: `tests/test_documented_counts.py` anchors on a test
+noun, and a duration has none.
+
+<details>
+<summary>How this table went stale, twice</summary>
+
+`ci` first read 92 s — measured before the retail source, the
 weather source and the DuckLake move, so 66% low. Corrected to 153 s, it is
 191 s eight days later: in that window the offline graph gained a mart, a seed
 and the tests that came with them. The two live workflows barely moved, because
@@ -181,6 +197,8 @@ two corrections. The range and `n` ship beside the median for that reason: a
 single number invites exactly the quiet decay that produced the 92 s, and the
 live workflows' spread (`nightly` reaching 999 s, `pages` 712 s) is a property of
 the public APIs rather than noise to be averaged away.
+
+</details>
 
 **The dollar cost is zero**, and I'd rather say that plainly than dress it up:
 GitHub Actions' free tier, no cloud warehouse, no credentials, no bill. That is a

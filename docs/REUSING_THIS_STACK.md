@@ -1,5 +1,25 @@
 # Reusing this stack
 
+The checklist, in the order to do it:
+
+1. **Copy the tree, or start from the template.** `src/modern_data_stack/` is
+   the domain-neutral third; delete the example's sources, models, pages and
+   docs ([§1](#1-what-youre-actually-reusing)).
+2. **Rename the project, and keep the package** unless you mean to rename every
+   import ([§5](#5-renaming-the-project)).
+3. **Decide the grain, what makes an entity exist, which resources merge, and
+   what is state**, before writing code
+   ([§3](#3-four-decisions-to-make-before-writing-code)).
+4. **Wire one source end to end before the second**, because the string-matched
+   names between the layers fail silently
+   ([§2](#2-the-names-that-join-the-layers), [§6](#6-build-order)).
+5. **Carry over the invariants that fail silently**
+   ([§4](#4-invariants-that-fail-silently)).
+6. **Drop the optional layers you do not need**; the landing zone is not one
+   of them ([§7](#7-what-to-drop-if-you-want-less)).
+7. **Plan around the single-writer lock, not the row count**
+   ([§8](#8-where-this-shape-stops-being-the-right-one)).
+
 How to start a *new* project on this shape (dlt → DuckLake → dbt → Polars →
 Evidence, orchestrated by Dagster), using this repo as the reference
 implementation.
@@ -18,24 +38,14 @@ It's the layer above: what carries over to a different dataset, what has to be
 rewritten, and the handful of decisions that are expensive to change later.
 
 **Most of what makes this repo work is not transferable code.** The pipeline is
-~7,800 lines of Python and the part with nothing domain-specific in it is maybe a third:
-the layout, the wiring conventions, the CI shape, the lint config. The rest is a
+~7,800 lines of Python and the part with nothing domain-specific in it is maybe
+a third: the layout, the wiring conventions, the CI shape, the lint config. The rest is a
 worked example. The fastest way to reuse it is to copy the tree, keep the
 skeleton and delete the emissions.
 
 That third is already separated out, so you don't have to go looking for it:
 it's `src/modern_data_stack/`, it takes its configuration as arguments, and the
 project modules that call it hold the constants.
-
-**This document was executed** against `c054e53`: a clone
-followed it literally, with one unrelated source (monthly gold prices, a month
-grain and no country), until CI's `build` job passed. The "a third" held up for
-the code. The lists below did not, and they are corrected from that run: the
-package rename touched 63 files rather than six, `orchestration/assets.py` was
-56% example, and three defects passed every local check and would have failed
-only in CI or at the first release (the `*.csv` fixture in §4, since fixed
-here, the export's personal-data refusal in §7, the lakehouse release check in
-§7).
 
 ## 1. What you're actually reusing
 
