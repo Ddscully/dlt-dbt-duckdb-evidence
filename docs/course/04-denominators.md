@@ -389,7 +389,7 @@ sed -i 's/\* f\.avg_units_per_eur as electricity_price_usd_kwh/* f.period_end_un
 just course-rebuild
 ```
 
-**Observe.** `PASS=561 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy, and
+**Observe.** `PASS=564 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy, and
 every price is still a plausible price. Across all 1,373 rows the mean *signed*
 change is **+0.14%** — the errors very nearly cancel, because the closing rate is
 above the average about as often as below — while the mean *absolute* change is
@@ -738,7 +738,7 @@ choice was ever made. Averaging is not the problem; averaging silently is.
 - An error that is common to a period cancels out of a level and doubles in a
   difference, which is the opposite of where people look.
 - Units errors are invisible to one-sided bounds and to every ratio downstream.
-  Twelve invented offices can out-emit Spain with `PASS=561 ERROR=0`.
+  Twelve invented offices can out-emit Spain with `PASS=564 ERROR=0`.
 - "Never compare floats for equality" is really "floats are order-dependent under
   aggregation". A reproduced scalar expression is bit-exact; a re-summed column
   is not.

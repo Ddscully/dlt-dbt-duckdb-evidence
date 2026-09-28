@@ -385,7 +385,7 @@ models:
         description: >
           Renewables as a share of primary energy, % (OWID). **79 countries** in
           every year — the narrowest widely-used column in this table. For
-          country coverage use `low_carbon_share_elec_pct` (~210) instead; it is
+          country coverage use `renewables_share_elec_pct` (~210) instead; it is
           a share of electricity rather than of all energy, so the two are not
           interchangeable in levels.
         data_tests:
@@ -424,6 +424,20 @@ models:
         meta:
           additivity: non_additive
         description: Renewables plus nuclear as a share of electricity generated, %.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}
+      - name: renewables_share_elec_pct
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          Renewables as a share of electricity generated, % (OWID). The current
+          series for what `renew_elec_pct` measured until 2021, and from the same
+          accounts as the other `*_share_elec_pct` columns, so it plus
+          `nuclear_share_elec_pct` is `low_carbon_share_elec_pct`. Differs from
+          the WDI series by a median 0.3 pp, but by over 20 pp for some small
+          grids, so never splice the two into one series.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
@@ -524,7 +538,10 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
-        description: Renewable electricity output, % of total (WDI EG.ELC.RNEW.ZS).
+        description: >
+          Renewable electricity output, % of total (WDI EG.ELC.RNEW.ZS). **Ends in
+          2021**: the World Bank republishes the IEA's figures and no longer
+          extends them. Use `renewables_share_elec_pct` for anything recent.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}

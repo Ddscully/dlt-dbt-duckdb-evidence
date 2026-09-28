@@ -194,10 +194,26 @@ carries it forward is `publishing-a-release`.
 - **`renewables_share_pct` covers 79 countries; the `*_elec` columns cover ~210.**
   OWID's broad-coverage energy series is the *electricity* mix, not the
   primary-energy mix. For anything where country coverage matters, prefer
-  `low_carbon_share_elec_pct` or `carbon_intensity_elec_g_kwh` (gCO2/kWh, which
+  `renewables_share_elec_pct`, `low_carbon_share_elec_pct` or
+  `carbon_intensity_elec_g_kwh` (gCO2/kWh, which
   also reads directly: coal grid ~800, gas ~400, nuclear/hydro under 50). They
   answer a narrower question — electricity is roughly a third of energy use — so
   the two are not interchangeable in levels, only in intent.
+- **The mart has two renewable-electricity shares, and one is frozen.**
+  `renew_elec_pct` is WDI's `EG.ELC.RNEW.ZS`, the IEA's figures republished by
+  the World Bank, and it ends in 2021 while the rest of WDI moves on;
+  `renewables_share_elec_pct` is OWID's and current. Take the OWID one: it comes
+  from the same accounts as the other `*_share_elec_pct` columns (it plus
+  nuclear is `low_carbon_share_elec_pct` exactly), where WDI's total renewables
+  sits more than 0.5 pp below OWID's solar plus wind in 59 country-years.
+  **Never `coalesce` them into one series**: they agree to a median 0.3 pp but
+  differ by over 20 pp for some small grids (Equatorial Guinea 2021: 8.8% WDI,
+  32.9% OWID), which a splice turns into a jump in 2021.
+  - **The WDI series is also the one a watermark with no carried rows would
+    fail on**: its five-year lookback holds no values, so
+    `wdi_indicators_all_present` reports it missing. Every workflow today
+    starts with neither the watermark nor the rows, so it fetches the whole
+    series.
 - **Territorial vs. consumption-based emissions.** `co2_mt` is what a country
   burns; `consumption_co2` adds the carbon embodied in imports and subtracts
   exports (~120 countries, one year behind). It exists so "the cut was just

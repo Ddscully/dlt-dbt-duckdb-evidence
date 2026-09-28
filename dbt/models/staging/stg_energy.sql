@@ -20,6 +20,7 @@ select
     electricity_generation as electricity_generation_twh,
     carbon_intensity_elec as carbon_intensity_elec_g_kwh,
     low_carbon_share_elec as low_carbon_share_elec_pct,
+    renewables_share_elec as renewables_share_elec_pct,
     solar_share_elec as solar_share_elec_pct,
     wind_share_elec as wind_share_elec_pct,
     nuclear_share_elec as nuclear_share_elec_pct,
