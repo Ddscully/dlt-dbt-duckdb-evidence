@@ -140,6 +140,13 @@ dbt-docs-serve: dbt-docs
 explain-change year_a year_b currency="EUR":
     uv run python -m agent.bridge {{year_a}} {{year_b}} --currency {{currency}}
 
+# Any OpenAI-compatible server: AGENT_BASE_URL and AGENT_MODEL, defaulting to a
+# local Ollama (docs/FINANCE_AGENT.md). Quote the question: `?` is a shell glob.
+# Ask a model about revenue; it answers only with the tools' figures (read-only)
+[group('inspect')]
+ask +question:
+    uv run python -m agent.loop {{ quote(question) }}
+
 # Report what the DuckLake landing zone holds — tables, rows, snapshots (read-only)
 [group('inspect')]
 lakehouse:

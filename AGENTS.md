@@ -37,7 +37,8 @@ topic** — [`WAREHOUSE.md`](docs/WAREHOUSE.md),
 [`DATA_QUALITY.md`](docs/DATA_QUALITY.md),
 [`PUBLISHED_DATA.md`](docs/PUBLISHED_DATA.md),
 [`DATA_PROTECTION.md`](docs/DATA_PROTECTION.md),
-[`DASHBOARD.md`](docs/DASHBOARD.md) and
+[`DASHBOARD.md`](docs/DASHBOARD.md),
+[`FINANCE_AGENT.md`](docs/FINANCE_AGENT.md) and
 [`FOR_REVIEWERS.md`](docs/FOR_REVIEWERS.md). What it cost to learn sits here and
 in the skills, so a change to how a layer works usually needs an edit in `docs/`
 **and** in one of those. **Docs describe the present;** why a rejected approach
@@ -74,7 +75,7 @@ ingest/     dlt — `sources/` is one module per publisher; `pipeline.py` is
 lake/       the DuckLake landing zone
 dbt/        staging → intermediate → marts
 transform/  the Polars derived metrics
-agent/      the analyst's tools over the marts — the revenue bridge so far
+agent/      the analyst's tools over the marts, and a model loop that calls them
 orchestration/  the Dagster asset graph over all of the above
 publish/    the boundary outward: the Evidence site, the release, and the
             previous release's carried state

@@ -70,8 +70,9 @@ _SHELL_COMMENT = re.compile(r"#[^\n]*")
 
 # A recipe definition in the justfile: name, optional args (which may carry a
 # default, e.g. `backfill-wdi start end=''`), then the colon — the default
-# matters, or the recipe reads as undefined.
-_RECIPE_DEF = re.compile(r"^([a-z][a-z0-9-]*)(?: [a-z_]+(?:=[^\s:]*)?)*:", re.MULTILINE)
+# matters, or the recipe reads as undefined. So does a variadic's `+` or `*`
+# (`ask +question`).
+_RECIPE_DEF = re.compile(r"^([a-z][a-z0-9-]*)(?: [+*]?[a-z_]+(?:=[^\s:]*)?)*:", re.MULTILINE)
 
 # A markdown link to a sibling module, e.g. [00 — Setup](./00-setup.md).
 _MODULE_LINK = re.compile(r"\]\(\./([0-9]{2}-[a-z0-9-]+\.md)\)")

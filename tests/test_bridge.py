@@ -3,33 +3,18 @@
 The identity "the bars sum to the change" holds for *any* volume and mix
 formula, because price is computed as what is left over; so the test with
 teeth is the one that checks each bar against a value worked out on paper.
-The EUR rates are powers-of-two fractions so the hand values are exact too.
+The EUR rates in `retail_fact` are powers-of-two fractions so the hand values
+are exact too.
 """
 
 from __future__ import annotations
 
-import datetime as dt
 from fractions import Fraction
 
-import duckdb
 import pytest
+from retail_fact import cancel, fee, sale, warehouse
 
 from agent.bridge import explain_change, render
-
-RATE = {2021: 1.25, 2022: 1.125}
-
-
-def sale(day: str, sku: str, units: int, gbp: float) -> tuple:
-    return (day, "sale", "product", sku, True, units, gbp)
-
-
-def cancel(day: str, sku: str, units: int, gbp: float) -> tuple:
-    return (day, "cancellation", "product", sku, True, units, gbp)
-
-
-def fee(day: str, gbp: float) -> tuple:
-    return (day, "cancellation", "fee", "BANK CHARGES", False, -1, gbp)
-
 
 # A and B sold in both years; C only in 2021, D only in 2022.
 LINES = [
@@ -44,36 +29,6 @@ LINES = [
     cancel("2022-04-01", "B", -1, -5.0),
     fee("2022-04-01", -2.0),
 ]
-
-
-def warehouse(lines: list[tuple]) -> duckdb.DuckDBPyConnection:
-    con = duckdb.connect()
-    con.execute("create schema marts")
-    con.execute(
-        """create table marts.fct_retail_order_line (
-            invoice_date date, invoice_type varchar, item_type varchar,
-            stock_code varchar, is_revenue_line boolean, quantity bigint,
-            line_amount_gbp double, year integer, is_stock_write_off boolean,
-            line_amount_eur double, line_amount_usd double)"""
-    )
-    for day, invoice_type, item_type, sku, revenue, units, gbp in lines:
-        year = dt.date.fromisoformat(day).year
-        con.execute(
-            "insert into marts.fct_retail_order_line values (?, ?, ?, ?, ?, ?, ?, ?, false, ?, ?)",
-            [
-                day,
-                invoice_type,
-                item_type,
-                sku,
-                revenue,
-                units,
-                gbp,
-                year,
-                gbp * RATE[year],
-                gbp * 1.5,
-            ],
-        )
-    return con
 
 
 def bars(bridge) -> dict[str, Fraction]:

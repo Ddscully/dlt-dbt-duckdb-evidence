@@ -142,6 +142,7 @@ change later, and the invariants that fail silently.
 | [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the asset graph, its jobs, backfills and freshness policies |
 | [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | tests, contracts, groups, exposures and model versions |
 | [`docs/DASHBOARD.md`](./docs/DASHBOARD.md) | each dashboard page and how the site is deployed |
+| [`docs/FINANCE_AGENT.md`](./docs/FINANCE_AGENT.md) | asking a model about revenue, locally through Ollama or any OpenAI-compatible server |
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly release and how to query it |
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column and what the release does to it |
 | [`docs/REUSING_THIS_STACK.md`](./docs/REUSING_THIS_STACK.md) | adapting the stack to a different dataset |
