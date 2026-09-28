@@ -52,6 +52,10 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 - **The warehouse is published, not just the dashboard**: monthly, as DuckDB and
   Parquet, with attribution per source and the one column that identifies a
   person pseudonymised on the way out.
+- **A model can ask the warehouse questions, but not supply the numbers.** The
+  tools do every calculation; the model picks one and writes the prose, and
+  `just ask` flags any figure in its answer that no tool printed. The same tools
+  are served over MCP, so Claude Code or an IDE can call them too.
 - **Dagster wraps the layers instead of replacing them.** `ingest`, `dbt` and
   `transform` still run on their own, and the asset graph comes from keys the
   layers already share.
@@ -101,6 +105,7 @@ gitignored; `just clean` reclaims the build output, and `just clean deep` the
 | `lake/` | [DuckLake](https://ducklake.select/) | the landing zone for raw data: Parquet under a catalog, with snapshot history |
 | `dbt/` | [dbt](https://docs.getdbt.com/) + [DuckDB](https://duckdb.org/) | staging → intermediate → marts in one file, with contracts and tests |
 | `transform/` | [Polars](https://pola.rs/) | the metrics SQL models badly |
+| `agent/` | [MCP](https://modelcontextprotocol.io/) | the analyst's tools over the marts, a model loop that calls them, and a server for any MCP client ([how](./docs/FINANCE_AGENT.md)) |
 | `orchestration/` | [Dagster](https://dagster.io/) | one asset graph over every layer ([how](./docs/ORCHESTRATION.md)) |
 | `reports/` | [Evidence](https://evidence.dev/) | the dashboard, as SQL and markdown |
 | `publish/` | | the boundary outward: the site build, the monthly release and the history it carries forward |
@@ -142,7 +147,7 @@ change later, and the invariants that fail silently.
 | [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md) | the asset graph, its jobs, backfills and freshness policies |
 | [`docs/DATA_QUALITY.md`](./docs/DATA_QUALITY.md) | tests, contracts, groups, exposures and model versions |
 | [`docs/DASHBOARD.md`](./docs/DASHBOARD.md) | each dashboard page and how the site is deployed |
-| [`docs/FINANCE_AGENT.md`](./docs/FINANCE_AGENT.md) | asking a model about revenue, locally through Ollama or any OpenAI-compatible server |
+| [`docs/FINANCE_AGENT.md`](./docs/FINANCE_AGENT.md) | the analyst's tools (a revenue bridge, the semantic layer's metrics, a CBAM carbon-price scenario), asked through a local model or served to any MCP client |
 | [`docs/PUBLISHED_DATA.md`](./docs/PUBLISHED_DATA.md) | the monthly release and how to query it |
 | [`docs/DATA_PROTECTION.md`](./docs/DATA_PROTECTION.md) | the one personal column and what the release does to it |
 | [`docs/REUSING_THIS_STACK.md`](./docs/REUSING_THIS_STACK.md) | adapting the stack to a different dataset |
