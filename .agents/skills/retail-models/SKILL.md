@@ -225,7 +225,8 @@ reimplemented by one. The bar set and what it was chosen over are
   output got every bar copied correctly and two sums of bars invented; with
   the subtotals printed it invented none. Neither version got the model to
   repeat the unaligned figure, so a caller that paraphrases the bridge appends
-  the note itself.
+  the note itself — `agent/loop.py` does (`just ask`,
+  [`docs/FINANCE_AGENT.md`](../../../docs/FINANCE_AGENT.md)).
 - **The answer for 2010 → 2011 is mostly churn**: continuing SKUs sold fewer
   units (volume −€2.23m) at slightly lower prices (−€0.26m) with a richer mix
   (+€0.59m), and new SKUs (+€2.74m) replaced most of it.
