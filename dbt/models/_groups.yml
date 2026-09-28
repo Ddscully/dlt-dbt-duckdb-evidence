@@ -35,8 +35,8 @@ groups:
   - name: compliance
     description: >
       Regulatory products built on top of `country_stats` — the Scope 2 grid
-      emission factors, the worked example that uses them, and the CBAM border
-      cost. These are read by someone filing something, which is why the
+      emission factors, the worked example that uses them, and the CBAM gross
+      border cost. These are read by someone filing something, which is why the
       lineage columns and the caveats travel with the rows.
     owner:
       name: Daniel Scully

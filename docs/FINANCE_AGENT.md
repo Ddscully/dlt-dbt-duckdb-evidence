@@ -17,7 +17,8 @@ writes the answer; the tools compute every figure in it. There are four:
   It describes `fct_cbam_exposure` too.
 - **`run_scenario`** (`agent/scenario.py`): what CBAM, the EU carbon border tax,
   costs per tonne of an imported good at a carbon price the question names,
-  gross of the free-allocation deduction ([below](#a-carbon-price-scenario)).
+  gross of the deductions for free allocation and for a carbon price paid at
+  origin ([below](#a-carbon-price-scenario)).
 
 ```
 $ AGENT_MODEL=gemma4:26b-a4b-it-q4_K_M just ask "Why did revenue fall from 2010 to 2011, in euros?"
@@ -197,12 +198,14 @@ China (own value)                                      3.6          €360.00   
 The dearest listed source costs €340.56 more per tonne than the cheapest at €100 (€255.42 at €75), and €170,280.00 more for 500 t.
 Norway: not listed in the annex for this good. An unlisted country outside the EU uses the other-countries values above, unless CBAM exempts it; this tool does not know the exemptions.
 
-These are gross figures, before the deduction for EU ETS free allocation, which this tool does not model, so they are not what an importer will owe. They use the regulation's default values, not any supplier's verified emissions, and €100 per tonne of CO2e is an assumed price.
+These are gross figures, before the deductions for EU ETS free allocation and for any carbon price paid where the good was made, which this tool does not model, so they are not what an importer will owe. They use the regulation's default values, not any supplier's verified emissions, and €100 per tonne of CO2e is an assumed price.
 ```
 
 - **The figures are gross.** An importer surrenders fewer certificates than the
-  defaults imply, in step with the allowances EU producers still get free, and
-  the benchmarks that deduction needs were provisional when this was built. The
+  defaults imply, after two deductions: one in step with the allowances EU
+  producers still get free, whose benchmarks were provisional when this was
+  built, and one for any carbon price effectively paid where the good was made
+  (Article 9 of Regulation (EU) 2023/956), whose rules were not yet adopted. The
   last paragraph above is the tool's note, which the loop appends verbatim.
 - **A good is named in words**: a CN code or its prefix, a `good_key`, or words
   from the description and product group. `aluminium` matches 24 goods, which

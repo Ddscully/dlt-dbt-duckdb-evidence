@@ -1,13 +1,13 @@
 ---
 title: The grid
-description: Why a country's electricity grid barely enters its CBAM border cost, measured by product group and on primary aluminium.
+description: Why a country's electricity grid barely enters its CBAM gross border cost, measured by product group and on primary aluminium.
 sidebar_position: 2
 ---
 
 [← CBAM Exposure](/cbam)
 
 **Electricity is under 1% of the carbon the annex prices, so a country's grid
-barely moves its border cost. The reason is the regulation, not the statistics:
+barely moves its gross border cost. The reason is the regulation, not the statistics:
 it mostly does not count electricity at all.**
 
 ```sql electricity_share
@@ -63,7 +63,7 @@ no indirect column at all, and for iron and steel it is present on 27 of the
 6,229 country-specific rows. Where it does count it is small: 5.8% of a cement
 tonne and 5.5% of a fertiliser one.
 
-## Primary aluminium: the border cost against the grid
+## Primary aluminium: the gross border cost against the grid
 
 ```sql primary_aluminium
 -- Route K is primary aluminium, made by electrolysis; L, the other route the
@@ -108,20 +108,20 @@ where good_key = '7601-unwrought-aluminium'
     yMin={0}
     color="#b5530a"
     xAxisTitle="Grid emission factor (tCO₂ / MWh)"
-    yAxisTitle="CBAM cost per tonne, 2026"
+    yAxisTitle="Gross CBAM cost per tonne, 2026"
     tooltipTitle=country_display_name
-    title="Primary aluminium: border cost against the grid it was smelted on"
+    title="Primary aluminium: gross border cost against the grid it was smelted on"
     subtitle="Unwrought aluminium, production route K, one point per sourcing country"
 />
 
-Primary aluminium is made by electrolysis, and the annex publishes no indirect value for it. Across the <Value data={primary_aluminium_summary} column=n_countries/> countries with a primary-aluminium value, <Value data={primary_aluminium_summary} column=cleanest_grid_country/> has the cleanest grid and pays <Value data={primary_aluminium_summary} column=cleanest_grid_cost fmt='€#,##0'/> a tonne while <Value data={primary_aluminium_summary} column=dirtiest_grid_country/> has the dirtiest and pays <Value data={primary_aluminium_summary} column=dirtiest_grid_cost fmt='€#,##0'/> a tonne, with a correlation of <Value data={primary_aluminium_summary} column=correlation fmt="0.00"/> between the two.
+Primary aluminium is made by electrolysis, and the annex publishes no indirect value for it. Across the <Value data={primary_aluminium_summary} column=n_countries/> countries with a primary-aluminium value, <Value data={primary_aluminium_summary} column=cleanest_grid_country/> has the cleanest grid and carries a gross cost of <Value data={primary_aluminium_summary} column=cleanest_grid_cost fmt='€#,##0'/> a tonne while <Value data={primary_aluminium_summary} column=dirtiest_grid_country/> has the dirtiest and carries <Value data={primary_aluminium_summary} column=dirtiest_grid_cost fmt='€#,##0'/> a tonne, with a correlation of <Value data={primary_aluminium_summary} column=correlation fmt="0.00"/> between the two.
 
 ## Every product group against the grid
 
 ```sql grid_vs_default
 -- The grid factor is OWID's (`grid_factor_t_co2_per_mwh`), context rather than
 -- the factor the annex used, which is the question being asked: does the grid a
--- country runs on show up in what its goods pay at all?
+-- country runs on show up in the carbon its goods are priced on at all?
 select
     product_group,
     count(*)                                               as n_values,
@@ -146,13 +146,13 @@ it is not the carbon in the electricity. Aluminium does not follow the grid at a
 
 <Alert status=info>
 
-**So what.** The bill is overwhelmingly the carbon burned *in the process*, the
+**So what.** The priced carbon is overwhelmingly the carbon burned *in the process*, the
 coke in a blast furnace and the calcination of limestone, not the carbon behind
 the meter. A grid factor is the right input to a [Scope 2](/scope2) disclosure and
 the wrong input to a sourcing decision on steel.
 
 **Who acts:** whoever is building a supplier-screening or carbon-cost model.
-**Cost of getting it wrong:** ranking suppliers on grid data that the border cost
+**Cost of getting it wrong:** ranking suppliers on grid data that the gross border cost
 is almost entirely insensitive to.
 
 </Alert>

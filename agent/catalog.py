@@ -76,12 +76,16 @@ def describable(manifest: dict) -> dict[str, dict]:
     return dict(sorted(out.items()))
 
 
+_ABBREVIATIONS = ("e.g", "i.e")
+
+
 def _first(text: str, *, paragraph: bool = False) -> str:
     """The first paragraph, or sentence, of a description, on one line.
 
     dbt keeps a `>` description's paragraph breaks as single newlines, and a
     `|` one's as blank lines. A full stop inside backticks or brackets
-    (`St. Martin (French part)`) does not end a sentence.
+    (`St. Martin (French part)`) does not end a sentence, and nor does the one
+    that closes "e.g." or "i.e.".
     """
     text = (text or "").strip()
     text = text.split("\n\n" if "\n\n" in text else "\n")[0]
@@ -97,6 +101,8 @@ def _first(text: str, *, paragraph: bool = False) -> str:
         elif not code and char in ")]":
             depth = max(depth - 1, 0)
         elif char == "." and not code and depth == 0 and text[i + 1 : i + 2] in (" ", ""):
+            if text[max(i - 3, 0) : i] in _ABBREVIATIONS and not text[i - 4 : i - 3].isalnum():
+                continue
             return text[: i + 1]
     return text
 

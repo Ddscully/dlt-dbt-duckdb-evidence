@@ -314,10 +314,10 @@ models:
       contract:
         enforced: true
     description: >
-      What a tonne of an imported CBAM good costs at the EU border, by where it
-      was made: Annex I's default values resolved against the annex's own
-      fallback rule, marked up on the statutory schedule, and multiplied by an
-      EU ETS price.
+      What a tonne of an imported CBAM good costs at the EU border before any
+      deduction, by where it was made: Annex I's default values resolved
+      against the annex's own fallback rule, marked up on the statutory
+      schedule, and multiplied by an EU ETS price.
 
       Grain: one row per (country or territory listed in the annex, good) —
       11,665 rows over 121 countries plus the fallback table, x the 260 goods the
@@ -332,6 +332,15 @@ models:
       and the tonnage columns ship beside the euro columns so a consumer can
       re-price without a rebuild. `reports/pages/cbam.md` draws the EUR 60-120
       sensitivity straight off them.
+
+      **The figures are gross.** An importer surrenders fewer certificates than
+      these, after two deductions this model does not make: one for the EU ETS
+      allowances EU producers of the good still receive free (a benchmark per
+      good, times a factor that phases out from 2026 to 2034), and one for any
+      carbon price effectively paid where the good was made. When this was
+      written the free-allocation benchmarks were provisional and the rules for
+      the origin-price deduction not yet adopted. Every euro and certificate
+      column is therefore above what an importer owes.
 
       **A screening tool, not a filing.** These are administrative values with a
       mark-up designed to be worse than reality, so that going and getting
@@ -486,7 +495,8 @@ models:
         meta:
           additivity: non_additive
         description: >
-          Certificates surrendered per tonne, i.e. after the mark-up. Not null
+          Certificates per tonne after the mark-up and before any deduction:
+          what the default values imply, not what an importer surrenders. Not null
           anywhere: every row either carries a country-specific value or resolves
           to the fallback, and this test is what proves the fallback join covers
           the annex.
@@ -502,16 +512,16 @@ models:
         meta:
           additivity: non_additive
         description: >
-          Certificates per tonne in 2027: `total_t_co2e_per_t` with the product group's
-          2027 mark-up from `cbam_markup_schedule`.
+          Certificates per tonne in 2027, before any deduction: `total_t_co2e_per_t`
+          with the product group's 2027 mark-up from `cbam_markup_schedule`.
         data_tests: [not_null]
       - name: certificates_2028_t_co2e_per_t
         data_type: DOUBLE
         meta:
           additivity: non_additive
         description: >
-          Certificates per tonne in 2028: `total_t_co2e_per_t` with the product group's
-          2028 mark-up.
+          Certificates per tonne in 2028, before any deduction: `total_t_co2e_per_t`
+          with the product group's 2028 mark-up.
         data_tests: [not_null]
       - name: markup_2026_pct
         description: >
@@ -540,7 +550,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
-        description: Certificates x `eu_ets_price_eur_per_t`, EUR per tonne of good.
+        description: >
+          Gross: certificates x `eu_ets_price_eur_per_t`, EUR per tonne of good, before
+          any deduction.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -549,13 +561,17 @@ models:
         data_type: DOUBLE
         meta:
           additivity: non_additive
-        description: 2027 certificates x `ets_price_eur_per_t`, EUR per tonne of good.
+        description: >
+          Gross: 2027 certificates x `ets_price_eur_per_t`, EUR per tonne of good, before
+          any deduction.
         data_tests: [not_null]
       - name: cbam_cost_2028_eur_per_t
         data_type: DOUBLE
         meta:
           additivity: non_additive
-        description: 2028 certificates x `ets_price_eur_per_t`, EUR per tonne of good.
+        description: >
+          Gross: 2028 certificates x `ets_price_eur_per_t`, EUR per tonne of good, before
+          any deduction.
         data_tests: [not_null]
       - name: excess_over_cleanest_source_t_co2e_per_t
         data_type: DOUBLE
@@ -564,8 +580,8 @@ models:
         description: >
           This country's 2026 certificates per tonne minus the cheapest *listed*
           source of the same good. The procurement number: the same tonne of steel
-          carries a different border cost depending only on which country smelted
-          it.
+          carries a different gross border cost depending only on which country
+          smelted it.
 
           **Null on the fallback row**, all 260 of them, because "excess over the
           cleanest source" presupposes the row is a source and the annex's "other

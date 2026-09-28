@@ -141,3 +141,17 @@ def test_the_loop_offers_every_metric_the_yml_defines(catalog):
     result = tools["query_metric"].run({"metrics": "orders", "group_by": "year", "years": 2022})
     assert result.note is None
     assert result.text.splitlines()[:3] == ["orders by year, 2022", "year  orders", "2022       2"]
+
+
+def test_a_column_is_described_by_its_whole_first_sentence(catalog):
+    from agent.catalog import _first, describe_model
+
+    # The full stop that closes "i.e." or "e.g." is not the end of a sentence.
+    assert _first("X, i.e. Y. Z.") == "X, i.e. Y."
+    assert _first("A key, e.g. `a.b`. B.") == "A key, e.g. `a.b`."
+    assert _first("Made in Chile. More.") == "Made in Chile."
+    lines = describe_model(catalog, "fct_cbam_exposure").splitlines()
+    good_key = next(line for line in lines if line.startswith("- good_key "))
+    assert good_key.endswith("e.g. `28041000-hydrogen`.")
+    certificates = next(line for line in lines if line.startswith("- certificates_2026_"))
+    assert "before any deduction" in certificates

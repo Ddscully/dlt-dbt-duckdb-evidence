@@ -20,7 +20,7 @@ body:
     attributes:
       label: Where is the number?
       description: A dashboard page and chart, a model and column, or a released Parquet file.
-      placeholder: /retail — "Net revenue by month", or marts.fct_cbam_exposure.certificate_cost_eur
+      placeholder: /retail — "Net revenue by month", or marts.fct_cbam_exposure.cbam_cost_2026_eur_per_t
     validations:
       required: true
 

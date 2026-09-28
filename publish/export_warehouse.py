@@ -745,7 +745,10 @@ select count(*) from lakehouse.raw.om_weather_daily;
   importer uses when they have no verified supplier data — at a carbon price that
   is a *parameter*, not a market quote. The price this build used is stated on
   every row in `ets_price_eur_per_t`, and the tonnage columns ship beside the euro
-  columns so you can re-price without rebuilding.
+  columns so you can re-price without rebuilding. The euro and certificate
+  columns are gross: they come before the deductions for EU ETS free allocation
+  and for any carbon price paid where the good was made, which the table does not
+  model.
   The seeds it is built from (`cbam_default_values`, `cbam_goods`,
   `cbam_markup_schedule`) are in the DuckDB file's `main` schema, not the Parquet
   set.
