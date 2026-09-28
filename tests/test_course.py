@@ -40,6 +40,7 @@ SKILLS_DIR = project_root() / ".agents" / "skills"
 # gitignored and built, so a path under it is correct even before a fresh clone
 # builds it.
 CITABLE_ROOTS = (
+    "agent",
     "dbt",
     "docs",
     "ingest",
