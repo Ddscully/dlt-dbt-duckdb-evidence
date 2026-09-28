@@ -1,8 +1,8 @@
 """The analyst's tools, served over the Model Context Protocol to any MCP client.
 
-`agent/loop.py` is the agent for a local model; this is the same three tools
-(`explain_change`, `describe_model`, `query_metric`) for someone else's agent —
-Claude Code, Claude Desktop, an IDE. The client launches it and speaks to it on
+`agent/loop.py` is the agent for a local model; this serves the same tools
+(`explain_change`, `describe_model`, `query_metric`, `run_scenario`) to someone
+else's agent — Claude Code, Claude Desktop, an IDE. The client launches it and speaks to it on
 stdin and stdout, so nothing here listens on a port, and **nothing may print to
 stdout**: it is the protocol channel.
 

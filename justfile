@@ -157,6 +157,16 @@ describe-model model:
 metric +args:
     uv run python -m agent.metrics "$@"
 
+# Re-prices marts.fct_cbam_exposure's certificate columns without a dbt rebuild;
+# the good is a CN code, a good_key or words, and several matches list the choice.
+# `--country China --country India`, `--tonnes 500`. Gross of the free-allocation
+# deduction, which nothing here models (docs/FINANCE_AGENT.md).
+# CBAM cost per tonne of a good at a carbon price you choose (read-only)
+[group('inspect')]
+[positional-arguments]
+scenario good year price *args:
+    uv run python -m agent.scenario "$@"
+
 # Any OpenAI-compatible server: AGENT_BASE_URL and AGENT_MODEL, defaulting to a
 # local Ollama (docs/FINANCE_AGENT.md). Quote the question: `?` is a shell glob.
 # Ask a model about revenue; it answers only with the tools' figures (read-only)

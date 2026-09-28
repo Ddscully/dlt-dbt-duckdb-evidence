@@ -205,6 +205,15 @@ time series.
   tonnage columns beside the euro columns and states the price per row, so the
   page draws its EUR 60-120 sensitivity from one build and a release consumer can
   re-price without rebuilding.
+- **`agent/scenario.py` is that re-pricing for the finance agent** (`just
+  scenario`, the `run_scenario` tool), and its figures are **gross of the EU ETS
+  free-allocation deduction**, which nothing in the repo models: the benchmarks
+  were provisional when it was built. Its note says so on every answer, and the
+  mart's own "certificates surrendered" wording does not yet
+  ([`docs/decisions/0017-the-cbam-scenario.md`](../../../docs/decisions/0017-the-cbam-scenario.md)).
+  It rounds half up in `Decimal`, so 840 of the mart's 34,995 euro figures come
+  out a penny higher there: each is exactly half a penny, held just below by the
+  double.
 ### What the unit tests hold
 
 Five of them, in `dbt/models/marts/_unit_tests.yml`. This model's data tests

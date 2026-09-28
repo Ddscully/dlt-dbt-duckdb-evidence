@@ -134,7 +134,7 @@ def test_the_loop_offers_every_metric_the_yml_defines(catalog):
     from agent.tools import warehouse_tools
 
     tools = {tool.name: tool for tool in warehouse_tools(warehouse(LINES), catalog)}
-    assert list(tools) == ["explain_change", "describe_model", "query_metric"]
+    assert list(tools) == ["explain_change", "describe_model", "query_metric", "run_scenario"]
     schema = tools["query_metric"].schema["function"]["parameters"]["properties"]
     assert schema["metrics"]["items"]["enum"] == sorted(catalog.layer.metrics)
     # Names bare rather than in a list, as small models send them.

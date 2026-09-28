@@ -2,7 +2,7 @@
 
 `just ask "…"` puts a question to a language model that has the warehouse's
 analysis tools and nothing else. The model chooses a tool and its arguments and
-writes the answer; the tools compute every figure in it. There are three:
+writes the answer; the tools compute every figure in it. There are four:
 
 - **`explain_change`**, the revenue bridge in `agent/bridge.py`: why net revenue
   moved between two years, as volume, mix, price, new and discontinued SKUs,
@@ -14,6 +14,10 @@ writes the answer; the tools compute every figure in it. There are three:
 - **`describe_model`** (`agent/catalog.py`): what one row of a retail mart is,
   and each column's type, additivity label and description, read from the dbt
   manifest, so a model can tell `quantity` (sum it) from `unit_price` (never).
+  It describes `fct_cbam_exposure` too.
+- **`run_scenario`** (`agent/scenario.py`): what CBAM, the EU carbon border tax,
+  costs per tonne of an imported good at a carbon price the question names,
+  gross of the free-allocation deduction ([below](#a-carbon-price-scenario)).
 
 ```
 $ AGENT_MODEL=gemma4:26b-a4b-it-q4_K_M just ask "Why did revenue fall from 2010 to 2011, in euros?"
@@ -30,9 +34,9 @@ Periods aligned: the data covers 2009-12-01 to 2011-12-09, so each year is compa
 
 The last paragraph is not the model's: the loop appends it
 ([below](#what-the-loop-guarantees-and-what-it-does-not)).
-`just explain-change 2010 2011`, `just metric …` and `just describe-model …`
-print the tools' own output, with no model involved, and `just mcp-server`
-serves the same three tools to an MCP client such as Claude Code or Claude
+`just explain-change 2010 2011`, `just metric …`, `just describe-model …` and
+`just scenario …` print the tools' own output, with no model involved, and
+`just mcp-server` serves the same tools to an MCP client such as Claude Code or Claude
 Desktop ([below](#from-an-mcp-client)).
 
 ## Running it on a laptop, with Ollama
@@ -86,7 +90,7 @@ library's `urllib` rather than a vendor SDK, so the loop adds no dependency.
 
 ## From an MCP client
 
-`agent/mcp_server.py` serves the three tools over the Model Context Protocol, on
+`agent/mcp_server.py` serves the tools over the Model Context Protocol, on
 stdio: the client launches it, and nothing listens on a port
 ([0016](decisions/0016-the-mcp-server.md)). The warehouse and the dbt manifests
 are needed as for the loop, and the `dev` dependency group, which `just setup`
@@ -170,6 +174,51 @@ What the tool adds to MetricFlow, which does none of it:
 - **A period the data covers only in part is named** in a note the loop appends
   verbatim, below.
 
+## A carbon-price scenario
+
+`marts.fct_cbam_exposure` holds the CBAM certificates the regulation's default
+values imply per tonne of each good, by the country it was made in, for 2026,
+2027 and 2028, and prices them at one assumed carbon price, EUR 75. The tonnage
+is fixed by law and the price is not, so `run_scenario` re-prices the
+certificates at any price without a dbt rebuild
+([0017](decisions/0017-the-cbam-scenario.md)):
+
+```
+$ just scenario 7601 2027 100 --country China --country Norway --tonnes 500
+Unwrought aluminium (CN 7601, Aluminium): CBAM certificates for 2027, priced at €100 per tonne of CO2e (the warehouse assumes €75).
+
+                                               tCO2e per t  € per t at €100  € per t at €75  change per t  € for 500 t at €100
+cheapest listed source: Algeria and 36 others        0.432           €43.20          €32.40       +€10.80           €21,600.00
+median of 67 listed sources                          0.432           €43.20          €32.40       +€10.80           €21,600.00
+dearest listed source: Mozambique                   3.8376          €383.76         €287.82       +€95.94          €191,880.00
+other countries and territories (fallback)          2.6436          €264.36         €198.27       +€66.09          €132,180.00
+China (own value)                                      3.6          €360.00         €270.00       +€90.00          €180,000.00
+
+The dearest listed source costs €340.56 more per tonne than the cheapest at €100 (€255.42 at €75), and €170,280.00 more for 500 t.
+Norway: not listed in the annex for this good. An unlisted country outside the EU uses the other-countries values above, unless CBAM exempts it; this tool does not know the exemptions.
+
+These are gross figures, before the deduction for EU ETS free allocation, which this tool does not model, so they are not what an importer will owe. They use the regulation's default values, not any supplier's verified emissions, and €100 per tonne of CO2e is an assumed price.
+```
+
+- **The figures are gross.** An importer surrenders fewer certificates than the
+  defaults imply, in step with the allowances EU producers still get free, and
+  the benchmarks that deduction needs were provisional when this was built. The
+  last paragraph above is the tool's note, which the loop appends verbatim.
+- **A good is named in words**: a CN code or its prefix, a `good_key`, or words
+  from the description and product group. `aluminium` matches 24 goods, which
+  come back as a list to choose from.
+- **The gap between the dearest and cheapest source is printed**, as the
+  difference of the two printed figures, so it agrees with the table. Asked how
+  much cheaper one source was, both local models and Claude subtracted for
+  themselves until it was.
+- **A fallen-back country is marked as one.** The annex prints "-" for about one
+  row in eight, and the mart copies the fallback onto it, so its figure is the
+  fallback's and not the country's own.
+- **A country the annex does not list for the good is never priced.** Which
+  unlisted countries CBAM exempts is set by the regulation's articles, which
+  the tool does not know. A misspelt name (`Turkey`) is refused with the
+  spelling the warehouse uses (`Turkiye`).
+
 ## What the loop guarantees, and what it does not
 
 Three things hold whatever the model writes, each because a model was measured
@@ -191,7 +240,8 @@ so a tool schema and its handler cannot drift apart unnoticed.
 - **Every number in the answer is checked against the tool output**, and one
   that appears in no tool output and not in the question is listed under the
   answer: `Not in any tool output, so check before quoting: …`. Signs and
-  thousands separators are ignored, so "fell 3.19%" quotes "-3.19%"; a rounded
+  thousands separators are ignored and numbers compare by value, so "fell
+  3.19%" quotes "-3.19%" and "€56,156" quotes "€56,156.00"; a rounded
   figure (€2.2m for €2,227.6k) is flagged, which is the point of asking for
   exact quotes.
 
@@ -221,10 +271,21 @@ flagged.
 | `gemma4:26b-a4b-it-q4_K_M`, about a minute | net revenue by quarter in 2011 | nothing, though the figures lost their £ |
 | `gemma4:26b-a4b-it-q4_K_M`, about a minute | which region bought the most in 2010 | named the region with the most revenue without quoting the revenue |
 | `gemma4:26b-a4b-it-q4_K_M`, under a minute | can `unit_price` be added up | nothing: no, because it is non-additive |
+| `granite4.1:8b`, under a minute | a tonne of unwrought aluminium from China, 2027, at €100 (`run_scenario`) | called China's €360.00 "the dearest listed source", which is Mozambique |
+| `granite4.1:8b`, under a minute | the cheapest source of grey portland cement in 2026, and how much cheaper than the dearest, at €90 | nothing, though it wrote the subtraction out: its result is the tool's gap |
+| `granite4.1:8b`, under a minute | 500 t of urea from Egypt, 2028, at €80 | nothing: it chose one of the six urea goods the first call listed, and quoted €56,156 |
+| `gemma4:26b-a4b-it-q4_K_M`, about a minute | the aluminium question | nothing |
+| `gemma4:26b-a4b-it-q4_K_M`, about a minute | the cement question | nothing |
+| `gemma4:26b-a4b-it-q4_K_M`, about two minutes | the urea question | nothing: the same choice, with its CN code named |
 
 The two failures are the two kinds the checks cannot see, and both are the
 smaller model's. On the metric and table questions neither model wrote a wrong
-figure: with every total already on its own row, there was nothing to add up. To compare models on a question, run it twice with
+figure: with every total already on its own row, there was nothing to add up.
+The CBAM questions' first runs found two defects of the tool's, since fixed:
+asked how much cheaper one source was, every model subtracted for itself, so
+the tool now prints the gap; and a cost quoted as €56,156 was flagged against
+the tool's €56,156.00, so the check now compares numbers by value. Granite's
+wrong row on the aluminium question is the misattribution again. To compare models on a question, run it twice with
 `AGENT_MODEL` changed; the scripted-model tests are what hold the loop itself.
 
 ## Adding a tool
@@ -250,7 +311,7 @@ only an `additive` one.
 
 Claude Code as the client (`claude -p`, with `sonnet` as the model), started
 outside the repo, so none of its instructions applied, with its built-in tools
-off and this server alone loaded. Both notes were quoted verbatim, and no answer
+off and this server alone loaded. Every note it was sent was quoted verbatim, and no answer
 held a number missing from the tool output (checked with the loop's check,
 `agent.loop.unverified`).
 
@@ -260,3 +321,6 @@ held a number missing from the tool output (checked with the loop's check,
 | which region bought the most in 2010, and its average order value | `query_metric` by region, then again for the average order value filtered to that region | nothing |
 | can `unit_price` be added up | `describe_model` | nothing: no, because it is non-additive, with the metric to use instead |
 | why did revenue fall from 2010 to 2011 | `explain_change`, in EUR by default | nothing: the aligned −3.19% with the note, and each subtotal with its own bars |
+| a tonne of unwrought aluminium from China, 2027, at €100 | `run_scenario` | nothing |
+| the cheapest source of grey portland cement in 2026, and how much cheaper than the dearest, at €90 | `run_scenario` | nothing |
+| 500 t of urea from Egypt, 2028, at €80 | `run_scenario` twice: six urea goods listed, then one chosen | nothing; it added the cheapest, median and dearest sources unasked |

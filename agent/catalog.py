@@ -13,7 +13,8 @@ words, and `fct_retail_order_line` has dozens of columns, so each column gets on
 line: its type, its label and the first sentence of its description.
 
 The tables described are the `retail` group's marts and every model a semantic
-model reads, which is what `query_metric` can reach.
+model reads, which is what `query_metric` can reach, plus `fct_cbam_exposure`,
+which `run_scenario` reads.
 
 Run:  uv run python -m agent.catalog fct_retail_order_line
 """
@@ -26,6 +27,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent import scenario
 from agent.metrics import GROUP_BY, TIME_GRAINS, SemanticLayer, load_semantic_layer
 from modern_data_stack.bus_matrix import declared_grains
 from modern_data_stack.paths import dbt_manifest_path
@@ -55,7 +57,8 @@ def load_catalog() -> Catalog:
 
 
 def describable(manifest: dict) -> dict[str, dict]:
-    """Model name -> node, for the retail marts and every model a semantic model reads."""
+    """Model name -> node: the retail marts, every model a semantic model reads, and
+    the models a CBAM scenario reads."""
     read = {
         node_id
         for semantic_model in manifest.get("semantic_models", {}).values()
@@ -68,7 +71,7 @@ def describable(manifest: dict) -> dict[str, dict]:
         # A versioned relation (`alias` differs from `name`) is a compatibility view.
         if (node.get("alias") or node["name"]) != node["name"]:
             continue
-        if node.get("group") == "retail" or node_id in read:
+        if node.get("group") == "retail" or node_id in read or node["name"] in scenario.MODELS:
             out[node["name"]] = node
     return dict(sorted(out.items()))
 
