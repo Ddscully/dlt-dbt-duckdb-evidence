@@ -122,9 +122,8 @@ it cost to learn:
     hand — so its coverage is asserted against the frame `build_retail_rfm`
     emits rather than against a list.
   - **Keyed by `schema.alias`**, so it names the relations the release actually
-    ships. The versioned model appears twice — `marts.fct_emissions_energy` and
-    `marts.fct_emissions_energy_v1` — which is what the Parquet files are called,
-    and v1 inherits its 36 labels through `include: all`.
+    ships: a versioned model appears once per live version, under the name its
+    Parquet file is called.
 
 - **The `relations` map carries what each column means**: every published
   relation's description and each column's type and description.
@@ -352,7 +351,7 @@ that went.
 - **`analytics.pipeline_*` is exempt**: those tables count the project's own
   tests and tables, so deleting a model shrinks them on purpose.
 - **`removed` is reported, never judged**, or retiring a model — as
-  `fct_emissions_energy_v1` will be — would fail the next release on a planned
+  `fct_emissions_energy_v1` was — would fail the next release on a planned
   removal. A test pins this through the command's exit, because
   counting `removed` as a loss keeps every verdict label right.
 - **A deliberate drop is published by dispatch**: a scheduled run cannot take

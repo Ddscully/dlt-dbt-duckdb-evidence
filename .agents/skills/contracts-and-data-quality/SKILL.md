@@ -93,11 +93,10 @@ account of the same ground is `docs/DATA_QUALITY.md`.
 - **Every numeric mart column declares `meta: {additivity: …}`** from a closed
   vocabulary — `additive`, `semi_additive`, `non_additive`, `not_a_measure` —
   because neither a type nor a test says whether `sum()` means anything, and
-  about half are non-additive. `fct_emissions_energy_v1` inherits its labels
-  through `include: all`, so the manifest counts more labels than the ymls
-  write. `tests/test_additivity.py` holds coverage, the closed
-  vocabulary, numeric-only labels, and a name rule — no ratio-named column may be
-  summable — which is the one check that catches a label present and *wrong*.
+  about half are non-additive. `tests/test_additivity.py` holds coverage, the
+  closed vocabulary, numeric-only labels, and a name rule — no ratio-named column
+  may be summable — which is the one check that catches a label present and
+  *wrong*.
   - `semi_additive` must say which direction fails: `population` gives person-years across years;
     `original_quantity` belongs to the matched purchase, so summing it counts a
     purchase once per return matched to it. `gdp_usd` is `semi_additive` and
@@ -133,15 +132,22 @@ account of the same ground is `docs/DATA_QUALITY.md`.
     `DBT_TARGET_PATH` says, so it can answer from a stale or a fixture parse
     ([0015](../../../docs/decisions/0015-metrics-in-the-semantic-layer.md)).
 - **`fct_emissions_energy` is versioned** because nothing in the repo refs it and
-  the release ships it: v2 renames `co2_per_gdp` to `co2_kg_per_gdp_ppp_2011`. v2
-  is aliased back to the bare relation name, and v1 is a view over v2 that puts
-  the old column back last, with its contract declared in the same order.
-  - **The `deprecation_date` (2026-11-01) is enforced.** dbt's own behaviour when
-    it passes is a warning and exit 0, so `flags.warn_error_options` promotes
+  the release ships it: v2 renames `co2_per_gdp` to `co2_kg_per_gdp_ppp_2011`,
+  and is aliased back to the bare relation name. It is the only version. The
+  next one keeps the old shape as a view over the new — the renamed column put
+  back last, its contract `include: all` in the same order — so it inherits
+  every label and a new column reaches both.
+  - **A `deprecation_date` is enforced.** dbt's own behaviour when one passes is
+    a warning and exit 0, so `flags.warn_error_options` promotes
     `DeprecatedModel` and `DeprecatedReference` to errors, failing `dbt parse`.
     `UpcomingReferenceDeprecation` stays a warning — it fires during the
     migration window, which is what the window is for — and so does everything
     else: `error: all` would fail the release on a warning some later dbt adds.
+    No version carries a date today.
+  - **Removing a version does not drop its relation.** A warehouse file kept
+    across builds still holds the old view, and the export publishes whole
+    schemas, so a local `just export-data` ships it; every workflow builds from
+    an empty file, so no release does. Drop it by hand through `just sql write`.
   - **Versioning changes the Dagster asset key, silently.** The default
     translator keys a versioned model on its alias alone, dropping the `marts/`
     prefix and with it the model's materialisation history.

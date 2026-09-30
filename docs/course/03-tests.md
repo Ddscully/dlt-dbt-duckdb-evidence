@@ -17,14 +17,14 @@ for the pivot that turns row loss into column emptiness.
 ## 1. The census
 
 A dbt test is a `select` that must return no rows. That is the whole mechanism,
-and everything below is a consequence of it. This project has 482 of them:
+and everything below is a consequence of it. This project has 467 of them:
 
 | test | n | what it asserts |
 |---|---|---|
-| `not_null` | 224 | this column is populated on every row |
-| `dbt_utils.accepted_range` | 152 | this column's values lie in a band |
+| `not_null` | 222 | this column is populated on every row |
+| `dbt_utils.accepted_range` | 140 | this column's values lie in a band |
 | `dbt_utils.expression_is_true` | 33 | an arbitrary row-level claim |
-| `dbt_utils.unique_combination_of_columns` | 32 | this is the grain |
+| `dbt_utils.unique_combination_of_columns` | 31 | this is the grain |
 | `accepted_values` | 17 | this column is an enum |
 | `unique` | 14 | this key does not repeat |
 | `relationships` | 7 | every value here exists over there |
@@ -37,13 +37,13 @@ select test_type, count(*) as n from analytics.pipeline_tests
 group by 1 order by 2 desc"
 ```
 
-Read the shape of that table rather than the total. **376 of the 482 (78%) are
+Read the shape of that table rather than the total. **362 of the 467 (78%) are
 `not_null` and `accepted_range`**, both of which are per-column statements about
 rows that are *present*. That is module 01's punchline restated as a census: the
 test suite is overwhelmingly made of assertions that a deletion makes *more*
 likely to pass.
 
-Three of the 482 are the interesting ones, and they are rare because they are the
+Three of the 467 are the interesting ones, and they are rare because they are the
 only ones that compare a relation against something **outside itself**: the seven
 `relationships`, the two `equal_rowcount`, and the single hand-written test,
 `income_history_latest_vintage_matches_the_country_dimension`. That last one is
@@ -207,7 +207,7 @@ sed -i '/name: co2_per_capita/,+3 s/{min_value: 0}/{min_value: 0, max_value: 50}
 just course-rebuild
 ```
 
-**Observe.** `PASS=564 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
+**Observe.** `PASS=545 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
 the reviewer's evidence checks out:
 
 ```bash
@@ -481,7 +481,7 @@ just pipeline-status   # only if analytics.pipeline_tests is stale
 <details>
 <summary>Reveal</summary>
 
-**1. 407 columns in `marts`, of which 198 carry a test**: 49%.
+**1. 366 columns in `marts`, of which 184 carry a test**: 50%.
 
 ```sql
 with mart_cols as (
@@ -499,7 +499,7 @@ left join tested t on t.tested_model = m.model and t.tested_column = m.column_na
 ```
 
 Set that beside the *contract* coverage: every mart model is contract-enforced, so
-**every one of those columns has its type pinned** and 49% have their values
+**every one of those columns has its type pinned** and 50% have their values
 checked. Those are two different guarantees and it is worth being able to say
 which one you have.
 
@@ -542,7 +542,7 @@ degrades to bare names instead of emptying the table.
 
 **4. Both sides, honestly.**
 
-*Under-built:* 49% column coverage and a median range test seeing a third of the
+*Under-built:* 50% column coverage and a median range test seeing a third of the
 rows means most of this warehouse is unasserted. The columns with the *worst*
 coverage are the sparse ones, which is backwards: sparse columns are where a
 join went wrong.
@@ -557,7 +557,7 @@ The synthesis, and the actual answer: **coverage is the wrong metric.** The righ
 question is per column, "what is the wrong value I could plausibly get here, and
 would anything notice?" That produces very few tests on pass-through columns,
 several on anything this repo *derives* (a ratio, a conversion, a gap-fill), and
-one on every join that could drop rows, which is the assertion the 482 are
+one on every join that could drop rows, which is the assertion the 467 are
 thinnest on and which no `accepted_range` can ever be.
 </details>
 
@@ -614,7 +614,7 @@ One row, zero difference, passing. `count(*)` reads it as one failure.
 
 The principle: **do not reimplement the verdict of a tool you are reporting on.**
 The health page's whole value is agreeing with the build; a second, simpler
-definition of "failing" that agrees 480 times out of 482 is worse than no page,
+definition of "failing" that agrees 465 times out of 467 is worse than no page,
 because the two disagreements are exactly where someone will trust the wrong one.
 The manifest already carries `fail_calc` and `severity` per node, so reading them
 is both correct and less code than the shortcut.

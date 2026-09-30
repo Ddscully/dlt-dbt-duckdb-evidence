@@ -185,10 +185,12 @@ this" for one dashboard page.
 
 **Version a model instead of renaming a column under its consumers.** The one
 versioned model renames a column whose old name gave neither unit nor basis. v1
-is a *view* over v2 with the one column put back (not a second copy of the logic
-or of the 43k rows), and it carries a deprecation date that also appears in the
-release notes, because the consumers who need it never read a dbt log.
-→ [`fct_emissions_energy_v1.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v1.sql)
+was a *view* over v2 with the one column put back (not a second copy of the logic
+or of the 43k rows), and it carried a deprecation date that also appeared in the
+release notes, because the consumers who needed it never read a dbt log. It was
+removed when the date came, which nobody had to remember: past it, `dbt parse`
+fails.
+→ [`_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
 
 ## 3. Write tests that can see a wrong answer
 
