@@ -224,6 +224,9 @@ def explain_change(
     currency = currency.upper()
     if currency not in AMOUNT_COLUMNS:
         raise ValueError(f"currency must be one of {', '.join(AMOUNT_COLUMNS)}")
+    if year_a == year_b:
+        # Not an empty bridge: every bar would read zero, under a note about alignment.
+        raise ValueError(f"year_a and year_b are both {year_a}; name two different years")
     bounds = con.execute(
         "select min(invoice_date), max(invoice_date) from marts.fct_retail_order_line"
     ).fetchone()

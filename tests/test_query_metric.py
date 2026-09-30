@@ -112,7 +112,11 @@ def test_a_period_covered_in_part_is_named(layer):
         ({"metrics": ["revenue"]}, "the metrics are"),
         ({"metrics": ["customers"], "group_by": ["customer_id"]}, "choose from year"),
         ({"metrics": ["orders"], "group_by": ["year", "month"]}, "one time grain"),
-        ({"metrics": ["orders"], "where": {"region": "Europe"}}, "Europe & Central Asia"),
+        # Each choice quoted: a name can hold a comma ("Hong Kong SAR, China").
+        (
+            {"metrics": ["orders"], "where": {"region": "Europe"}},
+            'the values are "Europe & Central Asia", "North America"',
+        ),
         ({"metrics": ["orders"], "years": (2020, 2021)}, "the data covers"),
     ],
 )
@@ -131,9 +135,12 @@ def test_money_is_printed_to_the_penny(layer):
 
 
 def test_the_loop_offers_every_metric_the_yml_defines(catalog):
+    from contextlib import nullcontext
+
     from agent.tools import warehouse_tools
 
-    tools = {tool.name: tool for tool in warehouse_tools(warehouse(LINES), catalog)}
+    con = warehouse(LINES)
+    tools = {tool.name: tool for tool in warehouse_tools(lambda: nullcontext(con), catalog)}
     assert list(tools) == ["explain_change", "describe_model", "query_metric", "run_scenario"]
     schema = tools["query_metric"].schema["function"]["parameters"]["properties"]
     assert schema["metrics"]["items"]["enum"] == sorted(catalog.layer.metrics)
@@ -141,6 +148,9 @@ def test_the_loop_offers_every_metric_the_yml_defines(catalog):
     result = tools["query_metric"].run({"metrics": "orders", "group_by": "year", "years": 2022})
     assert result.note is None
     assert result.text.splitlines()[:3] == ["orders by year, 2022", "year  orders", "2022       2"]
+    # A name given twice is answered once, and an empty list of years is no years.
+    twice = tools["query_metric"].run({"metrics": ["orders", "orders"], "years": []})
+    assert twice.text.splitlines()[1:] == ["orders", "     4"]
 
 
 def test_a_column_is_described_by_its_whole_first_sentence(catalog):

@@ -11,13 +11,22 @@ A tool refuses a call it cannot answer with a `ValueError` or `TypeError`, which
 `call_tool` returns as text beginning `error:`: the caller is a model, and it
 can relay the refusal or retry with the arguments corrected. Nothing checks the
 arguments against the schema first (the MCP SDK does not either), so each tool
-checks its own.
+checks its own. An error from DuckDB comes back the same way, since a traceback
+ends the loop's run and reaches an MCP client as a bare `Internal server error`.
+
+**A tool opens the warehouse for its own call and closes it**, through the
+`Connect` it was built with. DuckDB takes one writer or many readers across
+processes, and both callers outlive a call by minutes: the loop waits on a
+model between calls, and the server lives as long as its client. A connection
+held across either would make every build fail for that long. A call made
+while a build holds the file gets `LOCKED` back.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 
 import duckdb
@@ -39,6 +48,19 @@ INSTRUCTIONS = (
     "carbon price."
 )
 
+LOCKED = "error: the warehouse is locked, most likely by a build; try again when it finishes"
+# DuckDB's words for the lock. Its message quotes the file's path too, so a bare
+# "lock" would also match a missing warehouse under a directory named `blocks`.
+_LOCK_MESSAGE = "Could not set lock on file"
+
+# Opens the warehouse for one tool call; leaving the `with` closes it.
+Connect = Callable[[], AbstractContextManager[duckdb.DuckDBPyConnection]]
+
+
+def read_only(database: Callable[[], str]) -> Connect:
+    """A `Connect` that opens `database()` read-only, afresh for every call."""
+    return lambda: duckdb.connect(database(), read_only=True)
+
 
 @dataclass(frozen=True)
 class ToolResult:
@@ -56,9 +78,10 @@ class Tool:
         return self.schema["function"]["name"]
 
 
-def warehouse_tools(con: duckdb.DuckDBPyConnection, catalog: Catalog | None = None) -> list[Tool]:
-    """The tools over the marts, bound to one read-only connection.
+def warehouse_tools(connect: Connect, catalog: Catalog | None = None) -> list[Tool]:
+    """The tools over the marts, each opening the warehouse with `connect` when it runs.
 
+    Built once: nothing here touches the warehouse until a tool is called.
     `describe_model` and `query_metric` need the dbt manifests, so they are
     offered only with a `catalog`. Their schemas' choices are read from the
     manifests, so a metric added in yml is offered without a code change.
@@ -68,9 +91,10 @@ def warehouse_tools(con: duckdb.DuckDBPyConnection, catalog: Catalog | None = No
         missing = sorted({"year_a", "year_b"} - set(args))
         if missing:
             raise TypeError(f"explain_change needs {' and '.join(missing)}")
-        bridge = explain_change(
-            con, int(args["year_a"]), int(args["year_b"]), str(args.get("currency", "EUR"))
-        )
+        # `or`, not a default: a small model sends null for an argument it leaves out.
+        currency = str(args.get("currency") or "EUR")
+        with connect() as con:
+            bridge = explain_change(con, int(args["year_a"]), int(args["year_b"]), currency)
         return ToolResult(render(bridge), alignment_note(bridge))
 
     explain_change_schema = {
@@ -99,14 +123,15 @@ def warehouse_tools(con: duckdb.DuckDBPyConnection, catalog: Catalog | None = No
         missing = sorted({"good", "year", "ets_price_eur_per_t"} - set(args))
         if missing:
             raise TypeError(f"run_scenario needs {' and '.join(missing)}")
-        result = scenario.run_scenario(
-            con,
-            str(args["good"]),
-            args["year"],
-            args["ets_price_eur_per_t"],
-            countries=_names(args.get("countries") or []),
-            tonnes=args.get("tonnes"),
-        )
+        with connect() as con:
+            result = scenario.run_scenario(
+                con,
+                str(args["good"]),
+                args["year"],
+                args["ets_price_eur_per_t"],
+                countries=_names(args.get("countries") or []),
+                tonnes=args.get("tonnes"),
+            )
         return ToolResult(scenario.render(result), scenario.scenario_note(result))
 
     run_scenario_schema = {
@@ -148,7 +173,7 @@ def warehouse_tools(con: duckdb.DuckDBPyConnection, catalog: Catalog | None = No
     }
     tools = [Tool(explain_change_schema, run_explain_change)]
     if catalog is not None:
-        tools += _catalog_tools(con, catalog)
+        tools += _catalog_tools(connect, catalog)
     return [*tools, Tool(run_scenario_schema, run_run_scenario)]
 
 
@@ -170,6 +195,8 @@ def _years(value) -> tuple[int, int] | None:
     if value is None:
         return None
     years = [value] if isinstance(value, int | str) else list(value)
+    if not years:  # an empty list is no years, as null is
+        return None
     try:
         if len(years) not in (1, 2):
             raise ValueError
@@ -178,7 +205,7 @@ def _years(value) -> tuple[int, int] | None:
         raise ValueError(f"years is [first, last] or a single year, not {value!r}") from None
 
 
-def _catalog_tools(con: duckdb.DuckDBPyConnection, catalog: Catalog) -> list[Tool]:
+def _catalog_tools(connect: Connect, catalog: Catalog) -> list[Tool]:
     layer = catalog.layer
 
     def run_describe_model(args: dict) -> ToolResult:
@@ -194,14 +221,15 @@ def _catalog_tools(con: duckdb.DuckDBPyConnection, catalog: Catalog) -> list[Too
             raise ValueError(
                 f'where is an object, e.g. {{"region": "North America"}}, not {where!r}'
             )
-        table = metrics.query_metric(
-            con,
-            layer,
-            _names(args["metrics"]),
-            group_by=_names(args.get("group_by") or []),
-            years=_years(args.get("years")),
-            where=where,
-        )
+        with connect() as con:
+            table = metrics.query_metric(
+                con,
+                layer,
+                _names(args["metrics"]),
+                group_by=_names(args.get("group_by") or []),
+                years=_years(args.get("years")),
+                where=where,
+            )
         return ToolResult(metrics.render(table), metrics.coverage_note(table))
 
     describe_model_schema = {
@@ -265,12 +293,19 @@ def _catalog_tools(con: duckdb.DuckDBPyConnection, catalog: Catalog) -> list[Too
     ]
 
 
-def call_tool(tools: dict[str, Tool], name: str, arguments: str | dict) -> ToolResult:
+def call_tool(tools: dict[str, Tool], name: str, arguments: str | dict | None) -> ToolResult:
     """Run one tool call. A refusal goes back to the model as text, to relay or retry."""
     if name not in tools:
         return ToolResult(f"error: no tool named {name!r}; the tools are {', '.join(tools)}")
     try:
         args = json.loads(arguments) if isinstance(arguments, str) else arguments
+        if args is None:  # null for no arguments: the tool then names the ones it needs
+            args = {}
+        if not isinstance(args, dict):
+            raise TypeError(f"arguments is a JSON object of named arguments, not {args!r}")
         return tools[name].run(args)
     except (ValueError, TypeError) as exc:
         return ToolResult(f"error: {exc}")
+    except duckdb.Error as exc:
+        # A missing file raises the lock's own class; only the lock is worth a retry.
+        return ToolResult(LOCKED if _LOCK_MESSAGE in str(exc) else f"error: {exc}")

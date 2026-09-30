@@ -46,7 +46,7 @@ import argparse
 import difflib
 import statistics
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 import duckdb
 
@@ -109,8 +109,17 @@ class Candidates:
 
 
 def euros(certificates: Decimal, price: Decimal, tonnes: Decimal = Decimal(1)) -> Decimal:
-    """The cost, rounded to the penny once, after every multiplication."""
-    return (certificates * price * tonnes).quantize(_PENNY, ROUND_HALF_UP)
+    """The cost, rounded to the penny once, after every multiplication.
+
+    `Decimal` keeps 28 digits, and refuses a cost with more before the pennies
+    than that leaves room for; the refusal is passed on as one a model can act on.
+    """
+    try:
+        return (certificates * price * tonnes).quantize(_PENNY, ROUND_HALF_UP)
+    except InvalidOperation:
+        raise ValueError(
+            "too large to price to the penny; lower ets_price_eur_per_t or tonnes"
+        ) from None
 
 
 def _certificates(value: float) -> Decimal:

@@ -15,9 +15,10 @@ stdout**: it is the protocol channel.
   the client's session, and DuckDB takes one writer or many readers across
   processes: a connection held between calls would make every build fail for as
   long as the client stayed open. Opening one costs a fraction of a second. A
-  call made while a build holds the file gets an error result saying so.
-* **The metrics are read once, at start**, so restart the server after
-  `just dbt-parse`.
+  call made while a build holds the file gets an error result saying so. The
+  tools open and close it themselves (`agent/tools.py`), as they do for the loop.
+* **The tools are built once, at start**, and the metrics read then, so restart
+  the server after `just dbt-parse`.
 
 What the loop guarantees and this cannot: the loop appends each tool's note to
 the answer verbatim, and flags any number in the answer that no tool printed.
@@ -33,24 +34,21 @@ import sys
 from collections.abc import Callable
 
 import anyio
-import duckdb
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from agent.catalog import Catalog, load_catalog
-from agent.tools import INSTRUCTIONS, ToolResult, call_tool, warehouse_tools
+from agent.tools import INSTRUCTIONS, call_tool, read_only, warehouse_tools
 from modern_data_stack.paths import warehouse_path
 
-LOCKED = "error: the warehouse is locked, most likely by a build; try again when it finishes"
 NOTE = "Quote this note verbatim in the answer: "
 
 
 def build_server(catalog: Catalog, database: Callable[[], str] = warehouse_path) -> Server:
     """The server, calling `database()` for the file to open on each call."""
-    # The schemas never touch the connection, so an empty in-memory one builds them.
-    with duckdb.connect() as con:
-        schemas = [tool.schema["function"] for tool in warehouse_tools(con, catalog)]
+    tools = {tool.name: tool for tool in warehouse_tools(read_only(database), catalog)}
+    schemas = [tool.schema["function"] for tool in tools.values()]
 
     async def list_tools(ctx, params) -> types.ListToolsResult:
         return types.ListToolsResult(
@@ -65,7 +63,7 @@ def build_server(catalog: Catalog, database: Callable[[], str] = warehouse_path)
         )
 
     async def run_tool(ctx, params: types.CallToolRequestParams) -> types.CallToolResult:
-        result = _call(catalog, database(), params.name, params.arguments or {})
+        result = call_tool(tools, params.name, params.arguments)
         content = [types.TextContent(type="text", text=result.text)]
         if result.note:
             content.append(types.TextContent(type="text", text=NOTE + result.note))
@@ -74,16 +72,6 @@ def build_server(catalog: Catalog, database: Callable[[], str] = warehouse_path)
     return Server(
         "warehouse", instructions=INSTRUCTIONS, on_list_tools=list_tools, on_call_tool=run_tool
     )
-
-
-def _call(catalog: Catalog, database: str, name: str, arguments: dict) -> ToolResult:
-    try:
-        con = duckdb.connect(database, read_only=True)
-    except duckdb.IOException as exc:
-        # A missing file raises the same class; only the lock is worth retrying.
-        return ToolResult(LOCKED if "lock" in str(exc) else f"error: {exc}")
-    with con:
-        return call_tool({t.name: t for t in warehouse_tools(con, catalog)}, name, arguments)
 
 
 async def _serve(server: Server) -> None:
