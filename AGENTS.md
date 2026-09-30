@@ -204,8 +204,7 @@ DuckDB file. The full account is [`docs/WAREHOUSE.md`](docs/WAREHOUSE.md).
   Parquet
 - `marts` — dbt tables, one folder per dbt group:
   - `country_stats/` — `dim_country_year` (the spine), `fct_emissions_energy`
-    (**the one versioned model**; `fct_emissions_energy_v1` is a compatibility
-    view until 2026-11-01), `fct_co2_estimate_versions`,
+    (**the one versioned model**), `fct_co2_estimate_versions`,
     `fct_eu_electricity_prices_semiannual`, `fct_country_weather_year`
   - `reference/` — `dim_country` (**the conformed country dimension**),
     `dim_country_income_history`, `dim_date`, `dim_currency` and the
@@ -286,8 +285,6 @@ unit tests are `unit-testing-dbt-models`. What bites outside those tasks:
 - **Contracts are enforced on every mart model**, so a column changing type
   fails the build before it writes. **Never round-trip these ymls through
   PyYAML**: it reflows every description to add a scalar.
-- **`fct_emissions_energy_v1`'s deprecation date, 2026-11-01, fails `dbt parse`**
-  once it passes — dbt's own default would only warn.
 - **Select an asset prefix as `key:"marts/*"`.** A bare `marts/*` materialises
   nothing and exits 0; `just materialize-preview` shows what a selection
   resolves to.

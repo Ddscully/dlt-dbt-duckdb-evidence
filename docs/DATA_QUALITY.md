@@ -13,7 +13,7 @@
 - **Four groups by domain own every model**, dbt enforces who may depend on it at
   parse time, and each dashboard page is an exposure
   ([Groups, exposures and versions](#groups-exposures-and-versions)).
-- **`fct_emissions_energy_v1` dies on 2026-11-01, enforced**: from that date
+- **A model version's deprecation date is enforced**: once it passes,
   `dbt parse` fails ([Groups, exposures and versions](#groups-exposures-and-versions)).
 
 `just dbt-build` runs the data tests and unit tests alongside the models, and the
@@ -235,16 +235,17 @@ and it is derived rather than declared: the bus matrix in
 `just bus-matrix`.
 
 `fct_emissions_energy` is versioned. v2 renamed one column to state its unit and
-basis (`co2_per_gdp` → `co2_kg_per_gdp_ppp_2011`), and v1 stays live as a
-compatibility view until **2026-11-01**, because the people reading the published
-Parquet files can't be paged. Nothing in the repo refs that model and the release
-ships it, which is what makes it the right one to version: a rename is free
-in-repo and breaking outside it.
+basis (`co2_per_gdp` → `co2_kg_per_gdp_ppp_2011`), and v1 stayed live as a
+compatibility view for a dated migration window, because the people reading the
+published Parquet files can't be paged. Nothing in the repo refs that model and
+the release ships it, which is what makes it the right one to version: a rename
+is free in-repo and breaking outside it. The window has closed and v2 is the
+only version.
 
-That date is enforced rather than announced. dbt's own behaviour when a
+A window's end is enforced rather than announced. dbt's own behaviour when a
 deprecation date passes is a warning and a zero exit, so the monthly release
-would have gone on publishing v1 with the reason in a log nobody reads;
+would go on publishing the old version with the reason in a log nobody reads;
 `dbt_project.yml` promotes `DeprecatedModel` and `DeprecatedReference` to errors
-through `flags.warn_error_options`, which from 2026-11-01 fails `dbt parse` —
-run in CI's Dagster-definitions step, before anything is built or published.
-Removing v1 is then a change somebody makes on purpose.
+through `flags.warn_error_options`, so a passed date fails `dbt parse` — run in
+CI's Dagster-definitions step, before anything is built or published. Removing
+the old version is then a change somebody makes on purpose.
