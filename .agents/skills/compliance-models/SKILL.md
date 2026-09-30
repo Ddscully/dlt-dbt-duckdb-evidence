@@ -29,11 +29,21 @@ generation-only factors and sends upstream emissions to Scope 3 category 3. So:
   a stand-in that reads higher, and a company also reporting category 3 would
   count the upstream part twice. `factor_basis` is `location-based, lifecycle`
   for that reason.
-- **The gap is measured only at the clean end.** The seven grids above 10 TWh
-  that are at least 99.5% low-carbon carry 23.1 to 27.8 g/kWh, where a
-  generation-only factor would be at or near zero; the limits page computes
-  that live. Against a generation-only series it has not been measured, so
-  state no size for it anywhere else.
+- **The gap is measured in two places, and neither gives it one size.** The
+  seven grids above 10 TWh that are at least 99.5% low-carbon carry 23.1 to
+  27.8 g/kWh, where a generation-only factor would be at or near zero; the
+  limits page computes that live. Against the European Environment Agency's
+  generation-only intensities for 2023, the series reads higher in 23 of the
+  EU's 27 members, by a median of 34 g/kWh, and 14% higher for the 27 weighted
+  by generation (236 against 207).
+  - **It reads lower in four**: Estonia (396 against 690), Cyprus, Belgium and
+    Lithuania. A wider boundary cannot do that, so the comparison mixes boundary
+    with method: the EEA divides reported emissions by gross generation, and
+    Ember multiplies generation by a factor per fuel. Quote it as a comparison
+    of two series, never as "the upstream share".
+  - **The EEA's series is not in the warehouse.** The figures were read off its
+    country-level chart for 1990, 2000, 2010 and 2023, so they are fixed
+    numbers in prose, and nothing outside the EU is measured.
 - **It is computed, not metered.** Generation by fuel times a factor per fuel:
   the gas factors are for 2017, and coal's are built from 2020 base factors and
   each country's plant mix. So it moves with what a grid generates from, and not

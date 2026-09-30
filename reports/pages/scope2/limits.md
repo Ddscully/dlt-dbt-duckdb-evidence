@@ -34,6 +34,14 @@ reads higher than the factor the standard describes, and a company that also
 reports category 3 would count the upstream part twice. The clean end shows it:
 the <Value data={low_carbon_floor} column=n_grids/> grids above 10 TWh that are at least 99.5% low-carbon carry <Value data={low_carbon_floor} column=lowest fmt="0.0"/> to <Value data={low_carbon_floor} column=highest fmt="0.0"/> g per kWh, where a generation-only factor would be at or near zero.
 
+One open series does count generation only, for one region: the
+[European Environment Agency's](https://www.eea.europa.eu/en/analysis/indicators/greenhouse-gas-emission-intensity-of-1)
+for the EU. For 2023 this series reads higher than it in 23 of the 27 members,
+by a median of 34 g per kWh, and 14% higher for the 27 together. It reads lower
+in four, Estonia most of all, because the two differ in method as well as in
+boundary: the EEA divides the emissions a country reports by what it generates,
+and Ember multiplies generation by a factor for each fuel.
+
 **Location-based only.** This is the grid average where a site sits. A
 market-based factor reflects the contracts a company actually holds, such as
 RECs, Guarantees of Origin, PPAs and supplier-specific residual mixes, and no

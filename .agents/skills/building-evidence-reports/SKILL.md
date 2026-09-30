@@ -407,7 +407,7 @@ filed here, because all three are about the site rather than about Dagster.
   `reports/build/` — so a route that emitted only the SvelteKit shell would
   materialise green and deploy. The forty pages render at 35–61 kB; the floor is
   8 kB. The two smallest are the ones carrying the least SQL — Restatements
-  (35 kB) and Scope 2's limits page (36 kB) — so it is prose-heavy pages, not
+  (35 kB) and Scope 2's limits page (37 kB) — so it is prose-heavy pages, not
   chart pages, that would ever bring the floor into play.
 - **`explore`, `settings` and `api` are reserved route names.** Evidence's own
   template ships `pages/explore/` (the SQL console and schema browser) and

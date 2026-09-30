@@ -35,6 +35,17 @@ low-carbon in their latest year carry 23.1 to 27.8 g/kWh. A generation-only
 factor for a grid that burns almost nothing is at or near zero. That is the one
 place the difference shows without a second series to compare against.
 
+Measured against a second series: the European Environment Agency publishes a
+generation-only intensity for each EU member, which by its own account does "not
+take into account life-cycle greenhouse gas emissions" and leaves out upstream
+emissions and the combustion of biomass. For 2023 the OWID series reads higher
+in 23 of the 27 members, by a median of 34 g/kWh (the median ratio is 1.27), and
+14% higher for the 27 weighted by generation, 236 g/kWh against 207. It reads
+lower in four: Estonia (396 against 690), Cyprus, Belgium and Lithuania. The two
+differ in method as well as in boundary, which is why: the EEA divides the
+emissions each country reports by its gross generation, and Ember multiplies
+generation by one factor per fuel.
+
 ## Decision
 
 - **Every description says lifecycle and CO2e**, and none says the series *is*
@@ -65,9 +76,12 @@ place the difference shows without a second series to compare against.
   UK's conversion factors, eGRID). Each covers one jurisdiction on its own
   method, so the table would hold two boundaries under one column and the
   spread between countries, which is what the pages chart, would mix them.
-- **Stating the size of the gap.** Nothing here measures it against a
-  generation-only series, and a figure from the fuel factors alone would be
-  Ember's model restated as a finding.
+- **Stating one size for the gap.** The EEA comparison above is the only
+  measurement, it covers one region and one year, and it mixes the boundary with
+  the method: the series reads lower than a generation-only one in four
+  countries, which a boundary alone cannot do. The pages give that comparison
+  as what it is. A figure from the fuel factors alone would be Ember's model
+  restated as a finding.
 
 ## Consequences
 
