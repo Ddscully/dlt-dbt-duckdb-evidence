@@ -209,7 +209,9 @@ print(len(revisions(WEATHER_TABLE, v[-2], v[-1])), 'rows genuinely restated') if
 Any JDBC client meets the lock and the catalog attach, without `just sql` to
 handle either. What follows was measured with DBeaver and its DuckDB JDBC driver
 1.5.5.1; the `ATTACH` rules were re-measured on the pinned DuckDB 1.5.5
-through the Python client.
+through the Python client, and the bootstrap statement through that driver
+called directly. The menu names are from DBeaver's own documentation, read
+against 26.2.
 
 **Why it fails out of the box.** The `staging` views store SQL that names the
 catalog literally (`select * from lakehouse.raw.owid_co2`), and DuckDB resolves
@@ -218,19 +220,40 @@ that name at *query* time. A fresh GUI connection opens every table and fails
 with `Catalog "lakehouse" does not exist!`. Attaching the catalog under any other
 alias (`lake`, `ducklake`) fails them identically.
 
-1. **Driver properties → `duckdb.read_only = true`, before the first connect.**
-   Without it the GUI takes the writer lock and every `just run`,
-   `just dbt-build` and `just materialize` fails until it disconnects.
-2. **Connection → Initialization → Bootstrap queries: one entry**, with
-   `<LAKEHOUSE_DIR>` being the absolute path `just where` prints:
+Both settings are on the connection: right-click it → **Edit Connection**. A
+new one has them in the wizard, as its **Driver properties** tab and under
+**Connection details** → **Connection Initialization Settings**.
+
+1. **Driver properties → `duckdb.read_only` = `true`, before the first connect.**
+   The tab lists it among the driver's own settings, as "Set connection to
+   read-only mode". Without it the GUI takes the writer lock and every
+   `just run`, `just dbt-build` and `just materialize` fails until it
+   disconnects.
+2. **Connection settings → Initialization → Bootstrap queries → Configure →
+   Add: one entry**, with `<LAKEHOUSE_DIR>` being the absolute path `just where`
+   prints on its `lakehouse:` line:
 
    ```sql
    ATTACH 'ducklake:duckdb:<LAKEHOUSE_DIR>/catalog.duckdb' AS lakehouse (DATA_PATH '<LAKEHOUSE_DIR>/data/', READ_ONLY)
    ```
 
+   For a clone at `/home/you/demo`, that is:
+
+   ```sql
+   ATTACH 'ducklake:duckdb:/home/you/demo/data/lakehouse/catalog.duckdb' AS lakehouse (DATA_PATH '/home/you/demo/data/lakehouse/data/', READ_ONLY)
+   ```
+
+   Confirm both dialogs, then **Invalidate/Reconnect**: a bootstrap query runs
+   when a connection opens, so one that is already open never sees it.
+
    Bootstrap queries run on every physical connection, which is what is wanted:
    DBeaver opens separate ones for the navigator and each editor, and an attach in
    one is invisible to the others.
+
+   `AS lakehouse` is the name the views store, so it is not a choice.
+   `READ_ONLY` is the second lock: on a connection step 1 made read-only the
+   catalog attaches read-only with or without it, and on one where step 1 was
+   missed it is all that stops the GUI writing to the landing zone.
 
    With `LAKEHOUSE_DATA_PATH` set, `DATA_PATH` is that URL, and a `CREATE SECRET`
    has to come first as its own entry. With `LAKEHOUSE_CATALOG` set the attach is
@@ -242,13 +265,16 @@ alias (`lake`, `ducklake`) fails them identically.
 
 Two traps, both of which look like something else:
 
-- **One bootstrap entry is one JDBC statement.** A `LOAD ducklake` and the
-  `ATTACH` in the same entry arrive as one statement and fail with
-  `Parser Error: syntax error at or near "ATTACH"`; the poisoned connection then
-  reports `Attempting to execute an unsuccessful or closed pending query result`
+- **One bootstrap entry reaches the driver as one string, line breaks and all.**
+  A `LOAD ducklake` on one line and the `ATTACH` on the next, with no semicolon
+  between them, fail with `Parser Error: syntax error at or near "ATTACH"`, so
+  nothing is attached and every view then reports
+  `Attempting to execute an unsuccessful or closed pending query result`
   followed by `Catalog "lakehouse" does not exist!` — cause and effect, not two
-  problems. The `LOAD` is not needed at all: the `ducklake:` prefix autoloads the
-  extension.
+  problems, and the first of those lines is only how the driver wraps the
+  second. With a semicolon the driver runs both statements (drivers 1.4.0.0 to
+  1.5.5.1, called directly rather than through the dialog). The `LOAD` is not
+  needed either way: the `ducklake:` prefix autoloads the extension.
 - **`DATA_PATH` must match the path the catalog stored, as a string.** A relative
   spelling, a symlinked route to the same directory and a doubled slash are all
   refused with `DATA_PATH parameter "…" does not match existing data path in the
@@ -258,6 +284,8 @@ Two traps, both of which look like something else:
 Verify with `select database_name, type from duckdb_databases()` — `lakehouse`
 must be listed as `ducklake` — and then a view:
 `select co2_mt from staging.stg_co2 where country_iso3 = 'DEU' and year = 2020`.
+A landing table answers under the same name: `select count(*) from
+lakehouse.raw.owid_co2`.
 
 **Don't read `lakehouse.raw_staging`.** It is dlt's merge scratch, a full copy of
 each merge table's latest load, not a layer of the warehouse. And `read_only`

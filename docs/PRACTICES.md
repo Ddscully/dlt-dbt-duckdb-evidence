@@ -29,7 +29,9 @@ aggregate that changes in its last bits between two runs of the same code. Most
 of what follows is machinery for making one of those loud.
 
 Every figure below was measured on this repo, and most were produced by
-deliberately breaking something and counting what noticed.
+deliberately breaking something and counting what noticed. The practices are
+older than the repo: where one has a standard statement, its paragraph links
+it, and a link backs the practice, never a figure.
 
 ---
 
@@ -60,7 +62,9 @@ from the seed — 17,866 lines and £615,520 gone, all 90 nodes green.
 [`stg_retail_lines.sql`](../dbt/models/staging/stg_retail_lines.sql)
 
 **Derive the bus matrix, because the practice above cannot check itself.**
-Business processes down, conformed dimensions across: the artifact that says
+Business processes down, conformed dimensions across, which is Kimball's
+[enterprise data warehouse bus matrix](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/enterprise-data-warehouse-bus-matrix/):
+the artifact that says
 which dimensions each fact can be joined on, and the one thing groups (who owns
 it), exposures (who reads it) and contracts (what shape it is) do not state. It
 is generated from `manifest.json`, never written, so the grain comes from each
@@ -72,7 +76,11 @@ sibling `fct_fx_rates_daily` spelled it the conformed way. No test here could se
 that, because every guard is scoped to one relation, so a key spelled two ways is
 three green models. Both were renamed, along with the `date_key`
 `fct_retail_returns` was missing beside a sibling at the identical grain — so the
-practice above is enforced by something rather than only asserted.
+practice above is enforced by something rather than only asserted. Kimball's
+definition names both defects: dimensions
+[conform](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/conformed-dimension/)
+when their attributes "have the same column names and domain contents", and the
+currency key failed the first half where the retail labels failed the second.
 
 Two rules keep the output honest. A uniqueness test carrying a `where` is not a
 grain (`dim_grid_emission_factors` asserts one row per country
@@ -90,13 +98,21 @@ free: the mean absolute half-over-half change was 19% across countries in 2022
 against 3–5% through the 2010s, and the Netherlands went from €0.034/kWh in
 2022-S1 to €0.142 in S2 as that year's energy-tax cuts landed. The annual
 average, €0.088, is a price nobody paid. Both grains are modelled, and the
-annual one exists to join prices to emissions, not to chart.
+annual one exists to join prices to emissions, not to chart. Kimball's advice on
+[grain](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/grain/)
+runs the same way: start from the atomic one, because a rolled-up grain
+presupposes the questions that will be asked of it.
 → [`fct_eu_electricity_prices_semiannual.sql`](../dbt/models/marts/country_stats/fct_eu_electricity_prices_semiannual.sql)
 
 **Where two answers are both correct, ship both and name them.** Converting a
 balance uses the closing rate; converting revenue uses the period average. Using
 one where the other belongs is a standard finance bug, and it is invisible
-because a plausible number comes out either way. So the warehouse publishes both
+because a plausible number comes out either way. The split is
+[IAS 21](https://www.ifrs.org/issued-standards/list-of-standards/ias-21-the-effects-of-changes-in-foreign-exchange-rates/)'s:
+[paragraphs 39 and 40](https://eur-lex.europa.eu/eli/reg/2023/1803/oj) translate
+assets and liabilities at the closing rate and income and expenses at the rate
+on each transaction's date, with a period average allowed in its place only
+while rates do not fluctuate significantly. So the warehouse publishes both
 and carries a column measuring the gap: for EUR/USD it reaches +11.7% in 2003, and
 across every currency the worst complete year is the Icelandic króna in 2008 at
 +98%.
@@ -121,7 +137,8 @@ models**. Getting that backwards is
 easy and this repo did it: it counted models and called them marts, so a stale figure sat in five files through two
 additions to the layer.
 
-The boundary between the four is not a folder convention. `access` is enforced at
+The boundary between the four is not a folder convention.
+[`access`](https://docs.getdbt.com/docs/mesh/govern/model-access) is enforced at
 **parse** time, so a cross-mart dependency fails before anything builds, and the
 folders exist so the four are visible in the tree as well as in the ymls.
 
@@ -130,11 +147,14 @@ fails — the point of the layer is that none of it is a comment.
 
 **Declare the grain as a test.** Every fact-shaped model carries
 `unique_combination_of_columns` on its key. It has been holding the grain since
-the start.
+the start. Kimball calls the
+[grain](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/grain/)
+declaration "a binding contract on the design"; the test is what binds it.
 → [`dbt/models/marts/country_stats/_country_stats.yml`](../dbt/models/marts/country_stats/_country_stats.yml)
 
 **Enforce a schema contract on everything that leaves.** Every mart model is
-contract-enforced, every column with a declared type.
+[contract-enforced](https://docs.getdbt.com/docs/mesh/govern/model-contracts),
+every column with a declared type.
 The grain test and the schema contract catch different things: the contract is
 what sees a column change type under a consumer. Verified by declaring `year` as
 `VARCHAR`, which fails the build with a per-column mismatch table *before writing
@@ -146,7 +166,9 @@ so the boundary is the one dbt itself can check rather than a filing convention
 and a test states that it is correct; neither says whether adding it up is
 meaningful. About half the numeric mart columns are non-additive: ratios, rates,
 prices, averages or extrema, where a sum is nonsense that comes back as a number.
-Every one carries `meta: {additivity: …}` from a closed four-value vocabulary,
+Every one carries `meta: {additivity: …}` from a closed four-value vocabulary
+(Kimball's [additive, semi-additive and non-additive](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/additive-semi-additive-non-additive-fact/),
+and a fourth for a number that is not a measure),
 the `semi_additive` ones have to say in prose *which* direction fails
 (`population` gives person-years across years; `cumulative_co2` recounts every
 earlier year), and the labels ship in the release manifest so a Parquet consumer
@@ -184,7 +206,8 @@ this" for one dashboard page.
 → [`dbt/models/_exposures.yml`](../dbt/models/_exposures.yml)
 
 **Version a model instead of renaming a column under its consumers.** The one
-versioned model renames a column whose old name gave neither unit nor basis. v1
+[versioned model](https://docs.getdbt.com/docs/mesh/govern/model-versions)
+renames a column whose old name gave neither unit nor basis. v1
 is a *view* over v2 with the one column put back (not a second copy of the logic
 or of the 43k rows), and it carries a deprecation date that also appears in the
 release notes, because the consumers who need it never read a dbt log.
@@ -203,7 +226,11 @@ mutation the data tests could not see.
 **A test earns its place by mutation, and "nothing went red" is the finding.**
 The method: break the model in a plausible way against a *copy* of the warehouse,
 run its full suite, and record the number that moves. Across seven models, 38
-mutations were run and the data tests caught 5.
+mutations were run and the data tests caught 5. This is mutation testing
+([DeMillo, Lipton and Sayward, 1978](https://doi.org/10.1109/C-M.1978.218136))
+done by hand on SQL models;
+[Petrović and Ivanković (2018)](https://research.google/pubs/state-of-mutation-testing-at-google/)
+describe it run inside code review at Google.
 → [`.agents/skills/unit-testing-dbt-models/SKILL.md`](../.agents/skills/unit-testing-dbt-models/SKILL.md)
 
 **Determinism is a property to pin, and a determinism guard has to be mutated
@@ -218,7 +245,10 @@ Two spot-checks had called it broken-but-stable; they were unlucky draws.
 **Aggregating floats is not reproducible, and the fix is to stop quoting counts.**
 Two `dbt run` invocations against byte-identical sources gave 5,781 and 5,785
 distinct values of a summed revenue column: floating-point addition is not
-associative and DuckDB's parallel aggregation fixes no order. Every disclosure
+associative ([Goldberg, 1991](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html))
+and DuckDB's parallel aggregation fixes no order, which DuckDB lists among its
+[non-deterministic behaviours](https://duckdb.org/docs/current/operations_manual/non-deterministic_behavior).
+Every disclosure
 figure in this repo is therefore a *share*, which is stable to a tenth of a
 point, never a count.
 
@@ -277,7 +307,10 @@ takes a date range, and its whole series since 1999 is one three-second request.
 **CI runs offline against recorded fixtures; a nightly run against the live
 endpoints is what tells you reality moved.** A red pull request therefore means
 *this repo* broke, not that a publisher was rate-limiting. The nightly opening
-an issue is the cue to re-record.
+an issue is the cue to re-record. *Software Engineering at Google* describes the
+same split as [record and replay](https://abseil.io/resources/swe-book/html/ch14.html):
+replay before a change merges, record against the real service after. There the
+recording is automatic, and here it is a step the nightly prompts.
 → [`tests/fixtures/ingest/`](../tests/fixtures/ingest/),
 [`.github/workflows/nightly.yml`](../.github/workflows/nightly.yml)
 
@@ -320,7 +353,11 @@ mechanism serves both, and one count feeds the three places that check it.
 **Classify personal data in metadata, apply the policy at the copy, and measure
 the result rather than asserting it.** One column identifies a person. Deleting
 it does not anonymise the extract, and the number is the argument: 98.6% of the
-5,881 customers are unique on three money columns with no id at all. The policy
+5,881 customers are unique on three money columns with no id at all. That is the
+small case of a known result:
+[de Montjoye et al. (2015)](https://doi.org/10.1126/science.1256297) picked out
+90% of 1.1 million cardholders from the place and day of four purchases each.
+The policy
 is applied to the published copy rather than in a model, because the copy holds
 identifiers no model declares: the staging views are materialised on the way out,
 and dbt's stored test failures ship too. 53 relations in a release carry that
@@ -350,6 +387,9 @@ This page is the index. The arguments, and what each one cost to learn, are in
 [`AGENTS.md`](../AGENTS.md) and the skills under `.agents/skills/`, written at
 the point they were learned rather than reconstructed afterwards.
 [`docs/FOR_REVIEWERS.md`](./FOR_REVIEWERS.md) answers the evaluation questions
-(SLA, run cost, what breaks at 1000×, what I would do differently), and
+(SLA, run cost, what breaks at 1000×, what I would do differently) and scores the
+warehouse against
+[a governance rubric from outside it](./FOR_REVIEWERS.md#6-scored-against-somebody-elses-rubric),
+and
 [`docs/REUSING_THIS_STACK.md`](./REUSING_THIS_STACK.md) covers what carries over
 to a different dataset.
