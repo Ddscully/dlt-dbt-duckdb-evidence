@@ -1,6 +1,6 @@
 -- The worked example of location-based Scope 2: metered kWh x grid emission
--- factor -> tonnes CO2e. **The sites are invented**
--- (`seeds/example_scope2_sites.csv`); the factors are not.
+-- factor -> tonnes CO2e, on the factor table's lifecycle basis. **The sites are
+-- invented** (`seeds/example_scope2_sites.csv`); the factors are not.
 with sites as (
     select * from {{ ref('example_scope2_sites') }}
 ),

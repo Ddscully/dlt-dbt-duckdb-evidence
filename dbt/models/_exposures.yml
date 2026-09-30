@@ -114,7 +114,7 @@ exposures:
     url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/scope2/
     description: >
       Grid emission factors as a reference product, with the vintage problem and
-      the three GHG Protocol caveats stated on the page. The worked example it
+      the four GHG Protocol caveats stated on the page. The worked example it
       renders is the only fabricated data in the warehouse and is labelled as
       such in three places.
     depends_on:

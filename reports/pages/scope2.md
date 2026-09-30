@@ -6,8 +6,10 @@ sidebar_position: 2
 
 The **location-based Scope 2 emission factor** is the number a company multiplies
 its metered electricity by for the purchased-electricity line of a CSRD, SECR or
-CDP disclosure. This is that factor for every country, with its vintage and its
-revision history.
+CDP disclosure. This is the open stand-in for it, for every country, with its
+vintage and its revision history: a grid average like the standard's, but a
+lifecycle one in CO₂e, so it counts the emissions upstream of the plant as well
+and reads higher than a generation-only factor.
 
 ```sql headline
 -- The double cast is not redundant. Evidence's DuckDB extractor writes every
@@ -54,7 +56,7 @@ select
     country_name,
     emission_factor_g_co2_per_kwh,
     cast(cast(year as integer) as varchar)          as factor_year,
-    least(emission_factor_g_co2_per_kwh, 900)       as "gCO₂ per kWh"
+    least(emission_factor_g_co2_per_kwh, 900)       as "gCO₂e per kWh"
 from warehouse.grid_emission_factors
 where is_latest_available
 ```
@@ -66,7 +68,7 @@ at the site root; a bare name resolves against the page and 404s. -->
     areaCol=country_iso3
     geoJsonUrl="../world-countries.geojson"
     geoId=iso3
-    value="gCO₂ per kWh"
+    value="gCO₂e per kWh"
     valueFmt="#,##0"
     colorPalette={['#d6e6f7', '#8fb8e6', '#eda100', '#b5530a', '#5a2403']}
     basemap="../blank-tile.png"
@@ -74,10 +76,10 @@ at the site root; a bare name resolves against the page and 404s. -->
     startingLong=10
     startingZoom=1
     height=420
-    title="Latest grid emission factor, gCO₂ per kWh (900 or more shown as 900)"
+    title="Latest grid emission factor, gCO₂e per kWh (900 or more shown as 900)"
     tooltip={[
         {id: 'country_name', showColumnName: false, valueClass: 'font-semibold'},
-        {id: 'emission_factor_g_co2_per_kwh', title: 'gCO₂ per kWh', fmt: '#,##0'},
+        {id: 'emission_factor_g_co2_per_kwh', title: 'gCO₂e per kWh', fmt: '#,##0'},
         {id: 'factor_year', title: 'Year'}
     ]}
 />
@@ -86,7 +88,7 @@ at the site root; a bare name resolves against the page and 404s. -->
     :global(.leaflet-container) { background: transparent !important; }
 </style>
 
-Among grids over 10 TWh the factor runs from <Value data={spread} column=cleanest_country/> at <Value data={spread} column=cleanest fmt="0.0"/> g per kWh to <Value data={spread} column=dirtiest_country/> at <Value data={spread} column=dirtiest fmt="#,##0"/> g. Under CSRD that figure is audited, and companies buy this table from consultancies and the IEA. **[The reference table →](/scope2/factors)**
+Among grids over 10 TWh the factor runs from <Value data={spread} column=cleanest_country/> at <Value data={spread} column=cleanest fmt="0.0"/> g per kWh to <Value data={spread} column=dirtiest_country/> at <Value data={spread} column=dirtiest fmt="#,##0"/> g. Under CSRD that figure is audited, and companies buy the generation-only version of this table from consultancies and the IEA. **[The reference table →](/scope2/factors)**
 
 ## "The latest factor" is not one year
 
@@ -175,14 +177,15 @@ calculation is only MWh times the factor; the grid does the rest. **[The worked 
 
 <Alert status=warning>
 
-**Location-based, annual and production-based.** No contracts, no hourly
-matching, no electricity trade: each is a reason this factor differs from what a
-company's market-based line or a 24/7 claim would say. **[What the factor is not →](/scope2/limits)**
+**Lifecycle, location-based, annual and production-based.** Upstream emissions
+included, no contracts, no hourly matching, no electricity trade: each is a
+reason this factor differs from what a company's filed Scope 2 line, its
+market-based line or a 24/7 claim would say. **[What the factor is not →](/scope2/limits)**
 
 </Alert>
 
 <small>Source: <a href="https://github.com/owid/energy-data">OWID Energy</a>
-(<code>carbon_intensity_elec</code>), modelled as
+(<code>carbon_intensity_elec</code>, from Ember's lifecycle estimates), modelled as
 <code>marts.dim_grid_emission_factors</code> and snapshotted as
 <code>history.snap_grid_emission_factors</code>. The GHG Protocol
 <a href="https://ghgprotocol.org/scope-2-guidance">Scope 2 Guidance</a> is the

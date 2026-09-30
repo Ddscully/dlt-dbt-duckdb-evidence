@@ -157,7 +157,7 @@ where is_latest_available
 <Histogram
     data={grid_factors}
     x=emission_factor_g_co2_per_kwh
-    xAxisTitle="gCO₂ per kWh"
+    xAxisTitle="gCO₂e per kWh"
     fillColor="#2a78d6"
     chartAreaHeight=160
     title="Grid emission factors, countries over 10 TWh"

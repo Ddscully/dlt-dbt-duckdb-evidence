@@ -350,7 +350,7 @@ project. These are the ones that recur in anything built this way:
   has validated a page against a dropped column's old schema; clearing
   `reports/.evidence/` (`just report-clean`) after any mart change fixes it.
 - **`evidence build` exits 0 for a site missing a page.** Check rendered file
-  *size*, not exit status: the smallest page here renders at about 34 kB and
+  *size*, not exit status: the smallest page here renders at about 35 kB and
   the check's floor is 8 kB, which catches a route that emitted nothing but the framework shell.
 - **A column named `tests` or `rows` silently draws no bars** in an Evidence chart.
   No error, no warning, and the same column is fine in a table three lines below.

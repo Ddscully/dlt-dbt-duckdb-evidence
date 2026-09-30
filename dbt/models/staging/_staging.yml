@@ -145,7 +145,8 @@ models:
               arguments: {min_value: 0}
       - name: carbon_intensity_elec_g_kwh
         description: >
-          Grams of CO2 per kWh of electricity generated. ~210 countries, so
+          Grams of CO2e per kWh of electricity generated, lifecycle: upstream
+          emissions are counted with the plant's own. ~210 countries, so
           roughly three times the coverage of `renewables_share_pct`, and in a
           unit that reads directly. Ceiling is generous: the observed maximum is
           ~1307 (coal-only grids), so 2000 catches a unit error without failing

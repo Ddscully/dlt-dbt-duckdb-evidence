@@ -1,6 +1,7 @@
 -- Grid emission factors as a Scope 2 reference table, with vintage and lineage
--- beside the number. Why it repeats `fct_emissions_energy`'s factor, and the
--- caveats, are the description in _compliance.yml.
+-- beside the number. Why it repeats `fct_emissions_energy`'s factor, the
+-- caveats, and why `co2` in the column names holds CO2e are the description in
+-- _compliance.yml.
 with factors as (
     select * from {{ ref('stg_energy') }}
 ),
@@ -65,8 +66,10 @@ select
     v.factor_version_count > 1 as is_restated,
     v.first_published_at,
     v.last_revised_at,
-    -- Lineage on every row: the table ships as a standalone Parquet file.
-    'location-based' as factor_basis,
+    -- Lineage on every row: the table ships as a standalone Parquet file. The
+    -- basis names the method and the boundary, because the boundary is the part
+    -- a Scope 2 filing does not share (see `factor_basis` in _compliance.yml).
+    'location-based, lifecycle' as factor_basis,
     'owid_energy.carbon_intensity_elec' as source_dataset,
     p.source_loaded_at
 from published as p

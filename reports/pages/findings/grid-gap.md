@@ -65,8 +65,8 @@ order by year
     yFmt="#,##0"
     yMin=0
     title="National grid carbon intensity, 10th, 50th and 90th percentiles"
-    subtitle="The same countries every year, grids above 10 TWh, gCO₂ per kWh"
-    yAxisTitle="gCO₂ per kWh"
+    subtitle="The same countries every year, grids above 10 TWh, gCO₂e per kWh"
+    yAxisTitle="gCO₂e per kWh"
 />
 
 The panel is <Value data={grid_percentiles} column=n_countries/> countries, each with a grid above 10 TWh in every year since 2000.
@@ -102,7 +102,7 @@ order by 1
 
 <DataTable data={grid_dispersion} rows=2 rowNumbers=false>
     <Column id=year_label title="Year" align=left/>
-    <Column id=mean_ci title="Mean gCO₂/kWh" fmt="#,##0"/>
+    <Column id=mean_ci title="Mean gCO₂e/kWh" fmt="#,##0"/>
     <Column id=gap_p90_p10 title="Gap, 10th to 90th percentile" fmt="#,##0"/>
     <Column id=spread_relative_to_mean title="Spread relative to mean" fmt="0.00"/>
 </DataTable>

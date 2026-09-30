@@ -123,11 +123,12 @@ calls, so the recipe and the graph can't drift into running different builds.
 - `pages/restatements.md`: what OWID has revised since this warehouse first
   loaded it, off the dbt snapshot.
 - `pages/scope2.md` and `pages/scope2/`: the same grid carbon-intensity series the
-  other pages chart, read as the location-based Scope 2 emission factor it also
-  is. The overview maps `marts.dim_grid_emission_factors`, charts its vintages and
-  shows the worked example over twelve *invented* sites
+  other pages chart, read as a stand-in for the location-based Scope 2 emission
+  factor (it is a lifecycle figure, which that factor is not). The overview maps
+  `marts.dim_grid_emission_factors`, charts its vintages and shows the worked
+  example over twelve *invented* sites
   (`marts.fct_example_scope2_emissions`); the reference table, the stale and
-  restated factors, the example in full and the three caveats are detail pages.
+  restated factors, the example in full and the four caveats are detail pages.
   The fabricated sites are stated in an `<Alert>` directly above each chart of
   them rather than in a footnote.
 - `pages/cbam.md` and `pages/cbam/`: what a tonne of an imported CBAM good costs at the EU border,

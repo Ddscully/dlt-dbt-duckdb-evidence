@@ -74,8 +74,8 @@ order by g_change
     sort=false
     yFmt="#,##0"
     title="Change in grid carbon intensity since 2005"
-    subtitle="Grids generating more than 150 TWh a year, gCO₂ per kWh"
-    yAxisTitle="Change in gCO₂ per kWh"
+    subtitle="Grids generating more than 150 TWh a year, gCO₂e per kWh"
+    yAxisTitle="Change in gCO₂e per kWh"
 />
 
 Spain took 329 g out of every kWh (−69%), Poland 324 g and the UK 319 g (−60%).
@@ -94,12 +94,12 @@ electricity is only about a third of energy use.
 
 <Alert status=info>
 
-**So what.** Grid carbon intensity is the **location-based Scope 2 emission
-factor**, the number a multi-site company multiplies its metered kWh by to produce
-the electricity line in a CSRD, SECR or CDP disclosure. Across the largest grids
-it runs from Norway at 30 g/kWh to South Africa at 717 g/kWh, a **24× spread**:
-an identical 100 GWh/year site reports roughly 3 kt CO₂e in one and 72 kt in the
-other, having changed nothing but its address.
+**So what.** Grid carbon intensity is what the **location-based Scope 2 emission
+factor** measures, the number a multi-site company multiplies its metered kWh by
+to produce the electricity line in a CSRD, SECR or CDP disclosure. Across the
+largest grids it runs from Norway at 30 g/kWh to South Africa at 717 g/kWh, a
+**24× spread**: an identical 100 GWh/year site reports roughly 3 kt CO₂e in one
+and 72 kt in the other, having changed nothing but its address.
 
 **Who acts:** sustainability reporting, and site selection long before them.
 **Cost of getting it wrong:** a site chosen on power price alone that adds tens
@@ -131,5 +131,10 @@ countries against 79 for renewables' share of all energy, because OWID's
 broad-coverage energy series is the electricity mix rather than the
 primary-energy mix. Grids under 150 TWh are left off the chart, because a single
 new plant swings their number.
+
+It is a lifecycle figure in CO₂e, Ember's estimate as OWID republishes it: each
+fuel's generation multiplied by a factor that includes the emissions upstream of
+the plant. A filed Scope 2 factor counts generation only, so it would read lower
+than the figures here ([what the factor is not](/scope2/limits)).
 
 </Details>

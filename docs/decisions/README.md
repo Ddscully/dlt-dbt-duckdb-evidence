@@ -63,3 +63,4 @@ Status: accepted YYYY-MM-DD (#PR) | superseded by NNNN
 | [0015](0015-metrics-in-the-semantic-layer.md) | Metrics are defined in dbt's semantic layer and compiled by MetricFlow's engine, run on our own connection | accepted 2026-09-28 |
 | [0016](0016-the-mcp-server.md) | The analyst's tools are served over MCP on stdio, from the loop's own schemas, with a connection per call | accepted 2026-09-28 |
 | [0017](0017-the-cbam-scenario.md) | The CBAM scenario re-prices the mart's certificates for one good, gross of the free-allocation deduction, and says so | accepted 2026-09-28 |
+| [0018](0018-the-scope-2-factor-is-lifecycle.md) | The Scope 2 factor stays OWID's lifecycle series, labelled as lifecycle, under the column names it has | accepted 2026-09-30 |

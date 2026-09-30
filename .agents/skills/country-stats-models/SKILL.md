@@ -206,7 +206,7 @@ carries it forward is `publishing-a-release`.
   OWID's broad-coverage energy series is the *electricity* mix, not the
   primary-energy mix. For anything where country coverage matters, prefer
   `renewables_share_elec_pct`, `low_carbon_share_elec_pct` or
-  `carbon_intensity_elec_g_kwh` (gCO2/kWh, which
+  `carbon_intensity_elec_g_kwh` (gCO2e/kWh, lifecycle, which
   also reads directly: coal grid ~800, gas ~400, nuclear/hydro under 50). They
   answer a narrower question — electricity is roughly a third of energy use — so
   the two are not interchangeable in levels, only in intent.
