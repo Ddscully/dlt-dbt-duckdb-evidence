@@ -20,7 +20,8 @@
 One column in this warehouse identifies a person: `customer_id`, the pseudonym a
 UK gift wholesaler's till assigned to a shopper between December 2009 and
 December 2011. No name, no address, nothing to contact anyone with. It's still
-personal data (pseudonymised data explicitly is, under GDPR Recital 26), and
+personal data (pseudonymised data explicitly is, under
+[GDPR](https://eur-lex.europa.eu/eli/reg/2016/679/oj) Recital 26), and
 at first nothing in this project said so, nothing masked it, and every
 published release shipped it in the clear from five different schemas.
 
@@ -97,6 +98,12 @@ called.** Deleting `customer_id` from an extract moves the number from 100% to
 pseudonymisation is worth doing and isn't a privacy story on its own, and any
 claim that a customer-grain file has been "anonymised" by dropping a key is
 false in a way that's cheap to check and nobody checks.
+
+The finding isn't new, only small.
+[de Montjoye et al. (2015)](https://doi.org/10.1126/science.1256297) took three
+months of card records for 1.1 million people, and four spatiotemporal points,
+the place and day of a purchase, were enough to pick out 90% of them; knowing a
+purchase's price raised the risk by 22% on average.
 
 ## Pseudonymisation, and the salt
 

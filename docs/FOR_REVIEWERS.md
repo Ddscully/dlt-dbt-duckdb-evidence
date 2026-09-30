@@ -343,8 +343,10 @@ The genuine ones, not the diplomatic ones.
 Sections 4 and 5 self-critique against my own judgement, which is the weaker
 kind of criticism: I chose the questions. This scores the same warehouse against
 a rubric I did not write — the **Governance Debt Assessment Model** from Gahi,
-*What Went Wrong with Data Lakes? A 15-Year Reality Check from the Field*
-(arXiv 2606.08266, 2026).
+[*What Went Wrong with Data Lakes? A 15-Year Reality Check from the Field*](https://arxiv.org/abs/2606.08266v1)
+(arXiv 2606.08266, version 1, 2026). It is a preprint, and it calls the rubric a
+testable hypothesis rather than a validated instrument, so what follows is a
+structured second opinion and not a certification.
 
 Its five dimensions read at one of four levels — Absent, Ad hoc, Partial,
 Established. The paper is explicit that there is no aggregate score: *"We

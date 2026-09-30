@@ -106,7 +106,10 @@ re-fetches that year and merges it in.
 Two files. dlt lands `raw` in the DuckLake catalog under `data/lakehouse/`, and
 everything built from it is in the DuckDB file, `data/warehouse.duckdb` — so the
 file alone holds no `raw`, and its `staging` views need the catalog attached as
-`lakehouse` (which `just sql` does):
+`lakehouse`. `just sql` does that; a GUI such as DBeaver has to be given the
+attach as a bootstrap query and told to open read-only, and the two settings are
+in the [`querying-the-warehouse`](../.agents/skills/querying-the-warehouse/SKILL.md#connecting-a-gui-dbeaver)
+skill.
 
 | Schema | Written by | Contents |
 |--------|-----------|----------|
@@ -165,7 +168,9 @@ release layout and the asset keys ignore the nesting.
 ## The bus matrix
 
 Business processes down, conformed dimensions across — Kimball's planning
-artifact, and the one thing `_groups.yml` (who owns it), `_exposures.yml` (who
+artifact, the [enterprise data warehouse bus matrix](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/enterprise-data-warehouse-bus-matrix/)
+(his 1999 column on it is [*The Matrix*](https://www.kimballgroup.com/1999/12/the-matrix/)),
+and the one thing `_groups.yml` (who owns it), `_exposures.yml` (who
 reads it) and the contracts (what shape it is) do not say. **It is derived from
 `manifest.json`, never written**: the grain comes from each model's own
 uniqueness tests and the columns from its enforced contract, so a mart added
@@ -177,7 +182,10 @@ a grain — `dim_grid_emission_factors` asserts one row per country *where
 reference table look like a conformed country dimension. And conformance is
 **exact column-name matching**, deliberately: an alias list would render a key
 spelled two ways as a tidy row of marks, which hides exactly the defect the
-matrix exists to show. It found three on its first render
+matrix exists to show. That is Kimball's own test, not a shortcut: dimensions
+[conform](https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/conformed-dimension/)
+when their attributes "have the same column names and domain contents". It found
+three on its first render
 ([`PRACTICES.md`](PRACTICES.md#1-model-the-data-honestly) has them).
 
 Regenerate with `just bus-matrix`.
