@@ -405,10 +405,10 @@ filed here, because all three are about the site rather than about Dagster.
 - **`site_pages_all_rendered` is blocking, and it checks file *size*.**
   `evidence build` exits 0 for a site missing a page, and nothing downstream reads
   `reports/build/` — so a route that emitted only the SvelteKit shell would
-  materialise green and deploy. The forty pages render at 34–61 kB; the floor is
-  8 kB. The two smallest are the ones carrying the least SQL — Scope 2's limits
-  page (34 kB) and Restatements (35 kB) — so it is prose-only pages, not chart
-  pages, that would ever bring the floor into play.
+  materialise green and deploy. The forty pages render at 35–61 kB; the floor is
+  8 kB. The two smallest are the ones carrying the least SQL — Restatements
+  (35 kB) and Scope 2's limits page (37 kB) — so it is prose-heavy pages, not
+  chart pages, that would ever bring the floor into play.
 - **`explore`, `settings` and `api` are reserved route names.** Evidence's own
   template ships `pages/explore/` (the SQL console and schema browser) and
   `pages/settings/`, so an `explore.md` added under `reports/pages/` is silently *not* copied into

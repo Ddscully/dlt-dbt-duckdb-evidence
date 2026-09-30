@@ -769,6 +769,14 @@ select count(*) from lakehouse.raw.om_weather_daily;
   `marts.fct_example_scope2_emissions` prices twelve *hypothetical* sites against
   real grid emission factors, as a worked example of
   `marts.dim_grid_emission_factors`. Nothing else in this artifact is fabricated.
+- **The grid emission factors are lifecycle factors in CO₂e, and `factor_basis`
+  now says so.** `marts.dim_grid_emission_factors` carries OWID's
+  `carbon_intensity_elec`, which is Ember's lifecycle estimate: it counts the
+  emissions upstream of the plant, which a GHG Protocol Scope 2 factor leaves to
+  Scope 3 category 3, so it reads higher than a generation-only factor.
+  `factor_basis` was `location-based` on every row and is
+  `location-based, lifecycle` from this release on. No number moved, and `co2`
+  in the column names holds CO₂e.
 - **Any DuckDB from {MIN_READER_VERSION} on can open this file.** DuckDB {manifest["duckdb_version"]} wrote it,
   but the writer's version is not what decides whether you can read it — the storage
   format is, and this file is format {manifest["storage_version"]}, the oldest DuckDB still writes. If that

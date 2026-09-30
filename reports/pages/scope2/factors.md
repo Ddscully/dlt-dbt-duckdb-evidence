@@ -1,6 +1,6 @@
 ---
 title: The reference table
-description: The current location-based Scope 2 emission factor for every country, in both units, with its year and grid size.
+description: The current grid emission factor for every country, location-based and lifecycle, in both units, with its year and grid size.
 sidebar_position: 1
 ---
 
@@ -27,14 +27,14 @@ order by emission_factor_g_co2_per_kwh
 <DataTable data={latest_factors} rows=20 search=true>
     <Column id=country_name title="Country"/>
     <Column id=year title="Year" fmt="0"/>
-    <Column id=emission_factor_g_co2_per_kwh title="gCO₂ / kWh" fmt="#,##0.0" contentType=bar/>
+    <Column id=emission_factor_g_co2_per_kwh title="gCO₂e / kWh" fmt="#,##0.0" contentType=bar/>
     <Column id=emission_factor_t_co2_per_mwh title="tCO₂e / MWh" fmt="0.0000"/>
     <Column id=low_carbon_share_elec_pct title="Low-carbon %" fmt="0"/>
     <Column id=electricity_generation_twh title="Grid (TWh)" fmt="#,##0.0"/>
     <Column id=latest_factor_lag_years title="Years behind" fmt="0"/>
 </DataTable>
 
-Two units for one number, on purpose. `gCO₂/kWh` is how the series is published
+Two units for one number, on purpose. `gCO₂e/kWh` is how the series is published
 and how a reader holds it. `tCO₂e/MWh` is the unit meter data arrives in, and
 making a reporter do the divide-by-1000 in a spreadsheet is how a filing acquires
 a factor-of-1000 error.

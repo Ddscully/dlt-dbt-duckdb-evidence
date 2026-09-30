@@ -121,7 +121,7 @@ order by g_change
     sort=false
     yFmt="#,##0"
     title="Grid carbon intensity since 2005"
-    subtitle="Change in gCO₂ per kWh: the ten largest improvements among grids over 150 TWh, and every one that got dirtier"
+    subtitle="Change in gCO₂e per kWh: the ten largest improvements among grids over 150 TWh, and every one that got dirtier"
 />
 
 Spain, Poland and the UK each took more than 300 g out of every kWh, by closing
@@ -402,7 +402,7 @@ order by year
     yFmt="#,##0"
     yMin=0
     title="Spread of national grids"
-    subtitle="gCO₂ per kWh, 10th, 50th and 90th percentiles of the same countries each year"
+    subtitle="gCO₂e per kWh, 10th, 50th and 90th percentiles of the same countries each year"
 />
 
 The same <Value data={grid_percentiles} column=n_countries/> countries in every year, so the sample cannot move the lines.

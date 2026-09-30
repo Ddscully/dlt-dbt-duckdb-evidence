@@ -12,17 +12,23 @@ models:
 
       `emission_factor_g_co2_per_kwh` is the same series as
       `fct_emissions_energy.carbon_intensity_elec_g_kwh`. It is modelled again
-      here because the use is different — under the GHG Protocol this *is* the
-      location-based Scope 2 emission factor, the figure a multi-site company
-      multiplies its metered kWh by for the electricity line of a CSRD, SECR or
-      CDP disclosure, and that reader wants a lookup table rather than a
-      60-column fact.
+      here because the use is different: a grid-average factor is what the GHG
+      Protocol's location-based method multiplies metered kWh by for the
+      electricity line of a CSRD, SECR or CDP disclosure, and that reader wants
+      a lookup table rather than a 60-column fact.
 
-      Three caveats travel with every row and are stated on the Scope 2 page
-      rather than hidden: it is **location-based** (a market-based factor needs
+      Four caveats travel with every row and are stated on the Scope 2 page
+      rather than hidden. It is a **lifecycle** factor in **CO2e**: Ember's
+      estimate, each fuel's generation times a lifecycle factor, so it includes
+      the upstream emissions (fuel extraction, methane, building the plant) that
+      the Protocol reports in Scope 3 category 3, where a Scope 2 factor counts
+      generation only. It is **location-based** (a market-based factor needs
       contractual instruments — RECs, GOs — that no public dataset carries), it
       is an **annual average** rather than hourly-matched, and OWID's series is
       **production-based**, so it ignores imported electricity.
+
+      The column names say `co2` and the quantity is CO2e
+      (docs/decisions/0018).
 
       Not built on the full spine, unlike every other model here: a country-year
       with no factor is an absence, not a reference value. `dim_country_year` is
@@ -72,8 +78,9 @@ models:
         meta:
           additivity: non_additive
         description: >
-          Grams of CO2 per kWh generated. Never null — a row exists only where
-          a factor does.
+          Grams of CO2e per kWh generated, lifecycle: upstream emissions are in
+          it, so a hydro grid reads about 24, not zero. Never null — a row
+          exists only where a factor does.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -147,9 +154,9 @@ models:
         meta:
           additivity: non_additive
         description: >
-          The factor as first snapshotted. The point of keeping it is that a
-          disclosure filed against a superseded number has to stay reconcilable;
-          it does not become wrong when OWID restates.
+          The factor as first snapshotted, g CO2e per kWh. The point of keeping
+          it is that a disclosure filed against a superseded number has to stay
+          reconcilable; it does not become wrong when OWID restates.
       - name: is_restated
         data_type: BOOLEAN
         description: Whether the factor has changed since the snapshot first saw it. Null before 2015.
@@ -166,9 +173,12 @@ models:
       - name: factor_basis
         data_type: VARCHAR
         description: >
-          Always `location-based`. Constant on every row on purpose: this table
-          ships as a standalone Parquet file in the data release, and a factor
-          detached from its basis is the one thing a reporter must not be handed.
+          Always `location-based, lifecycle`: the method, then the boundary. A
+          grid average where the site sits, counting upstream emissions as well
+          as generation, which is more than a Scope 2 factor counts. Constant on
+          every row on purpose: this table ships as a standalone Parquet file in
+          the data release, and a factor detached from its basis is the one
+          thing a reporter must not be handed.
         data_tests: [not_null]
       - name: source_dataset
         data_type: VARCHAR
@@ -188,7 +198,8 @@ models:
     description: >
       The worked example for `dim_grid_emission_factors`: metered MWh x factor
       -> tonnes CO2e, per site, which is the whole of location-based Scope 2
-      accounting under the GHG Protocol.
+      accounting under the GHG Protocol. The factor is a lifecycle one, so the
+      tonnes here are higher than a generation-only factor would give.
 
       **The twelve sites are invented** — `seeds/example_scope2_sites.csv`, the
       only fabricated data in this warehouse. The factors they are multiplied by
@@ -277,7 +288,9 @@ models:
         data_type: DOUBLE
         meta:
           additivity: additive
-        description: Location-based Scope 2 emissions for one year, tonnes CO2e.
+        description: >
+          Location-based Scope 2 emissions for one year, tonnes CO2e, on the
+          factor's lifecycle basis.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:

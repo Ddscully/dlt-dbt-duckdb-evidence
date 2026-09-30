@@ -1,7 +1,8 @@
 {#
   SCD2 history of the grid emission factor, i.e. the number a company multiplies
   its metered kWh by to produce the location-based Scope 2 line in a CSRD, SECR
-  or CDP disclosure.
+  or CDP disclosure. It is a lifecycle factor in CO2e; see
+  `dim_grid_emission_factors` in _compliance.yml.
 
   `snap_co2_estimates` keeps revisions because a restated inventory is
   interesting; this one keeps them because a *filed* number has to stay

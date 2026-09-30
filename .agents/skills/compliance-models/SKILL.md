@@ -12,11 +12,45 @@ lineage columns and the caveats travel with the rows.
 ## Scope 2 emission factors (`dim_grid_emission_factors`, `reports/pages/scope2.md`)
 
 `carbon_intensity_elec_g_kwh` is already in the wide fact. It is modelled a
-second time as `marts.dim_grid_emission_factors` because under the GHG Protocol
-that series **is** the location-based Scope 2 emission factor — the number a
-multi-site company multiplies its metered kWh by for the electricity line of a
-CSRD / SECR / CDP disclosure. No new ingestion, no new analysis: the work was
-packaging.
+second time as `marts.dim_grid_emission_factors` because a grid-average factor
+is what the GHG Protocol's location-based method multiplies metered kWh by for
+the electricity line of a CSRD / SECR / CDP disclosure. No new ingestion, no
+new analysis: the work was packaging.
+
+**The series is a lifecycle factor in CO2e, and a Scope 2 factor counts
+generation only.** OWID's codebook titles `carbon_intensity_elec`
+"Lifecycle carbon intensity of electricity generation", in grams of CO2
+equivalents, and Ember's methodology says how it is made: each fuel's generation
+times a lifecycle factor (UNECE, IPCC AR5, Jordaan et al.), "including upstream
+methane, supply chain and manufacturing emissions". The Scope 2 Guidance uses
+generation-only factors and sends upstream emissions to Scope 3 category 3. So:
+
+- **Never write that the series *is* the location-based Scope 2 factor.** It is
+  a stand-in that reads higher, and a company also reporting category 3 would
+  count the upstream part twice. `factor_basis` is `location-based, lifecycle`
+  for that reason.
+- **The gap is measured in two places, and neither gives it one size.** The
+  seven grids above 10 TWh that are at least 99.5% low-carbon carry 23.1 to
+  27.8 g/kWh, where a generation-only factor would be at or near zero; the
+  limits page computes that live. Against the European Environment Agency's
+  generation-only intensities for 2023, the series reads higher in 23 of the
+  EU's 27 members, by a median of 34 g/kWh, and 14% higher for the 27 weighted
+  by generation (236 against 207).
+  - **It reads lower in four**: Estonia (396 against 690), Cyprus, Belgium and
+    Lithuania. A wider boundary cannot do that, so the comparison mixes boundary
+    with method: the EEA divides reported emissions by gross generation, and
+    Ember multiplies generation by a factor per fuel. Quote it as a comparison
+    of two series, never as "the upstream share".
+  - **The EEA's series is not in the warehouse.** The figures were read off its
+    country-level chart for 1990, 2000, 2010 and 2023, so they are fixed
+    numbers in prose, and nothing outside the EU is measured.
+- **It is computed, not metered.** Generation by fuel times a factor per fuel:
+  the gas factors are for 2017, and coal's are built from 2020 base factors and
+  each country's plant mix. So it moves with what a grid generates from, and not
+  with how its plants are run.
+- **`g_co2` in the column names holds CO2e**, and the rename is a contract break
+  that has not been paid for
+  ([`docs/decisions/0018-the-scope-2-factor-is-lifecycle.md`](../../../docs/decisions/0018-the-scope-2-factor-is-lifecycle.md)).
 
 ### The factor table
 
@@ -68,10 +102,10 @@ packaging.
   global footprint is the fix and the spread is better for it.
 ### Caveats and figures
 
-- **The three caveats are stated on the page, not hidden.** Location-based only
-  (market-based needs RECs/GOs, which no public dataset carries), an annual
-  average rather than hourly matching, and production- rather than
-  consumption-based. Naming them is the difference between a credible reference
+- **The four caveats are stated on the page, not hidden.** Lifecycle rather
+  than generation-only (above), location-based only (market-based needs
+  RECs/GOs, which no public dataset carries), an annual average rather than
+  hourly matching, and production- rather than consumption-based. Naming them is the difference between a credible reference
   table and a liability; a practitioner checks all three first.
 - The page quotes a 57x spread across grids above 10 TWh where
   `findings/electricity.md` quotes 24x above 150 TWh. Both are correct and the page says why — if one

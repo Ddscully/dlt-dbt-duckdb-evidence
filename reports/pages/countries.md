@@ -44,7 +44,7 @@ where year = ${inputs.year.value}
 <Grid cols=4>
     <BigValue data={kpis} value=n_countries title="Countries reporting all three"/>
     <BigValue data={kpis} value=avg_life_expectancy fmt="0.0" title="Avg life expectancy (yrs)"/>
-    <BigValue data={kpis} value=avg_grid_intensity fmt="#,##0" title="Avg grid (gCO₂/kWh)"/>
+    <BigValue data={kpis} value=avg_grid_intensity fmt="#,##0" title="Avg grid (gCO₂e/kWh)"/>
     <BigValue data={kpis} value=avg_low_carbon fmt='0.0"%"' title="Avg low-carbon electricity"/>
 </Grid>
 
@@ -57,7 +57,7 @@ select
     country_name,
     carbon_intensity_elec_g_kwh,
     coal_share_elec_pct,
-    least(carbon_intensity_elec_g_kwh, 900) as "gCO₂ per kWh"
+    least(carbon_intensity_elec_g_kwh, 900) as "gCO₂e per kWh"
 from warehouse.emissions_energy
 where year = ${inputs.year.value}
   and carbon_intensity_elec_g_kwh is not null
@@ -70,7 +70,7 @@ at the site root; a bare name resolves against the page and 404s. -->
     areaCol=country_iso3
     geoJsonUrl="../world-countries.geojson"
     geoId=iso3
-    value="gCO₂ per kWh"
+    value="gCO₂e per kWh"
     valueFmt="#,##0"
     colorPalette={['#d6e6f7', '#8fb8e6', '#eda100', '#b5530a', '#5a2403']}
     basemap="../blank-tile.png"
@@ -78,10 +78,10 @@ at the site root; a bare name resolves against the page and 404s. -->
     startingLong=10
     startingZoom=1
     height=400
-    title="gCO₂ per kWh generated (900 or more shown as 900)"
+    title="gCO₂e per kWh generated (900 or more shown as 900)"
     tooltip={[
         {id: 'country_name', showColumnName: false, valueClass: 'font-semibold'},
-        {id: 'carbon_intensity_elec_g_kwh', title: 'gCO₂ per kWh', fmt: '#,##0'},
+        {id: 'carbon_intensity_elec_g_kwh', title: 'gCO₂e per kWh', fmt: '#,##0'},
         {id: 'coal_share_elec_pct', title: 'Coal share %', fmt: '0'}
     ]}
 />
@@ -92,7 +92,9 @@ at the site root; a bare name resolves against the page and 404s. -->
 
 Coal-heavy grids sit near 800 g, nuclear and hydro grids under 50. Gas ranges from
 about 400 with modern plant to 700 with old plant or oil, which is why grids with
-no coal can still be dark.
+no coal can still be dark. The figure is a lifecycle one in CO₂e, counting the
+emissions upstream of the plant, which is why a hydro grid reads about 24 g
+rather than zero.
 
 ## Clean electricity and life expectancy, {inputs.year.label}
 
@@ -228,7 +230,7 @@ order by year
     yMin=0
     lineColor="#2a78d6"
     echartsOptions={{xAxis: {min: 'dataMin', max: 'dataMax'}}}
-    title="Grid carbon intensity, gCO₂ per kWh"
+    title="Grid carbon intensity, gCO₂e per kWh"
 />
 
 </Grid>

@@ -14,7 +14,9 @@ where the electricity is used.**
 
 **The twelve sites below are invented.** They are seeded in
 `dbt/seeds/example_scope2_sites.csv` and are the only fabricated data in this
-warehouse. The factors they are multiplied by are real.
+warehouse. The factors they are multiplied by are real, and they are
+[lifecycle factors](/scope2/limits): the tonnes below include emissions upstream
+of the plant, which a filed Scope 2 line leaves to Scope 3.
 
 </Alert>
 
@@ -76,7 +78,7 @@ order by ord desc
 Lyon and Göteborg together draw 17% of the group's electricity and account for
 1.7% of its reported emissions. Lyon alone draws three times the power of the
 Durban depot, 54 GWh against 18, and reports less than a fifth of its tonnes,
-because France's grid runs at 41 gCO₂/kWh and South Africa's at 699. At the other
+because France's grid runs at 41 gCO₂e/kWh and South Africa's at 699. At the other
 end, Pune is 11% of the electricity and 18% of the footprint.
 
 ## The same demand on the cleanest and dirtiest grid
@@ -130,7 +132,7 @@ order by scope2_t_co2e desc
     <Column id=country_name title="Country"/>
     <Column id=annual_electricity_mwh title="MWh / yr" fmt="#,##0"/>
     <Column id=factor_year title="Factor year" fmt="0"/>
-    <Column id=emission_factor_g_co2_per_kwh title="gCO₂ / kWh" fmt="#,##0.0"/>
+    <Column id=emission_factor_g_co2_per_kwh title="gCO₂e / kWh" fmt="#,##0.0"/>
     <Column id=scope2_t_co2e title="tCO₂e" fmt="#,##0"/>
     <Column id=share_of_group_pct title="Share of total" fmt='0.0"%"'/>
 </DataTable>

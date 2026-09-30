@@ -15,8 +15,8 @@ select
     energy_per_capita,
     energy_per_gdp,
     -- electricity: a narrower slice of energy, but ~210 countries rather than
-    -- 79, and `carbon_intensity_elec` is in gCO2 per kWh — a unit a reader can
-    -- hold, unlike a share of a mix
+    -- 79, and `carbon_intensity_elec` is in gCO2e per kWh, lifecycle — a unit a
+    -- reader can hold, unlike a share of a mix
     electricity_generation as electricity_generation_twh,
     carbon_intensity_elec as carbon_intensity_elec_g_kwh,
     low_carbon_share_elec as low_carbon_share_elec_pct,

@@ -62,12 +62,13 @@ about how it was built, rather than about what it concludes.
 Four real ones, and they are the reason the "So what" boxes exist on the
 findings page:
 
-- **Scope 2 disclosure.** `carbon_intensity_elec_g_kwh` *is* the location-based
-  grid emission factor, the figure a multi-site company multiplies its metered
-  kWh by to produce the electricity line in a CSRD, SECR or CDP filing. Across
-  the largest grids in 2024 it runs 30 g/kWh (Norway) to 717 g/kWh (South
+- **Scope 2 disclosure.** `carbon_intensity_elec_g_kwh` is a grid-average
+  emission factor, the kind of figure a multi-site company multiplies its
+  metered kWh by to produce the electricity line in a CSRD, SECR or CDP filing.
+  Across the largest grids in 2024 it runs 30 g/kWh (Norway) to 717 g/kWh (South
   Africa), so the same 100 GWh site reports ~3 kt CO₂e or ~72 kt depending only
-  on where it sits.
+  on where it sits. It is a lifecycle factor, so it reads higher than the
+  generation-only one a filing uses, and the Scope 2 pages say so.
 - **Energy cost exposure.** EU household electricity prices at their *published*
   half-year grain, not flattened to an annual average, because the annual
   average hides the thing you'd want to see. The Netherlands went €0.034/kWh in

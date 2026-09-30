@@ -68,7 +68,7 @@ order by electricity_generation_twh desc
     <Column id=country_name title="Country"/>
     <Column id=latest_available_year title="Newest factor" fmt="0"/>
     <Column id=latest_factor_lag_years title="Years behind" fmt="0"/>
-    <Column id=emission_factor_g_co2_per_kwh title="gCO₂ / kWh" fmt="#,##0.0"/>
+    <Column id=emission_factor_g_co2_per_kwh title="gCO₂e / kWh" fmt="#,##0.0"/>
     <Column id=electricity_generation_twh title="Grid (TWh)" fmt="#,##0.0"/>
 </DataTable>
 
