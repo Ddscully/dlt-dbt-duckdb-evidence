@@ -44,7 +44,7 @@ retail log sits below one.
 | Eurostat: household electricity prices (41 countries, the EU-27 among them) | country-half-year (fact) | https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204 |
 | ECB euro reference rates, via Frankfurter | date-currency (fact), the only one with no country | https://frankfurter.dev |
 | UCI Online Retail II: one retailer's invoice lines | invoice-line (fact), the finest grain here and the only one below a country | https://archive.ics.uci.edu/dataset/502/online+retail+ii |
-| Open-Meteo ERA5: daily weather at 41 capital cities | country-day (fact), aggregated to country-year | https://open-meteo.com/ |
+| Open-Meteo reanalysis (ERA5-Land, ERA5): daily weather at 41 capital cities | country-day (fact), aggregated to country-year | https://open-meteo.com/ |
 
 The country-year sources join on **ISO country code + year**, which is what puts
 *CO₂ per \$ of GDP* beside an income group, or renewables adoption beside life
@@ -287,8 +287,8 @@ revisions(WEATHER_TABLE, v[-2], v[-1])   # rows that genuinely differ
   list it.
 
 Weather is the table worth diffing because it is the only source here that
-restates on a schedule — Open-Meteo serves preliminary ERA5T and Copernicus
-supersedes it with final ERA5 two to three months later, so every ingest
+restates on a schedule — Open-Meteo serves the preliminary reanalysis and
+Copernicus supersedes it with the final one two to three months later, so every ingest
 re-merges 90 days of daily rows in place.
 
 ### The Parquet in an S3-compatible bucket

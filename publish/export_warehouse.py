@@ -112,7 +112,7 @@ its publishers and is redistributed here under their licences.
 | CBAM default values (Annex I) | [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621), as corrected by [(EU) 2026/1740](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740) | [Commission reuse decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj) |
 | Euro foreign-exchange reference rates | [European Central Bank](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html), via [Frankfurter](https://frankfurter.dev) | [ECB reuse policy](https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html) |
 | Online Retail II transactions | [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/502/online+retail+ii) (Chen, D., 2019) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
-| Daily capital-city weather (ERA5 reanalysis) | [Open-Meteo](https://open-meteo.com/), generated using Copernicus Climate Change Service information (ECMWF ERA5) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Daily capital-city weather (ERA5-Land temperatures; ERA5 precipitation, wind and radiation) | [Open-Meteo](https://open-meteo.com/), generated using Copernicus Climate Change Service information (ECMWF ERA5-Land and ERA5) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 
 Annexes II and III of that regulation — the country electricity emission factors
 — are **not** in this artifact. They are IEA data under CC BY-NC-SA 4.0, and
@@ -805,6 +805,15 @@ select count(*) from lakehouse.raw.om_weather_daily;
   rename below: `sed -i 's/quote_currency/currency_code/g'` over your queries is
   the whole migration, and carrying a v1 of two tables to say so would cost more
   than it tells you.
+- **The weather from 2017 on changed, to be one reanalysis in every year.**
+  Open-Meteo answered 2017 onwards from a forecast model (ECMWF IFS) until the
+  request named what should answer: ERA5-Land for the temperatures, ERA5 for
+  precipitation, wind and radiation. Heating degree days from 2017 moved by more
+  than 5% in over a quarter of country-years, Malta, Cyprus and Portugal most,
+  and `grid_distance_km` is smaller because the cell is ERA5-Land's. One
+  `(grid_latitude, grid_longitude)` per country in `staging.stg_weather_daily`
+  says every year in this archive has been re-fetched; more than one means some
+  years still carry the old answer.
 - **`marts.fct_eu_electricity_prices_semiannual` gained two columns, and it is
   not an EU table.** Eurostat prices 41 countries, 27 of them EU members.
   `is_eu_member` marks those, and `eu27_price_eur_kwh` is Eurostat's own EU

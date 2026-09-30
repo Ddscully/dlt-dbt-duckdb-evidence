@@ -8,6 +8,7 @@ call to exercise. The end-to-end path lives in `just test-pipeline`.
 
 from __future__ import annotations
 
+import gzip
 import json
 import re
 import time
@@ -1049,9 +1050,38 @@ def test_weather_url_carries_every_location_in_one_request():
     assert "start_date=2022-01-01&end_date=2022-12-31" in url
     for variable in weather.WEATHER_DAILY_VARIABLES:
         assert variable in url
-    # Four decimals for a byte-stable, reproducible URL; ERA5's 0.25-degree grid
-    # means this precision can't change which cell answers.
+    # Four decimals for a byte-stable, reproducible URL; ERA5-Land's 0.1-degree
+    # grid means this precision can't change which cell answers.
     assert "52.523500" not in url
+    # Never left to the API's default, which answers 2017 onwards from a
+    # forecast model and earlier years from this reanalysis.
+    assert url.endswith(f"&models={weather.WEATHER_MODEL}")
+
+
+def test_the_recorded_weather_answers_every_variable_in_the_expected_unit():
+    """A model is named in the request, and a model that lacks a variable answers
+    it with nulls, not an error: `era5_land` returns the three temperatures and
+    null precipitation, wind and radiation on every date. No range test sees
+    that, since each passes on a null, and none sees a unit change either.
+
+    So the payload the pipeline was last recorded against is held to both: every
+    location answers every variable, in the unit the models assume.
+    """
+    url = weather.weather_url([("DEU", 52.5235, 13.4115)], "2020-01-01", "2020-12-31")
+    with gzip.open(fixtures.path_for(url), "rt") as handle:
+        entries = json.load(handle)
+
+    assert len(entries) == len(weather.WEATHER_COUNTRIES)
+    for entry in entries:
+        units = entry["daily_units"]
+        for variable, unit in weather.WEATHER_EXPECTED_UNITS.items():
+            assert units[variable] == unit
+            values = entry["daily"][variable]
+            answered = sum(value is not None for value in values)
+            assert answered == len(values), (
+                f"{variable} is null on {len(values) - answered} of {len(values)} days at "
+                f"{entry['latitude']},{entry['longitude']} — does `WEATHER_MODEL` provide it?"
+            )
 
 
 def test_weather_end_date_stops_short_of_the_archives_edge():

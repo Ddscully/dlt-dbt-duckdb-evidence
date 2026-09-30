@@ -29,6 +29,10 @@ on:
         required: false
         type: boolean
         default: false
+      weather_years:
+        description: "Re-fetch these weather years before the build, e.g. '2017 2026' (at most 15 a run)"
+        required: false
+        type: string
 
 permissions:
   contents: write # creates the tag, the release and its assets
@@ -121,6 +125,28 @@ jobs:
           print(f"restored_lakehouse_rows={weather}")
           PY
           rm -rf prev-release
+
+      # The carried weather rows are never refetched by a routine build, which
+      # asks only for the last ninety days. So a change to what the request
+      # asks for (the model it names, a variable) reaches the published archive
+      # only through this step, and until it runs the archive holds both the old
+      # answer and the new one. Paced to Open-Meteo's budget: ten years is over
+      # an hour, most of it one sleep (`weather-models`).
+      #
+      # Through the environment and checked, like the tag: `just` interpolates
+      # its arguments into a script.
+      - name: Re-fetch weather years
+        if: ${{ inputs.weather_years }}
+        env:
+          WEATHER_YEARS: ${{ inputs.weather_years }}
+        run: |
+          read -r first last <<< "$WEATHER_YEARS"
+          last="${last:-$first}"
+          if ! [[ "$first" =~ ^[0-9]{4}$ && "$last" =~ ^[0-9]{4}$ ]]; then
+            echo "weather_years must be one or two four-digit years, got: $WEATHER_YEARS" >&2
+            exit 1
+          fi
+          just backfill-weather "$first" "$last"
 
       # ingest -> dbt build + test -> Polars, in asset-graph order. dbt's data
       # and unit tests run inside `dbt build`, so a warehouse that fails them

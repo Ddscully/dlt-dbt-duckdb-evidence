@@ -1,17 +1,48 @@
 ---
 name: weather-models
-description: The Open-Meteo ERA5 capital-city weather source — raw.om_weather_daily, stg_weather_daily, the weighted rate-limit budget that bounds what can be fetched, the positional multi-location response, the two degree-day conventions and the year-range backfill it shares with wb_wdi, which refuses a range over a day's budget. Use when editing the weather resource or model, running just backfill-weather, changing which years or locations the archive covers, or reasoning about anything the weather budget constrains.
+description: The Open-Meteo reanalysis capital-city weather source — raw.om_weather_daily, stg_weather_daily, the model the request names, the weighted rate-limit budget that bounds what can be fetched, the positional multi-location response, the two degree-day conventions and the year-range backfill it shares with wb_wdi, which refuses a range over a day's budget. Use when editing the weather resource or model, running just backfill-weather, changing which years or locations the archive covers, or reasoning about anything the weather budget constrains.
 ---
 
 # Capital-city weather (`om_weather_daily`, `stg_weather_daily`)
 
 
-Daily ERA5 weather for 41 capitals, those of the countries Eurostat prices, from Open-Meteo. Added because
+Daily reanalysis weather for 41 capitals, those of the countries Eurostat prices,
+from Open-Meteo. Added because
 `stg_country` had carried the World Bank's capital `latitude`/`longitude` since
 the first commit and **nothing read either column** — this file mentioned them
 once, as a `try_cast` ingest gotcha. It is the warehouse's first spatial join and
 its first source with a *finite budget*.
 
+- **The request names its model, because the default is two.** With no
+  `models=` the archive API answers from its "best match", which is a
+  reanalysis to 2016-12-31 and the ECMWF IFS forecast model from 2017-01-01,
+  and reports the IFS cell's coordinates for every year. `WEATHER_MODEL` pins
+  `era5_seamless`: ERA5-Land (0.1°) for the three temperatures, ERA5 (0.25°)
+  for precipitation, wind and radiation. Why, and what was rejected, is
+  [`docs/decisions/0019-the-weather-request-names-its-model.md`](../../../docs/decisions/0019-the-weather-request-names-its-model.md).
+  - **`era5_land` alone answers the temperatures and nothing else.**
+    Precipitation, wind and radiation come back null on every date, with a 200
+    and no message, and every range test on those columns passes on a null. The
+    mart's every-variable-arrives test and the fixture test in
+    `tests/test_ingest.py` exist for that.
+  - **A model change reaches carried rows only by re-fetching them.** A routine
+    load asks for ninety days, so everything older keeps whatever answered when
+    it was fetched. Locally that is `just backfill-weather`; for the published
+    archive it is `release-data.yml`'s `weather_years` input, which runs the
+    same recipe between the restore and the build. Until every year has been
+    re-fetched the archive holds two models. The cell says which rows are
+    which: `count(distinct (grid_latitude, grid_longitude))` per country is 1
+    once every year is on one model, because each model reports its own cell.
+  - **The forecast model and the reanalysis are not close.** Over the 369
+    complete country-years from 2017 to 2025, heating degree days differ by more
+    than 5% in 100 and more than 10% in 54, from 18.7% below to 90.2% above.
+    Malta, Cyprus and Portugal average 42%, 33% and 25% apart. Before 2017 the
+    default already answered from `era5_seamless`: re-fetching 2016 changed one
+    day, the last.
+  - **The reanalysis runs about six days behind**, where the forecast model
+    answered yesterday. The days between come back with every variable null
+    and are dropped, so the newest row is older than it used to be and the
+    current year's `n_days` is smaller.
 - **The binding constraint is a rate limit, not disk.** The obvious cost model
   prices rows, and on that basis the whole 1940- global archive is trivial: 211
   capitals x 86 years x 6 variables is ~110 MB in DuckDB, nowhere near the 2 GiB
@@ -44,7 +75,7 @@ its first source with a *finite budget*.
   every other source. The *free tier* is additionally non-commercial and capped
   at 10,000 calls a day, which binds this pipeline and follows nobody who
   downloads the result. Attribution names Copernicus/ECMWF as well as
-  Open-Meteo, because ERA5 is theirs.
+  Open-Meteo, because ERA5 and ERA5-Land are theirs.
 - **The response is matched to the request by *position*, and there is no other
   key.** A multi-location response is a JSON array whose entries carry a
   `location_id` — except the first, which has none at all (absent, 1, 2, ...).
@@ -137,9 +168,10 @@ its first source with a *finite budget*.
     pacing turned a loud stop into a silent one; the guard has to be the test,
     because the runtime has no way left to complain.
 
-- **The 90-day merge lookback is sized to ERA5T, not to politeness.**
-  Open-Meteo serves preliminary ERA5T within a day or two of real time and
-  Copernicus supersedes it with final ERA5 two to three months later. FX's ten
+- **The 90-day merge lookback is sized to the preliminary runs, not to
+  politeness.** Open-Meteo serves ERA5T and ERA5-Land's equivalent about six
+  days behind real time and Copernicus supersedes them with the final
+  reanalysis two to three months later. FX's ten
   days would freeze preliminary numbers *permanently* here, because rows outside
   the window are carried forward rather than refetched.
 - **A backfill over more than a day's allowance is refused before any request.**
@@ -162,9 +194,9 @@ its first source with a *finite budget*.
   is also why `raw_by_year_assets` reads `context.selected_asset_keys`:
   materialising `raw/om_weather_daily` alone must not re-fetch WDI.
 - **A capital is a coarse proxy and the model says so with a number.**
-  `grid_distance_km` is the great-circle distance from the capital to the ERA5
-  cell that answered — the API snaps to the nearest cell centre and reports where
-  it landed, so Berlin's 52.5235/13.4115 comes back 52.54833/13.407822.
+  `grid_distance_km` is the great-circle distance from the capital to the
+  ERA5-Land cell that answered — the API snaps to the nearest cell centre and
+  reports where it landed, so Berlin's 52.5235/13.4115 comes back 52.5/13.400009.
   Comparing a country with *itself* across years is what degree days are for
   here; comparing countries with each other is much weaker, and a
   population-weighted average over many cells is the honest version at many times
@@ -177,19 +209,20 @@ its first source with a *finite budget*.
   policy, the warehouse builds one value of it, and every other value it claims
   to support is untested by construction.
   - **"Disagree" is the whole of it — there is no ordering between them.**
-    Measured over the full archive (656 rows, 41 capitals x 16 years): `hdd_minmax_total` is the **larger in 253 rows (38.6%)** and the
-    smaller in 403, gaps running -153.0 to +96.2. Whether the midpoint sits
+    Measured over the full archive (656 rows, 41 capitals x 16 years):
+    `hdd_minmax_total` is the **larger in 326 rows (49.7%)** and the smaller in
+    330, gaps running -83.0 to +64.7. Whether the midpoint sits
     above or below the true daily mean depends on the day's diurnal shape, so a
     data test asserting an order turns the build red on reality.
   - **The two being swapped is therefore uncatchable by a data test**: swap them
-    in the mart's final SELECT and all 29 of `fct_country_weather_year`'s data
-    tests pass. It is a unit test — `weather_year_keeps_the_two_degree_day_conventions_apart`,
+    in the mart's final SELECT and every data test on
+    `fct_country_weather_year` passes. It is a unit test — `weather_year_keeps_the_two_degree_day_conventions_apart`,
     whose fixture deliberately puts one country on each side of the gap. See
     `unit-testing-dbt-models`.
 - **The payoff is a negative result, which only weather lets this warehouse
   reach.** Heating degree days for six EU capitals, 2021 against 2022:
-  every one milder, inside a 6.5-point band (Germany -13.5%, Spain -10.2%,
-  France -16.5%, Italy -12.0%, Netherlands -13.8%, Poland -10.0%) while
+  every one milder, inside a 10.4-point band (Germany -14.6%, Spain -9.8%,
+  France -17.4%, Italy -7.0%, Netherlands -14.6%, Poland -11.4%) while
   electricity prices spread 81.8 points in both directions. Weather explains
   essentially none of the divergence, which upgrades the existing Netherlands
   finding — EUR 0.034 to EUR 0.142 across the 2022 halves, "a price nobody paid"
@@ -197,15 +230,16 @@ its first source with a *finite budget*.
 - **Against emissions the same test comes out positive**, and the page shows
   both (`reports/sources/warehouse/weather_emissions_pairs.sql`). With 2020 and
   2021 left out, the panel's year-level HDD change and total CO₂ change
-  correlate at 0.73 over ten year-pairs. Per country the correlation runs about
-  0.7–0.8 in Romania, Austria, Poland, Belgium and France, 0.77–0.85 on gas CO₂
-  alone, and near zero or negative in Spain, Portugal, Türkiye and Norway. Two
+  correlate at 0.69 over ten year-pairs. Per country the correlation runs
+  0.75–0.81 in Romania, Serbia, Belgium, Poland and Austria, reaches 0.77–0.83
+  on gas CO₂ alone in seven (Belgium, Czechia and Germany among them), and is
+  near zero or negative in Spain, Portugal, Türkiye and Norway. Two
   traps sit in the method:
   - **Leave the pandemic years out.** 2020 was mild *and* a lockdown, 2021 cold
     *and* a rebound; both line up with the weather by coincidence and inflate
     every correlation.
   - **The signal is continent-wide winters.** Demeaning each year across
-    countries, which strips out the shared winter, leaves r ≈ 0.16. So read the
+    countries, which strips out the shared winter, leaves r ≈ 0.17. So read the
     per-country fits as each country against its own history, never as a
     same-year cross-country comparison.
   The newest complete weather year has no OWID CO₂ to pair with (it runs a year

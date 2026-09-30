@@ -21,7 +21,7 @@ by_year as (
         max(heating_base_c) as heating_base_c,
         max(cooling_base_c) as cooling_base_c,
 
-        -- A mean of ERA5's daily means (not of hourly values); the extremes are
+        -- A mean of the reanalysis's daily means (not of hourly values); the extremes are
         -- of daily extremes.
         round(avg(temp_mean_c), 2) as temp_mean_c,
         min(temp_min_c) as temp_min_c,

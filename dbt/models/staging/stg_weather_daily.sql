@@ -1,4 +1,4 @@
--- Daily capital-city ERA5 weather, turned into degree days. Its caveats — a
+-- Daily capital-city reanalysis weather, turned into degree days. Its caveats — a
 -- capital as a country's proxy, the preliminary recent tail, two degree-day
 -- conventions — are the description in _staging.yml and the weather-models skill.
 with source as (
@@ -18,7 +18,7 @@ renamed as (
         wind_speed_10m_max as wind_speed_max_kmh,
         shortwave_radiation_sum as solar_radiation_mj_m2,
 
-        -- The grid cell ERA5 answered from, not the capital (the API snaps to
+        -- The grid cell ERA5-Land answered from, not the capital (the API snaps to
         -- the nearest cell centre).
         grid_latitude,
         grid_longitude,

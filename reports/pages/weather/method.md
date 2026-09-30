@@ -91,8 +91,9 @@ select
 from (select distinct country_iso3, grid_distance_km from warehouse.country_weather_year)
 ```
 
-ERA5 answers on a 0.25-degree grid, so a request snaps to the nearest cell centre
-and the response reports where it actually landed. Averaged over the capitals
+The temperatures come from ERA5-Land, which answers on a 0.1-degree grid, so a
+request snaps to the nearest cell centre and the response reports where it
+actually landed. Averaged over the capitals
 that displacement is <Value data={grid_summary} column=average_km fmt='0.0'/> km, and the furthest capital sits <Value data={grid_summary} column=furthest_km fmt='0.0'/> km from the cell that answered for it.
 
 <DataTable data={grid}>
@@ -114,12 +115,20 @@ climate.
   series exactly, so the two join with no gaps. Joined to the global emissions
   data it leaves the rest of the world null, the same way the electricity price
   column already does.
+- **A reanalysis, not a forecast model, in every year.** The request names
+  what answers it: ERA5-Land for the temperatures, ERA5 for precipitation, wind
+  and radiation. Left unnamed, Open-Meteo answers the years from 2017 out of a
+  weather-forecast model instead, which is finer and runs closer to today, and
+  which would put a change of model inside every comparison that crosses 2017.
+  A year's heating degree days differ by more than 5% between the two in over a
+  quarter of country-years, and by a third or more in Malta and Cyprus.
 - **One cell per country.** See [A capital is not a country](#a-capital-is-not-a-country): fine for a country against itself, weak
   for one country against another. A population-weighted average over many cells
   is the honest version and costs many times the API budget this source has.
-- **The recent tail is preliminary.** Open-Meteo serves ERA5T within a day or two
-  of real time and Copernicus replaces it with final ERA5 two to three months
-  later, so rows inside the last ninety days can change value between builds.
+- **The recent tail is preliminary.** Open-Meteo serves the reanalysis about six
+  days behind real time, from preliminary runs that Copernicus replaces with
+  final ones two to three months later, so rows inside the last ninety days can
+  change value between builds.
   Rows older than that are frozen, because they are carried forward between
   releases rather than refetched.
 - **Degree days are a demand proxy, not demand.** They know nothing about
@@ -141,5 +150,5 @@ The tables are `marts.fct_country_weather_year` (these pages) and
 `staging.stg_weather_daily` (the daily grain underneath it, one row per country
 and date). Both ship in the
 [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest),
-along with the raw ERA5 landing table, which is the one table in this warehouse a
+along with the raw landing table, which is the one table in this warehouse a
 rebuild cannot reproduce inside the source's daily budget.

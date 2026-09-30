@@ -119,7 +119,8 @@ REMOTE_ENV_VARS = (DATA_PATH_ENV_VAR, CATALOG_ENV_VAR)
 # dlt's provenance, rewritten on every re-merge (module docstring); diffs drop it.
 DLT_COLUMNS = ("_dlt_load_id", "_dlt_id")
 
-# The one merge-loaded table upstream restates: final ERA5 replaces ERA5T.
+# The one merge-loaded table upstream restates: the final reanalysis replaces
+# the preliminary one.
 WEATHER_TABLE = "raw.om_weather_daily"
 
 # The weather loads `expire` keeps diffable; `weather_revisions_are_derivable`
