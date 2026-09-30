@@ -23,8 +23,8 @@ file `data/course/warehouse.duckdb`, which holds everything dbt builds, and the
 DuckLake landing zone `data/course/lakehouse/`, which holds `raw`. Delete
 `data/course/` and run it again.
 
-You should see it finish on `PASS=564 WARN=0 ERROR=0 SKIP=0 NO-OP=10
-TOTAL=574`. The ten no-ops are the exposures, which dbt resolves and does not
+You should see it finish on `PASS=545 WARN=0 ERROR=0 SKIP=0 NO-OP=11
+TOTAL=556`. The eleven no-ops are the exposures, which dbt resolves and does not
 build.
 
 ### The four recipes

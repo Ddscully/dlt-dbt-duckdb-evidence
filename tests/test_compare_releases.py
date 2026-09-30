@@ -83,7 +83,7 @@ def test_a_table_without_a_span_is_never_narrowed():
 
 
 def test_a_removed_table_is_reported_not_judged(manifests):
-    """Retiring a model removes its table on purpose — `fct_emissions_energy_v1` will.
+    """Retiring a model removes its table on purpose, as `fct_emissions_energy_v1` did.
 
     Asserted on what the command fails on as well as on the label, because
     counting `removed` as a loss keeps every label right.

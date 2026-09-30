@@ -95,7 +95,7 @@ countries on a 17-country slice. Three different numbers, none of them 17.
 01's drill (`left join co2` -> `inner join co2` in
 `dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`) was run: the mart goes 4,096 ->
 3,487 rows and **52 -> 17 countries**, EU price rows 701 -> 104, and `dbt build`
-reports `PASS=564 WARN=0 ERROR=0` either way. Don't quote a drill's numbers
+reports `PASS=545 WARN=0 ERROR=0` either way. Don't quote a drill's numbers
 without seeding it — the whole claim of the course is that the verdict doesn't
 move.
 
@@ -212,7 +212,7 @@ of an old bug — twice.** The merge-key drill (drop `indicator` from
 `staging.stg_wdi` stays at **576 rows** — unchanged, because a pivot's output
 grain does not depend on how many input rows feed it. Nine of eleven columns go
 to 100% null at a constant row count, so the obvious sanity check is structurally
-blind to it. `dbt build` reports `PASS=564 ERROR=0` either way.
+blind to it. `dbt build` reports `PASS=545 ERROR=0` either way.
 
 **Do not explain a mechanism the drill only demonstrates.** A reveal saying a
 single indicator survived, "by arriving first", was wrong. Re-running the drill
@@ -249,7 +249,7 @@ answer is the module.** `dbt_utils.accepted_range` compiles to
 silently skips its nulls. On `fct_emissions_energy` that means each of the
 fourteen range tests examines between **1.6%** (`electricity_price_eur_kwh`, 701
 of 43,138) and **54%** (`co2_mt`) of the fact — except `year`, the one column
-that is never null, at 100%. 198 of the 407 `marts` columns carry any test at
+that is never null, at 100%. 184 of the 366 `marts` columns carry any test at
 all, against every mart model under a type contract: two different guarantees, and
 worth being able to say which one you have. The audit schema is measurable too,
 but **it counts the reader's own rename history, not the project** — 36 orphans
@@ -257,7 +257,7 @@ on the warehouse last measured, and zero on a freshly built one. Write that kind
 never as the answer, or the reveal contradicts what the learner sees.
 
 **Drill 1 is the calibration trap with a second axis nobody expects.** Adding
-`max_value: 50` to `stg_co2.co2_per_capita` builds `PASS=564 WARN=0 ERROR=0` on
+`max_value: 50` to `stg_co2.co2_per_capita` builds `PASS=545 WARN=0 ERROR=0` on
 the sandbox, whose maximum is **22.22 — the USA in 1973**, a real and satisfying
 peak that is 35x too small. On the real warehouse it rejects **124 rows across 6
 countries** (Sint Maarten 782.7, Kuwait 364.8, Brunei 245.1, Qatar, Curaçao, UAE
@@ -286,7 +286,7 @@ one of three tables wrong, which has no signature.
 `share_of_group_pct` is a ratio of two numbers that both moved — so using
 `emission_factor_g_co2_per_kwh` where `emission_factor_t_co2_per_mwh` belongs
 turns 232,456 tCO2e into 232.5 **Mt** (more than Spain's 215.5 Mt in 2023) with
-`PASS=564 ERROR=0`. **A scaling error is invisible to one-sided bounds and to
+`PASS=545 ERROR=0`. **A scaling error is invisible to one-sided bounds and to
 every ratio downstream of it**, which is module 03's ceiling argument arriving as
 a live gap rather than a hypothetical.
 
