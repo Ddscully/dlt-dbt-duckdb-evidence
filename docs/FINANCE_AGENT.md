@@ -63,9 +63,11 @@ Desktop ([below](#from-an-mcp-client)).
 
 ## Running it on a laptop, with Ollama
 
-1. **A built warehouse.** `just run` once. The loop opens
-   `data/warehouse.duckdb` read-only, so it fails while a build holds the file
-   (`querying-the-warehouse`), and a build fails while it is reading. It also
+1. **A built warehouse.** `just run` once; without the file the loop stops and
+   says so. Each tool call opens `data/warehouse.duckdb` read-only and closes
+   it, so a build can run while the model is writing. A call made while a build
+   holds the file goes back to the model as `error: the warehouse is locked, …`,
+   which it relays (`querying-the-warehouse`). The loop also
    reads `dbt/target/manifest.json` and `semantic_manifest.json`, which every
    dbt command writes; without them it stops and says to run `just dbt-parse`.
 2. **Ollama, serving on port 11434, with a model that can call tools.** As a
@@ -90,7 +92,9 @@ Desktop ([below](#from-an-mcp-client)).
 
 A server that is not running reads `cannot reach http://localhost:11434/v1:
 [Errno 111] Connection refused`, and a model not yet pulled is Ollama's own
-`404 … model 'x' not found`.
+`404 … model 'x' not found`. One that accepts the request and never replies
+is given ten minutes, then `sent no reply within 600 seconds`; a reply with no
+message in it is printed as it came.
 
 ## Pointing it at another server
 
@@ -149,12 +153,15 @@ model writes the answer, so nothing appends the note or checks the numbers.
 The server sends a tool's note as a second block, `Quote this note verbatim in
 the answer: …`, and the one model measured did quote it, but nothing makes it.
 
-**It holds no connection between calls.** Each call opens the warehouse
+**It holds no connection between calls**, as the loop does not: the tools open
+the warehouse themselves. Each call opens it
 read-only and closes it, so a build can run while a client is connected, and a
 call made while the build holds the file answers `error: the warehouse is
 locked, most likely by a build; try again when it finishes` in about a
 hundredth of a second. A connection held for the client's session would make
-every build fail for as long as the client stayed open.
+every build fail for as long as the client stayed open. A warehouse that is
+not there answers with DuckDB's own `database does not exist`, which is not
+worth a retry.
 
 ## The metrics
 
@@ -163,7 +170,7 @@ net revenue in pounds, euros and dollars, gross revenue, returns, units sold,
 orders, customers, average order value, average selling price and return rate,
 each with its filter and a description the model reads in the tool's schema.
 MetricFlow, which dbt-core already installs, compiles a request to SQL, and
-`agent/metrics.py` runs it on the loop's read-only connection
+`agent/metrics.py` runs it on the tool's read-only connection
 ([0015](decisions/0015-metrics-in-the-semantic-layer.md)).
 
 ```
@@ -341,12 +348,17 @@ held a number missing from the tool output (checked with the loop's check,
 A `Tool` in `agent/tools.py` is its OpenAI `tools` schema and a
 `run(args) -> ToolResult`. `ToolResult.text` is what the model reads, and
 `ToolResult.note`, when set, is what every answer carries verbatim. Add the tool
-to `warehouse_tools(con, catalog)`, which both the loop and the MCP server
+to `warehouse_tools(connect, catalog)`, which both the loop and the MCP server
 offer, and write its text the way `render` writes
 the bridge: every figure a reader could want already computed and labelled, so
-the model has nothing to add up. A `ValueError` or `TypeError` from `run` goes
+the model has nothing to add up. A tool that reads the warehouse opens it
+inside `run`, with `with connect() as con:`, and holds it no longer: the loop
+waits minutes on a model between calls, and a connection kept across that wait
+makes a build fail. A `ValueError` or `TypeError` from `run` goes
 back to the model as `error: …`, for it to relay or to retry with other
-arguments.
+arguments, and so does an error from DuckDB. Check each argument for the
+shapes a small model sends: null or an empty list for one it leaves out, and a
+lone name bare.
 
 **Adding a metric is yml, not Python.** A metric added to
 `_retail_metrics.yml` is in `query_metric`'s schema after the next

@@ -13,6 +13,7 @@ What they hold:
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from decimal import Decimal
 
 import duckdb
@@ -177,7 +178,7 @@ def test_what_cannot_be_answered_is_refused(con, year, price, tonnes, error):
 
 
 def test_through_the_tool_list(con):
-    tools = {tool.name: tool for tool in warehouse_tools(con)}
+    tools = {tool.name: tool for tool in warehouse_tools(lambda: nullcontext(con))}
     priced = call_tool(
         tools, "run_scenario", {"good": "7601", "year": 2027, "ets_price_eur_per_t": 90}
     )
@@ -196,3 +197,10 @@ def test_through_the_tool_list(con):
     assert "Cland (own value)" in bare.text
     missing = call_tool(tools, "run_scenario", {"good": "7601"})
     assert missing.text == "error: run_scenario needs ets_price_eur_per_t and year"
+    # A cost with more digits than `Decimal` keeps is refused, not an arithmetic error.
+    huge = call_tool(
+        tools, "run_scenario", {"good": "7601", "year": 2027, "ets_price_eur_per_t": 1e30}
+    )
+    assert (
+        huge.text == "error: too large to price to the penny; lower ets_price_eur_per_t or tonnes"
+    )

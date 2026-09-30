@@ -2,22 +2,27 @@
 
 What is tested is what the loop promises whatever the model does: a figure no
 tool printed is flagged, the alignment note reaches the answer verbatim, and a
-tool's refusal goes back to the model rather than ending the run. The last test
-runs the real `explain_change` tool, on a fact small enough to build here, so a
-schema and a handler that disagree fail without a server. How good a given
-model's prose is stays a measurement, in `docs/FINANCE_AGENT.md`.
+tool's refusal goes back to the model rather than ending the run. The last tests
+run the real `explain_change` tool, on a fact small enough to build here, so a
+schema and a handler that disagree fail without a server, and so does a
+connection held while the model writes. How good a given model's prose is stays
+a measurement, in `docs/FINANCE_AGENT.md`.
 """
 
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+from contextlib import nullcontext
 
+import duckdb
 import pytest
 from retail_fact import sale, warehouse
 
 from agent.bridge import alignment_note, explain_change, render
 from agent.loop import NoAnswer, ask, unverified
-from agent.tools import Tool, ToolResult, warehouse_tools
+from agent.tools import Tool, ToolResult, call_tool, read_only, warehouse_tools
 
 NOTE = "Periods aligned: each year is compared over 1 Jan to 9 Dec only."
 BRIDGE = "Net revenue, EUR, 2010 to 2011: €10,744.6k to €10,401.3k (-3.19%, -€343.3k)."
@@ -111,8 +116,54 @@ def test_the_real_tool_runs_from_what_a_model_sends():
         call("c2", year_a="2021", year_b="2022"),  # years as strings, as small models send
         reply(f"Revenue changed by {float(bridge.change_pct):+.2%}."),
     )
-    answer = ask("How did revenue change?", chat, warehouse_tools(con))
+    answer = ask("How did revenue change?", chat, warehouse_tools(lambda: nullcontext(con)))
     assert chat.sent[1][-1]["content"] == "error: explain_change needs year_b"
     assert chat.sent[2][-1]["content"] == render(bridge)
     assert answer.notes == (alignment_note(bridge),)
     assert answer.unverified == ()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "refusal"),
+    [
+        ("[]", "error: arguments is a JSON object of named arguments, not []"),
+        ("null", "error: explain_change needs year_a and year_b"),
+        # Not a bridge of zeros under a note about alignment.
+        ('{"year_a": 2021, "year_b": 2021}', "error: year_a and year_b are both 2021"),
+    ],
+)
+def test_a_call_no_tool_can_answer_is_a_refusal_not_a_crash(arguments, refusal):
+    con = warehouse([sale("2021-03-01", "A", 10, 10.0), sale("2022-12-09", "A", 12, 12.0)])
+    tools = {tool.name: tool for tool in warehouse_tools(lambda: nullcontext(con))}
+    assert call_tool(tools, "explain_change", arguments).text.startswith(refusal)
+    # Null for an argument left out is the default, as small models send it.
+    defaulted = call_tool(
+        tools, "explain_change", '{"year_a": 2021, "year_b": 2022, "currency": null}'
+    )
+    assert defaulted.text == render(explain_change(con, 2021, 2022, "EUR"))
+
+
+def test_an_error_from_the_warehouse_goes_back_to_the_model():
+    # A warehouse that was never built: DuckDB's own error, relayed, not a traceback.
+    empty = duckdb.connect()
+    tools = {tool.name: tool for tool in warehouse_tools(lambda: nullcontext(empty))}
+    result = call_tool(tools, "explain_change", {"year_a": 2021, "year_b": 2022})
+    assert result.text.startswith("error: Catalog Error: Table with name")
+
+
+def test_no_connection_is_held_while_the_model_writes(tmp_path):
+    path = tmp_path / "warehouse.duckdb"
+    warehouse([sale("2021-03-01", "A", 10, 10.0), sale("2022-03-01", "A", 12, 12.0)], path).close()
+    build = [sys.executable, "-c", f"import duckdb; duckdb.connect({str(path)!r}).close()"]
+
+    class Building(Scripted):
+        """A model slow enough that a build starts, in another process, as it writes."""
+
+        def __call__(self, messages: list[dict], tools: list[dict]) -> dict:
+            subprocess.run(build, check=True, timeout=60)
+            return super().__call__(messages, tools)
+
+    chat = Building(call("c1", year_a=2021, year_b=2022), reply("It rose."))
+    ask("How did revenue change?", chat, warehouse_tools(read_only(lambda: str(path))))
+    # The second round trip came after the tool ran, and the build still got the file.
+    assert chat.sent[1][-1]["content"].startswith("Net revenue, EUR, 2021 to 2022")

@@ -48,6 +48,7 @@ import duckdb
 from metricflow.engine.metricflow_engine import MetricFlowEngine, MetricFlowQueryRequest
 from metricflow.protocols.sql_client import SqlEngine
 from metricflow.sql.render.duckdb_renderer import DuckDbSqlPlanRenderer
+from metricflow_semantics.errors.error_classes import InformativeUserError
 from metricflow_semantics.model.dbt_manifest_parser import (
     parse_manifest_from_dbt_generated_manifest,
 )
@@ -146,7 +147,12 @@ def _compile(
         where_constraints=where,
         order_by_names=names,
     )
-    return layer.engine.explain(request).sql_statement.sql
+    try:
+        return layer.engine.explain(request).sql_statement.sql
+    except InformativeUserError as exc:
+        # MetricFlow's refusal of a request, as this module's own: a caller
+        # catches `ValueError`, and the tool sends it back to the model.
+        raise ValueError(f"MetricFlow cannot answer that request. {exc}") from None
 
 
 def _quote(value: str) -> str:
@@ -219,7 +225,10 @@ def query_metric(
     where: Mapping[str, str] | None = None,
 ) -> MetricTable:
     """Metric values, grouped and filtered, with an `all` row and the periods covered in part."""
-    metrics, group_by, where = tuple(metrics), tuple(group_by), dict(where or {})
+    # A name given twice is answered once: MetricFlow refuses a duplicate, and
+    # a model that repeats a metric is not asking for two columns of it.
+    metrics, group_by = tuple(dict.fromkeys(metrics)), tuple(dict.fromkeys(group_by))
+    where = dict(where or {})
     unknown = [m for m in metrics if m not in layer.metrics]
     if not metrics or unknown:
         raise ValueError(
@@ -252,9 +261,9 @@ def query_metric(
             raise ValueError(f"cannot filter on {dimension}; choose from {', '.join(FILTERS)}")
         allowed = filter_values(con, dimension)
         if value not in allowed:
-            raise ValueError(
-                f"no sales with {dimension} {value!r}; the values are {', '.join(allowed)}"
-            )
+            # Quoted, because a value can hold a comma: "Hong Kong SAR, China".
+            choices = ", ".join(json.dumps(name, ensure_ascii=False) for name in allowed)
+            raise ValueError(f"no sales with {dimension} {value!r}; the values are {choices}")
         constraints.append(f"{{{{ Dimension('{FILTERS[dimension]}') }}}} = {_quote(value)}")
 
     result = con.execute(_compile(layer, metrics, group_by, constraints))

@@ -38,16 +38,16 @@ import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-
-import duckdb
+from pathlib import Path
 
 from agent.catalog import load_catalog
-from agent.tools import INSTRUCTIONS, Tool, call_tool, warehouse_tools
+from agent.tools import INSTRUCTIONS, Tool, call_tool, read_only, warehouse_tools
 from modern_data_stack.paths import warehouse_path
 
 BASE_URL = "http://localhost:11434/v1"  # Ollama's OpenAI-compatible endpoint
 MODEL = "granite4.1:8b"
 MAX_ROUNDS = 5
+TIMEOUT = 600  # seconds for one reply: a local model can take minutes, not seconds
 
 SYSTEM = INSTRUCTIONS
 
@@ -57,7 +57,7 @@ Chat = Callable[[list[Message], list[dict]], Message]
 
 
 class NoAnswer(RuntimeError):
-    """The model kept calling tools and never answered."""
+    """No answer came back: the model kept calling tools, or a reply held no message."""
 
 
 @dataclass(frozen=True)
@@ -138,7 +138,9 @@ def ask(question: str, chat: Chat, tools: Sequence[Tool], max_rounds: int = MAX_
     raise NoAnswer(f"no answer after {max_rounds} rounds of tool calls")
 
 
-def openai_chat(base_url: str, model: str, api_key: str | None = None) -> Chat:
+def openai_chat(
+    base_url: str, model: str, api_key: str | None = None, timeout: float = TIMEOUT
+) -> Chat:
     """A `Chat` against any OpenAI-compatible `/chat/completions` endpoint."""
     url = base_url.rstrip("/") + "/chat/completions"
     headers = {"Content-Type": "application/json"}
@@ -148,9 +150,14 @@ def openai_chat(base_url: str, model: str, api_key: str | None = None) -> Chat:
     def chat(messages: list[Message], tools: list[dict]) -> Message:
         body = {"model": model, "messages": messages, "tools": tools, "temperature": 0}
         request = urllib.request.Request(url, json.dumps(body).encode(), headers)
-        # A local model can take minutes, not seconds.
-        with urllib.request.urlopen(request, timeout=600) as response:
-            return json.load(response)["choices"][0]["message"]
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read()
+        try:
+            return json.loads(body)["choices"][0]["message"]
+        except (ValueError, LookupError, TypeError):
+            # A 200 whose body is an error, or not JSON: say what came back.
+            text = body[:300].decode(errors="replace")
+            raise NoAnswer(f"the reply holds no message: {text}") from None
 
     return chat
 
@@ -166,14 +173,23 @@ def main() -> None:
         catalog = load_catalog()
     except FileNotFoundError as exc:
         sys.exit(str(exc))
+    if not Path(warehouse_path()).exists():
+        # Said here, not by the model after a round trip spent finding out.
+        sys.exit(f"{warehouse_path()} does not exist: run `just run`")
     try:
-        # Read-only: fails while a build holds the file, by DuckDB's design.
-        with duckdb.connect(warehouse_path(), read_only=True) as con:
-            answer = ask(args.question, chat, warehouse_tools(con, catalog))
+        # Each tool call opens the warehouse read-only and closes it: a connection
+        # held while the model writes would make a build fail for minutes.
+        answer = ask(args.question, chat, warehouse_tools(read_only(warehouse_path), catalog))
     except urllib.error.HTTPError as exc:  # the server's reason, e.g. a model not pulled
         sys.exit(f"{args.base_url} refused: {exc.code} {exc.read().decode(errors='replace')}")
     except urllib.error.URLError as exc:
         sys.exit(f"cannot reach {args.base_url}: {exc.reason}. Is the model server running?")
+    # urllib wraps a failure to connect in URLError, and neither of these: a
+    # reply that never comes, and a connection closed before one.
+    except TimeoutError:
+        sys.exit(f"{args.base_url} sent no reply within {TIMEOUT} seconds")
+    except ConnectionError as exc:
+        sys.exit(f"{args.base_url} closed the connection: {exc}")
     except NoAnswer as exc:
         sys.exit(f"{args.model}: {exc}")
     for call in answer.calls:

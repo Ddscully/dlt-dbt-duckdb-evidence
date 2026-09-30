@@ -9,7 +9,9 @@ What they hold:
   error result, not a crash. Both are checked from a second process, because the
   lock is between processes: inside one, DuckDB refuses a second connection with
   a different configuration for a reason of its own, so a same-process check
-  would pass either way.
+  would pass either way;
+* a warehouse that is not there is not called a build in progress, whatever its
+  path spells.
 """
 
 from __future__ import annotations
@@ -76,16 +78,14 @@ def _texts(result) -> list[str]:
 
 
 def test_the_server_lists_exactly_the_loops_tools(catalog, database):
-    import duckdb
-
-    from agent.tools import warehouse_tools
+    from agent.tools import read_only, warehouse_tools
 
     async def calls(client):
         return (await client.list_tools()).tools
 
     listed = _session(_server(catalog, database), calls)
-    with duckdb.connect() as con:
-        schemas = [tool.schema["function"] for tool in warehouse_tools(con, catalog)]
+    tools = warehouse_tools(read_only(lambda: str(database)), catalog)
+    schemas = [tool.schema["function"] for tool in tools]
     assert [(t.name, t.description, t.input_schema) for t in listed] == [
         (s["name"], s["description"], s["parameters"]) for s in schemas
     ]
@@ -126,7 +126,7 @@ def test_no_connection_outlives_a_call(catalog, database):
 
 
 def test_a_call_during_a_build_is_an_error_not_a_crash(catalog, database):
-    from agent.mcp_server import LOCKED
+    from agent.tools import LOCKED
 
     # A writer in another process, holding the file until its stdin closes.
     hold = (
@@ -148,3 +148,19 @@ def test_a_call_during_a_build_is_an_error_not_a_crash(catalog, database):
         build.wait()
     assert result.is_error
     assert _texts(result) == [LOCKED]
+
+
+def test_a_missing_warehouse_is_not_called_a_build(catalog, tmp_path):
+    from agent.tools import LOCKED
+
+    # DuckDB's message quotes the path, and this one spells "lock".
+    missing = tmp_path / "blocks" / "warehouse.duckdb"
+    missing.parent.mkdir()
+
+    async def calls(client):
+        return await client.call_tool("query_metric", {"metrics": ["orders"]})
+
+    result = _session(_server(catalog, missing), calls)
+    assert result.is_error
+    (text,) = _texts(result)
+    assert text != LOCKED and text.endswith("database does not exist")
