@@ -154,7 +154,7 @@ then `-- emissions`, `-- energy`, `-- economic / social (World Bank WDI)`.
   dropped upstream in `stg_co2`" is not.
 - **[convention]** Document the *grain* on every model description, and any
   column whose coverage is partial. `electricity_price_eur_kwh` being null
-  outside the EU/EEA is the kind of thing that has to be written down.
+  outside the 41 countries Eurostat prices is the kind of thing that has to be written down.
 - **[convention]** Test the grain contract, not everything: `not_null` on the
   join keys, and a uniqueness test on `(country_iso3, year)`.
 - **[convention]** Prefer a smaller number of high-value tests over exhaustive

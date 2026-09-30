@@ -1,4 +1,4 @@
-"""Open-Meteo ERA5: daily weather for EU/EEA capitals.
+"""Open-Meteo ERA5: daily weather for the capitals of the countries Eurostat prices.
 
 The largest source module here, and the only one bounded by a *budget* rather
 than by what the API will serve: Open-Meteo charges weighted units, so what can

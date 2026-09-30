@@ -269,7 +269,8 @@ models:
       group: country_stats
     description: >
       Eurostat household electricity prices at their published grain: one row per
-      (country_iso3, year, half). EU/EEA only. This is the cleaning model — the
+      (country_iso3, year, half), for the 41 countries Eurostat prices: the EU's
+      27 members and 14 of its neighbours. This is the cleaning model — the
       geo -> ISO3 mapping happens here and `stg_eu_electricity_prices` averages
       it to the annual grain the rest of the warehouse uses.
 
@@ -318,14 +319,26 @@ models:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 1, inclusive: false}
+      - name: is_eu_member
+        description: >
+          True for the 27 countries in Eurostat's `EU27_2020` aggregate, listed in
+          the model in Eurostat's own codes. Today's membership at every
+          half-year, which is how the aggregate itself is composed.
+      - name: eu27_price_eur_kwh
+        description: >
+          Eurostat's `EU27_2020` aggregate for the half-year, repeated on every
+          country's row. Null would mean Eurostat has renamed the aggregate, which
+          it does when the membership changes (this one replaced `EU28`); the
+          mart's `not_null` on it is what notices.
 
   - name: stg_eu_electricity_prices
     config:
       group: country_stats
     description: >
       Eurostat household electricity prices averaged from semi-annual to annual,
-      one row per (country_iso3, year). EU/EEA only. Derived from
-      `stg_eu_electricity_prices_semiannual`, which holds the source grain.
+      one row per (country_iso3, year), for the 41 countries Eurostat prices.
+      Derived from `stg_eu_electricity_prices_semiannual`, which holds the source
+      grain.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

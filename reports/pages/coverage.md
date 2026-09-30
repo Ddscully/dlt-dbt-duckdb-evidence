@@ -77,7 +77,7 @@ exactly the columns it needs.
    per-metric latest year from `sources/warehouse/latest_years.sql` for exactly
    this reason.
 3. **The sources end at different times.** Read the `To` column below rather
-   than the chart, which is capped for legibility. GDP and EU electricity prices
+   than the chart, which is capped for legibility. GDP and Eurostat's electricity prices
    already run a year beyond the emissions series, with the grid series partly
    there, while consumption-based CO₂ ends a year before the emissions series. The mart's
    `max(year)` is the leader, not the consensus.

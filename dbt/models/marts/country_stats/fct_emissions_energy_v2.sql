@@ -1,4 +1,4 @@
--- Wide country-year fact: emissions + energy + WDI + EU prices on the spine.
+-- Wide country-year fact: emissions + energy + WDI + Eurostat prices on the spine.
 -- Grain: one row per (country_iso3, year).
 with spine as (
     select * from {{ ref('dim_country_year') }}
@@ -77,7 +77,8 @@ select
     w.forest_area_pct,
     w.renew_elec_pct,
     w.energy_imports_pct,
-    -- EU household electricity price, EUR/kWh (Eurostat; null outside the EU/EEA),
+    -- Household electricity price, EUR/kWh (Eurostat; null outside the 41
+    -- countries it prices),
     -- averaged over the year's halves and flagged when only one exists. See
     -- fct_eu_electricity_prices_semiannual for the unaveraged series.
     p.electricity_price_eur_kwh,

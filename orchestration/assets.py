@@ -113,7 +113,7 @@ RAW_DESCRIPTIONS = {
         "incrementally: `merge` on (indicator, country_code, year) over a "
         "5-year lookback window, not a full reload."
     ),
-    "eu_elec_prices": "Eurostat nrg_pc_204 household electricity prices, EU/EEA (JSON-stat).",
+    "eu_elec_prices": "Eurostat nrg_pc_204 household electricity prices for 41 countries, the EU-27 among them (JSON-stat).",
     "ecb_fx_rates": (
         "ECB daily euro FX reference rates via Frankfurter, at (rate_date, "
         "quote_currency). Loaded incrementally: "
@@ -128,7 +128,7 @@ RAW_DESCRIPTIONS = {
         "fetch."
     ),
     "om_weather_daily": (
-        "Open-Meteo ERA5 daily weather at each EU/EEA capital city, at "
+        "Open-Meteo ERA5 daily weather at the capital of each country Eurostat prices, at "
         "(country_iso3, weather_date) — the one source joined on a *coordinate*, "
         "the World Bank's capital latitude/longitude. Loaded "
         "incrementally: `merge` over a 90-day lookback (ERA5T is superseded by "

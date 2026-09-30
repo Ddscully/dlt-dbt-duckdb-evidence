@@ -1,6 +1,6 @@
 ---
 title: Currency
-description: The ECB's daily euro reference rates, what the 30% of days with no rate cost you, and why the same electricity price rose about 36% or 14% depending on which currency you counted in.
+description: The ECB's daily euro reference rates, what the 30% of days with no rate cost you, and why the same electricity price rose about 26% or 6% depending on which currency you counted in.
 sidebar_position: 4
 ---
 
@@ -106,26 +106,26 @@ A balance converts at the closing rate and a flow at the period average. For {in
 ## The same price, counted in euros and in dollars
 
 ```sql eur_vs_usd
--- Both currencies indexed to the first half of 2021, over one fixed set of
--- countries (eu_price_panel.sql), so the gap between the lines is the exchange
--- rate alone.
-with base as (select eur_kwh, usd_kwh from warehouse.eu_price_panel where period = '2021-S1')
+-- Eurostat's own EU average (eu_average_price.sql) in both currencies, indexed
+-- to the first half of 2021, so the gap between the lines is the exchange rate
+-- alone.
+with base as (select eu27_eur_kwh, eu27_usd_kwh from warehouse.eu_average_price where period = '2021-S1')
 
-select a.period_start_date, 'Priced in euros' as currency, 100 * a.eur_kwh / b.eur_kwh as price_index
-from warehouse.eu_price_panel a cross join base b
+select a.period_start_date, 'Priced in euros' as currency, 100 * a.eu27_eur_kwh / b.eu27_eur_kwh as price_index
+from warehouse.eu_average_price a cross join base b
 union all
-select a.period_start_date, 'Priced in dollars', 100 * a.usd_kwh / b.usd_kwh
-from warehouse.eu_price_panel a cross join base b
+select a.period_start_date, 'Priced in dollars', 100 * a.eu27_usd_kwh / b.eu27_usd_kwh
+from warehouse.eu_average_price a cross join base b
 order by 1
 ```
 
 ```sql crisis_rise
 select
-    100.0 * (max(eur_kwh) filter (where period = '2022-S2')
-        / max(eur_kwh) filter (where period = '2021-S1') - 1) as eur_rise_pct,
-    100.0 * (max(usd_kwh) filter (where period = '2022-S2')
-        / max(usd_kwh) filter (where period = '2021-S1') - 1) as usd_rise_pct
-from warehouse.eu_price_panel
+    100.0 * (max(eu27_eur_kwh) filter (where period = '2022-S2')
+        / max(eu27_eur_kwh) filter (where period = '2021-S1') - 1) as eur_rise_pct,
+    100.0 * (max(eu27_usd_kwh) filter (where period = '2022-S2')
+        / max(eu27_usd_kwh) filter (where period = '2021-S1') - 1) as usd_rise_pct
+from warehouse.eu_average_price
 ```
 
 <LineChart
@@ -141,7 +141,7 @@ from warehouse.eu_price_panel
     <ReferenceLine y=100 label=" "/>
 </LineChart>
 
-From the first half of 2021 to the second half of 2022 the same electricity rose <Value data={crisis_rise} column=eur_rise_pct fmt='0"%"'/> in euros and <Value data={crisis_rise} column=usd_rise_pct fmt='0"%"'/> in dollars.
+From the first half of 2021 to the second half of 2022 the EU's average household price rose <Value data={crisis_rise} column=eur_rise_pct fmt='0"%"'/> in euros and <Value data={crisis_rise} column=usd_rise_pct fmt='0"%"'/> in dollars.
 
 The euro fell against the dollar while European electricity got dearer, so a
 dollar-based buyer of the same kilowatt-hour saw a much smaller rise. Both numbers

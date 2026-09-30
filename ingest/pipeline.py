@@ -5,7 +5,7 @@ Sources (all freely licensed; country + year keyed apart from the last):
   - OWID Energy           https://github.com/owid/energy-data
   - World Bank WDI        https://databank.worldbank.org/source/world-development-indicators
   - World Bank countries  https://api.worldbank.org/v2/country?format=json  (dimension table)
-  - Eurostat prices       https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204  (EU only)
+  - Eurostat prices       https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204  (41 countries, the EU-27 among them)
   - ECB reference rates   https://frankfurter.dev  (daily FX)
   - UCI Online Retail II  https://archive.ics.uci.edu/dataset/502/online+retail+ii
                           (order lines — the one grain below a country, and the

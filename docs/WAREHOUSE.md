@@ -41,7 +41,7 @@ retail log sits below one.
 | OWID Energy | country-year (fact) | https://github.com/owid/energy-data |
 | World Bank WDI: GDP, life expectancy, population, poverty | country-year (fact) | https://databank.worldbank.org/source/world-development-indicators |
 | World Bank countries: region & income group | country (dimension) | https://api.worldbank.org/v2/country?format=json |
-| Eurostat: household electricity prices (EU/EEA) | country-half-year (fact) | https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204 |
+| Eurostat: household electricity prices (41 countries, the EU-27 among them) | country-half-year (fact) | https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204 |
 | ECB euro reference rates, via Frankfurter | date-currency (fact), the only one with no country | https://frankfurter.dev |
 | UCI Online Retail II: one retailer's invoice lines | invoice-line (fact), the finest grain here and the only one below a country | https://archive.ics.uci.edu/dataset/502/online+retail+ii |
 | Open-Meteo ERA5: daily weather at 41 capital cities | country-day (fact), aggregated to country-year | https://open-meteo.com/ |

@@ -252,8 +252,9 @@ carries it forward is `publishing-a-release`.
   2010–2024 and still scored 10% *worse* on carbon intensity.
   `gdp_constant_usd` (`NY.GDP.MKTP.KD`, constant 2015 US$) is the real-terms
   series. **The same failure is now measurable rather than narrated** — see the
-  Currency section: the EU household electricity price rose about 36% or 14% between
-  2021-S1 and 2022-S2 depending only on whether you counted in euros or dollars.
+  Currency section: the EU's average household electricity price rose about 26% or
+  6% between 2021-S1 and 2022-S2 depending only on whether you counted in euros or
+  dollars.
   - **The yen figure was wrong here and in `transform/co2_intensity.py` once,
     and it was wrong in the way a plausible number is.** It said the
     yen "fell 28% against the dollar"; 28% is Japan's *current-dollar GDP* fall
@@ -280,9 +281,33 @@ carries it forward is `publishing-a-release`.
   server-side, then walks that grid (see `ingest/sources/eurostat.py`). Its `geo` codes are ISO2
   *except* `EL`=Greece (GR) and `UK`=UK (GB);
   `stg_eu_electricity_prices_semiannual.sql` remaps those and joins `stg_country`
-  for ISO3. EU/EEA only, so the mart column is null for the rest of the world.
-  (The `length(geo) = 2` filter there drops `EU27_2020` and friends but *not*
-  `EA` — two letters. That falls out at the inner join, which no ISO2 matches.)
+  for ISO3. It prices 41 countries, so the mart column is null for the rest of
+  the world. (The `length(geo) = 2` filter there drops `EU27_2020` and friends
+  from the rows but *not* `EA` — two letters. That falls out at the inner join,
+  which no ISO2 matches.)
+- **The 41 are not the EU, and a mean over them is not the EU's average.** They
+  are the 27 members (`is_eu_member`, today's membership at every half-year),
+  Iceland, Liechtenstein, Norway, the United Kingdom and ten candidates and
+  potential candidates, Turkey, Ukraine and Georgia among them; 13 of the 14
+  non-members are cheaper than the members' mean. Three figures answer to "the
+  EU average" for 2025-S2, and only the first is one:
+  - **0.290 EUR/kWh, `eu27_price_eur_kwh`**: Eurostat's `EU27_2020` aggregate,
+    each national price weighted by that country's latest household consumption
+    (its reference metadata, section 18). It lands in `raw` as a row and is
+    carried as a column, the same on every row of a half-year, because it is no
+    country. Every chart titled an EU average reads it, through
+    `reports/sources/warehouse/eu_average_price.sql`.
+  - **0.255, the plain mean of the 27**: what the average member country
+    charges. It runs 8-17% below the aggregate, and the gap is a finding, not
+    noise: it was narrowest in 2022-S2, when the aggregate had risen 26% since
+    2021-S1 and the plain mean 38%, because Germany rose 5% and France 13% while
+    four smaller members at least doubled. The half-years page charts the two.
+  - **0.227, the mean over the 36 countries priced in every half-year since
+    2015**: the average of no group anyone would name. The site's "EU average"
+    was this until it was measured against the other two.
+  The aggregate's `not_null` test is what notices an enlargement: Eurostat
+  renames the code when membership changes (`EU28` became `EU27_2020`), and the
+  member list in `stg_eu_electricity_prices_semiannual.sql` is typed by hand.
 - **Eurostat prices are semi-annual, and both grains are modelled.**
   `stg_eu_electricity_prices_semiannual` is the cleaning model at
   `(country_iso3, year, half)`; `stg_eu_electricity_prices` averages it to annual

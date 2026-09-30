@@ -1,5 +1,5 @@
--- Capital-city weather aggregated to the country-year, for the 41 EU/EEA
--- countries the electricity-price mart also covers.
+-- Capital-city weather aggregated to the country-year, for the 41 countries
+-- the electricity-price mart also covers.
 --
 -- The mart is keyed on ISO3 only, so the dimension supplies the labels (both
 -- models are in `evidence_weather`'s `depends_on`).

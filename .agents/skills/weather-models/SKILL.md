@@ -6,7 +6,7 @@ description: The Open-Meteo ERA5 capital-city weather source — raw.om_weather_
 # Capital-city weather (`om_weather_daily`, `stg_weather_daily`)
 
 
-Daily ERA5 weather for the 41 EU/EEA capitals, from Open-Meteo. Added because
+Daily ERA5 weather for 41 capitals, those of the countries Eurostat prices, from Open-Meteo. Added because
 `stg_country` had carried the World Bank's capital `latitude`/`longitude` since
 the first commit and **nothing read either column** — this file mentioned them
 once, as a `try_cast` ingest gotcha. It is the warehouse's first spatial join and

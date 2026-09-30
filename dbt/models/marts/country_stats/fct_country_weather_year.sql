@@ -1,5 +1,5 @@
--- Capital-city weather at the country-year, for the 41 EU/EEA countries: the
--- warehouse's control variable. Filter on `year_is_complete` for any
+-- Capital-city weather at the country-year, for the 41 countries Eurostat
+-- prices electricity for: the warehouse's control variable. Filter on `year_is_complete` for any
 -- year-over-year comparison (see _country_stats.yml).
 with daily as (
     select * from {{ ref('stg_weather_daily') }}

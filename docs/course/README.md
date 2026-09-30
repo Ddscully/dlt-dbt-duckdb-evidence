@@ -33,7 +33,7 @@ answer → exercises. Three kinds, and they are marked:
   the evidence, and fix it. Every drill ends with a **verification query**,
   because "it looks right now" is the failure mode the course exists to break.
 - 🔍 **Investigate.** A question the warehouse answers and intuition does not
-  ("did European electricity rise 35% or 13.5%?"). Run against the **real**
+  ("did the EU's electricity price rise 26% or 6%?"). Run against the **real**
   warehouse, not the sandbox: coverage is usually the point, and the sandbox
   has 17 countries.
 - 💬 **Design defence.** No code. "Which three relations here can a rebuild not

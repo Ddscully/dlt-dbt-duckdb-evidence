@@ -113,7 +113,7 @@ sed -i 's|^left join co2 as c on|inner join co2 as c on|' \
 just course-rebuild
 ```
 
-**Observe.** The build finishes on `PASS=564 WARN=0 ERROR=0 SKIP=0`: the same
+**Observe.** The build finishes on `PASS=565 WARN=0 ERROR=0 SKIP=0`: the same
 verdict, to the row, as the healthy build. Every data test passes. Both grain
 contracts still hold, because the grain *is* still unique; the model simply has
 fewer rows in it.
@@ -151,7 +151,7 @@ Healthy: `4096`, `52`, `701`.
 | mart rows | 4,096 | 3,487 (−15%) |
 | distinct countries | **52** | **17** (−67%) |
 | rows carrying an EU price | 701 | 104 (−85%) |
-| `dbt build` | `PASS=564 ERROR=0` | `PASS=564 ERROR=0` |
+| `dbt build` | `PASS=565 ERROR=0` | `PASS=565 ERROR=0` |
 
 Row count fell 15% and country count fell 67%, which is the tell: the loss is not
 spread evenly, it is *whole countries*. The 17 survivors are exactly the CO2

@@ -69,7 +69,7 @@ findings page:
   Africa), so the same 100 GWh site reports ~3 kt CO₂e or ~72 kt depending only
   on where it sits. It is a lifecycle factor, so it reads higher than the
   generation-only one a filing uses, and the Scope 2 pages say so.
-- **Energy cost exposure.** EU household electricity prices at their *published*
+- **Energy cost exposure.** Eurostat's household electricity prices at their *published*
   half-year grain, not flattened to an annual average, because the annual
   average hides the thing you'd want to see. The Netherlands went €0.034/kWh in
   2022-S1 to €0.142 in S2; the annual €0.088 is a price nobody paid.
@@ -82,8 +82,8 @@ findings page:
   `dim_currency` and the three `fct_fx_rates_*` tables are what let the two meet,
   and they make the choice explicit rather than incidental: a price over a
   period converts at the period average, a balance at the closing rate, and both
-  columns ship. Converted at the average, EU household electricity rose 35%
-  between 2021-S1 and 2022-S2 in euros and 13.5% in dollars.
+  columns ship. Converted at the average, the EU's average household electricity
+  price rose 26% between 2021-S1 and 2022-S2 in euros and 6% in dollars.
 
 **What it deliberately is not.** Below the country there is exactly one grain,
 and it is one retailer's: UCI's Online Retail II gives customers, products and
