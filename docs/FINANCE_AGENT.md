@@ -88,7 +88,9 @@ Desktop ([below](#from-an-mcp-client)).
    just ask "Why did revenue fall from 2010 to 2011?"
    ```
 
-   Each tool call is printed to stderr as `called …`, then the answer.
+   Each tool call is printed to stderr as `called …` when the model makes it,
+   then the answer. A model still calling tools after five rounds is stopped
+   with `no answer after 5 rounds of tool calls`, under the calls it made.
 
 A server that is not running reads `cannot reach http://localhost:11434/v1:
 [Errno 111] Connection refused`, and a model not yet pulled is Ollama's own

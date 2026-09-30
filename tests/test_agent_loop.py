@@ -102,9 +102,12 @@ def test_a_refusal_goes_back_to_the_model_against_its_call():
 
 
 def test_a_model_that_never_answers_is_stopped():
-    chat = Scripted(*(call(f"c{n}", year_a=2010, year_b=2011) for n in range(3)))
+    chat = Scripted(*(call(f"c{n}", year_a=2010 + n, year_b=2011) for n in range(3)))
+    seen: list[str] = []
     with pytest.raises(NoAnswer):
-        ask("Why?", chat, [stub_tool(ToolResult(BRIDGE))], max_rounds=3)
+        ask("Why?", chat, [stub_tool(ToolResult(BRIDGE))], max_rounds=3, on_call=seen.append)
+    # No `Answer` comes back to read the calls from, so they are reported as made.
+    assert seen == [f'explain_change({{"year_a": {2010 + n}, "year_b": 2011}})' for n in range(3)]
 
 
 def test_the_real_tool_runs_from_what_a_model_sends():
