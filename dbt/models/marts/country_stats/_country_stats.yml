@@ -211,7 +211,8 @@ models:
       Country-year fact combining OWID emissions & energy, World Bank WDI
       (GDP, life expectancy, population, poverty, internet, urbanisation, forest,
       renewable electricity, energy imports) and Eurostat household electricity
-      prices (EU only), with World Bank classifications.
+      prices (41 countries, in and around the EU), with World Bank
+      classifications.
 
       Built on `dim_country_year`: every measure is a left join off the spine, so
       a country-year that only OWID energy or only WDI reports arrives with the
@@ -353,9 +354,12 @@ models:
         meta:
           additivity: semi_additive
         description: >
-          CO2 emitted since 1750, million tonnes (OWID). Stock, not flow — it
-          adds across countries and never across years, where it would count
-          every earlier year again.
+          CO2 emitted since the country's first year of data, million tonnes
+          (OWID). That year is 1750 for five countries and 1900 or later for 140
+          of the 214, so the stock is each country's recorded total and not a
+          total from one common start. Stock, not flow — it adds across
+          countries and never across years, where it would count every earlier
+          year again.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
@@ -377,7 +381,11 @@ models:
         description: >
           Primary energy consumption, TWh (OWID, substitution method). The
           narrowest-coverage energy column: ~79 countries from 2024 on, so a
-          latest-year cut thins badly — see `renewables_share_pct`.
+          latest-year cut thins badly — see `renewables_share_pct`. OWID joins
+          two publishers here, the Energy Institute's review (79 countries,
+          current) and the U.S. EIA (the rest, a year behind), so the thinning
+          is the EIA's countries not yet published, not countries that stopped
+          reporting.
       - name: renewables_share_pct
         data_type: DOUBLE
         meta:
@@ -560,7 +568,8 @@ models:
           additivity: non_additive
         description: >
           Household electricity price, EUR/kWh incl. all taxes, medium band DC
-          (Eurostat nrg_pc_204). Null for non-EU/EEA countries. **Averaged over
+          (Eurostat nrg_pc_204). Null outside the 41 countries Eurostat prices:
+          the EU's 27 members and 14 of its neighbours. **Averaged over
           the year's two half-years**, which is what the annual grain costs:
           within-year moves of 300% have happened. Use
           `fct_eu_electricity_prices_semiannual` for anything about prices over
@@ -582,7 +591,7 @@ models:
       contract:
         enforced: true
     description: >
-      Capital-city weather aggregated to (country_iso3, year), for the 41 EU/EEA
+      Capital-city weather aggregated to (country_iso3, year), for the 41
       countries Eurostat publishes an electricity price for. The warehouse's
       control variable: it exists so that "was it colder that year" can be
       disposed of before a movement in energy or price is attributed to anything
@@ -627,7 +636,7 @@ models:
     columns:
       - name: country_iso3
         data_type: VARCHAR
-        description: ISO3. EU/EEA only — null for the rest of the world upstream.
+        description: ISO3. Only the 41 countries Eurostat prices electricity for.
         data_tests:
           - not_null
           - relationships:
@@ -792,11 +801,19 @@ models:
       contract:
         enforced: true
     description: >
-      EU/EEA household electricity prices at Eurostat's published grain: one row
-      per (country_iso3, year, half), 2007 onwards. The country-stats group's
-      only sub-annual fact, and the reason it exists is that the annual average
-      is lossy — the mean absolute half-over-half change was 19% across
-      countries in 2022 and 13% in 2023, against 3-5% through the 2010s.
+      Household electricity prices at Eurostat's published grain: one row per
+      (country_iso3, year, half), 2007 onwards. The country-stats group's only
+      sub-annual fact, and the reason it exists is that the annual average is
+      lossy — the mean absolute half-over-half change was 19% across countries
+      in 2022 and 13% in 2023, against 3-5% through the 2010s.
+
+      It is not an EU table. Eurostat prices 41 countries: the EU's 27 members
+      (`is_eu_member`), Iceland, Liechtenstein, Norway and the United Kingdom,
+      and ten candidates and potential candidates to join, Turkey, Ukraine and
+      Georgia among them. **An average over these rows is not the EU's average
+      price**: even the members' plain mean sits 8-17% below
+      `eu27_price_eur_kwh`, Eurostat's own figure, which weights each member by
+      what its households consume.
 
       Built on `dim_country_year` for its dimension attributes, so like every
       other fact here it can only carry countries the dimension knows. The USD
@@ -890,10 +907,10 @@ models:
           and it exists because this is its only euro-denominated measurement
           sitting beside dollar-denominated GDP.
 
-          It changes the story rather than restating it: across the 39 countries
-          present in both halves, the average household price rose **35%**
-          between 2021-S1 and 2022-S2 in euros and **13.5%** in dollars, because
-          the euro fell from 1.205 to 1.014 over the same eighteen months.
+          It changes the story rather than restating it: Eurostat's EU average
+          (`eu27_price_eur_kwh`) rose **26%** between 2021-S1 and 2022-S2 in
+          euros and **6%** in dollars, because the euro fell from 1.205 to 1.014
+          over the same eighteen months.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 2, inclusive: false}
@@ -920,4 +937,28 @@ models:
           True when the half-year's FX average is over a period that has not
           finished. Same caveat as `price_is_partial_year` one model over, for
           the same reason.
+        data_tests: [not_null]
+      - name: is_eu_member
+        data_type: BOOLEAN
+        description: >
+          True for the 27 countries in Eurostat's `EU27_2020` aggregate. It is
+          today's membership applied to every half-year, as the aggregate is:
+          Croatia counts before it joined in 2013 and the United Kingdom never
+          does. Filter on it before calling any figure from this table the EU's.
+      - name: eu27_price_eur_kwh
+        data_type: DOUBLE
+        meta:
+          additivity: non_additive
+        description: >
+          Eurostat's own EU average for the half-year (`EU27_2020`), EUR/kWh, the
+          same on every row of a period: read it with `min()`, never `sum()` or a
+          mean across periods. Eurostat weights each member's price by its
+          latest national household consumption, so this is what the average EU
+          household pays, where a plain mean over `is_eu_member` rows is what the
+          average member country charges. Multiply by `usd_per_eur_period_avg`
+          for dollars.
+
+          The `not_null` is the guard on a live source: Eurostat renames the
+          aggregate when the membership changes (this one replaced `EU28`), and
+          the column would go null without an error.
         data_tests: [not_null]

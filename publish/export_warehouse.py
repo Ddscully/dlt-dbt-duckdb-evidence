@@ -805,6 +805,13 @@ select count(*) from lakehouse.raw.om_weather_daily;
   rename below: `sed -i 's/quote_currency/currency_code/g'` over your queries is
   the whole migration, and carrying a v1 of two tables to say so would cost more
   than it tells you.
+- **`marts.fct_eu_electricity_prices_semiannual` gained two columns, and it is
+  not an EU table.** Eurostat prices 41 countries, 27 of them EU members.
+  `is_eu_member` marks those, and `eu27_price_eur_kwh` is Eurostat's own EU
+  average for the half-year, the same on every row of it. A mean over the rows
+  is not that average: even the members' plain mean runs 8–17% below it, because
+  Eurostat weights each member by what its households consume. Purely additive;
+  both columns come after the existing ones.
 - **`marts.fct_retail_returns` gained a column.** `date_key`, the same
   `yyyymmdd` surrogate `marts.fct_retail_order_line` carries at the identical
   grain, so returns can now be joined to `marts.dim_date` the same way. Purely

@@ -247,15 +247,17 @@ follows from that rather than from the numbers.
 - **The one thing it changes about a number already on the site.** Eurostat's
   household electricity price is the warehouse's only euro-denominated
   measurement, sitting beside the World Bank's dollar GDP. Converted at the
-  half-year average, the 36 countries priced in every half-year since 2015 rose
-  **36%** from 2021-S1 to 2022-S2 in euros and **14%** in dollars, because the euro fell
-  from 1.205 to 1.014 over the same eighteen months. Neither is wrong; a chart of
+  half-year average, Eurostat's EU average rose **26%** from 2021-S1 to 2022-S2
+  in euros and **6%** in dollars, because the euro fell from 1.205 to 1.014 over
+  the same eighteen months. Neither is wrong; a chart of
   "European electricity prices" with no stated currency is reporting the exchange
   rate as if it were an energy market. That is the `gdp_usd` vs
   `gdp_constant_usd` gotcha below, finally measured instead of narrated.
-  **Chart it over one fixed set of countries** (`reports/sources/warehouse/eu_price_panel.sql`):
-  Eurostat's coverage grew from 6 countries in 2007-S1 to 38 by 2015, so an
-  average over whoever reported moves as countries join.
+  **Chart Eurostat's own average** (`reports/sources/warehouse/eu_average_price.sql`),
+  never a mean over the rows: the table holds 41 countries, 14 of them outside
+  the EU, and its coverage grew from 6 in 2007-S1, so a mean over whoever
+  reported is lower than the EU's average and moves as countries join
+  (`country-stats-models`).
 - **`marts.fct_fx_rates_daily` is archived to the lake and `raw.ecb_fx_rates` is
   not** — the reverse of every other table there. The landing table is keyed on
   `rate_date` and has no `year` to partition on. It is also the only table that

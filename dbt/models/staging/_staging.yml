@@ -43,7 +43,9 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 100}
       - name: coal_co2
-        description: CO2 from coal, million tonnes. Sums with oil/gas/cement/flaring to `co2_mt`.
+        description: >
+          CO2 from coal, million tonnes. With `oil_co2` and `gas_co2` it does not
+          sum to `co2_mt`: cement, flaring and other industry are the rest.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
@@ -81,7 +83,10 @@ models:
           emits — so this is deliberately untested rather than bounded to
           0-100. A bound here would fail on reality, not on a bug.
       - name: cumulative_co2
-        description: Every tonne emitted since 1750, million tonnes. The stock behind the flow.
+        description: >
+          Every tonne on record, million tonnes: the stock behind the flow. OWID
+          sums from each country's first year of data, not from a common year.
+          That is 1750 for five countries and 1900 or later for 140 of the 214.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
@@ -122,7 +127,9 @@ models:
           Primary energy consumption, TWh. Covers ~210 countries through 2023
           and only ~79 from 2024 on — anything filtered to the mart's latest
           year loses two thirds of its sample here. The `*_elec` columns below
-          do not have that cliff.
+          do not have that cliff. It is a publishing lag and not a fall in
+          reporting: OWID joins two publishers, the Energy Institute's review
+          (79 countries, current) and the U.S. EIA (the rest, a year behind).
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
@@ -269,7 +276,8 @@ models:
       group: country_stats
     description: >
       Eurostat household electricity prices at their published grain: one row per
-      (country_iso3, year, half). EU/EEA only. This is the cleaning model — the
+      (country_iso3, year, half), for the 41 countries Eurostat prices: the EU's
+      27 members and 14 of its neighbours. This is the cleaning model — the
       geo -> ISO3 mapping happens here and `stg_eu_electricity_prices` averages
       it to the annual grain the rest of the warehouse uses.
 
@@ -318,14 +326,26 @@ models:
           - not_null
           - dbt_utils.accepted_range:
               arguments: {min_value: 0, max_value: 1, inclusive: false}
+      - name: is_eu_member
+        description: >
+          True for the 27 countries in Eurostat's `EU27_2020` aggregate, listed in
+          the model in Eurostat's own codes. Today's membership at every
+          half-year, which is how the aggregate itself is composed.
+      - name: eu27_price_eur_kwh
+        description: >
+          Eurostat's `EU27_2020` aggregate for the half-year, repeated on every
+          country's row. Null would mean Eurostat has renamed the aggregate, which
+          it does when the membership changes (this one replaced `EU28`); the
+          mart's `not_null` on it is what notices.
 
   - name: stg_eu_electricity_prices
     config:
       group: country_stats
     description: >
       Eurostat household electricity prices averaged from semi-annual to annual,
-      one row per (country_iso3, year). EU/EEA only. Derived from
-      `stg_eu_electricity_prices_semiannual`, which holds the source grain.
+      one row per (country_iso3, year), for the 41 countries Eurostat prices.
+      Derived from `stg_eu_electricity_prices_semiannual`, which holds the source
+      grain.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -723,7 +743,9 @@ models:
           pii: direct_identifier
       - name: country
         description: >
-          The source's own label, 43 of them, kept as written. `relationships`
+          The source's own label, 43 of them, kept as written. UCI defines it as
+          the country where the customer resides, which is not necessarily where
+          an order was delivered. `relationships`
           against `retail_country_map` is what makes a label the seed has never
           seen loud: the resolution is a left join, so an unmapped label
           otherwise lands as a null `country_iso3` and looks exactly like the

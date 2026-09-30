@@ -118,28 +118,30 @@ electricity prices, beside GDP in dollars. The FX table is what lets the two be
 compared, and the comparison matters.
 
 ```sql eur_vs_usd
--- One fixed set of countries for every half-year (eu_price_panel.sql): an
--- average over whoever reported would move as countries joined.
+-- Eurostat's own EU average (eu_average_price.sql), which weights each member
+-- by its household consumption. A mean over the countries in the table is a
+-- different and lower number.
 select
     period_start_date,
-    eur_kwh as price_in_euros,
-    usd_kwh as price_in_dollars
-from warehouse.eu_price_panel
+    eu27_eur_kwh as price_in_euros,
+    eu27_usd_kwh as price_in_dollars
+from warehouse.eu_average_price
 order by period_start_date
 ```
 
 ```sql crisis
 with ends as (
-    select period, eur_kwh, usd_kwh, usd_per_eur, n_countries
-    from warehouse.eu_price_panel
+    select period, eu27_eur_kwh, eu27_usd_kwh, usd_per_eur
+    from warehouse.eu_average_price
     where period in ('2021-S1', '2022-S2')
 )
 select
-    max(n_countries) as n_countries,
-    100.0 * (max(eur_kwh) filter (where period = '2022-S2')
-        / max(eur_kwh) filter (where period = '2021-S1') - 1) as eur_rise_pct,
-    100.0 * (max(usd_kwh) filter (where period = '2022-S2')
-        / max(usd_kwh) filter (where period = '2021-S1') - 1) as usd_rise_pct,
+    100.0 * (max(eu27_eur_kwh) filter (where period = '2022-S2')
+        / max(eu27_eur_kwh) filter (where period = '2021-S1') - 1) as eur_rise_pct,
+    100.0 * (max(eu27_usd_kwh) filter (where period = '2022-S2')
+        / max(eu27_usd_kwh) filter (where period = '2021-S1') - 1) as usd_rise_pct,
+    100.0 * (max(usd_per_eur) filter (where period = '2022-S2')
+        / max(usd_per_eur) filter (where period = '2021-S1') - 1) as fx_change_pct,
     max(usd_per_eur) filter (where period = '2021-S1') as fx_before,
     max(usd_per_eur) filter (where period = '2022-S2') as fx_after
 from ends
@@ -148,10 +150,10 @@ from ends
 <Grid cols=3>
     <BigValue data={crisis} value=eur_rise_pct fmt='0.0"%"' title="Price rise, 2021-S1 to 2022-S2, in EUR"/>
     <BigValue data={crisis} value=usd_rise_pct fmt='0.0"%"' title="... the same rise, in USD"/>
-    <BigValue data={crisis} value=n_countries title="Countries, priced every half-year since 2015"/>
+    <BigValue data={crisis} value=fx_change_pct fmt='0.0"%"' title="The euro against the dollar, same months"/>
 </Grid>
 
-Across the <Value data={crisis} column=n_countries/> countries Eurostat has priced in every half-year since 2015, the average household electricity price rose <Value data={crisis} column=eur_rise_pct fmt='0.0"%"'/> in euros and <Value data={crisis} column=usd_rise_pct fmt='0.0"%"'/> in dollars over the same eighteen months. The euro fell from <Value data={crisis} column=fx_before fmt='0.000'/> to <Value data={crisis} column=fx_after fmt='0.000'/> against the dollar while that was happening.
+The EU's average household electricity price, Eurostat's own figure for the 27 members, rose <Value data={crisis} column=eur_rise_pct fmt='0.0"%"'/> in euros and <Value data={crisis} column=usd_rise_pct fmt='0.0"%"'/> in dollars over the same eighteen months. The euro fell from <Value data={crisis} column=fx_before fmt='0.000'/> to <Value data={crisis} column=fx_after fmt='0.000'/> against the dollar while that was happening.
 
 <LineChart
     data={eur_vs_usd}
@@ -164,8 +166,8 @@ Across the <Value data={crisis} column=n_countries/> countries Eurostat has pric
 
 <Alert status=info>
 
-**So what.** Both numbers are right. A household paying in euros did face a 36% rise,
-and a dollar-denominated buyer of the same electricity did face 14%. A chart
+**So what.** Both numbers are right. A household paying in euros did face a 26% rise,
+and a dollar-denominated buyer of the same electricity did face 6%. A chart
 titled "European electricity prices" with no stated currency is reporting the
 exchange rate alongside the energy market. This warehouse already carried that
 warning in prose, from the case where Japan cut emissions 21% between 2010 and

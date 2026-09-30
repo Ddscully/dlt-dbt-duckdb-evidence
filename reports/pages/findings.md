@@ -489,7 +489,7 @@ union all select 'GDP (constant US$)', gdp_year_label, 2 from ${latest_years}
 union all select 'Electricity mix & intensity', elec_year_label, 3 from ${latest_years}
 union all select 'Primary energy', energy_year_label, 4 from ${latest_years}
 union all select 'Consumption-based CO₂', consumption_year_label, 5 from ${latest_years}
-union all select 'EU electricity prices', price_year_label, 6 from ${latest_years}
+union all select 'Eurostat electricity prices', price_year_label, 6 from ${latest_years}
 order by ord
 ```
 

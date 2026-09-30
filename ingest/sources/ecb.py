@@ -24,7 +24,9 @@ FX_BASE_CURRENCY = "EUR"
 # The first reference-rate day. Earlier dates return an empty `rates` object.
 FX_FIRST_DATE = "1999-01-04"
 
-# Short, because the ECB does not restate: it only closes a failed run's hole.
+# Short, because the ECB all but never restates, so it only closes a failed
+# run's hole. Of the 262,845 rates landed here that the ECB's own API also
+# serves, two differ, each by 0.0001 at most and each over ten years old.
 FX_LOOKBACK_DAYS = 10
 
 # One watermark, because every currency arrives in the same request.

@@ -1,4 +1,5 @@
--- EU household electricity prices at Eurostat's own half-year grain. Use this
+-- Household electricity prices at Eurostat's own half-year grain, for the 41
+-- countries it prices, of which the EU's members are 27. Use this
 -- for prices over time and `fct_emissions_energy`'s annual column only to join
 -- prices to emissions or GDP (see _country_stats.yml).
 with semiannual as (
@@ -30,6 +31,8 @@ with_change as (
         period,
         period_start_date,
         electricity_price_eur_kwh,
+        is_eu_member,
+        eu27_price_eur_kwh,
         lag(electricity_price_eur_kwh) over country_periods as previous_price,
         lag(period_start_date) over country_periods
         = period_start_date - interval 6 month as follows_previous_half
@@ -65,7 +68,12 @@ select
     f.avg_units_per_eur as usd_per_eur_period_avg,
     -- Shipped, not used: the closing rate suits a balance, not a price.
     f.period_end_units_per_eur as usd_per_eur_period_end,
-    not f.period_is_complete as usd_conversion_is_partial_period
+    not f.period_is_complete as usd_conversion_is_partial_period,
+
+    -- Eurostat's own EU average for the half-year, the same on every row of it,
+    -- and which rows it is an average of (see _country_stats.yml).
+    s.is_eu_member,
+    s.eu27_price_eur_kwh
 from with_change as s
 inner join spine as d on s.country_iso3 = d.country_iso3 and s.year = d.year
 left join usd as f on s.period_start_date = f.period_start_date

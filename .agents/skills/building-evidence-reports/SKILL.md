@@ -253,8 +253,8 @@ where year = ${inputs.year.value}
   `sci`, `num0`–`num4`, the date tags and **every bare currency code** (`usd`,
   `eur`, `gbp`, …) are live suffixes too: `kg_co2_per_usd` drew a `$1.50` axis
   until it was given a `yFmt`.
-- Filter nulls in the SQL. `electricity_price_eur_kwh` is null outside the
-  EU/EEA and `life_expectancy` is sparse in early years — unfiltered they render
+- Filter nulls in the SQL. `electricity_price_eur_kwh` is null outside the 41
+  countries Eurostat prices and `life_expectancy` is sparse in early years — unfiltered they render
   as gaps or drag averages.
 
 ## How a page is laid out

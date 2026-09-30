@@ -99,12 +99,13 @@ calls, so the recipe and the graph can't drift into running different builds.
   `../` still resolves under the Pages base path, because every route ends in `/`.
 - `pages/countries.md` and `pages/countries/`: the country explorer, driven by a
   year selector (a world map of grid intensity, clean electricity against life
-  expectancy, EU prices against the low-carbon share, the most carbon-efficient
+  expectancy, Eurostat prices against the low-carbon share, the most carbon-efficient
   economies) and a country selector (one country's CO₂ per person and grid
   intensity over time), with CO₂ intensity by income group over time. Its detail
-  pages explain the income grouping, and chart EU prices half by half from the
+  pages explain the income grouping, and chart Eurostat's prices half by half from the
   semi-annual fact, because the annual average the explorer uses hides moves of
-  300%+ inside a single year. The country selector is keyed on `country_iso3`: a
+  300%+ inside a single year, with Eurostat's EU average beside the plain mean
+  of its members. The country selector is keyed on `country_iso3`: a
   name like Côte d'Ivoire would close the quoted string in the page's SQL.
 - `pages/findings.md` and `pages/findings/`: the nine findings. The overview is
   one chart and a caption of a sentence or two per finding, each linking to its

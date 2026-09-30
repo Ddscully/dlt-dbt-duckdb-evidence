@@ -37,7 +37,8 @@ sources:
           error_after: {count: 7, period: day}
       - name: om_weather_daily
         description: >
-          Open-Meteo ERA5 daily weather at each EU/EEA capital city, at
+          Open-Meteo ERA5 daily weather at the capital of each of the 41 countries
+          Eurostat prices electricity for, at
           (country_iso3, weather_date). The only source joined on a *coordinate*
           rather than a code: the capital latitude/longitude the World Bank
           already publishes, which nothing in the warehouse read until this

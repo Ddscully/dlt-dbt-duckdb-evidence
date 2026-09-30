@@ -202,8 +202,8 @@ the answer by six figures.
 ### [Currency →](/currency)
 
 ```sql eur_usd
-select period_start_date, eur_kwh as euros, usd_kwh as dollars
-from warehouse.eu_price_panel
+select period_start_date, eu27_eur_kwh as euros, eu27_usd_kwh as dollars
+from warehouse.eu_average_price
 order by period_start_date
 ```
 
@@ -214,7 +214,7 @@ order by period_start_date
     yFmt="0.00"
     seriesColors={{'Euros': '#2a78d6', 'Dollars': '#eb6834'}}
     chartAreaHeight=160
-    title="European household electricity, per kWh"
+    title="EU average household electricity, per kWh"
 />
 
 The same price rose by very different amounts depending on the currency it was

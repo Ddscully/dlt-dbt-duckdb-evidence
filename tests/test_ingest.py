@@ -1583,6 +1583,35 @@ def test_weather_countries_are_exactly_the_ones_eurostat_prices():
     )
 
 
+STG_EU_PRICES = STG_WDI.with_name("stg_eu_electricity_prices_semiannual.sql")
+
+
+def test_the_eu_member_list_is_the_27_countries_eurostat_prices_under_those_codes():
+    """`is_eu_member` is a list typed by hand into the staging model, in
+    Eurostat's codes rather than ISO2, and it decides which rows the members'
+    mean is taken over.
+
+    A code Eurostat does not use (`GR` for `EL`) matches nothing and takes a
+    member out of that mean with no error, and a dropped line does the same.
+    The recorded payload is what the codes are held to, along with the
+    aggregate the list describes, whose name carries the count.
+    """
+    sql = STG_EU_PRICES.read_text()
+    listed = re.search(r"geo in \((.*?)\) as is_eu_member", sql, re.DOTALL)
+    assert listed, "the member list is no longer written as `geo in (...) as is_eu_member`"
+    members = re.findall(r"'([A-Z]{2})'", listed.group(1))
+
+    cube = json.loads(fixtures.path_for(eurostat.EU_ELEC_PRICES_API).read_text())
+    geos = set(cube["dimension"]["geo"]["category"]["index"])
+
+    assert "EU27_2020" in geos
+    assert len(members) == len(set(members)) == 27
+    assert set(members) - geos == set(), (
+        f"{sorted(set(members) - geos)} are not codes Eurostat prices under, so "
+        "`is_eu_member` is false for a member"
+    )
+
+
 def test_weather_countries_carry_no_duplicates():
     """A repeated code would send the same coordinates twice and shift every
     location after it against the response, which is matched by position."""

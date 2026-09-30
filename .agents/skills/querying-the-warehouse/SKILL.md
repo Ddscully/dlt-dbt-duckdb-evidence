@@ -153,8 +153,9 @@ confusing query results if you don't know them:
 - The mart's `max(year)` is whichever source is furthest ahead (currently Eurostat
   and WDI, a year past OWID CO2). For "the latest year of X", use
   `max(year) filter (where X is not null)`.
-- `electricity_price_eur_kwh` is EU/EEA only — null for most of the world by
-  design, not by bug.
+- `electricity_price_eur_kwh` covers the 41 countries Eurostat prices — null for
+  most of the world by design, not by bug. They are not all in the EU: filter
+  `fct_eu_electricity_prices_semiannual` on `is_eu_member` for the 27.
 
 `dim_country_year` is the *complete* set of country-years, so it's the way to ask
 what's missing rather than what's there:

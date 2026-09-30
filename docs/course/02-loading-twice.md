@@ -109,8 +109,9 @@ def wdi_start_year(last_loaded_year):
 
 Fetching only what is *newer* than the watermark would freeze stale revisions
 into the warehouse forever, because **the World Bank restates published years as
-routine practice.** The ECB does not restate a fixing, so the same mechanism is
-tuned to ten days there, and the two numbers are not a copy-paste failure:
+routine practice.** The ECB all but never restates a fixing, so the same
+mechanism is tuned to ten days there, and the two numbers are not a copy-paste
+failure:
 
 | | `wb_wdi` | `ecb_fx_rates` |
 |---|---|---|
@@ -146,7 +147,7 @@ sed -i 's|^WDI_PRIMARY_KEY = ("indicator", "country_code", "year")|WDI_PRIMARY_K
 just course-sandbox     # a merge key change needs a re-ingest, not just a rebuild
 ```
 
-**Observe.** `PASS=564 WARN=0 ERROR=0 SKIP=0`: again identical to healthy. Then:
+**Observe.** `PASS=565 WARN=0 ERROR=0 SKIP=0`: again identical to healthy. Then:
 
 ```bash
 just course-query 'select count(*) from staging.stg_wdi'
@@ -189,7 +190,7 @@ Healthy: `6336`, `11`.
 | `stg_wdi.population` non-null | 576 | **0** |
 | `stg_wdi.forest_area_pct` non-null | 541 | **174** |
 | `stg_wdi.renew_elec_pct` non-null | 502 | **338** |
-| `dbt build` | `PASS=564 ERROR=0` | `PASS=564 ERROR=0` |
+| `dbt build` | `PASS=565 ERROR=0` | `PASS=565 ERROR=0` |
 
 Nine of the eleven indicators were destroyed outright at the landing table, and
 the two that survived are shredded — 392 rows of `EG.ELC.RNEW.ZS` and 184 of
