@@ -354,9 +354,12 @@ models:
         meta:
           additivity: semi_additive
         description: >
-          CO2 emitted since 1750, million tonnes (OWID). Stock, not flow — it
-          adds across countries and never across years, where it would count
-          every earlier year again.
+          CO2 emitted since the country's first year of data, million tonnes
+          (OWID). That year is 1750 for five countries and 1900 or later for 140
+          of the 214, so the stock is each country's recorded total and not a
+          total from one common start. Stock, not flow — it adds across
+          countries and never across years, where it would count every earlier
+          year again.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
@@ -378,7 +381,11 @@ models:
         description: >
           Primary energy consumption, TWh (OWID, substitution method). The
           narrowest-coverage energy column: ~79 countries from 2024 on, so a
-          latest-year cut thins badly — see `renewables_share_pct`.
+          latest-year cut thins badly — see `renewables_share_pct`. OWID joins
+          two publishers here, the Energy Institute's review (79 countries,
+          current) and the U.S. EIA (the rest, a year behind), so the thinning
+          is the EIA's countries not yet published, not countries that stopped
+          reporting.
       - name: renewables_share_pct
         data_type: DOUBLE
         meta:

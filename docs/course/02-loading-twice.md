@@ -109,8 +109,9 @@ def wdi_start_year(last_loaded_year):
 
 Fetching only what is *newer* than the watermark would freeze stale revisions
 into the warehouse forever, because **the World Bank restates published years as
-routine practice.** The ECB does not restate a fixing, so the same mechanism is
-tuned to ten days there, and the two numbers are not a copy-paste failure:
+routine practice.** The ECB all but never restates a fixing, so the same
+mechanism is tuned to ten days there, and the two numbers are not a copy-paste
+failure:
 
 | | `wb_wdi` | `ecb_fx_rates` |
 |---|---|---|

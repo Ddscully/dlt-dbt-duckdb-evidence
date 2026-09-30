@@ -48,7 +48,8 @@ select
     c.consumption_co2_per_capita,
     c.trade_co2,
     c.trade_co2_share,
-    -- cumulative: the stock since 1750, which is a different ranking to the flow
+    -- cumulative: the stock since each country's first year of data, which is a
+    -- different ranking to the flow
     c.cumulative_co2,
     c.share_global_cumulative_co2,
     -- energy

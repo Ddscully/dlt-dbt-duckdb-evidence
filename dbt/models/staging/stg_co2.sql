@@ -23,7 +23,8 @@ select
     consumption_co2_per_capita,
     trade_co2,
     trade_co2_share,
-    -- the stock, not the flow: everything emitted since 1750
+    -- the stock, not the flow: everything emitted since the country's first
+    -- year of data, which is 1750 at the earliest
     cumulative_co2,
     share_global_cumulative_co2
 from source

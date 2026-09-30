@@ -89,8 +89,10 @@ models:
         meta:
           pii: quasi_identifier
         description: >
-          The source's own country label, kept as written (`EIRE`, `RSA`, `USA`). Group
-          by `country_iso3` to join the country tables.
+          The source's own country label, kept as written (`EIRE`, `RSA`, `USA`). UCI
+          defines it as the country where the customer resides, so it is not
+          necessarily where the order was delivered. Group by `country_iso3` to
+          join the country tables.
       - name: country_iso3
         description: >
           The conformed country key, resolved from `country` through the

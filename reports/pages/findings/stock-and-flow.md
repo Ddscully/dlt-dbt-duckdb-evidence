@@ -56,7 +56,8 @@ order by ord
 
 A line that falls from left to right is a country whose share of today's
 emissions is smaller than its historical share. The stock is the sum of every
-tonne emitted since 1750.
+tonne on record: OWID counts from each country's first year of data, which is
+1750 at the earliest.
 
 ```sql uk_vs_india
 select

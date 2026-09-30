@@ -197,7 +197,10 @@ carries it forward is `publishing-a-release`.
   whichever source runs furthest ahead (Eurostat prices, a year beyond the rest),
   and coverage thins out unevenly before that: `co2_mt` holds 214 countries into
   the latest year, `primary_energy_twh` collapses from ~210 to **79**,
-  `consumption_co2` stops a year earlier still. Cutting an energy chart to the
+  `consumption_co2` stops a year earlier still. The collapse is a publishing
+  lag: OWID joins the Energy Institute's review (79 countries, current, and the
+  same 79 that `renewables_share_pct` holds) to the U.S. EIA's data (the rest,
+  a year behind). Cutting an energy chart to the
   latest CO2 year quietly drops two thirds of its sample. The Evidence layer
   reads `sources/warehouse/latest_years.sql` — latest year per *metric family*,
   each with its own coverage floor — instead of hardcoding a literal; add a
