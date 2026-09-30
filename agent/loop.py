@@ -104,8 +104,18 @@ def unverified(answer: str, sources: Sequence[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(n for n in _numbers(answer) if n not in known))
 
 
-def ask(question: str, chat: Chat, tools: Sequence[Tool], max_rounds: int = MAX_ROUNDS) -> Answer:
-    """Run the loop until the model answers without calling a tool."""
+def ask(
+    question: str,
+    chat: Chat,
+    tools: Sequence[Tool],
+    max_rounds: int = MAX_ROUNDS,
+    on_call: Callable[[str], None] | None = None,
+) -> Answer:
+    """Run the loop until the model answers without calling a tool.
+
+    `on_call` is told each call as the model makes it, before the tool runs: a
+    run that ends with no answer returns no `Answer` to read the calls from.
+    """
     by_name = {tool.name: tool for tool in tools}
     schemas = [tool.schema for tool in tools]
     messages: list[Message] = [
@@ -130,6 +140,8 @@ def ask(question: str, chat: Chat, tools: Sequence[Tool], max_rounds: int = MAX_
         for call in tool_calls:
             function = call["function"]
             calls.append(f"{function['name']}({function['arguments']})")
+            if on_call is not None:
+                on_call(calls[-1])
             result = call_tool(by_name, function["name"], function["arguments"])
             outputs.append(result.text)
             if result.note:
@@ -176,10 +188,17 @@ def main() -> None:
     if not Path(warehouse_path()).exists():
         # Said here, not by the model after a round trip spent finding out.
         sys.exit(f"{warehouse_path()} does not exist: run `just run`")
+
+    def called(call: str) -> None:
+        # As it is made, not after the answer: a model that gives up after its
+        # last round, or a server lost mid-run, leaves no answer to print them with.
+        print(f"called {call}", file=sys.stderr, flush=True)
+
     try:
         # Each tool call opens the warehouse read-only and closes it: a connection
         # held while the model writes would make a build fail for minutes.
-        answer = ask(args.question, chat, warehouse_tools(read_only(warehouse_path), catalog))
+        tools = warehouse_tools(read_only(warehouse_path), catalog)
+        answer = ask(args.question, chat, tools, on_call=called)
     except urllib.error.HTTPError as exc:  # the server's reason, e.g. a model not pulled
         sys.exit(f"{args.base_url} refused: {exc.code} {exc.read().decode(errors='replace')}")
     except urllib.error.URLError as exc:
@@ -192,8 +211,6 @@ def main() -> None:
         sys.exit(f"{args.base_url} closed the connection: {exc}")
     except NoAnswer as exc:
         sys.exit(f"{args.model}: {exc}")
-    for call in answer.calls:
-        print(f"called {call}", file=sys.stderr)
     print(answer)
 
 
