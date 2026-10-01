@@ -13,7 +13,7 @@
 # uv reads `.python-version` and fetches CPython itself, as on a host.
 
 FROM node:24.21.0-bookworm-slim AS node
-FROM ghcr.io/astral-sh/uv:0.12.17 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.21 AS uv
 
 FROM mcr.microsoft.com/devcontainers/base:2.2.1-bookworm
 
