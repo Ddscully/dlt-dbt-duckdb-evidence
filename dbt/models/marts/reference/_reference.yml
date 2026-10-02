@@ -434,12 +434,12 @@ models:
     description: >
       One row per currency the ECB series has ever quoted, joining the
       `currencies` seed to the series' own evidence of when each code was live.
-      47 rows: 46 quoted plus the euro, which is the base of every quote and so
+      45 rows: 44 quoted plus the euro, which is the base of every quote and so
       never appears as one.
 
-      It exists because the panel is not fixed. 17 codes have stopped — ten at a
-      euro adoption, two at a redenomination, five without an explanation this
-      project is willing to invent — and two of the survivors have interior gaps
+      It exists because the panel is not fixed. 15 codes have stopped — ten at a
+      euro adoption and five without an explanation this project is willing
+      to invent — and two of the survivors have interior gaps
       where the currency itself stopped working (Iceland 2008-2018, Argentina
       2002). Anything that carries a rate forward has to know all of that, which
       is why `first_published_date` / `last_published_date` bound the spine in
@@ -455,8 +455,8 @@ models:
             where: "retired_on is not null"
       # And the other direction of the same seed/series agreement: a seed row the
       # series has never quoted. EUR is the one legitimate case — it is the base
-      # of every quote — so anything else unquoted is a code that was typed into
-      # the seed and never existed. The seed's `retired_on` test cannot catch it:
+      # of every quote — so anything else unquoted is a code typed into the seed
+      # that never existed, or one the source has since dropped. The seed's `retired_on` test cannot catch it:
       # its subquery returns NULL for a code with no rates, and `retired_on >
       # NULL` is not false, it is null, so the row passes by being unknown.
       - dbt_utils.expression_is_true:
@@ -512,7 +512,7 @@ models:
         description: >
           The longest run of calendar days between two consecutive fixings. 3 for
           a weekend, 5 for the Christmas closures, and only two values far beyond
-          that: ISK at 3,341 and ARS at 34.
+          that: ISK at 3,347 and ARS at 34.
       - name: has_interior_gap
         data_type: BOOLEAN
         description: A quote that stopped and resumed, rather than one that stopped.
@@ -624,7 +624,7 @@ models:
     description: >
       The reference rates on every calendar day within each currency's quoted
       lifetime, gap-filled. Grain: one row per (date_day, currency_code).
-      381,414 rows — 265,035 published, 113,020 carried forward and 3,359 stale.
+      378,450 rows — 262,961 published, 112,124 carried forward and 3,365 stale.
 
       **The gap is the model.** 30% of calendar days carry no fixing (2,878
       weekend days and 134 weekday TARGET closures), so a transaction dated on a
@@ -693,7 +693,7 @@ models:
           additivity: non_additive
         description: >
           Null where the carry has run past the cap, so a stale number cannot be
-          multiplied by anything by accident. That is 3,359 rows: Iceland
+          multiplied by anything by accident. That is 3,365 rows: Iceland
           2008-2018 and Argentina in early 2002.
         data_tests:
           - dbt_utils.accepted_range:
@@ -778,7 +778,7 @@ models:
       spend, a price paid over a period — converts at the period average. Both
       ship, named for what they are, and this model picks for nobody.
       `period_end_vs_avg_pct` measures the cost of choosing wrong: +11.7% for
-      EUR/USD in 2003, -8.6% in 2014, and +98% for the Icelandic krona in 2008.
+      EUR/USD in 2003, -8.6% in 2014, and +102% for the Icelandic krona in 2008.
 
       Two subtleties baked in. The averages are taken over *published fixings*,
       not over the dense daily table, which would weight every Friday three times
@@ -962,9 +962,9 @@ models:
           disclosed, not nulled** — 290.00 ISK/EUR was the last real fixing of
           2008 and a balance closed on 31 December would have converted at it;
           what the reader needs is that it was three weeks old because the
-          currency had stopped trading. True on 22 complete period-ends across 7
+          currency had stopped trading. True on 21 complete period-ends across 6
           currencies, of which 16 are currencies that left the ECB's panel (RUB
-          2022-03-01; ARS, DZD, MAD and TWD together on 2020-10-30), 5 are the
-          two currency crises and 1 is the ROL redenomination. The worst is the
-          rouble's 2022 year end at 305 days, not the krona's famous 2008 at 22.
+          2022-03-01; ARS, DZD, MAD and TWD together on 2020-10-30) and 5 are
+          the two currency crises. The worst is the rouble's 2022 year end at
+          305 days, not the krona's famous 2008 at 28.
         data_tests: [not_null]

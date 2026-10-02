@@ -577,9 +577,9 @@ models:
       - name: units_per_eur
         description: >
           Units of the quote currency per 1 EUR, as the ECB quotes it. Untested
-          for an upper bound on purpose: the range spans 0.85 (GBP) to 1,725,000
-          (the pre-2005 Turkish lira), so any ceiling that would catch a real bug
-          would also fail on the pre-redenomination series.
+          for an upper bound on purpose: the range spans 0.37 (the Turkish lira
+          in 1999, in post-2005 units) to 21,034 (the rupiah), so no single
+          ceiling is tight enough to catch a real bug in most currencies.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:

@@ -231,7 +231,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   date_day` (no backfill from the future), `rate_source_date = date_day` on
   published rows, positive rates, a non-negative age. **Five mutations, all
   fifteen green on every one.** Widening the cap from 7 days to 30 prices 46
-  stale rows; removing the cap prices all 3,359 and leaves the model
+  stale rows; removing the cap prices all 3,365 and leaves the model
   contradicting itself, `is_rate_stale` true beside a usable rate; `<=` to `<`
   costs 2 rows their rate; `is_rate_stale` on `>=` instead of `>` flags 2 rows
   stale *and* priced. Worst is dropping `partition by currency_code` from the
@@ -280,7 +280,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     shape. The fixture makes the period peak in the middle and close below where
     it opened, so last, first, max and min are four different numbers.
   - **The reciprocal gap is worst exactly when someone is looking.** 0.07% for
-    EUR/USD in calm 2015, 0.52% in 2008 — and **11.9% for the Icelandic krona in
+    EUR/USD in calm 2015, 0.52% in 2008 — and **11.3% for the Icelandic krona in
     2008**, which is the number that makes the rule matter rather than the USD
     one. Fixture values are chosen exact in binary floating point: mean of 0.5
     and 0.125 is 0.3125 against one over the mean of 2 and 8, which is 0.2.

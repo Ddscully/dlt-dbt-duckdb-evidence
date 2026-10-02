@@ -376,14 +376,14 @@ unit_tests:
   # | mutation                              | data tests    | effect                                    |
   # |---------------------------------------|---------------|-------------------------------------------|
   # | cap 7 -> 30 days                      | all pass      | 46 stale rows gain a rate                 |
-  # | cap removed entirely                  | all pass      | all 3,359 stale rows priced, self-contradictory |
+  # | cap removed entirely                  | all pass      | all 3,365 stale rows priced, self-contradictory |
   # | `<=` cap becomes `<`                  | all pass      | 2 rows at exactly the cap lose their rate |
   # | `is_rate_stale` uses `>=` not `>`     | all pass      | 2 rows stale *and* priced                 |
   # | window loses `partition by currency`  | all pass      | 113,479 rows (29.7%) carry another currency's rate |
   #
   # The tests that exist guard direction (`rate_source_date <= date_day`, so no
   # backfill from the future) and the grain. Nothing guards the *cap*, because a
-  # rate carried 8 days or 3,341 days is still a positive number with a source
+  # rate carried 8 days or 3,347 days is still a positive number with a source
   # date in the past. What the cap refuses is worth a number: the ISK's last
   # fixing before the 2008 collapse is 290.00 and the first after the nine-year
   # gap is 125.01, and the ARS goes 0.89130 to 1.76373 across its 26-day gap.
@@ -438,7 +438,7 @@ unit_tests:
     description: >
       `fx_max_carry_forward_days` is 7, and no data test can see it: a rate
       carried 8 days is as well-formed as one carried 2. Removing the cap
-      altogether prices all 3,359 stale rows and leaves the model contradicting
+      altogether prices all 3,365 stale rows and leaves the model contradicting
       itself — `is_rate_stale` true beside a usable rate — with every data test
       green. One currency, one gap that runs past the cap, then a second fixing
       that resets the age: the last row proves the carry restarts rather than
@@ -506,7 +506,7 @@ unit_tests:
   #
   # | mutation                                    | data tests    | effect                                        |
   # |---------------------------------------------|---------------|-----------------------------------------------|
-  # | `avg_eur_per_unit` = 1 / `avg_units_per_eur`| all pass      | USD 2008 0.683499 -> 0.679923; ISK 2008 off 11.9% |
+  # | `avg_eur_per_unit` = 1 / `avg_units_per_eur`| all pass      | USD 2008 0.683499 -> 0.679923; ISK 2008 off 11.3% |
   # | `max()` for `arg_max(.., rate_date)`        | all pass      | USD 2014 period end 1.2141 -> 1.3953, `period_end_vs_avg_pct` **flips** -8.61% -> +5.03% |
   # | `min()` for `arg_min(.., rate_date)`        | all pass      | `period_start_units_per_eur` wrong on 16,975 rows (85.9%) |
   # | `period_is_complete` `<` instead of `<=`    | all pass      | **nothing at all** — no period ends on the series end |
@@ -570,7 +570,7 @@ unit_tests:
       the natural-looking simplification and it passes every data test: the
       number stays positive and non-null, and it is only 0.07% out in a calm
       year. The gap grows with how far the rate moved inside the period — 0.52%
-      for EUR/USD in 2008 and **11.9% for the Icelandic krona that same year** —
+      for EUR/USD in 2008 and **11.3% for the Icelandic krona that same year** —
       so it is largest exactly when someone is most likely to be looking. Two
       fixings four-fold apart make the two constructions unmistakable: the mean
       of 0.5 and 0.125 is 0.3125, while one over the mean of 2 and 8 is 0.2.
@@ -633,8 +633,8 @@ unit_tests:
       a non-null boolean either way.
 
       **Reading `is_rate_stale` off the sibling instead of computing it here**
-      catches 5 of the warehouse's 22 stale period-ends. The daily model stops
-      emitting rows once a currency leaves the ECB's panel, so the 17 rows that
+      catches 5 of the warehouse's 21 stale period-ends. The daily model stops
+      emitting rows once a currency leaves the ECB's panel, so the 16 rows that
       most need the flag have nothing to join to and a left join calls them
       clean. That mutation is unreachable from a unit test — it is a missing
       join, not a wrong value — which is why the model comment carries the

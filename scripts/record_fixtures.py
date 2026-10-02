@@ -169,7 +169,7 @@ def record_fx() -> None:
     Untrimmed: there is no country to filter on, and the structure worth testing
     is when each currency starts and stops — the euro changeovers, the 2022
     rouble suspension and Iceland's nine-year gap that `fct_fx_rates_daily`
-    handles. 3.6 MB whole, 844 kB compressed.
+    handles. 4.1 MB whole, 836 kB compressed.
     """
     url = fx_url(FX_FIRST_DATE)
     payload = json.dumps(get_json(url))

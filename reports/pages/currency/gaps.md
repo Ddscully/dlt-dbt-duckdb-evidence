@@ -97,7 +97,6 @@ select
     count(*) filter (where is_quoted and is_currently_published) as n_live,
     count(*) filter (where is_quoted and not is_currently_published) as n_stopped,
     count(*) filter (where retired_reason = 'euro_adoption') as n_euro,
-    count(*) filter (where retired_reason = 'redenomination') as n_redenominated,
     count(*) filter (
         where is_quoted and not is_currently_published and not retirement_is_explained
     ) as n_unexplained
@@ -109,7 +108,7 @@ changes over time.
 
 Of the <Value data={panel} column=n_quoted/> codes the series has ever quoted, <Value data={panel} column=n_live/> are still live and <Value data={panel} column=n_stopped/> stopped.
 
-Of those, <Value data={panel} column=n_euro/> stopped on the last business day before their country adopted the euro: the Greek drachma in 2000, the Croatian kuna in 2022, the Bulgarian lev at the end of 2025. <Value data={panel} column=n_redenominated/> stopped at a redenomination, where the same money continued under a new code, as with the Turkish lira at 1,000,000:1 and the Romanian leu at 10,000:1, both in 2005. The remaining <Value data={panel} column=n_unexplained/> simply ceased, and this project does not guess at why.
+Of those, <Value data={panel} column=n_euro/> stopped on the last business day before their country adopted the euro: the Greek drachma in 2000, the Croatian kuna in 2022, the Bulgarian lev at the end of 2025. None stopped at a redenomination: the ECB quotes the Turkish lira and the Romanian leu back to 1999 in their post-2005 units, so their 2005 changes of code never reach the series. The remaining <Value data={panel} column=n_unexplained/> simply ceased, and this project does not guess at why.
 
 So the dense series is built per currency between its first and last fixing, and
 a euro-era drachma never gets invented.
@@ -127,7 +126,7 @@ a euro-era drachma never gets invented.
 **Two: a suspended quote is not a long weekend.** The longest closure in the whole
 series is five days, so the carry-forward is capped at seven. That fills every
 weekend and holiday while refusing exactly two gaps, both of which are currency
-crises rather than calendars. The Icelandic króna has no reference rate for 3,341
+crises rather than calendars. The Icelandic króna has no reference rate for 3,347
 days between the 2008 banking collapse and February 2018, and the Argentine peso
 none for 34 days after the January 2002 breaking of the dollar peg.
 
