@@ -474,11 +474,11 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   being swapped. The expression was actually `hdd_minmax_total >= 0 and
   hdd_total >= 0` — non-negativity already carried by `not_null` and two
   `accepted_range {min_value: 0}`, and **invariant under the swap it claimed to
-  catch**. Swapping the columns in the final SELECT builds cleanly and **all 29
-  of `fct_country_weather_year`'s data tests pass**, with DEU 2022 reading
-  2170.55 for 2177.70.
+  catch**. Swapping the columns in the final SELECT builds cleanly and **every
+  data test on `fct_country_weather_year` passes**, with DEU 2022 reading
+  2140.15 for 2133.10.
   - **The ordering it asserted is false, so the "obvious" fix reddens the
-    build**: the midpoint total is the larger in 38.6% of the archive's rows
+    build**: the midpoint total is the larger in 49.7% of the archive's rows
     (`weather-models` has the measurement). Encoding the comment as an
     expression is the one repair to avoid.
   - **So the fixture puts a country on each side of it.** AAA's midpoint total

@@ -355,6 +355,12 @@ that went.
   `fct_emissions_energy_v1` will be — would fail the next release on a planned
   removal. A test pins this through the command's exit, because
   counting `removed` as a loss keeps every verdict label right.
+- **Re-fetching carried weather years is also a dispatch.** `weather_years`
+  (`2017 2026`, or one year) runs `just backfill-weather` between the restore
+  and the build, which is the only way a change to the weather request reaches
+  rows older than the ninety-day lookback. At most fifteen years a run, and ten
+  take over an hour, most of it the limiter sleeping (`weather-models`). It has
+  not run in CI yet.
 - **A deliberate drop is published by dispatch**: a scheduled run cannot take
   inputs, so it fails and a person re-runs with `accept_volume_drop`. The failed
   month's release never existed, so the re-run still compares against the last

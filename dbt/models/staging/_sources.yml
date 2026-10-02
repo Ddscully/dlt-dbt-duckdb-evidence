@@ -37,7 +37,7 @@ sources:
           error_after: {count: 7, period: day}
       - name: om_weather_daily
         description: >
-          Open-Meteo ERA5 daily weather at the capital of each of the 41 countries
+          Open-Meteo reanalysis weather, daily, at the capital of each of the 41 countries
           Eurostat prices electricity for, at
           (country_iso3, weather_date). The only source joined on a *coordinate*
           rather than a code: the capital latitude/longitude the World Bank
@@ -49,10 +49,10 @@ sources:
           and the full 2007- seed costs more than one day holds — so the rows
           are carried forward from the previous release rather than refetched,
           making this the only landing table a rebuild does not reproduce. And
-          the recent tail is **preliminary**: Open-Meteo serves ERA5T within a
-          day or two of real time and Copernicus supersedes it with final ERA5
-          two to three months later, which is what the 90-day merge lookback is
-          sized for.
+          the recent tail is **preliminary**: Open-Meteo serves the reanalysis
+          about six days behind real time and Copernicus supersedes those runs
+          with final ones two to three months later, which is what the 90-day
+          merge lookback is sized for.
         # Daily, like the FX rates, so the annual thresholds would let it stop
         # for a month unnoticed. Looser than FX's 2/7 because there is no
         # business-day calendar here — every day exists — but the load is paced

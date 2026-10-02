@@ -64,3 +64,4 @@ Status: accepted YYYY-MM-DD (#PR) | superseded by NNNN
 | [0016](0016-the-mcp-server.md) | The analyst's tools are served over MCP on stdio, from the loop's own schemas, with a connection per call | accepted 2026-09-28 |
 | [0017](0017-the-cbam-scenario.md) | The CBAM scenario re-prices the mart's certificates for one good, gross of the free-allocation deduction, and says so | accepted 2026-09-28 |
 | [0018](0018-the-scope-2-factor-is-lifecycle.md) | The Scope 2 factor stays OWID's lifecycle series, labelled as lifecycle, under the column names it has | accepted 2026-09-30 |
+| [0019](0019-the-weather-request-names-its-model.md) | The weather request names its model: ERA5-Land temperatures, ERA5 for the rest | accepted 2026-09-30 |

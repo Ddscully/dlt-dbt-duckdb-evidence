@@ -1,4 +1,4 @@
-"""Open-Meteo ERA5: daily weather for the capitals of the countries Eurostat prices.
+"""Open-Meteo reanalysis: daily weather for the capitals of the countries Eurostat prices.
 
 The largest source module here, and the only one bounded by a *budget* rather
 than by what the API will serve: Open-Meteo charges weighted units, so what can
@@ -24,9 +24,19 @@ from ingest.sources import worldbank
 from modern_data_stack import db
 from modern_data_stack.ratelimit import WeightedWindowLimiter
 
-# Open-Meteo's ERA5 reanalysis archive: daily weather at any point on Earth back
-# to 1940, no key. https://open-meteo.com/en/docs/historical-weather-api
+# Open-Meteo's historical archive: daily weather at any point on Earth back to
+# 1940, no key. https://open-meteo.com/en/docs/historical-weather-api
 OPEN_METEO_ARCHIVE_API = "https://archive-api.open-meteo.com/v1/archive"
+
+# Which model answers, named in every request. With none named the API picks its
+# "best match", which is this reanalysis to the end of 2016 and the ECMWF IFS
+# forecast model from 2017: two models in one series, over 5% apart on a year's
+# heating degree days at 10 of the 41 capitals.
+#
+# `era5_seamless` is ERA5-Land (0.1°) for temperature and ERA5 (0.25°) for
+# precipitation, wind and radiation. `era5_land` alone answers the three
+# temperatures and returns null for the rest, on every date.
+WEATHER_MODEL = "era5_seamless"
 
 # The countries Eurostat prices electricity for, which the weather analysis joins
 # to; `tests/test_ingest.py` holds the list to the price data.
@@ -49,7 +59,8 @@ WEATHER_DAILY_VARIABLES = (
     "shortwave_radiation_sum",
 )
 
-# Checked by `tests/test_ingest.py`: a unit change would fail no range test.
+# Held to the recorded payload by `tests/test_ingest.py`: a unit change would fail
+# no range test.
 WEATHER_EXPECTED_UNITS = {
     "temperature_2m_mean": "°C",
     "temperature_2m_max": "°C",
@@ -69,12 +80,14 @@ WEATHER_FIRST_YEAR = 2007
 # complete years to compare; deeper history is carried forward or backfilled.
 WEATHER_COLD_START_YEARS = 3
 
-# Final ERA5 replaces preliminary ERA5T two to three months on; a shorter window
-# would freeze preliminary values into the carried archive.
+# Final ERA5 and ERA5-Land replace their preliminary runs two to three months
+# on; a shorter window would freeze preliminary values into the carried archive.
 WEATHER_LOOKBACK_DAYS = 90
 
 # Asking past the archive's last day, measured at yesterday, is a 400, so
-# `today - 1` would fail on one side of the server's rollover.
+# `today - 1` would fail on one side of the server's rollover. The reanalysis
+# itself runs further behind, six days when measured: the days between come back
+# with every variable null and are dropped (`_weather_rows`).
 WEATHER_END_LAG_DAYS = 3
 
 WEATHER_PRIMARY_KEY = ("country_iso3", "weather_date")
@@ -99,8 +112,8 @@ WEATHER_BACKOFF_SECONDS = 1.5
 WEATHER_COLUMNS: dict[str, TColumnSchema] = {
     "country_iso3": {"data_type": "text", "nullable": False},
     "weather_date": {"data_type": "date", "nullable": False},
-    # The ERA5 grid cell the API snapped to, not the capital's coordinates
-    # (Berlin's 52.5235/13.4115 comes back 52.54833/13.407822).
+    # The ERA5-Land grid cell the API snapped to, not the capital's coordinates
+    # (Berlin's 52.5235/13.4115 comes back 52.5/13.400009).
     "grid_latitude": {"data_type": "double"},
     "grid_longitude": {"data_type": "double"},
     "elevation_m": {"data_type": "double"},
@@ -179,7 +192,9 @@ def weather_url(
     span was refused.
 
     Four decimals keep the URL byte-stable, so a recorded fixture is
-    reproducible; ERA5's 0.25° grid makes the lost precision irrelevant.
+    reproducible; ERA5-Land's 0.1° grid makes the lost precision irrelevant.
+
+    `models` is never left out: see `WEATHER_MODEL`.
     """
     latitudes = ",".join(f"{latitude:.4f}" for _, latitude, _ in locations)
     longitudes = ",".join(f"{longitude:.4f}" for _, _, longitude in locations)
@@ -187,6 +202,7 @@ def weather_url(
         f"{OPEN_METEO_ARCHIVE_API}?latitude={latitudes}&longitude={longitudes}"
         f"&start_date={start_date}&end_date={end_date}"
         f"&daily={','.join(WEATHER_DAILY_VARIABLES)}&timezone=UTC"
+        f"&models={WEATHER_MODEL}"
     )
 
 
@@ -428,9 +444,9 @@ def _weather_rows(
                 for name, values in columns.items()
             }
             # Drop a day with nothing measured. The merge replaces the stored row
-            # at this key, and the ERA5T tail returns unfinished days as all-null,
-            # which would overwrite a complete day loaded earlier. A partly null
-            # day still replaces a fuller one: dlt merges whole rows.
+            # at this key, and the days the reanalysis has not reached come back
+            # all-null, which would overwrite a complete day loaded earlier. A
+            # partly null day still replaces a fuller one: dlt merges whole rows.
             if all(value is None for value in measured.values()):
                 continue
             yield {
@@ -450,7 +466,7 @@ def _weather_rows(
     columns=WEATHER_COLUMNS,
 )
 def om_weather_daily(years: tuple[int, int] | None = None):
-    """Daily ERA5 weather at each capital city.
+    """Daily reanalysis weather at each capital city (`WEATHER_MODEL`).
 
     Unreproducible within a budget: 2007 to date for 41 capitals costs more than
     Open-Meteo's 10,000 daily units, so the rows are carried forward from the

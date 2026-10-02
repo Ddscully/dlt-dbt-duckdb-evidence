@@ -616,9 +616,9 @@ models:
       # **Swapping `hdd_total` and `hdd_minmax_total` is not catchable by a data
       # test.** The two conventions are not ordered — whether the (max + min)/2
       # midpoint sits above or below the true daily mean depends on the day's
-      # shape, and `hdd_minmax_total` is the larger in 38.6% of rows — so both
+      # shape, and `hdd_minmax_total` is the larger in 49.7% of rows — so both
       # totals are legal either way. With the columns swapped (measured on a
-      # warehouse copy) all 28 of `fct_country_weather_year`'s data tests pass;
+      # warehouse copy) every data test on `fct_country_weather_year` passes;
       # the unit test `weather_year_keeps_the_two_degree_day_conventions_apart`
       # fails.
 
@@ -633,6 +633,14 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "(frost_days > 0) = (temp_min_c < 0)"
+      # Every variable arrives. The request names a model, and a model that
+      # lacks a variable answers it with nulls, not an error: `era5_land` alone
+      # returns the three temperatures and nothing else, and every range test
+      # on these columns passes on a null. Complete years only, so a day the
+      # reanalysis has half finished cannot fail it.
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "not year_is_complete or (precipitation_mm is not null and solar_radiation_mj_m2 is not null and wind_speed_max_kmh is not null)"
     columns:
       - name: country_iso3
         data_type: VARCHAR
@@ -790,7 +798,7 @@ models:
         meta:
           additivity: non_additive
         description: >
-          Distance from the capital to the ERA5 cell that answered for it,
+          Distance from the capital to the ERA5-Land cell that answered for it,
           carried up from staging so the approximation stays visible at this
           grain too.
         data_tests:

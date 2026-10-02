@@ -1161,13 +1161,13 @@ unit_tests:
       and that a test therefore caught the swap; both halves were false, and the
       expression under it was non-negativity that is invariant under the swap.
       Measured against a warehouse copy: with the two swapped in the final
-      SELECT the model builds and **all 29 of `fct_country_weather_year`'s data
-      tests pass**, DEU 2022 reading 2170.55 where it should read 2177.70.
+      SELECT the model builds and **every data test on
+      `fct_country_weather_year` passes**, DEU 2022 reading 2140.15 where it should read 2133.10.
 
       **The fixture puts the two directions on either side of it, which is the
       part that matters.** AAA's `(max + min)/2` total lands above its mean-based
       one and BBB's lands below, because over the real archive `hdd_minmax_total`
-      is the larger in 253 of 656 rows (38.6%) and the smaller in 403. So this
+      is the larger in 326 of 656 rows (49.7%) and the smaller in 330. So this
       pins that the columns are distinguishable *without* asserting an ordering
       between them — a test that assumed one would be red on the warehouse.
 

@@ -5,7 +5,7 @@ sidebar_position: 5
 ---
 
 *Was it just colder?* is the question to dispose of before crediting an energy or
-price movement to anything else. This page answers it with daily ERA5 reanalysis
+price movement to anything else. This page answers it with daily reanalysis weather
 for the capital of every country in Eurostat's electricity price series, turned
 into heating degree days.
 
@@ -210,6 +210,6 @@ history, which is how every chart here reads; not a ranking of national climate.
 </Alert>
 
 <small>Weather data by <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY
-4.0), derived from ERA5 reanalysis produced by
+4.0), derived from the ERA5-Land and ERA5 reanalyses produced by
 <a href="https://www.ecmwf.int/">ECMWF</a> for the
 <a href="https://climate.copernicus.eu/">Copernicus Climate Change Service</a>.</small>

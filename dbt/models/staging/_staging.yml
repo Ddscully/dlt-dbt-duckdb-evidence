@@ -383,7 +383,7 @@ models:
     config:
       group: country_stats
     description: >
-      Daily capital-city weather from Open-Meteo's ERA5 archive, one row per
+      Daily capital-city weather from Open-Meteo's reanalysis archive, one row per
       (country_iso3, weather_date), for the 41 countries Eurostat publishes an
       electricity price for. The warehouse's second daily grain and its first
       model built on a *spatial* join — the capital coordinates in `stg_country`,
@@ -395,11 +395,17 @@ models:
       Neither is more correct; they disagree on asymmetric days, and shipping
       both is what lets a downstream model state which one it used.
 
-      One ERA5 grid cell at the capital stands in for national heating demand:
+      One grid cell at the capital stands in for national heating demand:
       defensible for comparing a country with itself across years, weak for
       comparing countries, and `grid_distance_km` shows the approximation. The
-      last 90 days are preliminary ERA5T, re-fetched until final ERA5 replaces
-      them, so they can change between builds.
+      last 90 days are preliminary, re-fetched until the final reanalysis
+      replaces them, so they can change between builds.
+
+      One model answers every year, because the request names it: ERA5-Land for
+      the three temperatures and ERA5 for precipitation, wind and radiation
+      (Open-Meteo's `era5_seamless`). Left unnamed, the API answers 2017 onwards
+      from a forecast model instead, and the series changes basis inside the
+      years it is compared across (docs/decisions/0019).
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -411,8 +417,8 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "country_iso3 in (select country_iso3 from {{ ref('stg_eu_electricity_prices_semiannual') }})"
-      # A capital must resolve to a grid cell next to it. ERA5's grid is 0.25
-      # degrees, so ~20 km is the worst honest case; 100 km means the request
+      # A capital must resolve to a grid cell next to it. ERA5-Land's grid is 0.1
+      # degrees, so ~8 km is the worst honest case; 100 km means the request
       # sent coordinates that are not the capital's, which no range test on a
       # temperature could ever notice.
       - dbt_utils.expression_is_true:
@@ -448,7 +454,7 @@ models:
                 field: country_iso3
       - name: weather_date
         description: >
-          The ERA5 day, UTC. Dense — unlike `stg_fx_rates`, every calendar day in
+          The reanalysis day, UTC. Dense — unlike `stg_fx_rates`, every calendar day in
           range has a row, because a reanalysis has no business calendar.
         data_tests:
           - not_null
@@ -523,7 +529,7 @@ models:
               arguments: {min_value: 0}
       - name: grid_distance_km
         description: >
-          Great-circle distance from the capital to the ERA5 cell centre that
+          Great-circle distance from the capital to the ERA5-Land cell centre that
           answered for it. The number that makes "a capital stands in for a
           country" an approximation you can see rather than one you have to
           remember.

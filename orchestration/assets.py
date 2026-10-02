@@ -128,11 +128,11 @@ RAW_DESCRIPTIONS = {
         "fetch."
     ),
     "om_weather_daily": (
-        "Open-Meteo ERA5 daily weather at the capital of each country Eurostat prices, at "
-        "(country_iso3, weather_date) — the one source joined on a *coordinate*, "
+        "Open-Meteo reanalysis weather, daily, at the capital of each country "
+        "Eurostat prices, at (country_iso3, weather_date) — the one source joined on a *coordinate*, "
         "the World Bank's capital latitude/longitude. Loaded "
-        "incrementally: `merge` over a 90-day lookback (ERA5T is superseded by "
-        "final ERA5 months later), backfilled by year range, and paced against a "
+        "incrementally: `merge` over a 90-day lookback (the preliminary runs are "
+        "superseded by final ones months later), backfilled by year range, and paced against a "
         "finite API budget rather than fetched whole."
     ),
 }

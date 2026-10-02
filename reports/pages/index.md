@@ -307,7 +307,7 @@ Parquet.
 <a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>,
 <a href="https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204">Eurostat electricity prices</a>,
 <a href="https://frankfurter.dev">ECB reference rates via Frankfurter</a>,
-<a href="https://open-meteo.com/">Open-Meteo</a> (ERA5, Copernicus/ECMWF),
+<a href="https://open-meteo.com/">Open-Meteo</a> (ERA5-Land and ERA5, Copernicus/ECMWF),
 <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621">Implementing Regulation (EU) 2025/2621</a>,
 <a href="https://archive.ics.uci.edu/dataset/502/online+retail+ii">UCI Online Retail II</a>.
 Country outlines from <a href="https://www.naturalearthdata.com/">Natural Earth</a>.

@@ -10,7 +10,7 @@ Sources (all freely licensed; country + year keyed apart from the last):
   - UCI Online Retail II  https://archive.ics.uci.edu/dataset/502/online+retail+ii
                           (order lines — the one grain below a country, and the
                            one source that is a bulk file drop rather than an API)
-  - Open-Meteo ERA5       https://open-meteo.com/en/docs/historical-weather-api
+  - Open-Meteo reanalysis https://open-meteo.com/en/docs/historical-weather-api
                           (daily capital-city weather — the one source joined on
                            a *coordinate*, and the one with a finite budget)
 
