@@ -344,8 +344,8 @@ seeds:
         data_tests: [not_null]
       - name: retired_on
         description: >
-          The first day the code was no longer a live quote — a euro adoption
-          date or a redenomination date. Null for the 30 current codes and for
+          The first day the code was no longer a live quote — so far always a
+          euro adoption date. Null for the 30 current codes and for
           the five whose quote simply ceased (ARS, DZD, MAD, TWD in October 2020
           and RUB in March 2022): the seed deliberately does not guess at a
           publisher's reason, and `dim_currency.retirement_is_explained` is how a
@@ -357,10 +357,10 @@ seeds:
                 values: [euro_adoption, redenomination]
       - name: replaced_by_currency
         description: >
-          EUR for the ten euro adoptions; TRY and RON for the two 2005
-          redenominations, where the money continued under a new code at
-          1,000,000:1 and 10,000:1. A series charted by code rather than by money
-          has a cliff at those two dates.
+          EUR for the ten euro adoptions. A redenomination would name the new
+          code, but the panel has none: the ECB quotes the Romanian leu and the
+          Turkish lira back to 1999 as RON and TRY, in their post-2005 units,
+          and never as the old ROL and TRL.
     data_tests:
       # Every retirement date the seed asserts must match what the ECB published:
       # the last quote falls strictly before it (all twelve on the business day

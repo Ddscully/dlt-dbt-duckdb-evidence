@@ -26,22 +26,22 @@ follows from that rather than from the numbers.
   bound is measured.** The longest closure the ECB has ever taken is 5 days
   (36 times, the Christmas/New Year runs). What the cap refuses is the two
   *interior* gaps in the whole series, and both are currency crises rather than
-  calendars: the Icelandic krona has no rate for 3,341 days from the 2008 banking
+  calendars: the Icelandic krona has no rate for 3,347 days from the 2008 banking
   collapse to February 2018, the Argentine peso none for 34 days from the January
-  2002 breaking of the dollar peg. Those 3,359 rows keep their place with a null
+  2002 breaking of the dollar peg. Those 3,365 rows keep their place with a null
   rate and `is_rate_stale` set. An uncapped fill would have put a pre-collapse
   krona on nine years of charts.
 - **No data test on `fct_fx_rates_daily` can see the cap, and five mutations
   prove it.** They guard the grain, the direction of the carry
   (`rate_source_date <= date_day`) and positivity — all real, none sufficient,
-  because a rate carried 8 days or 3,341 days is a well-formed positive number
+  because a rate carried 8 days or 3,347 days is a well-formed positive number
   with a source date in the past. All five mutations below pass every data
   test:
 
   | mutation | effect on the warehouse |
   |---|---|
   | cap 7 -> 30 days | 46 stale rows gain a rate |
-  | cap removed | all 3,359 priced; `is_rate_stale` true beside a usable rate |
+  | cap removed | all 3,365 priced; `is_rate_stale` true beside a usable rate |
   | `<=` becomes `<` | 2 rows at exactly the cap lose their rate |
   | `is_rate_stale` on `>=` | 2 rows stale *and* priced |
   | window loses `partition by currency_code` | **113,479 rows (29.7%) quote another currency** |
@@ -59,17 +59,14 @@ follows from that rather than from the numbers.
     1.76373 across its 26-day one — 132% and 98% from the next real quote.
   - Held by two unit tests in `dbt/models/marts/_unit_tests.yml`, which catch
     all five.
-- **The currency panel is not fixed, which is why `dim_currency` exists.** 46
+- **The currency panel is not fixed, which is why `dim_currency` exists.** 44
   codes have been quoted and 29 still are. Ten stop on the last business day
-  before their country adopted the euro (GRD 2000 through BGN 2025), two at a
-  redenomination where the money continues under a new code (TRL→TRY at
-  1,000,000:1, ROL→RON at 10,000:1 — a chart following the *code* has a cliff in
-  2005), and five simply cease. **The `currencies` seed carries the twelve dates
-  that are matters of public record and deliberately guesses at none of the
-  other five**, and a test checks each one against the series: every asserted
-  retirement date is the day after the last published fixing. `is_quoted` is
-  false for exactly one row — EUR, which is the base of every quote and never a
-  quote itself.
+  before their country adopted the euro (GRD 2000 through BGN 2025) and five
+  simply cease. **The `currencies` seed carries the ten dates that are matters
+  of public record and deliberately guesses at none of the other five**, and a
+  test checks each one against the series: every asserted retirement date is
+  the day after the last published fixing. `is_quoted` is false for exactly one
+  row — EUR, which is the base of every quote and never a quote itself.
   - **A hand-maintained seed needs a test in *both* directions, and only one of
     them existed.** `dim_currency` is `from seed left join` the series, so it can
     only ever hold seed rows — and `fct_fx_rates_daily` inner-joins it. A
@@ -82,7 +79,16 @@ follows from that rather than from the numbers.
     never quoted — could not be caught by the `retired_on` test either: its
     subquery returns NULL for a code with no rates, and `retired_on > NULL` is
     null rather than false, so the row passed by being *unknown*. Hence the
-    `is_quoted` assertion: 47 rows, 46 quoted, EUR the one exception.
+    `is_quoted` assertion: 45 rows, 44 quoted, EUR the one exception.
+    - **It also fires when the source drops a code, and that is how it was
+      first met.** Frankfurter used to serve ROL and TRL, the Romanian leu and
+      Turkish lira before their 2005 redenominations, beside RON and TRY back
+      to 1999. When it came into line with the ECB, which quotes only the new
+      codes, the release built from empty had two seed rows with no rates —
+      while a local tree, whose incremental landing table never forgets a
+      row, stayed green. Check the ECB's own data API
+      (`data-api.ecb.europa.eu/service/data/EXR/D.<code>.EUR.SP00.A`) before
+      deciding a code Frankfurter dropped is a loss rather than a correction.
 ### Both directions, and spot against average
 
 - **Six of seven mutations to `fct_fx_rates_periods` pass every one of its data
@@ -104,7 +110,7 @@ follows from that rather than from the numbers.
   uncovered.
   - **The reciprocal gap's headline number should be the krona, not the
     dollar.** 0.07% for EUR/USD in 2015 and 0.52% in 2008 read as rounding; the
-    ISK in 2008 is **11.9%**. The gap scales with intra-period movement, so it
+    ISK in 2008 is **11.3%**. The gap scales with intra-period movement, so it
     is largest in exactly the periods someone is investigating.
 - **Both directions of every rate ship.** `units_per_eur` is the ECB's own quote,
   `eur_per_unit` its reciprocal. Same argument as the Scope 2 factor in g/kWh
@@ -112,7 +118,7 @@ follows from that rather than from the numbers.
 - **Spot or average is a real decision and the model refuses to make it.** Stocks
   (a balance at an instant) convert at the closing rate; flows (revenue, spend, a
   price over a period) at the period average. `period_end_vs_avg_pct` measures
-  the cost of choosing wrong — +11.7% for EUR/USD in 2003, -8.6% in 2014, +98%
+  the cost of choosing wrong — +11.7% for EUR/USD in 2003, -8.6% in 2014, +102%
   for the krona in 2008.
   - **Average over published fixings, never over the dense table.** Averaging
     `fct_fx_rates_daily` counts every Friday three times and four or five times
@@ -135,21 +141,19 @@ follows from that rather than from the numbers.
     `period_end_is_stale` / `period_end_stale_days` close that, and the way they
     are computed is the point: **the obvious implementation — join the sibling,
     read `is_rate_stale` — reproduces the defect.** The daily model stops
-    emitting rows once a currency leaves the ECB's panel, so 17 of the 22 stale
-    period-ends have no row to join to and a left join flags 5 of 22 and calls
+    emitting rows once a currency leaves the ECB's panel, so 16 of the 21 stale
+    period-ends have no row to join to and a left join flags 5 of 21 and calls
     the rest clean. That was measured, and it is also **how a finding like this
     gets undersized**: sizing the problem by what the two models *share*
     (19,616 of 19,649 complete period-ends) excludes exactly the currencies that
     have the problem. The flag ages `last_rate_date` directly instead.
-  - **22 complete period-ends across 7 currencies are stale, from three causes.**
+  - **21 complete period-ends across 6 currencies are stale, from two causes.**
     Sixteen are panel exits `dim_currency` deliberately records no retirement
     for — RUB on 2022-03-01, and ARS, DZD, MAD and TWD together on 2020-10-30,
     which is one panel change rather than four events. Five are the currency
     crises (ISK 2008 across month, quarter, half and year; ARS January 2002).
-    One is ROL's 2005 redenomination, which the seed *does* record and which is
-    stale here anyway, because the model reads fixings and not the seed.
-    - **The worst is not the famous one.** ISK 2008's +98.3% is quoted all over
-      this project and is 22 days stale; **RUB's 2022 year end is 305 days
+    - **The worst is not the famous one.** ISK 2008's +101.6% is quoted all over
+      this project and is 28 days stale; **RUB's 2022 year end is 305 days
       stale** — a 117.201 close against an 88.397 average, because the ECB
       stopped publishing the rouble ten months before the year ended.
     - **The flag discloses and does not null**, unlike the daily model's cap.
@@ -160,7 +164,7 @@ follows from that rather than from the numbers.
       old because the currency had stopped trading — which makes it a *stronger*
       example, not a retracted one.
     - **The distribution is bimodal and the cap sits in the gap**: 19,743
-      period-ends are 0-3 days old, nothing at all between 4 and 21, then the 22.
+      period-ends are 0-3 days old, nothing at all between 4 and 21, then the 21.
       Any cap from 4 to 21 selects the same rows, so `>` versus `>=` moves
       nothing in the warehouse and only the unit test can pose it — the same
       unreachable-boundary category as `period_is_complete`'s `<=`.
@@ -210,7 +214,7 @@ follows from that rather than from the numbers.
     seed's `retired_on` test was correlated on it.** Both sides are qualified
     now; unqualified, DuckDB binds the inner one and the test compares every
     retirement date against the whole panel's last fixing. It lands the safe way
-    up — all twelve retired rows go red rather than quietly green — but that is
+    up — every retired row goes red rather than quietly green — but that is
     luck, not design.
 
 - **`fct_fx_rates_published` is the only `materialized='incremental'` model in
@@ -239,7 +243,7 @@ follows from that rather than from the numbers.
   straight.
 ### Fixtures, and what it changed elsewhere
 
-- **The FX fixture is the whole series, gzipped** (3.6 MB → 843 kB), and it is
+- **The FX fixture is the whole series, gzipped** (4.1 MB → 836 kB), and it is
   the one fixture that isn't trimmed. Every discontinuity above is something a
   model is tested against, so cutting the date range would take the euro
   changeovers, the rouble and Iceland out of CI. It is also the reason `_get_json`

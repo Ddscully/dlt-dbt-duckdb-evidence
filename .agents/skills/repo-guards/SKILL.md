@@ -274,7 +274,7 @@ section here. The mutation method these guards were written with is in the
   rebuilding its index, and `ecb_fx_rates` because the interesting structure is
   *when each currency starts and stops* — cutting the date range would take the
   euro changeovers, the rouble and Iceland's nine-year gap out of CI, which are
-  the four shapes the FX models exist to handle. It is gzipped (3.6 MB → 843 kB),
+  the four shapes the FX models exist to handle. It is gzipped (4.1 MB → 836 kB),
   and it is why `_get_json` has a `.gz` branch.
 - **`fixtures.path_for()` raises on an unmapped URL** rather than falling back to
   the network — otherwise "offline CI" quietly becomes "CI that's online

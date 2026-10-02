@@ -187,7 +187,7 @@ converted:
 |---|---|---|---|---|
 | USD | 2003 | 1.1312 | 1.2630 | **+11.7%** |
 | USD | 2014 | 1.3285 | 1.2141 | **−8.6%** |
-| ISK | 2008 | 146.25 | 290.00 | **+98.3%** |
+| ISK | 2008 | 143.83 | 290.00 | **+101.6%** |
 
 Two consequences the model builds around, both of which look like nitpicks and
 are not:
@@ -200,7 +200,7 @@ whichever weekday sits next to a closure. `fct_fx_rates_periods` reads
 
 **`avg_eur_per_unit` is not `1 / avg_units_per_eur`.** The mean of reciprocals is
 not the reciprocal of the mean, and the gap grows with volatility: 0.16% for the
-dollar in 2014, 0.52% in 2008, and **11.9% for the Icelandic krona in 2008**.
+dollar in 2014, 0.52% in 2008, and **11.3% for the Icelandic krona in 2008**.
 Each direction is the mean of its own series. The period-*end* columns do invert
 exactly, because a single point has no averaging in it.
 
@@ -639,7 +639,7 @@ extra `double` per row is the cheapest insurance in the warehouse.
 Where it stops is where the second column stops being a *restatement* and starts
 being a *second measurement*. `avg_eur_per_unit` looks like the reciprocal of
 `avg_units_per_eur` and is not (the mean of reciprocals differs from the
-reciprocal of the mean by 11.9% for the krona in 2008) so shipping both is
+reciprocal of the mean by 11.3% for the krona in 2008) so shipping both is
 mandatory rather than convenient, and each has to be computed from its own
 series. The opposite case is `renewables_share_pct` and
 `low_carbon_share_elec_pct`: two columns, near-identical names, genuinely

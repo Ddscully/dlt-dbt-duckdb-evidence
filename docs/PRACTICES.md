@@ -115,7 +115,7 @@ on each transaction's date, with a period average allowed in its place only
 while rates do not fluctuate significantly. So the warehouse publishes both
 and carries a column measuring the gap: for EUR/USD it reaches +11.7% in 2003, and
 across every currency the worst complete year is the Icelandic króna in 2008 at
-+98%.
++102%.
 → [`fct_fx_rates_daily.sql`](../dbt/models/marts/reference/fct_fx_rates_daily.sql),
 [`fct_fx_rates_periods.sql`](../dbt/models/marts/reference/fct_fx_rates_periods.sql)
 
