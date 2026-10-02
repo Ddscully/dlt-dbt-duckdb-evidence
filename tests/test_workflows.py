@@ -14,6 +14,7 @@ test asking someone to decide.
 
 from __future__ import annotations
 
+import inspect
 import re
 import subprocess
 from fnmatch import fnmatchcase
@@ -393,6 +394,55 @@ def test_every_workflow_that_runs_the_pipeline_uses_the_setup_action():
         if "./.github/actions/setup" not in (WORKFLOWS_DIR / name).read_text()
     )
     assert not missing, f"workflows running the pipeline without the setup action: {missing}"
+
+
+# --------------------------------------------------------------------------- #
+# dlt reads a workflow's environment as its own configuration
+# --------------------------------------------------------------------------- #
+
+
+def dlt_argument_names() -> set[str]:
+    """Every argument dlt may resolve from the environment, as an env var name.
+
+    dlt fills a source's or resource's arguments from config, and the last key it
+    tries is the bare upper-cased name. So `WEATHER_YEARS` in a step's `env:` is
+    read as `public_indicators(weather_years=…)` by everything the step runs.
+    """
+    from dlt.extract.resource import DltResource
+
+    from ingest import pipeline
+
+    names = set(inspect.signature(pipeline.public_indicators).parameters)
+    for resource in vars(pipeline).values():
+        if isinstance(resource, DltResource):
+            names |= set(inspect.signature(resource).parameters)
+    return {name.upper() for name in names}
+
+
+def test_the_dlt_argument_scan_reads_what_it_thinks_it_does():
+    """Vacuity guard: an empty set would leave the test below nothing to find."""
+    assert {"WEATHER_YEARS", "WDI_YEARS", "YEARS"} <= dlt_argument_names()
+
+
+def test_no_workflow_sets_a_variable_dlt_reads_as_an_argument():
+    """A workflow's own variable must not share a name with a dlt argument.
+
+    The release's `weather_years` input once reached its step as `WEATHER_YEARS`,
+    and every Dagster import under that step failed on it: dlt could not coerce
+    `"2017 2026"` into the source's year tuple. It passed every local run, where
+    nothing sets the variable, and failed on the input's first dispatch.
+    """
+    names = dlt_argument_names()
+    files = [*sorted(WORKFLOWS_DIR.glob("*.yml")), SETUP_ACTION]
+    offenders = {
+        path.name: found
+        for path in files
+        if (found := sorted(name for name in names if _assigns(path.read_text(), name)))
+    }
+    assert not offenders, (
+        f"variables dlt would read as source or resource arguments: {offenders}\n"
+        "Give the variable a name no dlt argument has (the release uses an _INPUT suffix)."
+    )
 
 
 # --------------------------------------------------------------------------- #
