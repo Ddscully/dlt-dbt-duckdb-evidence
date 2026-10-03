@@ -134,16 +134,17 @@ jobs:
       # an hour, most of it one sleep (`weather-models`).
       #
       # Through the environment and checked, like the tag: `just` interpolates
-      # its arguments into a script.
+      # its arguments into a script. Not `WEATHER_YEARS`: dlt reads that as
+      # `public_indicators(weather_years=…)` and every Dagster import fails.
       - name: Re-fetch weather years
         if: ${{ inputs.weather_years }}
         env:
-          WEATHER_YEARS: ${{ inputs.weather_years }}
+          WEATHER_YEARS_INPUT: ${{ inputs.weather_years }}
         run: |
-          read -r first last <<< "$WEATHER_YEARS"
+          read -r first last <<< "$WEATHER_YEARS_INPUT"
           last="${last:-$first}"
           if ! [[ "$first" =~ ^[0-9]{4}$ && "$last" =~ ^[0-9]{4}$ ]]; then
-            echo "weather_years must be one or two four-digit years, got: $WEATHER_YEARS" >&2
+            echo "weather_years must be one or two four-digit years, got: $WEATHER_YEARS_INPUT" >&2
             exit 1
           fi
           just backfill-weather "$first" "$last"
