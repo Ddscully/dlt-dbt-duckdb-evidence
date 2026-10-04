@@ -218,9 +218,9 @@ Then delete:
 - all of `reports/pages` and `reports/sources/warehouse/*.sql` **except
   `pipeline.md` and the four `pipeline_*.sql` queries**, which render the
   observability tables and name nothing in the example;
-- the eight justfile recipes that exist only for the example (`ingest-wdi-full`,
-  `backfill-*`, `disclosure-risk`, `course-*`), and the two transform lines in
-  `transform` and `test-pipeline`;
+- the nine justfile recipes that exist only for the example (`ingest-wdi-full`,
+  `ingest-fx-full`, `backfill-*`, `disclosure-risk`, `course-*`), and the two
+  transform lines in `transform` and `test-pipeline`;
 - `docs/course/`, and seven of the eighteen skills: country stats, compliance,
   retail, currency and calendar, weather, unit-tested models, course authoring;
 - the docs about this warehouse's data. What stays is `STYLE_GUIDE.md`,

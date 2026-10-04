@@ -30,7 +30,7 @@ from collections.abc import Iterable
 import dlt
 
 from ingest import fixtures
-from ingest.sources.ecb import ecb_fx_rates
+from ingest.sources.ecb import ecb_fx_rates, fx_full_reload_requested
 from ingest.sources.eurostat import eu_elec_prices
 from ingest.sources.owid import owid_co2, owid_energy
 from ingest.sources.retail import retail_invoice_lines
@@ -94,10 +94,15 @@ def load_groups(resources: Iterable[str] | None = None) -> list[tuple[list[str],
     alone doesn't try to run a load with no resources in it.
     """
     wanted = None if resources is None else set(resources)
+    refreshed, merged = FULL_REFRESH_RESOURCES, INCREMENTAL_RESOURCES
+    # The one merge resource cheap enough to re-fetch whole: `just ingest-fx-full`.
+    if fx_full_reload_requested():
+        refreshed = (*refreshed, "ecb_fx_rates")
+        merged = tuple(name for name in merged if name != "ecb_fx_rates")
     groups = []
     for names, kwargs in (
-        (FULL_REFRESH_RESOURCES, {"refresh": REFRESH}),
-        (INCREMENTAL_RESOURCES, {}),
+        (refreshed, {"refresh": REFRESH}),
+        (merged, {}),
     ):
         selected = [name for name in names if wanted is None or name in wanted]
         if selected:
