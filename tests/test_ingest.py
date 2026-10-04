@@ -641,9 +641,13 @@ def test_a_full_fx_reload_refreshes_ecb_fx_rates_and_nothing_else(monkeypatch):
     a refresh on `om_weather_daily` would cost days of Open-Meteo budget."""
     monkeypatch.setenv("INGEST_FX_FULL", "1")
     groups = {tuple(names): kwargs for names, kwargs in pipeline.load_groups()}
-    assert groups[(*pipeline.FULL_REFRESH_RESOURCES, "ecb_fx_rates")] == {"refresh": pipeline.REFRESH}
+    assert groups[(*pipeline.FULL_REFRESH_RESOURCES, "ecb_fx_rates")] == {
+        "refresh": pipeline.REFRESH
+    }
     assert groups[tuple(n for n in pipeline.INCREMENTAL_RESOURCES if n != "ecb_fx_rates")] == {}
-    assert pipeline.load_groups(["ecb_fx_rates"]) == [(["ecb_fx_rates"], {"refresh": pipeline.REFRESH})]
+    assert pipeline.load_groups(["ecb_fx_rates"]) == [
+        (["ecb_fx_rates"], {"refresh": pipeline.REFRESH})
+    ]
 
 
 def test_ecb_fx_rates_merges_unless_a_full_reload_is_asked_for(monkeypatch):
