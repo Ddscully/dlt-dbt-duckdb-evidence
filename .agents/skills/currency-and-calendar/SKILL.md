@@ -89,6 +89,13 @@ follows from that rather than from the numbers.
       row, stayed green. Check the ECB's own data API
       (`data-api.ecb.europa.eu/service/data/EXR/D.<code>.EUR.SP00.A`) before
       deciding a code Frankfurter dropped is a loss rather than a correction.
+    - **Once the seed drops the code, every older local tree goes red**, on
+      `stg_fx_rates`' `relationships` test, because its merged landing table
+      still holds the retracted rows. `just ingest-fx-full` drops
+      `raw.ecb_fx_rates`, re-fetches the series (one request, no quota) and
+      full-refreshes the FX models. It also removes what no test sees:
+      retracted fixings under a code that is still quoted, like ISK's
+      2008-12-04 to 12-09, which the same deploy took away.
 ### Both directions, and spot against average
 
 - **Six of seven mutations to `fct_fx_rates_periods` pass every one of its data

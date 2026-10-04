@@ -635,6 +635,28 @@ def test_load_groups_drops_groups_the_selection_empties():
     assert pipeline.load_groups([]) == []
 
 
+def test_a_full_fx_reload_refreshes_ecb_fx_rates_and_nothing_else(monkeypatch):
+    """`INGEST_FX_FULL=1` is the repair for rows the ECB feed retracted, which a
+    merge keeps forever. It must drop `ecb_fx_rates` and no other merge table:
+    a refresh on `om_weather_daily` would cost days of Open-Meteo budget."""
+    monkeypatch.setenv("INGEST_FX_FULL", "1")
+    groups = {tuple(names): kwargs for names, kwargs in pipeline.load_groups()}
+    assert groups[(*pipeline.FULL_REFRESH_RESOURCES, "ecb_fx_rates")] == {
+        "refresh": pipeline.REFRESH
+    }
+    assert groups[tuple(n for n in pipeline.INCREMENTAL_RESOURCES if n != "ecb_fx_rates")] == {}
+    assert pipeline.load_groups(["ecb_fx_rates"]) == [
+        (["ecb_fx_rates"], {"refresh": pipeline.REFRESH})
+    ]
+
+
+def test_ecb_fx_rates_merges_unless_a_full_reload_is_asked_for(monkeypatch):
+    monkeypatch.delenv("INGEST_FX_FULL", raising=False)
+    assert pipeline.load_groups(["ecb_fx_rates"]) == [(["ecb_fx_rates"], {})]
+    monkeypatch.setenv("INGEST_FX_FULL", "0")
+    assert pipeline.load_groups(["ecb_fx_rates"]) == [(["ecb_fx_rates"], {})]
+
+
 def test_the_cli_refuses_a_resource_it_does_not_know(monkeypatch):
     """`load_groups` drops an unknown name, so a typo on the command line would
     load nothing and exit 0 — a load that looks done."""

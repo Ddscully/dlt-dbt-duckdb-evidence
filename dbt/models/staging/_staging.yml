@@ -573,7 +573,10 @@ models:
           drops it silently. The published and period tables would still carry it,
           which is the shape that makes the hole hard to notice: one currency
           missing from the dense table only, with nothing red anywhere. This is
-          the direction the seed's own `retired_on` test cannot check.
+          the direction the seed's own `retired_on` test cannot check. It also
+          fails a local tree after a code leaves both the feed and the seed, as
+          ROL and TRL did: the merge keeps the retracted rows, and
+          `just ingest-fx-full` drops and re-fetches them.
         data_tests:
           - not_null
           - relationships:

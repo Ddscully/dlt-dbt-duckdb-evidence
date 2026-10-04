@@ -6,6 +6,7 @@ partitioned: the whole series since 1999 is one request.
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, date, datetime, timedelta
 
 import dlt
@@ -63,6 +64,16 @@ def fx_start_date(last_loaded_date: str | None) -> str:
         return FX_FIRST_DATE
     start = date.fromisoformat(last_loaded_date) - timedelta(days=FX_LOOKBACK_DAYS - 1)
     return max(start, date.fromisoformat(FX_FIRST_DATE)).isoformat()
+
+
+def fx_full_reload_requested() -> bool:
+    """`INGEST_FX_FULL=1` drops the landing table and re-fetches the series.
+
+    A merge only adds and updates, so a fixing or a whole currency the source
+    retracts stays in a local tree forever, while the release, built from
+    empty, never has it. ROL, TRL and four ISK fixings went that way.
+    """
+    return os.environ.get("INGEST_FX_FULL", "").lower() in {"1", "true", "yes"}
 
 
 @dlt.resource(
