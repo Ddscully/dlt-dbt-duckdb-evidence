@@ -10,6 +10,11 @@
 -- 2008-S1, the first with all of them (2007-S1 has 6). The table also holds
 -- countries outside the EU, which are cheaper and would pull a mean over every
 -- row well below either line.
+--
+-- And only the half-years Eurostat has published its aggregate for. A new
+-- half-year opens with the early reporters' prices and no EU average, and the
+-- panel below would shrink to those reporters for every period: 2026-S1 opened
+-- with 12 members, and the plain mean became a mean of 12 back to 2008.
 with priced as (
     select
         country_iso3,
@@ -21,6 +26,7 @@ with priced as (
     from marts.fct_eu_electricity_prices_semiannual
     where is_eu_member
       and period >= '2008-S1'
+      and eu27_price_eur_kwh is not null
 ),
 
 panel as (
