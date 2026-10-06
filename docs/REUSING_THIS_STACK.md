@@ -66,6 +66,7 @@ depend on it and write only the layers below.
 | `ratelimit` | a sliding-window budget for an API that charges by volume | `(seconds, units)` limits |
 | `workbook` | read a spreadsheet source without loading it whole | a URL and a batch size |
 | `db` | single-row and scalar reads, without the `Optional` | nothing |
+| `env` | read an on/off switch from the environment, with one set of spellings for every switch | the variable's name |
 | `bus_matrix` | derive the bus matrix from the manifest's uniqueness tests | a schema and the `dim_`/`fct_` prefixes |
 | `docker_launcher` | a Dagster `DockerRunLauncher` that starts each run from the launching container's own image ID, not a tag | the instance config's `run_launcher` block; needs `dagster-docker` |
 

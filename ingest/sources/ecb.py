@@ -6,13 +6,13 @@ partitioned: the whole series since 1999 is one request.
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, date, datetime, timedelta
 
 import dlt
 from dlt.common.schema.typing import TColumnSchema
 
 from ingest import http
+from modern_data_stack import env
 
 # Frankfurter republishes the ECB's daily euro foreign-exchange reference rates
 # as JSON — no key, no quota, no auth. https://frankfurter.dev
@@ -73,7 +73,7 @@ def fx_full_reload_requested() -> bool:
     retracts stays in a local tree forever, while the release, built from
     empty, never has it. ROL, TRL and four ISK fixings went that way.
     """
-    return os.environ.get("INGEST_FX_FULL", "").lower() in {"1", "true", "yes"}
+    return env.flag("INGEST_FX_FULL")
 
 
 @dlt.resource(
