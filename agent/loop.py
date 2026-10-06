@@ -125,7 +125,7 @@ def ask(
     outputs: list[str] = []
     notes: dict[str, None] = {}  # ordered, and one copy of a note two calls both return
     calls: list[str] = []
-    for _ in range(max_rounds):
+    for round_number in range(1, max_rounds + 1):
         message = chat(messages, schemas)
         messages.append(message)
         tool_calls = message.get("tool_calls") or []
@@ -142,6 +142,12 @@ def ask(
             calls.append(f"{function['name']}({function['arguments']})")
             if on_call is not None:
                 on_call(calls[-1])
+            if round_number == max_rounds:
+                continue  # no round is left to read a result in
+            # Some servers leave the id out. One is made up here, and written into
+            # the history too, so a server that pairs replies by id still can.
+            if not call.get("id"):
+                call["id"] = f"call_{len(calls)}"
             result = call_tool(by_name, function["name"], function["arguments"])
             outputs.append(result.text)
             if result.note:

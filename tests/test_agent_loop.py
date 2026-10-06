@@ -104,10 +104,24 @@ def test_a_refusal_goes_back_to_the_model_against_its_call():
 def test_a_model_that_never_answers_is_stopped():
     chat = Scripted(*(call(f"c{n}", year_a=2010 + n, year_b=2011) for n in range(3)))
     seen: list[str] = []
+    ran: list[dict] = []
+    tool = stub_tool(ToolResult(BRIDGE))
+    counted = Tool(tool.schema, lambda args: ran.append(args) or tool.run(args))
     with pytest.raises(NoAnswer):
-        ask("Why?", chat, [stub_tool(ToolResult(BRIDGE))], max_rounds=3, on_call=seen.append)
+        ask("Why?", chat, [counted], max_rounds=3, on_call=seen.append)
     # No `Answer` comes back to read the calls from, so they are reported as made.
     assert seen == [f'explain_change({{"year_a": {2010 + n}, "year_b": 2011}})' for n in range(3)]
+    # The last round's call is reported but not run: no round is left to read it.
+    assert [args["year_a"] for args in ran] == [2010, 2011]
+
+
+def test_a_call_without_an_id_is_given_one_on_both_sides():
+    unnamed = call("", year_a=2010, year_b=2011)
+    del unnamed["tool_calls"][0]["id"]
+    chat = Scripted(unnamed, reply("Revenue fell 3.19%."))
+    assert ask("Why?", chat, [stub_tool(ToolResult(BRIDGE))]).text == "Revenue fell 3.19%."
+    *_, assistant, tool_message = chat.sent[1]
+    assert tool_message["tool_call_id"] == assistant["tool_calls"][0]["id"]
 
 
 def test_the_real_tool_runs_from_what_a_model_sends():

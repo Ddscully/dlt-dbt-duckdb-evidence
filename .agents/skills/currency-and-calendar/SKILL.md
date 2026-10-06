@@ -93,7 +93,8 @@ follows from that rather than from the numbers.
       `stg_fx_rates`' `relationships` test, because its merged landing table
       still holds the retracted rows. `just ingest-fx-full` drops
       `raw.ecb_fx_rates`, re-fetches the series (one request, no quota) and
-      full-refreshes the FX models. It also removes what no test sees:
+      full-refreshes everything downstream of `stg_fx_rates`, that test
+      included. It also removes what no test sees:
       retracted fixings under a code that is still quoted, like ISK's
       2008-12-04 to 12-09, which the same deploy took away.
 ### Both directions, and spot against average

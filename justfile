@@ -81,11 +81,13 @@ ingest-wdi-full: where
 # A merge never deletes, so a currency or fixing the feed retracts stays in a
 # local tree and nowhere else — the release builds from empty. One request, no
 # quota. The incremental model keeps retracted rows too, hence its full refresh.
-# Drop and re-fetch the ECB rates, then rebuild the FX models from them
+# It selects from staging so the `relationships` test that flagged the
+# retraction is rerun, not left red until the next full build.
+# Drop and re-fetch the ECB rates, then rebuild everything that reads them
 [group('pipeline')]
 ingest-fx-full: where dbt-deps
     INGEST_FX_FULL=1 uv run python -m ingest.pipeline ecb_fx_rates
-    cd dbt && uv run dbt build --select fct_fx_rates_published+ --full-refresh
+    cd dbt && uv run dbt build --select stg_fx_rates+ --full-refresh
 
 # It lives in dlt's own directory, keyed on the pipeline name, so no warehouse
 # query shows it. `just dlt-state modern_data_stack_fixtures` reads the fixtures'.
