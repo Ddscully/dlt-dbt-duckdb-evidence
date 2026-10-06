@@ -90,10 +90,13 @@ WEATHER_LOOKBACK_DAYS = 90
 # with every variable null and are dropped (`_weather_rows`).
 WEATHER_END_LAG_DAYS = 3
 
-# `era5_seamless` answers from two reanalyses, which reach a day at different
-# times: on 2026-09-25 ERA5-Land had the temperatures and ERA5 not yet the rest.
-# So the newest days of a response can be partly null, and are dropped with the
-# all-null ones (`_weather_rows`). At most this many: a variable that stops
+# `era5_seamless` answers from two reanalyses, ERA5-Land for the temperatures
+# and ERA5 for the rest, so a day can be partly null. A precaution, not a
+# measured lag: the incomplete days at a response's newest end are dropped with
+# the all-null ones (`_weather_rows`), and the lookback asks for them again.
+# 2026-09-25 is partly null for every capital, but as a gap in ERA5 that stayed
+# after the following days filled in, not as a day still arriving, and as a gap
+# it lands behind the edge. At most this many: a variable that stops
 # arriving for good leaves every day partly null, and those must still land
 # (where a missing temperature fails `stg_weather_daily`'s tests) rather than
 # stall the archive without a word.
