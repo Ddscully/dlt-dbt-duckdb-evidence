@@ -21,20 +21,19 @@ The routes come from the project — `ingest/fixtures.py` has this one's.
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
+
+from modern_data_stack import env
 
 Route = tuple[re.Pattern[str], str]
 
 DEFAULT_ENV_VAR = "INGEST_FIXTURES"
 
-_TRUE = {"1", "true", "yes"}
-
 
 def enabled(env_var: str = DEFAULT_ENV_VAR) -> bool:
     """True when the pipeline should read fixtures instead of the network."""
-    return os.environ.get(env_var, "").lower() in _TRUE
+    return env.flag(env_var)
 
 
 def resolve(url: str, routes: list[Route], fixture_dir: Path) -> Path:

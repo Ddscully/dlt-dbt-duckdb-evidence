@@ -10,7 +10,6 @@ coordinates.
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
@@ -18,6 +17,7 @@ import dlt
 from dlt.common.schema.typing import TColumnSchema
 
 from ingest import http
+from modern_data_stack import env
 
 # Below the documented maximum of 32,000, whose pages occasionally time out.
 WB_PER_PAGE = 10_000
@@ -150,7 +150,7 @@ def wdi_start_year(last_loaded_year: int | None) -> int | None:
 
 def wdi_full_reload_requested() -> bool:
     """`INGEST_WDI_FULL=1` ignores the watermark and re-fetches everything."""
-    return os.environ.get("INGEST_WDI_FULL", "").lower() in {"1", "true", "yes"}
+    return env.flag("INGEST_WDI_FULL")
 
 
 def _is_stale(rows: list[dict]) -> bool:
