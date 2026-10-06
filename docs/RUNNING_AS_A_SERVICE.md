@@ -38,7 +38,7 @@ this shape stops scaling, and none of that changes.
 Named absences, so they are decisions rather than oversights: no multi-tenancy;
 no authentication; no health endpoint, though `analytics.pipeline_*` is already
 the health data one would expose and `reports/pages/pipeline.md` already renders
-it; and alerting still routed through `nightly.yml`'s GitHub issue unless a
+it; and alerting still routed through `live.yml`'s GitHub issue unless a
 Dagster sensor replaces it.
 
 ## What it replaces
@@ -46,7 +46,7 @@ Dagster sensor replaces it.
 | Workflow | Under a service |
 |----------|-----------------|
 | `ci.yml` | **stays.** It is about the repo, not the data: fixture-backed, offline, per PR. A service has nothing to say about a pull request. |
-| `nightly.yml` | **redundant**, if the service runs live daily and alerts. Its job is to distinguish "we broke it" from "OWID is down", and a service that ingests live inherits exactly that signal. |
+| `live.yml` | **redundant**, if the service runs live daily and alerts. Its job is to distinguish "we broke it" from "OWID is down", and a service that ingests live inherits exactly that signal. |
 | `pages.yml` | **redundant** if the service serves the site. Keep it only if the public mirror is wanted for its own sake. |
 | `release-data.yml` | **stays, and the service deliberately does not do it.** GitHub is the distribution channel; the service is not. Publishing is a monthly, outward-facing act with its own obligations (attribution, pseudonymisation, a storage-format ceiling), and none of them get easier by moving to a host that is also serving traffic. See [publish-and-swap](PUBLISH_AND_SWAP.md) for what the service borrows from it and what it leaves behind. |
 

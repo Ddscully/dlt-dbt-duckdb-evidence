@@ -11,7 +11,7 @@ unlisted source yields no row and the page under-reports while looking complete,
 an unlisted resource materialises with no description, a stale count reads as
 authoritative. Each one below is now asserted against the authority it copies.
 
-The two-tier test split and `nightly.yml` stay in `AGENTS.md` under *Testing*,
+The two-tier test split and `live.yml` stay in `AGENTS.md` under *Testing*,
 and coverage is `tests/README.md`. The traps in the suite itself are the last
 section here. The mutation method these guards were written with is in the
 `unit-testing-dbt-models` skill.

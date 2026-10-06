@@ -7,7 +7,7 @@ name: release-data
 #          AS warehouse (READ_ONLY);
 #
 # Like `pages.yml` this builds from the LIVE sources — a published dataset made
-# of the 17-country fixture slice would be worse than none. `nightly.yml` is what
+# of the 17-country fixture slice would be worse than none. `live.yml` is what
 # alerts when a source moves; a failure here just means the last release stands.
 #
 # Monthly, because the sources publish annually and a nightly release would be

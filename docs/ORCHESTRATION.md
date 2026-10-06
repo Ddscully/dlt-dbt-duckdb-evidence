@@ -96,7 +96,7 @@ don't start it beside a run the UI launched
 ## Three jobs, and why
 
 The site is the one asset held out of `full_refresh`. It shells out to npm, and
-CI, the nightly run and the data release all want a graph that runs on a bare
+CI, the weekly live run and the data release all want a graph that runs on a bare
 Python checkout. `publish_site` is `full_refresh` plus the site, and it's what
 the Pages workflow runs.
 

@@ -66,7 +66,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
     finished, and `auto_remove` left no exited containers. So `DockerRunLauncher`
     changes where a run executes and not how many execute.
 - **The Evidence site is an asset, excluded from `full_refresh` because it needs
-  Node.** The `evidence_site` asset shells out to npm; `ci.yml`, `nightly.yml` and
+  Node.** The `evidence_site` asset shells out to npm; `ci.yml`, `live.yml` and
   `release-data.yml` run `full_refresh` with no Node, and `pages.yml` runs
   `publish_site`. Both selections name what they leave out, so a second
   npm-shaped or partitioned asset has to be excluded by hand too.

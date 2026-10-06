@@ -6,7 +6,7 @@ name: pages
 # Unlike `ci.yml`, this runs against the LIVE sources. The published site is the
 # point of the repo, and a dashboard built from `tests/fixtures/ingest/` would
 # show the 17-country slice rather than the world. That means this workflow can
-# go red when an upstream source moves — `nightly.yml` is what alerts on that;
+# go red when an upstream source moves — `live.yml` is what alerts on that;
 # here the previous deployment simply stays up.
 #
 # Requires Pages to be enabled once, with Settings -> Pages -> Source set to

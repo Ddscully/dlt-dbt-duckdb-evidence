@@ -7,7 +7,7 @@ release, all orchestrated as one Dagster asset graph. No cloud account, no
 credentials, no bill.
 
 [![ci](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/ci.yml/badge.svg)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/ci.yml)
-[![nightly](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/nightly.yml/badge.svg)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/nightly.yml)
+[![live](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/live.yml/badge.svg)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/live.yml)
 [![pages](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/pages.yml/badge.svg)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/actions/workflows/pages.yml)
 [![data snapshot](https://img.shields.io/github/v/release/Ddscully/dlt-dbt-duckdb-evidence?sort=date&filter=data-*&label=data%20snapshot&color=1f6feb)](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
@@ -47,7 +47,7 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
   broken 38 ways, the data tests caught 5. The unit tests exist because of that
   gap.
 - **CI does not depend on anyone else's API.** Every pull request runs the whole
-  pipeline against recorded fixtures, and a nightly job runs it against the live
+  pipeline against recorded fixtures, and a weekly job runs it against the live
   sources and opens an issue when one changes.
 - **The warehouse is published, not just the dashboard**: monthly, as DuckDB and
   Parquet, with attribution per source and the one column that identifies a

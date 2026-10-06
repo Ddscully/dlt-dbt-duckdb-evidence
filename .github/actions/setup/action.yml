@@ -9,7 +9,7 @@ description: >
 inputs:
   groups:
     description: >
-      Dependency groups to sync, as flags. `ci.yml` and `nightly.yml` need
+      Dependency groups to sync, as flags. `ci.yml` and `live.yml` need
       `dev` for pytest and sqlfluff; `pages.yml` and `release-data.yml` only
       run the graph.
     required: false

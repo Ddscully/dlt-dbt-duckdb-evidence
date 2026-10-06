@@ -8,7 +8,7 @@ Everything `just run` does, as one asset graph, plus the Evidence site. Three jo
   UI launches a backfill instead of the routine load.
 * `full_refresh` — everything else bar the site, and unpartitioned: WDI and
   weather take their backfill years as run config (`YearRange`), not partitions.
-  Pure Python, so `ci.yml`, `nightly.yml` and `release-data.yml` run it without
+  Pure Python, so `ci.yml`, `live.yml` and `release-data.yml` run it without
   Node; the daily schedule targets it.
 * `publish_site` — `full_refresh` plus `reports/evidence_site`, which shells out
   to npm. `pages.yml` runs it.
