@@ -43,14 +43,21 @@ its first source with a *finite budget*.
     answered yesterday. The days between come back with every variable null
     and are dropped, so the newest row is older than it used to be and the
     current year's `n_days` is smaller.
-  - **The two reanalyses reach a day at different times.** On 2026-09-25
-    ERA5-Land had answered the temperatures and ERA5 not yet the rest: 41
-    rows, one per capital, the only partly null rows in the archive. So the
-    incomplete days at a response's edge are dropped too, up to
-    `WEATHER_EDGE_DAYS`, and the lookback asks for them again. A partly null
-    day *behind* the edge still lands, as does an edge longer than the cap: a
-    variable Open-Meteo stopped serving would otherwise stall the archive, and
-    nothing checks weather freshness.
+  - **ERA5 has gaps that ERA5-Land does not.** 2026-09-25 has temperatures
+    and no precipitation, wind or radiation for all 41 capitals, and stayed so
+    once 09-26 to 09-30 had arrived complete: a gap, not a day still arriving.
+    It lands, and no test fails, because only the temperature columns carry a
+    `not_null`; the year's precipitation and radiation sums are a day short.
+    The 90-day lookback re-asks for it if final ERA5 fills it. It was the
+    newest day when first loaded, which made it look like the two reanalyses
+    reaching a day at different times; telling the two apart took a second
+    fetch after later days had landed.
+  - **The incomplete days at a response's edge are dropped**, up to
+    `WEATHER_EDGE_DAYS`, and the lookback asks for them again — a precaution
+    against the two reanalyses reaching a day at different times, which has not
+    been measured. A partly null day *behind* the edge still lands, as does an
+    edge longer than the cap: a variable Open-Meteo stopped serving would
+    otherwise stall the archive, and nothing checks weather freshness.
 - **The binding constraint is a rate limit, not disk.** The obvious cost model
   prices rows, and on that basis the whole 1940- global archive is trivial: 211
   capitals x 86 years x 6 variables is ~110 MB in DuckDB, nowhere near the 2 GiB

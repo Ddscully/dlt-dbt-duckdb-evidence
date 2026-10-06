@@ -1460,17 +1460,17 @@ def test_a_day_missing_only_some_variables_behind_the_edge_is_still_landed():
 @pytest.mark.parametrize(
     "late",
     [
-        # As measured on 2026-09-25: ERA5-Land ahead, ERA5 not yet there.
+        # ERA5's variables late.
         ("precipitation_sum", "wind_speed_10m_max", "shortwave_radiation_sum"),
-        # The other way round, which fails five `not_null` tests if it lands.
+        # ERA5-Land's, which fail five `not_null` tests if they land.
         ("temperature_2m_mean", "temperature_2m_max", "temperature_2m_min"),
     ],
 )
 def test_a_partly_null_day_at_the_edge_is_not_landed(late):
-    """`era5_seamless` is two reanalyses, and they reach a day at different
-    times. A partly null day at the edge would replace a complete row the
-    merge already holds, or land nulls the next run would fix; the lookback
-    asks for it again either way."""
+    """`era5_seamless` is two reanalyses, and nothing guarantees they reach a
+    day together. A partly null day at the edge would replace a complete row
+    the merge already holds, or land nulls the next run would fix; the
+    lookback asks for it again either way."""
     entry = _weather_entry(["2026-09-24", "2026-09-25", "2026-09-26"], [10.8, -1.5, 3.0])
     for name in late:
         entry["daily"][name] = [entry["daily"][name][0], None, None]
