@@ -122,7 +122,7 @@ def test_get_json_waits_out_a_minute_long_outage(monkeypatch):
     assert sleeps == [4.0, 8.0, 16.0, 32.0]
     assert sum(sleeps) >= 60, (
         f"the retries span {sum(sleeps)} s. A schedule that gave up inside 4.5 s turned "
-        "a Eurostat error page, cleared by the time anyone looked, into a red nightly "
+        "a Eurostat error page, cleared by the time anyone looked, into a red live run "
         "(issue #94)."
     )
 

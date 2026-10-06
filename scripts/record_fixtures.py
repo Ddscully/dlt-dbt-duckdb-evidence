@@ -7,7 +7,7 @@ any publisher being up.
 Run:  uv run python -m scripts.record_fixtures
 
 Re-record when a source changes shape (new column, renamed field, a WDI
-indicator added to `WB_WDI_INDICATORS`) — the nightly live run is what tells you
+indicator added to `WB_WDI_INDICATORS`) — the weekly live run is what tells you
 that happened. Commit the result; the fixtures are checked in on purpose.
 
 ## What gets trimmed, and what deliberately doesn't

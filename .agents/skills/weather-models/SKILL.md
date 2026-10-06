@@ -163,7 +163,7 @@ its first source with a *finite budget*.
   wrong is a *hang* rather than a failure.** `WEATHER_FIRST_YEAR` (2007) is the
   backfill floor; `WEATHER_COLD_START_YEARS` is what a routine load asks
   for when the destination is empty — which is the normal state of a fresh clone
-  and of `pages.yml`, `nightly.yml` and `release-data.yml`, all three of which
+  and of `pages.yml`, `live.yml` and `release-data.yml`, all three of which
   build from nothing against the live APIs. Starting a cold load at 2007 is the
   intuitive choice and costs ~12,600 units against a 10,000-a-day allowance; the
   limiter honours that allowance by **waiting**, so nothing errors. Simulated end

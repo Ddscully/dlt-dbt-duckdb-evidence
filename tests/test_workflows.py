@@ -54,7 +54,7 @@ NOT_A_SITE_INPUT = (
     # `just materialize-site` build. Workflows are listed one by one, not as a
     # glob, so a new one lands unclassified and forces a decision.
     ".github/workflows/ci.yml",
-    ".github/workflows/nightly.yml",
+    ".github/workflows/live.yml",
     ".github/workflows/release-data.yml",
     # Seed builders' output is checked in (dbt/** covers it); the rest are live
     # or read-only.
@@ -385,7 +385,7 @@ def test_every_workflow_that_runs_the_pipeline_uses_the_setup_action():
         for path in sorted(WORKFLOWS_DIR.glob("*.yml"))
         if "just materialize" in path.read_text()
     }
-    assert runners == {"ci.yml", "nightly.yml", "pages.yml", "release-data.yml"}, (
+    assert runners == {"ci.yml", "live.yml", "pages.yml", "release-data.yml"}, (
         f"the scan for pipeline-running workflows found {sorted(runners)}; all four run it"
     )
     missing = sorted(

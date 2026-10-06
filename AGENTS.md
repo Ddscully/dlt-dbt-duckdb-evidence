@@ -417,8 +417,9 @@ Two tiers, and the split is the point — see [`tests/README.md`](tests/README.m
   every source served from `tests/fixtures/ingest/`, into a throwaway warehouse
   and landing zone. This is what CI runs, so a red PR build means the repo broke,
   not that OWID was down.
-- `.github/workflows/nightly.yml` runs the graph against the *live* sources daily
-  and opens a `nightly-failure` issue — the signal that the fixtures have drifted.
+- `.github/workflows/live.yml` runs the graph against the *live* sources weekly
+  and opens a `live-source-failure` issue — the signal that the fixtures have
+  drifted.
 
 The suite's own traps (asset-check wiring, CI's re-run set, fixture leaks) are
 `repo-guards`, and the mutation method is `unit-testing-dbt-models`. For any

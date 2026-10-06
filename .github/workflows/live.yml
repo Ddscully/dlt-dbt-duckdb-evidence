@@ -1,4 +1,4 @@
-name: nightly
+name: live
 
 # The other half of the test pyramid. `ci.yml` proves the repo works against
 # recorded payloads; this proves the recorded payloads still resemble reality —
@@ -15,8 +15,15 @@ name: nightly
 
 on:
   schedule:
-    # 05:20 UTC — off the hour, since everyone's cron fires on it.
-    - cron: "20 5 * * *"
+    # Weekly, not daily: the only scheduled jobs that read the live sources are
+    # `pages.yml` (Monday 06:40) and `release-data.yml` (the 1st, 07:10), so a
+    # source that breaks mid-week reaches nothing until one of them runs. Each
+    # cron fires shortly before one of those, which is when the alert can still
+    # act. Two lines, because `20 5 1 * 1` means "the 1st or a Monday", which
+    # nobody reads it as. 05:20 UTC — off the hour, since everyone's cron fires
+    # on it.
+    - cron: "20 5 * * 1"
+    - cron: "20 5 1 * *"
   workflow_dispatch:
 
 permissions:
@@ -71,19 +78,18 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-      # One open issue at a time: a source that breaks tends to stay broken for
-      # a few days, and a fresh issue every morning would just train people to
-      # ignore them. Subsequent failures comment on the existing thread.
+      # One open issue at a time: a source that breaks tends to stay broken,
+      # and a fresh issue every run would just train people to ignore them. Subsequent failures comment on the existing thread.
       - name: Open or update the failure issue
         if: failure()
         uses: actions/github-script@v9
         with:
           script: |
-            const label = 'nightly-failure';
+            const label = 'live-source-failure';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
                            `/actions/runs/${context.runId}`;
             const body = [
-              `The nightly live-source run failed: ${runUrl}`,
+              `The weekly live-source run failed: ${runUrl}`,
               '',
               'This does **not** mean a pull request broke the repo — `ci.yml` runs',
               'against recorded fixtures and is unaffected. It means one of the',
@@ -112,7 +118,7 @@ jobs:
               const { data: issue } = await github.rest.issues.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                title: `Nightly live-source run failed (${new Date().toISOString().slice(0, 10)})`,
+                title: `Live-source run failed (${new Date().toISOString().slice(0, 10)})`,
                 labels: [label],
                 body,
               });

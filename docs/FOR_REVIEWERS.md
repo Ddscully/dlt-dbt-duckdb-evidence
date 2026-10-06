@@ -7,7 +7,7 @@ of it estimated.
 
 - **Judge the engineering; the analysis has not had the same scrutiny**, and one
   mart ships fabricated data on purpose ([§0](#0-what-this-is-not-yet)).
-- **The freshness SLA is declared in code and alerted by a nightly workflow**
+- **The freshness SLA is declared in code and alerted by a weekly workflow**
   against the live sources ([§2](#2-what-is-the-freshness-sla-and-what-happens-when-it-is-missed)).
 - **A full run takes about a minute on a laptop and costs nothing in dollars**;
   disk is the real cost, and expiry holds it
@@ -111,9 +111,11 @@ schedule that quietly stopped firing shows as a stale asset rather than as an
 absence you have to notice.
 
 **The alerting path is a workflow, not a person watching a dashboard.**
-`nightly.yml` runs the full graph against the *live* endpoints daily at 05:20
-UTC and opens (or comments on) a `nightly-failure` issue. That is the signal
-that an upstream publisher moved, and it's separate from PR CI on purpose: CI
+`live.yml` runs the full graph against the *live* endpoints at 05:20 UTC every
+Monday and on the 1st of the month, ahead of the site build and the data
+release that would otherwise be first to meet a change, and opens (or comments
+on) a `live-source-failure` issue. That is the signal that an upstream publisher
+moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
 that OWID was down.
 
@@ -174,7 +176,7 @@ last 40:
 | Workflow | Median | Range | n | What it does |
 |----------|--------|-------|---|--------------|
 | `ci` | **191 s** | 170–290 | 40 | pytest + the whole asset graph against fixtures, offline |
-| `nightly` | **175 s** | 89–999 | 39 | the same graph against live sources |
+| `live` | **175 s** | 89–999 | 39 | the same graph against live sources |
 | `pages` | **271 s** | 164–712 | 40 | live build + the Evidence site + deploy |
 | `release-data` | **171 s** | 109–247 | 6 | live build + export + a dated GitHub release |
 
@@ -196,7 +198,7 @@ counts by scanning integers in front of a *test*-noun, and a **timing** has no
 such anchor — the same gap that let `just test` drift from ~1 s to ~42 s across
 two corrections. The range and `n` ship beside the median for that reason: a
 single number invites exactly the quiet decay that produced the 92 s, and the
-live workflows' spread (`nightly` reaching 999 s, `pages` 712 s) is a property of
+live workflows' spread (`live` reaching 999 s, `pages` 712 s) is a property of
 the public APIs rather than noise to be averaged away.
 
 </details>
@@ -390,7 +392,7 @@ carry no column descriptions, so a reader of the release gets a `null` for each
 of theirs.
 
 **Quality observability is Established with one caveat I would not want passed
-over.** The reach is real, and the alerting is a `nightly-failure` issue opened
+over.** The reach is real, and the alerting is a `live-source-failure` issue opened
 by a workflow on a repository one person watches. That is alerting in form. On a
 team it would be a page, and the dimension would read the same — which is worth
 knowing about the rubric as well as about the warehouse.

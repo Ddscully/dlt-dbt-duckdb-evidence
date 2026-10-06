@@ -3,7 +3,7 @@ name: ci
 # Fast, deterministic, offline. Every network call the pipeline makes is served
 # from `tests/fixtures/ingest/` (see ingest/fixtures.py), so a red build here
 # means this repo broke — not that OWID was rate-limiting. The live sources are
-# exercised once a day by `nightly.yml` instead.
+# exercised weekly by `live.yml` instead.
 
 on:
   push:

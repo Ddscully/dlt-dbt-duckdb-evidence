@@ -10,7 +10,7 @@
   model it guards ([§3](#3-write-tests-that-can-see-a-wrong-answer)).
 - **Guard the failures that stay green**: every hand-maintained list is tested
   against the thing it copies ([§4](#4-guard-the-failures-that-stay-green)).
-- **One graph across four tools**, with offline CI and a live nightly
+- **One graph across four tools**, with offline CI and a weekly live run
   ([§5](#5-one-graph-across-four-tools)).
 - **Treat publication as a boundary**: a compatibility ceiling, carried state,
   personal data measured and pseudonymised, licences as a modelling constraint
@@ -304,15 +304,15 @@ The one partitioned source is the one where every partition together is one read
 of one file. And merging is not what earns a window: a third source merges and
 takes a date range, and its whole series since 1999 is one three-second request.
 
-**CI runs offline against recorded fixtures; a nightly run against the live
+**CI runs offline against recorded fixtures; a weekly run against the live
 endpoints is what tells you reality moved.** A red pull request therefore means
-*this repo* broke, not that a publisher was rate-limiting. The nightly opening
+*this repo* broke, not that a publisher was rate-limiting. The weekly run opening
 an issue is the cue to re-record. *Software Engineering at Google* describes the
 same split as [record and replay](https://abseil.io/resources/swe-book/html/ch14.html):
 replay before a change merges, record against the real service after. There the
-recording is automatic, and here it is a step the nightly prompts.
+recording is automatic, and here it is a step the weekly run prompts.
 → [`tests/fixtures/ingest/`](../tests/fixtures/ingest/),
-[`.github/workflows/nightly.yml`](../.github/workflows/nightly.yml)
+[`.github/workflows/live.yml`](../.github/workflows/live.yml)
 
 **Define the environment once.** Four workflows each set their own paths until a
 storage change meant all four needed the same new line and none of them got it.

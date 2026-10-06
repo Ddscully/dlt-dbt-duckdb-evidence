@@ -141,7 +141,7 @@ carries it forward is `publishing-a-release`.
 - **WDI is not only observations, and `stg_wdi` cuts it back to them.** The
   World Bank once served `SP.POP.TOTL` out to **2050** — 155
   countries, 2026-2050, every other indicator null on those rows — and it broke
-  the nightly, the dashboard deploy and (had it run) the monthly release, because
+  the live-source run, the dashboard deploy and (had it run) the monthly release, because
   `stg_wdi.year` carried a literal `max_value: 2030`. Three things worth keeping:
   - **A ceiling in a test cannot keep a projection out of the warehouse**; it can
     only redden the build. The rule is a `where` clause in `stg_wdi.sql` now

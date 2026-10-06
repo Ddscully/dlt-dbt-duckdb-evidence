@@ -119,7 +119,7 @@ keep the split a split:
   exactly what a target separates, so the reasoning written beside that output
   inverts and `generate_schema_name.sql` below has to be reconsidered with it.
 - `orchestration/resources.py` — the dbt/dlt resource handles.
-- `.github/workflows/ci.yml` and `nightly.yml` — the offline-fixtures /
+- `.github/workflows/ci.yml` and `live.yml` — the offline-fixtures /
   live-sources split holds whatever you're ingesting.
 - `docs/STYLE_GUIDE.md`.
 
@@ -422,7 +422,7 @@ Each step leaves the repo runnable, so a failure has one plausible cause.
 4. **Fixtures and CI.** The *first* fixture belongs to step 2: CI runs with
    `INGEST_FIXTURES=1`, so the first source cannot pass `just test-pipeline`
    without one. What waits for this step is the rest of CI (the workflows, the
-   nightly), before there are five sources. Recording fixtures for one endpoint is
+   live run), before there are five sources. Recording fixtures for one endpoint is
    a morning; for five it's a project.
 5. **Tests as grain contracts.** `unique_combination_of_columns` on every
    fact-shaped model, the day it's created. It's how the grain from §3 stops
@@ -454,7 +454,7 @@ decision about where dlt lands rather than a layer you leave out
     that allowlist.
 - **Pipeline observability** (`transform/pipeline_status.py`) — earns its place
   once there are enough tables that "is anything stale?" isn't answerable by eye.
-- **Fixtures and the nightly job** (`tests/fixtures/`, `nightly.yml`) — the one I'd
+- **Fixtures and the live-source job** (`tests/fixtures/`, `live.yml`) — the one I'd
   drop last. Without it, a red CI build doesn't distinguish "we broke it" from
   "the API is down", and that ambiguity is what trains people to re-run failed builds.
 
