@@ -424,6 +424,60 @@ def test_the_dlt_argument_scan_reads_what_it_thinks_it_does():
     assert {"WEATHER_YEARS", "WDI_YEARS", "YEARS"} <= dlt_argument_names()
 
 
+# The env template's entries are commented out for a person to uncomment, so a
+# `#NAME=` there is a variable waiting to be set, not prose.
+ENV_TEMPLATE = REPO_ROOT / ".env.example"
+
+# Every tracked file that sets the environment the pipeline runs under.
+ENVIRONMENT_FILES = (
+    *sorted(WORKFLOWS_DIR.glob("*.yml")),
+    SETUP_ACTION,
+    REPO_ROOT / "compose.yaml",
+    REPO_ROOT / "justfile",
+    ENV_TEMPLATE,
+)
+
+
+def _sets_env(text: str, name: str, *, template: bool = False) -> bool:
+    """Every spelling these files set a variable in, where `_assigns` knows two.
+
+    A YAML key or a dotenv line (`NAME:`, `NAME=`), a line echoed into
+    `$GITHUB_ENV` (`echo "NAME=…"`, which is how the setup action writes the
+    pipeline paths), and an export from a shell or from `just` (`export NAME=`,
+    `export NAME :=`).
+    """
+    if not template:
+        text = _uncommented(text)
+    spellings = (
+        rf"^\s*{'#?' if template else ''}{name}\s*[:=]",
+        rf"\becho\s+[\"']?{name}=",
+        rf"\bexport\s+{name}\s*:?=",
+    )
+    return any(re.search(pattern, text, re.MULTILINE) for pattern in spellings)
+
+
+@pytest.mark.parametrize(
+    "text, template",
+    [
+        ("env:\n  YEARS: 2010\n", False),
+        ("run: |\n  YEARS=2010 just materialize\n", False),
+        ('run: |\n  {\n    echo "YEARS=2010"\n  } >> "$GITHUB_ENV"\n', False),
+        ("run: |\n  export YEARS=2010\n", False),
+        ('export YEARS := "2010"\n', False),
+        ("#YEARS=2010\n", True),
+    ],
+)
+def test_the_environment_scan_sees_every_spelling(text, template):
+    """Vacuity guard for the scan below: `_assigns` alone missed the `$GITHUB_ENV`
+    echo, which is the setup action's own way of exporting, and every export."""
+    assert _sets_env(text, "YEARS", template=template)
+
+
+def test_the_environment_scan_skips_a_comment_outside_the_template():
+    """The other side: a workflow explaining a name in prose is not setting it."""
+    assert not _sets_env('# echo "YEARS=2010" would reach dlt as an argument\n', "YEARS")
+
+
 def test_no_workflow_sets_a_variable_dlt_reads_as_an_argument():
     """A workflow's own variable must not share a name with a dlt argument.
 
@@ -431,13 +485,22 @@ def test_no_workflow_sets_a_variable_dlt_reads_as_an_argument():
     and every Dagster import under that step failed on it: dlt could not coerce
     `"2017 2026"` into the source's year tuple. It passed every local run, where
     nothing sets the variable, and failed on the input's first dispatch.
+
+    Not only the workflows: the setup action, the compose stack, the justfile and
+    the env template all set the environment Dagster imports under. A developer's
+    own `.env` is untracked and unread here.
     """
     names = dlt_argument_names()
-    files = [*sorted(WORKFLOWS_DIR.glob("*.yml")), SETUP_ACTION]
     offenders = {
         path.name: found
-        for path in files
-        if (found := sorted(name for name in names if _assigns(path.read_text(), name)))
+        for path in ENVIRONMENT_FILES
+        if (
+            found := sorted(
+                name
+                for name in names
+                if _sets_env(path.read_text(), name, template=path == ENV_TEMPLATE)
+            )
+        )
     }
     assert not offenders, (
         f"variables dlt would read as source or resource arguments: {offenders}\n"
