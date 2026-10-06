@@ -1442,18 +1442,58 @@ def test_a_day_the_archive_has_not_finished_with_is_not_landed_at_all():
     assert [r["weather_date"] for r in rows] == ["2022-01-01"]
 
 
-def test_a_day_missing_only_some_variables_is_still_landed():
-    """The other side of the same boundary. Dropping a day because one variable
-    is late would throw away five that arrived, and the null columns are what
-    `stg_weather_daily`'s `not_null` tests are for."""
-    entry = _weather_entry(["2022-01-01"], [10.8])
-    entry["daily"]["precipitation_sum"] = [None]
+def test_a_day_missing_only_some_variables_behind_the_edge_is_still_landed():
+    """The other side of the same boundary. A complete day after it means the
+    archive has finished with this one, so the nulls are not late, they are
+    missing, and the null columns are what `stg_weather_daily`'s `not_null`
+    tests are for."""
+    entry = _weather_entry(["2022-01-01", "2022-01-02"], [10.8, -1.5])
+    entry["daily"]["precipitation_sum"] = [None, 0.0]
 
     rows = list(weather._weather_rows(entry, [("DEU", 1.0, 2.0)]))
 
-    assert len(rows) == 1
+    assert [r["weather_date"] for r in rows] == ["2022-01-01", "2022-01-02"]
     assert rows[0]["temperature_2m_mean"] == 10.8
     assert rows[0]["precipitation_sum"] is None
+
+
+@pytest.mark.parametrize(
+    "late",
+    [
+        # As measured on 2026-09-25: ERA5-Land ahead, ERA5 not yet there.
+        ("precipitation_sum", "wind_speed_10m_max", "shortwave_radiation_sum"),
+        # The other way round, which fails five `not_null` tests if it lands.
+        ("temperature_2m_mean", "temperature_2m_max", "temperature_2m_min"),
+    ],
+)
+def test_a_partly_null_day_at_the_edge_is_not_landed(late):
+    """`era5_seamless` is two reanalyses, and they reach a day at different
+    times. A partly null day at the edge would replace a complete row the
+    merge already holds, or land nulls the next run would fix; the lookback
+    asks for it again either way."""
+    entry = _weather_entry(["2026-09-24", "2026-09-25", "2026-09-26"], [10.8, -1.5, 3.0])
+    for name in late:
+        entry["daily"][name] = [entry["daily"][name][0], None, None]
+    for name in weather.WEATHER_DAILY_VARIABLES:
+        entry["daily"][name][2] = None
+
+    rows = list(weather._weather_rows(entry, [("DEU", 1.0, 2.0)]))
+
+    assert [r["weather_date"] for r in rows] == ["2026-09-24"]
+
+
+def test_a_variable_that_stops_arriving_lands_rather_than_stalling_the_archive():
+    """The edge is capped. If Open-Meteo stopped serving a variable, every day
+    would be partly null, and dropping them all would stop the archive with no
+    test to fail; past `WEATHER_EDGE_DAYS` they land and the gap shows."""
+    days = [f"2022-01-{d:02d}" for d in range(1, weather.WEATHER_EDGE_DAYS + 2)]
+    entry = _weather_entry(days, [1.0] * len(days))
+    entry["daily"]["temperature_2m_mean"] = [None] * len(days)
+
+    rows = list(weather._weather_rows(entry, [("DEU", 1.0, 2.0)]))
+
+    assert len(rows) == len(days)
+    assert all(r["temperature_2m_mean"] is None for r in rows)
 
 
 def test_weather_retry_reads_the_window_off_the_429_message():

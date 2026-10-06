@@ -6,16 +6,17 @@
 -- "the EU average". `member_mean_eur_kwh` is the plain mean of the members'
 -- prices: what the average member country charges.
 --
--- Members only, and one fixed set of them: those priced in every half-year from
--- 2008-S1, the first with all of them (2007-S1 has 6). The table also holds
--- countries outside the EU, which are cheaper and would pull a mean over every
--- row well below either line.
+-- Members only: the table also holds countries outside the EU, which are cheaper
+-- and would pull a mean over every row well below either line. And only the
+-- half-years every member is priced in and Eurostat has published its aggregate
+-- for, so the plain mean is over the same 27 in every period. That starts at
+-- 2008-S1 (2007-S1 has 6), and leaves out a half-year still being published:
+-- 2026-S1 opened with 12 members and no aggregate.
 --
--- And only the half-years Eurostat has published its aggregate for. A new
--- half-year opens with the early reporters' prices and no EU average, and the
--- panel below would shrink to those reporters for every period: 2026-S1 opened
--- with 12 members, and the plain mean became a mean of 12 back to 2008.
-with priced as (
+-- The rule is per half-year on purpose. A fixed panel of members priced in every
+-- period, which this was, drops a member from the whole history for one missing
+-- half-year: the 12 early reporters of 2026-S1 became the panel back to 2008.
+with members as (
     select
         country_iso3,
         period,
@@ -25,15 +26,14 @@ with priced as (
         usd_per_eur_period_avg
     from marts.fct_eu_electricity_prices_semiannual
     where is_eu_member
-      and period >= '2008-S1'
-      and eu27_price_eur_kwh is not null
 ),
 
-panel as (
-    select country_iso3
-    from priced
-    group by country_iso3
-    having count(*) = (select count(distinct period) from priced)
+complete as (
+    select period
+    from members
+    where eu27_price_eur_kwh is not null
+    group by period
+    having count(*) = (select count(distinct country_iso3) from members)
 )
 
 select
@@ -44,7 +44,7 @@ select
     avg(electricity_price_eur_kwh)                        as member_mean_eur_kwh,
     min(usd_per_eur_period_avg)                           as usd_per_eur,
     count(*)                                              as n_members
-from priced
-where country_iso3 in (select country_iso3 from panel)
+from members
+where period in (select period from complete)
 group by period, period_start_date
 order by period_start_date
