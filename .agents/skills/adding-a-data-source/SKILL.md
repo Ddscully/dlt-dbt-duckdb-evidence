@@ -92,6 +92,25 @@ be read against the other half.
 - **Declare `timezone: False` on a timestamp column**, or dlt makes it
   `TIMESTAMP WITH TIME ZONE` and a 07:45 till time reads `08:45:00+01:00` on a CET
   machine.
+- **No environment variable may share a name with a source or resource
+  argument.** An argument with a default that a call leaves out is resolved as
+  configuration, and dlt's lookup ends at the bare upper-case name. Anything
+  passed explicitly, `None` included, is not looked up, and an argument with no
+  default is never config. So `WEATHER_YEARS` in the environment reaches every
+  bare `public_indicators()`: `ingest/pipeline.py`'s under `just ingest`, and the
+  ones `orchestration/assets.py` makes at import. A value that coerces to the
+  argument's type replaces the default with no warning (measured on an `int`).
+  The year tuples here coerce from neither `"2017 2026"` nor `"[2017, 2026]"`,
+  so for them it is `ConfigValueCannotBeCoercedException`, and every Dagster
+  command fails at import. A `workflow_dispatch` input is not an environment
+  variable and may carry the argument's name (the release's input is
+  `weather_years`). What may not is a variable set in a step's or job's `env:`,
+  an `echo … >> "$GITHUB_ENV"` line, the setup action, `compose.yaml`, the
+  justfile or `.env.example`, which is why the release maps its input to
+  `WEATHER_YEARS_INPUT`. `tests/test_workflows.py`'s
+  `test_no_workflow_sets_a_variable_dlt_reads_as_an_argument` scans all of
+  them for every argument name it reads off the source and resource
+  signatures.
 
 Run `just ingest` and look at the real column names before writing any SQL:
 
