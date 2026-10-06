@@ -90,6 +90,15 @@ WEATHER_LOOKBACK_DAYS = 90
 # with every variable null and are dropped (`_weather_rows`).
 WEATHER_END_LAG_DAYS = 3
 
+# `era5_seamless` answers from two reanalyses, which reach a day at different
+# times: on 2026-09-25 ERA5-Land had the temperatures and ERA5 not yet the rest.
+# So the newest days of a response can be partly null, and are dropped with the
+# all-null ones (`_weather_rows`). At most this many: a variable that stops
+# arriving for good leaves every day partly null, and those must still land
+# (where a missing temperature fails `stg_weather_daily`'s tests) rather than
+# stall the archive without a word.
+WEATHER_EDGE_DAYS = 14
+
 WEATHER_PRIMARY_KEY = ("country_iso3", "weather_date")
 
 # Open-Meteo's free-tier units (not requests: `weather_call_units`) per minute,
@@ -438,16 +447,28 @@ def _weather_rows(
         daily = entry.get("daily") or {}
         days = daily.get("time") or []
         columns = {name: daily.get(name) or [] for name in WEATHER_DAILY_VARIABLES}
-        for index, day in enumerate(days):
-            measured = {
+        measured_by_day = [
+            {
                 name: (values[index] if index < len(values) else None)
                 for name, values in columns.items()
             }
-            # Drop a day with nothing measured. The merge replaces the stored row
-            # at this key, and the days the reanalysis has not reached come back
-            # all-null, which would overwrite a complete day loaded earlier. A
-            # partly null day still replaces a fuller one: dlt merges whole rows.
-            if all(value is None for value in measured.values()):
+            for index in range(len(days))
+        ]
+        # The incomplete days after the newest complete one: the archive's edge,
+        # which one reanalysis may have reached and the other not yet.
+        edge = 0
+        for measured in reversed(measured_by_day):
+            if all(value is not None for value in measured.values()):
+                break
+            edge += 1
+        edge_start = len(days) - edge if edge <= WEATHER_EDGE_DAYS else len(days)
+        for index, (day, measured) in enumerate(zip(days, measured_by_day)):
+            # The merge replaces the stored row at this key with the whole new
+            # row, so a day with nothing measured, or one at the edge still
+            # arriving, would overwrite a complete day loaded earlier. The next
+            # run's lookback asks for the day again. A partly null day behind
+            # the edge lands, and `stg_weather_daily`'s tests see it.
+            if index >= edge_start or all(value is None for value in measured.values()):
                 continue
             yield {
                 "country_iso3": country_iso3,
