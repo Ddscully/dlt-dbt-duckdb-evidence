@@ -966,7 +966,20 @@ models:
           average member country charges. Multiply by `usd_per_eur_period_avg`
           for dollars.
 
+          Null on every row of the latest half-year while Eurostat is still
+          publishing it: the early reporters' prices arrive before the
+          aggregate does, so a new period opens with country rows and no EU
+          average. Earlier half-years are never null.
+
           The `not_null` is the guard on a live source: Eurostat renames the
           aggregate when the membership changes (this one replaced `EU28`), and
-          the column would go null without an error.
-        data_tests: [not_null]
+          the column would go null without an error. A rename nulls every
+          period, so the test skips the latest one and still sees it.
+        data_tests:
+          # Named, not ref'd: a generic test's `where` cannot call `ref()`,
+          # and `marts.` resolves the same in every build.
+          - not_null:
+              config:
+                where: >
+                  period < (select max(period)
+                  from marts.fct_eu_electricity_prices_semiannual)

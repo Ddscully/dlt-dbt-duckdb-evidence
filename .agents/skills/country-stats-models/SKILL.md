@@ -311,6 +311,12 @@ carries it forward is `publishing-a-release`.
   The aggregate's `not_null` test is what notices an enlargement: Eurostat
   renames the code when membership changes (`EU28` became `EU27_2020`), and the
   member list in `stg_eu_electricity_prices_semiannual.sql` is typed by hand.
+  **The test skips the latest half-year**, because Eurostat publishes the early
+  reporters' prices before the aggregate: 2026-S1 arrived with 13 countries,
+  12 of them members, and no EU average. A rename nulls every period, so the
+  test still sees one. Anything that needs a complete half-year filters on the
+  aggregate being present, as `eu_average_price.sql` does: its fixed panel of
+  members otherwise shrinks to the early reporters for the whole history.
 - **Eurostat prices are semi-annual, and both grains are modelled.**
   `stg_eu_electricity_prices_semiannual` is the cleaning model at
   `(country_iso3, year, half)`; `stg_eu_electricity_prices` averages it to annual

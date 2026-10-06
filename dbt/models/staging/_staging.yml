@@ -334,9 +334,12 @@ models:
       - name: eu27_price_eur_kwh
         description: >
           Eurostat's `EU27_2020` aggregate for the half-year, repeated on every
-          country's row. Null would mean Eurostat has renamed the aggregate, which
-          it does when the membership changes (this one replaced `EU28`); the
-          mart's `not_null` on it is what notices.
+          country's row. Null in the latest half-year means Eurostat has not yet
+          published the aggregate for it, which it does after the first
+          countries' prices; null in every half-year would mean Eurostat has
+          renamed the aggregate, which it does when the membership changes (this
+          one replaced `EU28`). The mart's `not_null`, which skips the latest
+          half-year, is what notices.
 
   - name: stg_eu_electricity_prices
     config:
