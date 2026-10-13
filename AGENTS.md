@@ -372,7 +372,7 @@ the boundary is `publishing-a-release`. Two things not to need it for:
     both series in 2010 and 2024, 30 flip the sign of their decarbonisation trend
     on that choice alone.
   - **"Latest year" is per column, not per table.** Coverage thins unevenly —
-    `co2_mt` holds 214 countries where `primary_energy_twh` has 79 — so read
+    `co2_mt` holds 215 countries where `primary_energy_twh` has 79 — so read
     `reports/sources/warehouse/latest_years.sql`, never a literal. It is the
     latest *observed* year, because `stg_wdi` cuts WDI at `current_date`: the
     World Bank also serves projections.

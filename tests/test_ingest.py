@@ -711,6 +711,35 @@ def test_eu_elec_prices_skips_absent_cells(monkeypatch):
     assert rows[0]["geo"] == "EL" and rows[0]["period"] == "2023-S1"
 
 
+def test_eu_elec_prices_refuses_a_filter_that_stopped_applying(monkeypatch):
+    """Two `tax` categories where the URL asked for one: the walk would read the
+    first, the price excluding tax, as the price including it."""
+    cube = _jsonstat({"0": 0.10, "6": 0.25})
+    cube["id"].insert(0, "tax")
+    cube["size"].insert(0, 2)
+    cube["dimension"]["tax"] = {"category": {"index": {"X_TAX": 0, "I_TAX": 1}}}
+    monkeypatch.setattr(http, "get_json", lambda url, **kw: cube)
+    with pytest.raises(ResourceExtractionError, match="`tax`"):
+        list(eurostat.eu_elec_prices())
+
+
+def test_eu_elec_prices_refuses_one_category_that_is_not_the_one_requested(monkeypatch):
+    """One category is not enough: it has to be the filter's, or a unit the API
+    swapped in would be walked under the requested one's name."""
+    cube = _jsonstat({"0": 250.0})
+    cube["dimension"]["unit"] = {"category": {"index": {"MWH": 0}}}
+    monkeypatch.setattr(http, "get_json", lambda url, **kw: cube)
+    with pytest.raises(ResourceExtractionError, match="'KWH'"):
+        list(eurostat.eu_elec_prices())
+
+
+def test_the_recorded_eurostat_payload_passes_its_own_filter_check():
+    """The check reads `category.index` as a mapping, and the synthetic cubes above
+    assume that shape; the recorded response is the API's own answer to it."""
+    recorded = json.loads(fixtures.path_for(eurostat.EU_ELEC_PRICES_API).read_text())
+    eurostat.check_one_category_per_filter(recorded)
+
+
 # --------------------------------------------------------------------------- #
 # ecb_fx_rates — the daily grain, and its watermark
 # --------------------------------------------------------------------------- #

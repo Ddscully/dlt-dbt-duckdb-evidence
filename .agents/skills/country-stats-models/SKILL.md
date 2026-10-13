@@ -195,7 +195,7 @@ carries it forward is `publishing-a-release`.
 
 - **"Latest year" is per column, not per table.** `max(year)` on the mart is
   whichever source runs furthest ahead (Eurostat prices, a year beyond the rest),
-  and coverage thins out unevenly before that: `co2_mt` holds 214 countries into
+  and coverage thins out unevenly before that: `co2_mt` holds 215 countries into
   the latest year, `primary_energy_twh` collapses from ~210 to **79**,
   `consumption_co2` stops a year earlier still. The collapse is a publishing
   lag: OWID joins the Energy Institute's review (79 countries, current, and the

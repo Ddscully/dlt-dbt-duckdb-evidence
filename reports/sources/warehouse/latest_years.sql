@@ -5,7 +5,7 @@
 --
 -- Not `max(year)`: the mart's max year is whichever source runs furthest ahead,
 -- and coverage falls off unevenly — `primary_energy_twh` drops from about 210
--- countries to 79 in a year where `co2_mt` still has 214. Each family gets the
+-- countries to 79 in a year where `co2_mt` still has 215. Each family gets the
 -- latest year that still has a broad enough sample to chart.
 --
 -- `*_label` copies exist because a year rendered through Evidence's numeric

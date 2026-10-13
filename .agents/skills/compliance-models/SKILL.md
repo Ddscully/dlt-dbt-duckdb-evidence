@@ -63,7 +63,7 @@ generation-only factors and sends upstream emissions to Scope 3 category 3. So:
   from its basis is the one thing a reporter must not be handed.
 - **`is_latest_available` is a filter, not a year, and that is the whole vintage
   problem.** "The most recent published factor for country X" resolves to 2025
-  for 90 countries, 2024 for 105, 2023 for 10 and 2022 for 2, so a
+  for 91 countries, 2024 for 105, 2023 for 10 and 2022 for 2, so a
   `where year = 2025` cross-section drops more than half the world. Same lesson
   as `latest_years.sql`, load-bearing here for a number with a legal
   consequence. A `unique_combination_of_columns` test with

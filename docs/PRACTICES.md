@@ -123,7 +123,7 @@ across every currency the worst complete year is the Icelandic króna in 2008 at
 the same year for every metric, so no page hardcodes a "latest year": each reads
 the latest year its own metric family can actually populate. Cutting an energy
 chart to the latest CO₂ year quietly drops two thirds of its sample: `co2_mt`
-holds 214 countries into the latest year where `primary_energy_twh` collapses to
+holds 215 countries into the latest year where `primary_energy_twh` collapses to
 79.
 → [`reports/sources/warehouse/latest_years.sql`](../reports/sources/warehouse/latest_years.sql)
 

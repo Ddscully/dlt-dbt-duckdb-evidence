@@ -4,7 +4,7 @@ with source as (
 )
 
 select
-    iso_code as country_iso3,
+    {{ owid_country_iso3() }} as country_iso3,
     country,
     cast(year as integer) as year,
     -- primary energy: all end uses, but OWID only carries it for ~79 countries
@@ -30,6 +30,5 @@ select
     -- `dim_grid_emission_factors` can say when its factor was pulled.
     to_timestamp(cast(_dlt_load_id as double)) as source_loaded_at
 from source
-where
-    iso_code is not null
-    and length(iso_code) = 3
+-- Aggregates out, Kosovo in: see the macro.
+where length({{ owid_country_iso3() }}) = 3

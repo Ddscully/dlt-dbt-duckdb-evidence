@@ -20,7 +20,7 @@ credentials, no bill.
 [The practices, indexed](./docs/PRACTICES.md) ·
 [What is not done yet](#what-this-project-has-and-has-not-done-yet)
 
-**505 dbt tests** (469 data, 36 unit) · an enforced schema contract on every
+**507 dbt tests** (469 data, 38 unit) · an enforced schema contract on every
 mart model · the whole pipeline run offline on every pull request · the site
 rebuilt from live sources weekly
 
@@ -77,7 +77,7 @@ uv tool install rust-just
 git clone https://github.com/Ddscully/dlt-dbt-duckdb-evidence.git
 cd dlt-dbt-duckdb-evidence
 
-just setup      # create the Python environment
+just setup      # the Python environment, and dbt's packages and manifest
 just run        # ingest -> dbt build -> Polars, about a minute
 just report     # build the dashboard (needs Node 18+)
 just sql        # query the warehouse in the DuckDB CLI

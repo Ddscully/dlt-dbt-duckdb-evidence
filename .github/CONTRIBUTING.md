@@ -20,7 +20,7 @@ it is worth saying up front what that means for a contribution:
 curl -LsSf https://astral.sh/uv/install.sh | sh   # or `brew install uv`
 uv tool install rust-just                         # the `just` command runner
 
-just setup                    # uv sync: runtime + dev + orchestration
+just setup                    # uv sync, DuckDB extensions, dbt deps + parse
 uv run pre-commit install     # the hooks CI also runs
 just run                      # the whole pipeline, ≈65 s, no credentials
 ```

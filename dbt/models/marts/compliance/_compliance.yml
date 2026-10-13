@@ -117,7 +117,7 @@ models:
           The most recent year this country has a published factor for — the row
           to use when the question is "the current factor for country X".
           **That is not the same year for every country**: today it is 2025 for
-          90 of them, 2024 for 105, 2023 for 10 and 2022 for 2, so a
+          91 of them, 2024 for 105, 2023 for 10 and 2022 for 2, so a
           `where year = <latest>` cross-section would drop more than half the
           world. Same lesson as `latest_years.sql`, load-bearing here for a
           number with a legal consequence.
