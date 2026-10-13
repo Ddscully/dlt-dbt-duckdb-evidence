@@ -355,11 +355,13 @@ that went.
   removal. A test pins this through the command's exit, because
   counting `removed` as a loss keeps every verdict label right.
 - **Re-fetching carried weather years is also a dispatch.** `weather_years`
-  (`2017 2026`, or one year) runs `just backfill-weather` between the restore
+  (`2021 2026`, or one year) runs `just backfill-weather` between the restore
   and the build, which is the only way a change to the weather request reaches
-  rows older than the ninety-day lookback. At most fifteen years a run, and ten
-  take over an hour, most of it the limiter sleeping (`weather-models`). It has
-  not run in CI yet.
+  rows older than the ninety-day lookback. At most six years a run, about six
+  minutes, with runs an hour apart and two a day at most: the first dispatch,
+  ten years, slept past GitHub's six-hour default (`weather-models` has the
+  mechanism). The step and the job carry their own timeouts, and the source
+  logs every attempt, and every wait before it starts.
 - **A deliberate drop is published by dispatch**: a scheduled run cannot take
   inputs, so it fails and a person re-runs with `accept_volume_drop`. The failed
   month's release never existed, so the re-run still compares against the last

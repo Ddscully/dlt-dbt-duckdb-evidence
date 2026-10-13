@@ -12,6 +12,9 @@ locations`` — one request can cost 600 units and the next 0.4.
   be: a shared budget wants one sequential loop.
 * **A request may exceed a whole window's budget**, where "sleep until it fits"
   never terminates. See `_window_delay`.
+* **A wait can be refused.** With `max_wait`, `acquire` raises `WaitTooLong`
+  instead of sleeping longer, because a limiter that honours a day-long window
+  by sleeping looks exactly like a hung process for a day.
 
 The limits arrive as arguments; `clock` and `sleep` are injectable so tests can
 run a day of pacing in microseconds.
@@ -23,11 +26,31 @@ import time
 from collections import deque
 from collections.abc import Callable, Sequence
 
-__all__ = ["WeightedWindowLimiter"]
+__all__ = ["WaitTooLong", "WeightedWindowLimiter"]
 
 # Slack for float residue in `_window_delay` (`(0.1 + 0.2) - 0.1 - 0.2` is not
 # 0), far below any real charge.
 _DRAIN_TOLERANCE = 1e-9
+
+
+class WaitTooLong(RuntimeError):
+    """`acquire` needed a longer wait than the limiter's `max_wait` allows."""
+
+    def __init__(self, units: float, wait: float, window: float, spent: float, budget: float):
+        # Every field goes to `args`: pickling and `copy` rebuild an exception as
+        # `cls(*args)`, which a message alone cannot satisfy.
+        super().__init__(units, wait, window, spent, budget)
+        self.units = units
+        self.wait = wait
+        self.window = window
+        self.spent = spent
+        self.budget = budget
+
+    def __str__(self) -> str:
+        return (
+            f"spending {self.units:,.1f} units needs a {self.wait:,.0f} s wait: the "
+            f"{self.window:,.0f} s window holds {self.spent:,.1f} of its {self.budget:,.0f}"
+        )
 
 
 class WeightedWindowLimiter:
@@ -39,6 +62,7 @@ class WeightedWindowLimiter:
         *,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        max_wait: float | None = None,
     ) -> None:
         if not limits:
             # A limiter with no windows would enforce nothing while looking like one.
@@ -46,7 +70,10 @@ class WeightedWindowLimiter:
         for window, budget in limits:
             if window <= 0 or budget <= 0:
                 raise ValueError(f"limit ({window}, {budget}) must be positive in both terms")
+        if max_wait is not None and max_wait <= 0:
+            raise ValueError(f"max_wait={max_wait} must be positive, or None for no ceiling")
         self._limits = tuple(limits)
+        self._max_wait = max_wait
         self._clock = clock
         self._sleep = sleep
         # (charged_at, units), oldest first, trimmed to the widest window.
@@ -73,9 +100,19 @@ class WeightedWindowLimiter:
         charged units age out for `units` to fit.
         """
         at = self._clock() if now is None else now
+        return self._binding(units, at)[0]
+
+    def _binding(self, units: float, at: float) -> tuple[float, float, float]:
+        """`(delay, window, budget)` for the window that asks the longest wait.
+
+        The one computation behind `delay_for` and `acquire`, so the tests that
+        assert on `delay_for` measure what `acquire` does.
+        """
         self._trim(at)
-        waits = [self._window_delay(window, budget, units, at) for window, budget in self._limits]
-        return max([0.0, *waits])
+        return max(
+            (self._window_delay(window, budget, units, at), window, budget)
+            for window, budget in self._limits
+        )
 
     def _window_delay(self, window: float, budget: float, units: float, now: float) -> float:
         """How long one window says to wait before `units` may be spent.
@@ -111,12 +148,24 @@ class WeightedWindowLimiter:
         self._trim(at)
         self._spent.append((at, units))
 
-    def acquire(self, units: float) -> float:
+    def acquire(self, units: float, on_wait: Callable[[float, float], None] | None = None) -> float:
         """Block until `units` may be spent. Returns the seconds actually slept.
 
-        Does not charge; the caller does, once the request has been made.
+        Does not charge; the caller does, once the request has been made. Raises
+        `WaitTooLong`, sleeping not at all, when the wait would exceed `max_wait`;
+        it names the window that binds, which is what a caller needs to say why.
+
+        `on_wait(seconds, window)` runs *before* the sleep. A caller that reports
+        a wait from the return value reports it once it is over, and is silent
+        for exactly as long as the wait lasts.
         """
-        delay = self.delay_for(units)
-        if delay > 0:
-            self._sleep(delay)
+        at = self._clock()
+        delay, window, budget = self._binding(units, at)
+        if delay <= 0:
+            return 0.0
+        if self._max_wait is not None and delay > self._max_wait:
+            raise WaitTooLong(units, delay, window, self.spent_within(window, at), budget)
+        if on_wait is not None:
+            on_wait(delay, window)
+        self._sleep(delay)
         return delay

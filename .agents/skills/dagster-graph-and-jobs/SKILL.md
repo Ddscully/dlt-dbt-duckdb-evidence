@@ -152,7 +152,8 @@ CLI this project does not install
   - **One range is one run, whichever source.** WDI asks `&date=lo:hi`, so
     1990–2025 is 11 requests, one per indicator, not 396. Weather
     chunks by year inside the resource either way, to pace its budget, and
-    refuses a range over a day's allowance before any request (`weather-models`).
+    refuses a range an hour's allowance cannot hold with a retry to spare
+    before any request (`weather-models`).
   - **`tests/test_definitions.py` asserts `full_refresh` and `publish_site` have
     no `partitions_def`**, because one partitioned asset joining either
     selection brings the picker back with nothing else red.

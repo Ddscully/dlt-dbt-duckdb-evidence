@@ -27,6 +27,7 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import logging
 import tempfile
 import zipfile
 from datetime import date
@@ -52,9 +53,9 @@ from ingest.sources.retail import (
     retail_workbook,
 )
 from ingest.sources.weather import (
-    WEATHER_RATE_LIMITS,
     get_weather_json,
     weather_call_units,
+    weather_limiter,
     weather_locations,
     weather_url,
 )
@@ -65,7 +66,6 @@ from ingest.sources.worldbank import (
 )
 from modern_data_stack import workbook
 from modern_data_stack.db import scalar
-from modern_data_stack.ratelimit import WeightedWindowLimiter
 
 # A slice wide enough that the modelled layers have something to do:
 #   - every World Bank region and all four income groups;
@@ -201,7 +201,7 @@ def record_weather() -> None:
     payload = json.dumps(
         get_weather_json(
             url,
-            WeightedWindowLimiter(WEATHER_RATE_LIMITS),
+            weather_limiter(),
             weather_call_units(len(locations), days),
         )
     )
@@ -314,6 +314,9 @@ RETAIL_FIXTURE_SHEET = "Year 2009-2011"
 
 
 def main() -> None:
+    # The weather request logs its attempts and waits at INFO, as in `ingest.pipeline`.
+    logging.basicConfig(format="%(asctime)s %(name)s %(message)s")
+    logging.getLogger("ingest").setLevel(logging.INFO)
     print(f"recording fixtures for {len(COUNTRIES)} countries into {FIXTURE_DIR}")
     record_owid(OWID_CO2)
     record_owid(OWID_ENERGY)

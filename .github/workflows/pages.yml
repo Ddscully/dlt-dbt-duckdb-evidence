@@ -66,6 +66,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # GitHub's default is six hours, and a hung run spends all of them: see
+    # release-data.yml's weather step. Sized at a few times the longest run measured.
+    timeout-minutes: 30
     # No INGEST_FIXTURES: see the note at the top. The three paths, and the
     # `dbt parse` the graph cannot load without, come from the setup action and
     # `just materialize-site`'s own dependency chain.
@@ -123,7 +126,10 @@ jobs:
       # `reports/evidence_site`, which runs npm (hence `setup-node`). Its
       # `sources:strict` makes an empty warehouse a red build rather than a site
       # of empty charts.
+      # Its own timeout under the job's, so a hang ends as a failure (red)
+      # rather than a cancelled job (grey), which reads as someone stopping it.
       - name: Build the warehouse and the site from live sources
+        timeout-minutes: 25
         run: just materialize-site
 
       - uses: actions/configure-pages@v6
@@ -135,6 +141,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

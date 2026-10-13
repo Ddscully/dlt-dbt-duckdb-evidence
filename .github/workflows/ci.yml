@@ -13,6 +13,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # GitHub's default is six hours, and a hung run spends all of them: see
+    # release-data.yml's weather step. Sized at a few times the longest run measured.
+    timeout-minutes: 20
     env:
       # The only variable this workflow owns. The three paths come from the
       # setup action, which is the single definition of them.
@@ -91,6 +94,9 @@ jobs:
   # holds to the manifest-gated list.
   container:
     runs-on: ubuntu-latest
+    # A backstop over the steps' own timeouts, which are what let `Service logs`
+    # run: a timed-out step fails, a timed-out job is cancelled and skips it.
+    timeout-minutes: 20
     env:
       # Throwaway, and literal on purpose: these configure containers that live
       # for one job and are never reachable from outside the runner. A secret
@@ -103,14 +109,17 @@ jobs:
 
       # No setup action and no uv: everything this job needs is in the image.
       - name: Build the image
+        timeout-minutes: 8
         run: docker compose build
 
       - name: Start the backing services
+        timeout-minutes: 4
         run: docker compose up -d --wait postgres seaweedfs
 
       # `--no-deps`, because the two services it depends on are already up and
       # `run` would otherwise start the long-running `dagster` service too.
       - name: Fixture pipeline, in the container
+        timeout-minutes: 6
         run: docker compose run --rm --no-deps dagster just test-pipeline
 
       - name: Service logs

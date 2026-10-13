@@ -242,6 +242,54 @@ def downloaded_assets(text: str) -> set[str]:
     return set(re.findall(r"--pattern\s+(\S+)", text))
 
 
+def test_every_job_sets_a_timeout_of_its_own():
+    """GitHub's default is six hours, and a run that hangs spends every one of
+    them: the weather re-fetch in run 37100640862 slept until it was cancelled at
+    six hours, with nothing in the log. A job missing its own `timeout-minutes`
+    inherits that default silently."""
+    yaml = pytest.importorskip("yaml")
+    workflows = sorted(WORKFLOWS_DIR.glob("*.yml"))
+    assert workflows, f"no workflows under {WORKFLOWS_DIR}"
+    missing = [
+        f"{path.name}:{job}"
+        for path in workflows
+        for job, spec in yaml.safe_load(path.read_text())["jobs"].items()
+        if not isinstance(spec.get("timeout-minutes"), int) or spec["timeout-minutes"] >= 360
+    ]
+    assert not missing, f"jobs on GitHub's six-hour default: {missing}"
+
+
+def test_a_job_that_reports_its_own_failure_still_reports_a_timeout():
+    """A step that hits its own `timeout-minutes` *fails*, so the steps gated on
+    `failure()` run; a job that hits its timeout is *cancelled*, and they are
+    skipped (actions/runner, `StepsRunner.cs`; run 37100640862 ended
+    `cancelled`). live.yml's issue step and ci.yml's service logs exist for the
+    run that goes wrong, and a hang is the likeliest way to go wrong. So every
+    command before such a step carries a timeout, and together they leave the
+    job's own timeout room to spare: otherwise the job's fires first."""
+    yaml = pytest.importorskip("yaml")
+    problems = []
+    for path in sorted(WORKFLOWS_DIR.glob("*.yml")):
+        for job, spec in yaml.safe_load(path.read_text())["jobs"].items():
+            steps = spec.get("steps", [])
+            gated = [i for i, step in enumerate(steps) if "failure()" in str(step.get("if", ""))]
+            if not gated:
+                continue
+            commands = [step for step in steps[: gated[0]] if "run" in step]
+            untimed = [
+                step.get("name", step["run"]) for step in commands if "timeout-minutes" not in step
+            ]
+            total = sum(step.get("timeout-minutes", 0) for step in commands)
+            if untimed:
+                problems.append(f"{path.name}:{job} runs with no timeout of their own: {untimed}")
+            elif total >= spec["timeout-minutes"]:
+                problems.append(
+                    f"{path.name}:{job} step timeouts sum to {total}, not under the job's "
+                    f"{spec['timeout-minutes']}"
+                )
+    assert not problems, problems
+
+
 def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
     """A release is a database *and* a landing zone, and taking only the first is silent.
 

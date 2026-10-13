@@ -23,6 +23,7 @@ Run:  uv run python -m ingest.pipeline                     (every resource)
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from collections.abc import Iterable
@@ -150,6 +151,10 @@ def build_pipeline() -> dlt.Pipeline:
 
 
 def main() -> None:
+    # The sources log their retries and waits at INFO; Python shows only warnings
+    # unless told otherwise. Under Dagster the instance's `python_logs` does this.
+    logging.basicConfig(format="%(asctime)s %(name)s %(message)s")
+    logging.getLogger("ingest").setLevel(logging.INFO)
     # Resource names narrow the load, as a Dagster selection does; none loads all.
     wanted = sys.argv[1:] or None
     unknown = sorted(set(wanted or ()) - {*FULL_REFRESH_RESOURCES, *INCREMENTAL_RESOURCES})

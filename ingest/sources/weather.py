@@ -10,6 +10,7 @@ Capital coordinates come from `ingest.sources.worldbank.country_pages`.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime, timedelta
@@ -22,7 +23,12 @@ from dlt.common.schema.typing import TColumnSchema
 from ingest import fixtures, http
 from ingest.sources import worldbank
 from modern_data_stack import db
-from modern_data_stack.ratelimit import WeightedWindowLimiter
+from modern_data_stack.ratelimit import WaitTooLong, WeightedWindowLimiter
+
+# Under Dagster a step's stdout is captured into files nobody reads in CI, so
+# progress goes through `logging`, which `python_logs` in the instance config
+# forwards to the console (`managed_python_loggers: [ingest]`).
+log = logging.getLogger(__name__)
 
 # Open-Meteo's historical archive: daily weather at any point on Earth back to
 # 1940, no key. https://open-meteo.com/en/docs/historical-weather-api
@@ -76,8 +82,9 @@ WEATHER_FIRST_YEAR = 2007
 
 # What a load into an empty destination fetches. It must fit the hourly budget,
 # which `tests/test_ingest.py` holds it to: from WEATHER_FIRST_YEAR it would pass
-# the daily one, and the limiter would sleep for most of a day. Three leaves two
-# complete years to compare; deeper history is carried forward or backfilled.
+# the daily one, and the run would wait for a day's budget it cannot be given.
+# Three leaves two complete years to compare; deeper history is carried forward
+# or backfilled.
 WEATHER_COLD_START_YEARS = 3
 
 # Final ERA5 and ERA5-Land replace their preliminary runs two to three months
@@ -114,6 +121,13 @@ WEATHER_RATE_LIMITS = ((60.0, 600.0), (3600.0, 5000.0), (86400.0, 10000.0))
 WEATHER_RETRY_AFTER_SECONDS = {"minutely": 65.0, "hourly": 660.0}
 WEATHER_DEFAULT_RETRY_AFTER_SECONDS = 65.0
 WEATHER_RETRIES = 6
+
+# The longest the limiter may wait before a request: the hourly window, which a
+# refused attempt late in a backfill can push a run into, plus a minute. Never
+# the daily one. Every attempt is charged, refused or not, so six 429s across a
+# ten-year backfill filled the day and the next request asked for a 22-hour
+# sleep: run 37100640862 sat silent until GitHub cancelled it at six hours.
+WEATHER_MAX_WAIT_SECONDS = 3660.0
 
 # The wait, growing linearly, for a failure that is not a rate limit — a 5xx, a
 # reset, a truncated body — which has nothing to do with the budget.
@@ -325,30 +339,37 @@ def weather_range_units(years: tuple[int, int], today: date | None = None) -> fl
 
 
 def check_weather_range_is_affordable(years: tuple[int, int], today: date | None = None) -> None:
-    """Refuse a backfill that costs more than a day's allowance, before any request.
+    """Refuse a backfill that, with one retry, costs more than an hour's allowance.
 
-    The limiter honours the daily window by *sleeping*, so an oversized range
-    does not fail: it waits for the window to drain, for as many days as the
-    range overspends, looking exactly like a hung run. 1960-2026 is ~42,800
-    units, over four days — what the Dagster UI once launched, when a
-    partitioned asset made "every year" its Materialize button's default. A range
-    inside the allowance still takes hours, paced by the hourly window, but ends.
+    A range inside the hourly budget is paced only by the minute window, a minute
+    a year: six years in about six minutes. One past it spends the run asleep
+    until the hour drains, and that sleep is where a budget shared with anything
+    else (a GitHub runner shares its address, and Open-Meteo budgets per address)
+    turns into a run that waits for hours. 2017-2026 was such a range: an hour of
+    pacing when every request was served, and a hang when some were refused.
 
-    The check is against a whole day's allowance, not what is left of it: only
-    Open-Meteo knows the rest, and it answers with the daily 429 that
-    `weather_retry_after` already refuses to wait out.
+    The headroom is one year's request, because every attempt is charged: a range
+    that fills the hour exactly turns a single 429 or 5xx into a wait for the
+    hour to drain, which took a simulated seven-year run from 6 minutes to 60.
+
+    Against a whole hour's allowance, not what is left of it: only Open-Meteo
+    knows the rest, and it answers with a 429 naming the window. The daily
+    allowance is why the refusal also says how many such runs fit in a day.
     """
-    daily = dict(WEATHER_RATE_LIMITS)[86400.0]
+    limits = dict(WEATHER_RATE_LIMITS)
+    hourly, daily = limits[3600.0], limits[86400.0]
+    year = weather_call_units(len(WEATHER_COUNTRIES), 366)
     cost = weather_range_units(years, today)
-    if cost <= daily:
+    if cost + year <= hourly:
         return
-    most = int(daily // weather_call_units(len(WEATHER_COUNTRIES), 366))
+    most = int(hourly // year) - 1
     first, last = years
     raise ValueError(
         f"a weather backfill over {first}-{last} costs ~{cost:,.0f} Open-Meteo units against "
-        f"{daily:,.0f} a day, and the rate limiter would sleep through the daily window rather "
-        f"than fail. Split it across days, at most {most} years a run: e.g. "
-        f"`just backfill-weather {last - most + 1} {last}`."
+        f"{hourly:,.0f} an hour, which must also hold a retried year's {year:,.0f}, so the run "
+        f"would spend most of itself asleep waiting for the next hour's budget. Split it into "
+        f"runs of at most {most} years, an hour apart and at most {int(daily // (most * year))} "
+        f"a day: e.g. `just backfill-weather {last - most + 1} {last}`."
     )
 
 
@@ -371,27 +392,59 @@ def weather_retry_after(reason: str) -> float:
     return WEATHER_DEFAULT_RETRY_AFTER_SECONDS
 
 
-def get_weather_json(url: str, limiter: WeightedWindowLimiter, units: float) -> dict | list:
+def weather_limiter() -> WeightedWindowLimiter:
+    """The budget every archive request is paced against, sized to refuse a day's sleep.
+
+    One definition for the resource and the fixture recorder, so neither can
+    build a limiter that waits out the daily window (`WEATHER_MAX_WAIT_SECONDS`).
+    """
+    return WeightedWindowLimiter(WEATHER_RATE_LIMITS, max_wait=WEATHER_MAX_WAIT_SECONDS)
+
+
+def get_weather_json(
+    url: str, limiter: WeightedWindowLimiter, units: float, label: str = "weather"
+) -> dict | list:
     """GET one archive window, spending `units` of a shared budget to do it.
 
     Under fixtures it delegates to `http.get_json`: there is no budget to pace.
 
     The limiter knows only this process's spend; a 429 means something else
-    shared the budget (an earlier run, the recorder, a person with curl), so the
-    wait is read off the response (`weather_retry_after`). Every attempt is
-    charged, useful or not, because the API counts it.
+    shared the budget (an earlier run, the recorder, a person with curl, another
+    tenant of a CI runner's address), so the wait is read off the response
+    (`weather_retry_after`). Every attempt is charged, useful or not, because
+    the API counts it.
 
     A 429 waits what its message says; a 5xx, timeout, reset or unparseable body
     backs off `WEATHER_BACKOFF_SECONDS`; any other 4xx raises at once, since a
-    retry would get the same rejection and spend budget on it.
+    retry would get the same rejection and spend budget on it. A wait for the
+    budget longer than the limiter's `max_wait` raises too (`WaitTooLong`).
+
+    Every attempt and every wait is logged under `label`: a run that only paced
+    itself and a run that was refused six times look the same from outside.
     """
     if fixtures.enabled():
         return http.get_json(url)
 
+    def waiting(seconds: float, window: float) -> None:
+        # Before the sleep: logged after it, an hour's wait is an hour of silence.
+        log.info("%s: waiting %.0f s for the %.0f s window's budget", label, seconds, window)
+
     last: Exception | None = None
     for attempt in range(WEATHER_RETRIES):
-        limiter.acquire(units)
+        try:
+            limiter.acquire(units, on_wait=waiting)
+        except WaitTooLong as exc:
+            # Open-Meteo counts the refused attempts too, so its own tally for this
+            # address is at least the limiter's: the window has to drain there.
+            again = "tomorrow" if exc.window >= 86400 else "in an hour"
+            raise RuntimeError(
+                f"{label}: Open-Meteo's budget is spent past what this run will wait for "
+                f"({exc}). Something else is drawing on the same budget (on a CI runner, "
+                f"other tenants of its address). Re-run {again}, with a narrower range if "
+                "the last one was refused."
+            ) from exc
         wait = WEATHER_BACKOFF_SECONDS * (attempt + 1)
+        started = time.monotonic()
         try:
             try:
                 resp = requests.get(url, timeout=300)
@@ -401,6 +454,11 @@ def get_weather_json(url: str, limiter: WeightedWindowLimiter, units: float) -> 
                 # served, and so billed, the request.
                 limiter.charge(units)
 
+            log.info(
+                "%s: attempt %d of %d, %.0f units, HTTP %d in %.1f s",
+                label, attempt + 1, WEATHER_RETRIES, units, resp.status_code,
+                time.monotonic() - started,
+            )  # fmt: skip
             if resp.status_code == 429:
                 # Raises for the daily window, and that raise escapes the loop.
                 wait = weather_retry_after(resp.text)
@@ -417,10 +475,12 @@ def get_weather_json(url: str, limiter: WeightedWindowLimiter, units: float) -> 
             last = exc
         except (requests.RequestException, ValueError) as exc:  # ValueError = JSONDecodeError
             # Transient: a timeout, a reset, an error page that is not JSON.
+            log.info("%s: attempt %d of %d failed: %s", label, attempt + 1, WEATHER_RETRIES, exc)
             last = exc
 
         if attempt == WEATHER_RETRIES - 1:
             break
+        log.info("%s: retrying in %.0f s (%s)", label, wait, last)
         time.sleep(wait)
     raise RuntimeError(f"failed to fetch weather from {url[:120]}…: {last}")
 
@@ -497,15 +557,15 @@ def om_weather_daily(years: tuple[int, int] | None = None):
     previous release and this asks only for what is new (`weather_watermark`).
 
     With `years` (a backfill, `just backfill-weather`) it loads exactly those
-    years and ignores the watermark, provided they fit a day's allowance
-    (`check_weather_range_is_affordable`). Without, it loads from the watermark's
-    lookback to the archive's end — or `WEATHER_COLD_START_YEARS` into an empty
-    destination.
+    years and ignores the watermark, provided they and a retry fit an hour's
+    allowance (`check_weather_range_is_affordable`). Without, it loads from the
+    watermark's lookback to the archive's end — or `WEATHER_COLD_START_YEARS` into
+    an empty destination.
     """
     if years is not None:
         check_weather_range_is_affordable(years)
     locations = weather_locations()
-    limiter = WeightedWindowLimiter(WEATHER_RATE_LIMITS)
+    limiter = weather_limiter()
     watermark = None if years is not None else weather_watermark()
 
     windows = weather_windows(years, watermark)
@@ -521,5 +581,6 @@ def om_weather_daily(years: tuple[int, int] | None = None):
             weather_url(locations, start, end),
             limiter,
             weather_call_units(len(locations), days),
+            label=f"om_weather_daily {start}..{end}",
         )
         yield list(_weather_rows(payload, locations))

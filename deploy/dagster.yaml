@@ -124,3 +124,12 @@ retention:
     purge_after_days: 30
   sensor:
     purge_after_days: 7
+
+# A step's stdout is captured into compute-log files, which no CI log shows, so
+# `print` from a source is invisible exactly when a run needs explaining. Records
+# from these Python loggers become Dagster events instead, on the console and in
+# the UI: the weather source logs each attempt and each wait for the budget.
+python_logs:
+  python_log_level: INFO
+  managed_python_loggers:
+    - ingest

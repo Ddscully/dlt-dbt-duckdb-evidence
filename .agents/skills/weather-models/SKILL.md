@@ -1,6 +1,6 @@
 ---
 name: weather-models
-description: The Open-Meteo reanalysis capital-city weather source — raw.om_weather_daily, stg_weather_daily, the model the request names, the weighted rate-limit budget that bounds what can be fetched, the positional multi-location response, the two degree-day conventions and the year-range backfill it shares with wb_wdi, which refuses a range over a day's budget. Use when editing the weather resource or model, running just backfill-weather, changing which years or locations the archive covers, or reasoning about anything the weather budget constrains.
+description: The Open-Meteo reanalysis capital-city weather source — raw.om_weather_daily, stg_weather_daily, the model the request names, the weighted rate-limit budget that bounds what can be fetched, the positional multi-location response, the two degree-day conventions and the year-range backfill it shares with wb_wdi, which refuses a range an hour's budget cannot hold with a retry to spare. Use when editing the weather resource or model, running just backfill-weather, changing which years or locations the archive covers, or reasoning about anything the weather budget constrains.
 ---
 
 # Capital-city weather (`om_weather_daily`, `stg_weather_daily`)
@@ -180,8 +180,11 @@ its first source with a *finite budget*.
   - **The limiter is what converted the failure into a hang, and that is the
     worse direction.** Without pacing, the sixteenth request would have 429'd
     naming the daily window and `weather_retry_after` would have raised. Correct
-    pacing turned a loud stop into a silent one; the guard has to be the test,
-    because the runtime has no way left to complain.
+    pacing turned a loud stop into a silent one. The runtime can complain now:
+    the limiter takes `max_wait`, and the source passes
+    `WEATHER_MAX_WAIT_SECONDS` (the hour plus a minute), so a wait for the daily
+    window raises `WaitTooLong` instead of sleeping. The test stays, because a
+    refusal is still a failed run.
 
 - **The 90-day merge lookback is sized to the preliminary runs, not to
   politeness.** Open-Meteo serves ERA5T and ERA5-Land's equivalent about six
@@ -189,18 +192,44 @@ its first source with a *finite budget*.
   reanalysis two to three months later. FX's ten
   days would freeze preliminary numbers *permanently* here, because rows outside
   the window are carried forward rather than refetched.
-- **A backfill over more than a day's allowance is refused before any request.**
-  The same shape as the cold start below: 1960–2026 is ~42,800 units, over four
-  days of allowance, which the limiter would honour by sleeping for days with
-  nothing red (measured when a partition picker launched exactly that:
-  [`docs/decisions/0002-yearly-sources-as-run-config.md`](../../../docs/decisions/0002-yearly-sources-as-run-config.md)).
-  `check_weather_range_is_affordable` sums `weather_windows` for every capital
-  and raises past 10,000, naming a split that fits: fifteen years a run, sized
-  against leap years. The resource calls it first thing, and
+- **A backfill an hour's allowance cannot hold with a retry to spare is refused
+  before any request.** `check_weather_range_is_affordable` sums
+  `weather_windows` for every capital and raises when that plus one leap year's
+  request passes 5,000, naming a split that fits: six years a run, an hour apart
+  and two a day at most. The spare year is there because every attempt is
+  charged: seven years fill the hour exactly, and on the injected clock one 503
+  took such a run from 6 minutes to 60, nearly all of it one sleep for the hour
+  to drain, where six years absorb it. The resource calls it first thing, and
   `raw_by_year_assets` calls it again before `dlt.run`, so the refusal is not
-  wrapped in dlt's extraction error. It checks a *whole* day's allowance, not
-  what is left of it — only Open-Meteo knows that, and its daily 429 already
-  raises (`weather_retry_after`).
+  wrapped in dlt's extraction error. Inside the hour a run is paced only by the
+  minute window, one year a minute.
+  - **The ceiling was a day's allowance until a dispatch hung for six hours.**
+    `weather_years=2017 2026` (run 37100640862, 6,255 units) logged its first
+    line and nothing else until GitHub cancelled it at the six-hour default.
+    Every attempt is charged, refused or not, and a runner shares its address,
+    which Open-Meteo budgets by. Simulated with the injected clock, six refused
+    attempts across that range end in a 22-hour sleep for the limiter's own
+    daily window, and none still spends 0.9 hours asleep for the hourly one.
+    An hour's ceiling makes the normal run minutes long, and `max_wait` turns
+    the abnormal one into an error; it sits above the hourly window, so only
+    the daily one can refuse, and the error says to re-run tomorrow. Every
+    workflow job has its own `timeout-minutes`, and each long step one under
+    its job's, because a step that times out *fails* while a job that times
+    out is *cancelled*, which skips the `if: failure()` steps that report it
+    (both held by `tests/test_workflows.py`).
+  - **The run said nothing because Dagster captures a step's stdout.** The
+    console got only `LOGS_CAPTURED`; anything printed went to compute-log files
+    on a runner that was then discarded. `get_weather_json` logs each attempt,
+    status and wait through `logging`, a wait *before* it starts (`acquire`'s
+    `on_wait`: logged after, an hour's wait is an hour of silence), and both
+    instance configs forward the `ingest` loggers (`python_logs`, measured:
+    without it neither `print` nor `logging` reached the console). A weekly
+    live run spent 856 silent seconds in that step, about one hourly 429 wait
+    and three minutely ones, which is the evidence that runner addresses are
+    refused.
+  - 1960–2026 is ~42,800 units, over four days of allowance: what a partition
+    picker once launched
+    ([`docs/decisions/0002-yearly-sources-as-run-config.md`](../../../docs/decisions/0002-yearly-sources-as-run-config.md)).
 - **`wb_wdi` and `om_weather_daily` share one `@dlt_assets` block and one
   `YearRange` config** (`dagster-graph-and-jobs` says why it is config and not
   partitions). One block because a year range means the same thing to both;

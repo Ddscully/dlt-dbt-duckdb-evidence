@@ -33,6 +33,11 @@ permissions:
 jobs:
   live:
     runs-on: ubuntu-latest
+    # GitHub's default is six hours, and a hung run spends all of them: see
+    # release-data.yml's weather step. A backstop: the steps that can hang carry
+    # their own, because a job that times out is *cancelled*, and the issue step
+    # below runs on failure() and so not at all.
+    timeout-minutes: 45
     # No INGEST_FIXTURES anywhere in this workflow — that is the entire point of
     # it. The three paths come from the setup action.
     steps:
@@ -44,7 +49,12 @@ jobs:
 
       # `just materialize` depends on `dbt-parse`, which writes the manifest
       # `@dbt_assets` reads at import time.
+      # A step that times out *fails* (actions/runner, StepsRunner.cs), so the
+      # issue still opens. About twice the longest run measured, 16.5 minutes,
+      # most of it Open-Meteo refusing and the weather source waiting: room for
+      # an hourly 429's 11-minute retry without a false alarm.
       - name: Materialize the asset graph against live sources
+        timeout-minutes: 35
         run: just materialize
 
       # `mart_covers_recent_years` is a WARN check, and a failed WARN check does
@@ -53,6 +63,7 @@ jobs:
       # graph — a late publisher should not halt the release or the site — and
       # this job, whose purpose is to notice, calls it directly.
       - name: Fail when a source has stopped updating
+        timeout-minutes: 5
         run: |
           uv run --group orchestration python - <<'PY'
           import sys
