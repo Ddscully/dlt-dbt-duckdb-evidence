@@ -14,7 +14,7 @@ just setup             # uv sync: runtime + dev + orchestration
 just course-sandbox    # ~50s, offline
 ```
 
-`course-sandbox` runs the whole pipeline — dlt ingest, `dbt build` (571 nodes),
+`course-sandbox` runs the whole pipeline — dlt ingest, `dbt build` (558 nodes),
 both Polars transforms and the observability tables — from the fixtures checked
 into `tests/fixtures/ingest/`. No network, no credentials, no cloud bill.
 
@@ -23,8 +23,8 @@ file `data/course/warehouse.duckdb`, which holds everything dbt builds, and the
 DuckLake landing zone `data/course/lakehouse/`, which holds `raw`. Delete
 `data/course/` and run it again.
 
-You should see it finish on `PASS=566 WARN=0 ERROR=0 SKIP=0 NO-OP=10
-TOTAL=576`. The ten no-ops are the exposures, which dbt resolves and does not
+You should see it finish on `PASS=547 WARN=0 ERROR=0 SKIP=0 NO-OP=11
+TOTAL=558`. The eleven no-ops are the exposures, which dbt resolves and does not
 build.
 
 ### The four recipes

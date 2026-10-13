@@ -7,9 +7,6 @@ numeric mart columns are non-additive. So the warehouse states it: `meta: {addit
 that carry the contract, and `publish/export_warehouse.py` carries the labels
 into the release manifest so a consumer who cannot be paged has them too.
 
-The manifest counts more labelled columns than the ymls write, because
-`fct_emissions_energy_v1` inherits its labels through `include: all`.
-
 The vocabulary is four values and closed, for `pii`'s reason exactly — a blank
 is ambiguous between "additive" and "nobody looked", and only one of those can
 be true by accident:
@@ -82,9 +79,9 @@ def mart_columns() -> dict[tuple[str, str], dict]:
     """Every column of every marts model, keyed by (relation, column).
 
     Keyed on the *published* relation (`schema.alias`) rather than the model
-    name, because the versioned model is two relations and they are labelled
-    independently — v1 inherits its 36 through `include: all` and declares
-    `co2_per_gdp` itself.
+    name, because each version of a model is its own relation, labelled
+    independently: a version declared `include: all` inherits its labels, so the
+    manifest can hold more labelled columns than the ymls write.
     """
     manifest = json.loads(Path(manifest_path).read_text())
     out = {}

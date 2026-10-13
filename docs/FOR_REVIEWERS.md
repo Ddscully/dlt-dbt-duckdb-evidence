@@ -23,7 +23,7 @@ of it estimated.
 |------|-----|
 | [`reports/pages/findings/`](../reports/pages/findings/) | the analysis, a page per finding, each ending in its "So what" box |
 | [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including why WDI and weather backfill by run config rather than partitions |
-| [`dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest. Also the repo's one versioned model, aliased back to the bare relation name so the rename is invisible to its consumers ([`_v1`](../dbt/models/marts/country_stats/fct_emissions_energy_v1.sql) is a compatibility view over it, not a second copy) |
+| [`dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest. Also the repo's one versioned model, aliased back to the bare relation name so the rename is invisible to its consumers |
 | [`ingest/pipeline.py`](../ingest/pipeline.py) | eight resources, two write dispositions, and why that has to be two `run()` calls |
 | [`AGENTS.md`](../AGENTS.md) | the gotchas every session needs, written down at the point they were learned — the rest are in the skills under `.agents/skills/` |
 
@@ -270,8 +270,8 @@ number before.
    is a few thousand a second and a few terabytes, there's no distributed query
    processing, and it's beta until DuckDB 2.0. And I haven't put dbt's
    build graph through it. That's the run that would settle it.
-3. **Full-refresh materialisation, for 32 of the 33 models.** Every mart is
-   `+materialized: table` and rebuilt whole (19 tables, 13 views, one
+3. **Full-refresh materialisation, for 31 of the 32 models.** Every mart is
+   `+materialized: table` and rebuilt whole (19 tables, 12 views, one
    incremental). That is deliberate rather than pending: each one re-derives a
    source that gets fully re-fetched, so rebuilding is *how* an upstream
    restatement is picked up, and the whole graph, 1.07M-row retail fact
@@ -362,7 +362,7 @@ below, and the profile is the point.
 | Quality observability | **Established** | Data and unit tests with failing rows stored per test, Dagster asset checks, freshness thresholds on every source but the closed retail archive, and `analytics.pipeline_tests` / `pipeline_runs` making all of it queryable. |
 | Access governance | **Absent** | Structurally, not by neglect — see below. |
 | Lineage traceability | **Established** | One graph from dlt through dbt and Polars to the site; 11 exposures answer "what breaks if I change this" per page; the bus matrix is derived from the manifest rather than drawn. |
-| Organizational ownership | **Ad hoc** | Ownership is declared and enforced for all 33 models. There is one owner, who is also the only contributor. |
+| Organizational ownership | **Ad hoc** | Ownership is declared and enforced for all 32 models. There is one owner, who is also the only contributor. |
 
 **Access governance is Absent and cannot be otherwise here, which is the most
 useful line in the table.** DuckDB has no access control at all: on the pinned
@@ -417,7 +417,7 @@ demo of this size — democratization and the skills mirage need users and a tea
 purposeless ingestion needs an ingest budget nobody is watching, where this has
 eight tables each feeding a named model. Of the rest:
 
-- **Schema avoidance (Sloth)** — no. Contracts on 21 relations, dlt column types
+- **Schema avoidance (Sloth)** — no. Contracts on 20 relations, dlt column types
   declared rather than inferred where inference was found to be unsafe.
 - **Cost delusion (Wrath)** — no, and §3 is the answer: the dollar figure is
   zero, said plainly, with the note that this is a property of the scale rather
