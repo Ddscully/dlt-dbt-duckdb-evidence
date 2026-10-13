@@ -33,6 +33,10 @@ permissions:
 jobs:
   live:
     runs-on: ubuntu-latest
+    # GitHub's default is six hours, and a hung run spends all of them: see
+    # release-data.yml's weather step. Sized at a few times the longest run measured,
+    # 16.5 minutes, most of it Open-Meteo refusing and the weather source waiting.
+    timeout-minutes: 30
     # No INGEST_FIXTURES anywhere in this workflow — that is the entire point of
     # it. The three paths come from the setup action.
     steps:

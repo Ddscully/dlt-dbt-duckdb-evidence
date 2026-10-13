@@ -10,6 +10,7 @@ coordinates.
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
@@ -18,6 +19,9 @@ from dlt.common.schema.typing import TColumnSchema
 
 from ingest import http
 from modern_data_stack import env
+
+# Logged, not printed: Dagster captures a step's stdout (`ingest.sources.weather`).
+log = logging.getLogger(__name__)
 
 # Below the documented maximum of 32,000, whose pages occasionally time out.
 WB_PER_PAGE = 10_000
@@ -179,10 +183,10 @@ def _fetch_wdi_indicator(
     rows, meta = _fetch_wdi_pages(code, start_year, end_year, WB_PER_PAGE)
     if not _is_stale(rows):
         return rows
-    print(
-        f"wb_wdi: {code} served a stale copy (lastupdated {meta.get('lastupdated')}); "
-        f"asking again with per_page={WB_STALE_RETRY_PER_PAGE}"
-    )
+    log.warning(
+        "wb_wdi: %s served a stale copy (lastupdated %s); asking again with per_page=%d",
+        code, meta.get("lastupdated"), WB_STALE_RETRY_PER_PAGE,
+    )  # fmt: skip
     rows, meta = _fetch_wdi_pages(code, start_year, end_year, WB_STALE_RETRY_PER_PAGE)
     if _is_stale(rows):
         raise RuntimeError(

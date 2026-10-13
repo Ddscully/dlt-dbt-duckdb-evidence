@@ -43,7 +43,7 @@ DAGSTER_SERVICE = "dagster"
 
 # What the two instances must say the same way. Not "everything but storage":
 # naming them makes adding a block a decision about both files.
-SHARED_BLOCKS = ("telemetry", "concurrency", "retention")
+SHARED_BLOCKS = ("telemetry", "concurrency", "retention", "python_logs")
 
 # The storage blocks that only the deployed instance has.
 DEPLOYED_ONLY = ("storage", "local_artifact_storage", "compute_logs")
@@ -107,6 +107,25 @@ def test_one_run_at_a_time_survives_in_both():
         assert load(path)["concurrency"]["runs"]["max_concurrent_runs"] == 1, (
             f"{path} no longer queues runs one at a time"
         )
+
+
+def test_the_sources_log_through_a_logger_the_instance_forwards():
+    """A step's stdout goes to compute-log files that no CI log shows, so a source
+    that explains itself only does so through a logger Dagster forwards. Measured
+    with `dagster asset materialize`: without `managed_python_loggers` neither a
+    `print` nor a `logging` call from inside the step reached the console. The
+    weather backfill that sat silent for six hours was the case."""
+    from ingest.sources import weather, worldbank
+
+    for path in (LAPTOP_INSTANCE, DEPLOYED_INSTANCE):
+        python_logs = load(path)["python_logs"]
+        managed = python_logs["managed_python_loggers"]
+        assert python_logs["python_log_level"] == "INFO", f"{path} filters out the INFO records"
+        for module in (weather, worldbank):
+            name = module.log.name
+            assert any(name == m or name.startswith(f"{m}.") for m in managed), (
+                f"{name} is not under any of {managed} in {path.name}"
+            )
 
 
 def test_only_the_deployed_instance_configures_storage():

@@ -1195,21 +1195,22 @@ def test_a_cold_start_fits_inside_the_hourly_budget():
     )
 
 
-def test_a_backfill_over_a_days_allowance_is_refused_before_any_request(monkeypatch):
-    """The limiter honours the daily window by sleeping, so an unaffordable range
-    is a hang measured in days rather than a failure. The Dagster UI launched
-    exactly that — 1960-2026, ~42,800 units — while WDI and
-    weather were yearly partitions, and it was cancelled by hand, not failed.
-    Refusing up front is the only loud signal left.
+def test_a_backfill_over_an_hours_allowance_is_refused_before_any_request(monkeypatch):
+    """Inside an hour's budget a backfill is paced by the minute window alone, a
+    minute a year. Past it the run spends most of itself asleep waiting for the
+    next hour, and that sleep is where a contested budget became six silent
+    hours (`test_refused_attempts_raise_rather_than_sleeping_through_the_day`).
+    The Dagster UI once launched 1960-2026, ~42,800 units, when WDI and weather
+    were yearly partitions. Refusing up front is the loud signal.
     """
     today = date(2026, 9, 17)
-    daily = dict(weather.WEATHER_RATE_LIMITS)[86400.0]
-    most = int(daily // weather.weather_call_units(len(weather.WEATHER_COUNTRIES), 366))
-    assert most == 15, "the justfile and the skills quote fifteen years a run"
+    hourly = dict(weather.WEATHER_RATE_LIMITS)[3600.0]
+    most = int(hourly // weather.weather_call_units(len(weather.WEATHER_COUNTRIES), 366))
+    assert most == 7, "the justfile, release-data.yml and the skills quote seven years a run"
 
     # The largest range the refusal suggests fits, leap years and all.
     weather.check_weather_range_is_affordable((2025 - most + 1, 2025), today=today)
-    with pytest.raises(ValueError, match=r"just backfill-weather 2011 2025"):
+    with pytest.raises(ValueError, match=r"just backfill-weather 2019 2025"):
         weather.check_weather_range_is_affordable((2025 - most, 2025), today=today)
 
     # And the resource refuses before it looks anything up, let alone fetches.
@@ -1218,6 +1219,66 @@ def test_a_backfill_over_a_days_allowance_is_refused_before_any_request(monkeypa
     )
     with pytest.raises(ResourceExtractionError, match="1960-2026"):
         list(weather.om_weather_daily((1960, 2026)))
+
+
+def test_refused_attempts_raise_rather_than_sleeping_through_the_day(monkeypatch):
+    """The six hours, reproduced on a fake clock through the resource itself.
+
+    Every attempt is charged, refused or not, so 429s pile charges into the
+    limiter's own daily window. Without a ceiling on the wait, the request after
+    the day fills asks for a sleep of most of a day: run 37100640862 sat silent
+    until GitHub cancelled it at six hours. Driven through `om_weather_daily`, so
+    the test fails if the resource stops passing `max_wait`, not only if the
+    limiter stops honouring it.
+    """
+    clock = [0.0]
+    slept: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        clock[0] += seconds
+
+    real = weather.WeightedWindowLimiter
+    monkeypatch.setattr(
+        weather,
+        "WeightedWindowLimiter",
+        lambda limits, **kw: real(limits, clock=lambda: clock[0], sleep=sleep, **kw),
+    )
+    monkeypatch.setattr(time, "sleep", sleep)
+    monkeypatch.setattr(weather.fixtures, "enabled", lambda: False)
+    locations = [(f"C{i:02d}", 0.0, float(i)) for i in range(len(weather.WEATHER_COUNTRIES))]
+    monkeypatch.setattr(weather, "weather_locations", lambda: locations)
+
+    # The first two years are refused five times each before being served, the
+    # rest are served first time: twelve charges fill an hour and most of a day.
+    served = [{"daily": {"time": []}} for _ in locations]
+    script = [_FakeResponse(429, text="Minutely API request limit exceeded.")] * 5
+    script = [*script, _FakeResponse(200, payload=served)] * 2
+    script += [_FakeResponse(200, payload=served)] * 5
+    monkeypatch.setattr(requests, "get", lambda url, **kw: script.pop(0))
+
+    with pytest.raises(ResourceExtractionError, match="Re-run in an hour"):
+        list(weather.om_weather_daily((2019, 2025)))
+    assert max(slept) <= weather.WEATHER_MAX_WAIT_SECONDS, f"slept {max(slept):,.0f} s at once"
+
+
+def test_every_weather_attempt_and_wait_is_logged(monkeypatch, caplog):
+    """A run that only paced itself and one refused six times look identical from
+    outside, and under Dagster a `print` reaches no CI log at all, so the
+    attempts are logged (`tests/test_dagster_instance.py` holds the forwarding)."""
+    caplog.set_level("INFO", logger=weather.log.name)
+    result, _, _ = _weather_fetch(
+        monkeypatch,
+        [
+            _FakeResponse(429, text="Minutely API request limit exceeded."),
+            _FakeResponse(200, payload={"daily": {"time": []}}),
+        ],
+    )
+    assert result == {"daily": {"time": []}}
+    lines = [r.getMessage() for r in caplog.records if r.name == weather.log.name]
+    assert any("attempt 1 of 6" in line and "HTTP 429" in line for line in lines), lines
+    assert any("retrying in 65 s" in line for line in lines), lines
+    assert any("attempt 2 of 6" in line and "HTTP 200" in line for line in lines), lines
 
 
 def test_a_cold_start_still_yields_two_complete_calendar_years():

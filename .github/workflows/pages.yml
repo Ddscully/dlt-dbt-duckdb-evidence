@@ -66,6 +66,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # GitHub's default is six hours, and a hung run spends all of them: see
+    # release-data.yml's weather step. Sized at a few times the longest run measured.
+    timeout-minutes: 30
     # No INGEST_FIXTURES: see the note at the top. The three paths, and the
     # `dbt parse` the graph cannot load without, come from the setup action and
     # `just materialize-site`'s own dependency chain.
@@ -135,6 +138,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

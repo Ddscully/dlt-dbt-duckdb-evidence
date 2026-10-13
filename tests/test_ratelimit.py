@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from modern_data_stack.ratelimit import WeightedWindowLimiter
+from modern_data_stack.ratelimit import WaitTooLong, WeightedWindowLimiter
 
 # Open-Meteo's published free-tier budget, and the numbers every case below is
 # reasoned against: 600/minute, 5,000/hour, 10,000/day.
@@ -41,9 +41,9 @@ class FakeClock:
         self.now += seconds
 
 
-def make(limits=OPEN_METEO_LIMITS) -> tuple[WeightedWindowLimiter, FakeClock]:
+def make(limits=OPEN_METEO_LIMITS, max_wait=None) -> tuple[WeightedWindowLimiter, FakeClock]:
     clock = FakeClock()
-    return WeightedWindowLimiter(limits, clock=clock, sleep=clock.sleep), clock
+    return WeightedWindowLimiter(limits, clock=clock, sleep=clock.sleep, max_wait=max_wait), clock
 
 
 def test_a_spend_that_fits_waits_for_nothing():
@@ -229,3 +229,37 @@ def test_a_paced_backfill_spends_its_budget_and_no_more():
     # 19 * 641 = 12,179 units against 5,000/hour is at least two full hours of
     # waiting; a limiter ignoring the hour window would finish in ~20 minutes.
     assert clock.now - 1000.0 > 2 * 3600.0
+
+
+def test_a_wait_past_max_wait_raises_instead_of_sleeping():
+    """The day-long sleep, refused. Ten requests of 641 units, with six refused
+    attempts charged on top, fill the daily window, and the next `acquire` asked
+    for a 22-hour sleep: a run that GitHub cancelled at six hours, having logged
+    nothing. With a ceiling it raises at once, naming the window that binds."""
+    limiter, clock = make(max_wait=3660.0)
+    for _ in range(16):
+        limiter.charge(641)
+        clock.advance(400)  # spread over 1.8 hours, so only the daily window binds
+
+    with pytest.raises(WaitTooLong) as raised:
+        limiter.acquire(641)
+    assert clock.slept == [], "it slept before refusing"
+    assert raised.value.window == 86400.0
+    assert raised.value.spent == pytest.approx(16 * 641)
+    assert raised.value.wait > 3660.0
+
+
+def test_a_wait_inside_max_wait_is_still_slept():
+    """The ceiling refuses the long wait, not every wait: an hour's window that
+    a backfill can legitimately meet still drains and the request goes ahead."""
+    limiter, clock = make(max_wait=3660.0)
+    for _ in range(7):
+        limiter.charge(641)  # 4,487 of the hour's 5,000, all at once
+    assert limiter.acquire(641) == pytest.approx(3600.0)
+    assert clock.slept == [pytest.approx(3600.0)]
+
+
+@pytest.mark.parametrize("max_wait", [0.0, -1.0])
+def test_a_ceiling_that_refuses_every_wait_refuses_to_exist(max_wait):
+    with pytest.raises(ValueError, match="max_wait"):
+        WeightedWindowLimiter(OPEN_METEO_LIMITS, max_wait=max_wait)

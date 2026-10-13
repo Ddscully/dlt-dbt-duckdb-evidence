@@ -13,6 +13,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # GitHub's default is six hours, and a hung run spends all of them: see
+    # release-data.yml's weather step. Sized at a few times the longest run measured.
+    timeout-minutes: 20
     env:
       # The only variable this workflow owns. The three paths come from the
       # setup action, which is the single definition of them.
@@ -91,6 +94,7 @@ jobs:
   # holds to the manifest-gated list.
   container:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       # Throwaway, and literal on purpose: these configure containers that live
       # for one job and are never reachable from outside the runner. A secret

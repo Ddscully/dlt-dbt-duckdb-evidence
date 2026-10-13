@@ -242,6 +242,23 @@ def downloaded_assets(text: str) -> set[str]:
     return set(re.findall(r"--pattern\s+(\S+)", text))
 
 
+def test_every_job_sets_a_timeout_of_its_own():
+    """GitHub's default is six hours, and a run that hangs spends every one of
+    them: the weather re-fetch in run 37100640862 slept until it was cancelled at
+    six hours, with nothing in the log. A job missing its own `timeout-minutes`
+    inherits that default silently, so the guard is on the job, not the step."""
+    yaml = pytest.importorskip("yaml")
+    workflows = sorted(WORKFLOWS_DIR.glob("*.yml"))
+    assert workflows, f"no workflows under {WORKFLOWS_DIR}"
+    missing = [
+        f"{path.name}:{job}"
+        for path in workflows
+        for job, spec in yaml.safe_load(path.read_text())["jobs"].items()
+        if not isinstance(spec.get("timeout-minutes"), int) or spec["timeout-minutes"] >= 360
+    ]
+    assert not missing, f"jobs on GitHub's six-hour default: {missing}"
+
+
 def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
     """A release is a database *and* a landing zone, and taking only the first is silent.
 

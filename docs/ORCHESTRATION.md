@@ -63,7 +63,7 @@ just materialize                          # whole graph, headless
 just materialize-site                     # ...plus the Evidence site (needs Node)
 just materialize-select 'raw/wb_wdi*'     # one source + everything downstream
 just backfill-wdi 1990 1995               # re-load WDI for a range of years
-just backfill-weather 2012 2026           # deepen the weather archive, 15 years a run at most
+just backfill-weather 2020 2026           # deepen the weather archive, 7 years a run at most
 ```
 
 The same runs are available from the UI — `just dagster`, then launch

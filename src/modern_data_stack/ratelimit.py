@@ -12,6 +12,9 @@ locations`` — one request can cost 600 units and the next 0.4.
   be: a shared budget wants one sequential loop.
 * **A request may exceed a whole window's budget**, where "sleep until it fits"
   never terminates. See `_window_delay`.
+* **A wait can be refused.** With `max_wait`, `acquire` raises `WaitTooLong`
+  instead of sleeping longer, because a limiter that honours a day-long window
+  by sleeping looks exactly like a hung process for a day.
 
 The limits arrive as arguments; `clock` and `sleep` are injectable so tests can
 run a day of pacing in microseconds.
@@ -23,11 +26,26 @@ import time
 from collections import deque
 from collections.abc import Callable, Sequence
 
-__all__ = ["WeightedWindowLimiter"]
+__all__ = ["WaitTooLong", "WeightedWindowLimiter"]
 
 # Slack for float residue in `_window_delay` (`(0.1 + 0.2) - 0.1 - 0.2` is not
 # 0), far below any real charge.
 _DRAIN_TOLERANCE = 1e-9
+
+
+class WaitTooLong(RuntimeError):
+    """`acquire` needed a longer wait than the limiter's `max_wait` allows."""
+
+    def __init__(self, units: float, wait: float, window: float, spent: float, budget: float):
+        self.units = units
+        self.wait = wait
+        self.window = window
+        self.spent = spent
+        self.budget = budget
+        super().__init__(
+            f"spending {units:,.1f} units needs a {wait:,.0f} s wait: the {window:,.0f} s "
+            f"window holds {spent:,.1f} of its {budget:,.0f}"
+        )
 
 
 class WeightedWindowLimiter:
@@ -39,6 +57,7 @@ class WeightedWindowLimiter:
         *,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        max_wait: float | None = None,
     ) -> None:
         if not limits:
             # A limiter with no windows would enforce nothing while looking like one.
@@ -46,7 +65,10 @@ class WeightedWindowLimiter:
         for window, budget in limits:
             if window <= 0 or budget <= 0:
                 raise ValueError(f"limit ({window}, {budget}) must be positive in both terms")
+        if max_wait is not None and max_wait <= 0:
+            raise ValueError(f"max_wait={max_wait} must be positive, or None for no ceiling")
         self._limits = tuple(limits)
+        self._max_wait = max_wait
         self._clock = clock
         self._sleep = sleep
         # (charged_at, units), oldest first, trimmed to the widest window.
@@ -114,9 +136,19 @@ class WeightedWindowLimiter:
     def acquire(self, units: float) -> float:
         """Block until `units` may be spent. Returns the seconds actually slept.
 
-        Does not charge; the caller does, once the request has been made.
+        Does not charge; the caller does, once the request has been made. Raises
+        `WaitTooLong`, sleeping not at all, when the wait would exceed `max_wait`;
+        it names the window that binds, which is what a caller needs to say why.
         """
-        delay = self.delay_for(units)
-        if delay > 0:
-            self._sleep(delay)
+        at = self._clock()
+        self._trim(at)
+        delay, window, budget = max(
+            (self._window_delay(window, budget, units, at), window, budget)
+            for window, budget in self._limits
+        )
+        if delay <= 0:
+            return 0.0
+        if self._max_wait is not None and delay > self._max_wait:
+            raise WaitTooLong(units, delay, window, self.spent_within(window, at), budget)
+        self._sleep(delay)
         return delay
