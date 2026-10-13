@@ -230,7 +230,7 @@ def weather_start_date(last_loaded_date: str | None, today: date | None = None) 
     With no watermark, `WEATHER_COLD_START_YEARS` of history (not
     `WEATHER_FIRST_YEAR` — see the constant). With one, `WEATHER_LOOKBACK_DAYS`
     back from it, clamped at `WEATHER_FIRST_YEAR`. Deeper history comes from the
-    previous release or a partition key, never from here.
+    previous release or a year-range backfill, never from here.
     """
     floor = date(WEATHER_FIRST_YEAR, 1, 1)
     if last_loaded_date is None:

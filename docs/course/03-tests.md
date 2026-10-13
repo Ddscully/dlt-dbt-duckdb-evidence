@@ -128,7 +128,7 @@ the test runs over, and several of this project's most important tests use it:
 
 | test | rows in the relation | rows examined |
 |---|---|---|
-| `dim_grid_emission_factors` grain, `where: is_latest_available` | 5,561 | **207** |
+| `dim_grid_emission_factors` grain, `where: is_latest_available` | 5,587 | **208** |
 | `stg_retail_lines` write-off check, `where: is_stock_write_off` | 1,067,371 | **3,457** |
 | `fct_retail_returns` match check, `where: is_matched` | 18,286 | 16,398 |
 | `cbam_default_values` sum check, `where:` all three columns non-null | 12,540 | **2,781** |
@@ -207,7 +207,7 @@ sed -i '/name: co2_per_capita/,+3 s/{min_value: 0}/{min_value: 0, max_value: 50}
 just course-rebuild
 ```
 
-**Observe.** `PASS=547 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
+**Observe.** `PASS=549 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy. And
 the reviewer's evidence checks out:
 
 ```bash
@@ -232,7 +232,7 @@ warehouse.
 3. **The question the drill is for:** the reviewer could have caught this by
    checking against the real warehouse instead of the sandbox. Find the *second*
    dimension along which their check would still have been wrong, even run
-   against the full 213 countries.
+   against the full 214 countries.
 4. What ceiling, if any, would you ship? Defend it in one sentence that a future
    reviewer will read before tightening it.
 
@@ -283,7 +283,7 @@ shock. It is a real and satisfying maximum, and it is 35× too small.
 
 **3. The second dimension is time.** 117 of the 124 rows are before 2000, **7
 are after it, and none at all since 2020.** So a reviewer who did the right
-thing (pulled the full 213-country warehouse and checked the recent
+thing (pulled the full 214-country warehouse and checked the recent
 cross-section) would have found a maximum around 40 and shipped the same
 ceiling. It would then have passed every build until the first person ran
 `just ingest-wdi-full`, restated an old year, or simply looked at 1954.
@@ -467,7 +467,7 @@ many tests there are, but how much of the data is under one.
 
 1. How many columns does `marts` have, and how many carry at least one test?
 2. For each `accepted_range` on `marts.fct_emissions_energy`, how many of the
-   43,138 rows does it actually examine? Rank them. Which column is the *only*
+   43,247 rows does it actually examine? Rank them. Which column is the *only*
    one examined on every row, and what is special about it?
 3. `dbt_test__audit` holds one table per test. Count them, and compare against
    the number of tests in `analytics.pipeline_tests`. Explain the difference.
@@ -510,14 +510,14 @@ which one you have.
 | `electricity_price_eur_kwh` | 701 | **1.6%** |
 | `consumption_co2` | 4,064 | 9.4% |
 | `renewables_share_pct` | 4,459 | 10.3% |
-| `carbon_intensity_elec_g_kwh` | 5,561 | 12.9% |
-| `low_carbon_share_elec_pct` | 6,421 | 14.9% |
-| `life_expectancy` | 14,071 | 32.6% |
-| `population` | 14,292 | 33.1% |
-| `co2_mt` | 23,370 | 54.2% |
-| `year` | **43,138** | **100%** |
+| `carbon_intensity_elec_g_kwh` | 5,587 | 12.9% |
+| `low_carbon_share_elec_pct` | 6,447 | 14.9% |
+| `life_expectancy` | 14,071 | 32.5% |
+| `population` | 14,292 | 33.0% |
+| `co2_mt` | 23,401 | 54.1% |
+| `year` | **43,247** | **100%** |
 
-`year` is examined on every row because it is the only one of the fourteen that
+`year` is examined on every row because it is the only one of the fifteen that
 is never null: it is half the grain. Everything else is a column on a fact built
 off the country-year spine (module 01), where a null means "this source does not
 cover this country-year", and a null is invisible to `accepted_range`.
@@ -525,7 +525,7 @@ cover this country-year", and a null is invisible to `accepted_range`.
 The €1/kWh ceiling on the Eurostat price — a genuinely useful test, since that
 column is the one place a cents/euros mix-up could enter — is being asked about
 1.6% of the fact. That is not an argument against the test. It is an argument
-for knowing the number before you quote "43,138 rows, fully range-checked" to
+for knowing the number before you quote "43,247 rows, fully range-checked" to
 anybody.
 
 **3. More audit tables than tests, and the excess is orphans.** On the warehouse
@@ -625,7 +625,7 @@ matters.
 </details>
 
 **(c)** The grain contract on `dim_grid_emission_factors` is scoped
-`where: is_latest_available` and therefore examines 207 of 5,561 rows: under 4%.
+`where: is_latest_available` and therefore examines 208 of 5,587 rows: under 4%.
 Is that a weakened test or a correct one? Give the rule that decides, and apply
 it to the CBAM `direct + indirect = total` check, which sees 2,781 of 12,540.
 
@@ -638,7 +638,7 @@ The test to apply is whether you can state the assertion in one sentence that
 includes the filter without it sounding like an excuse.
 
 `dim_grid_emission_factors` passes cleanly. The table is one row per country per
-*vintage year* — 2025 for 90 countries, 2024 for 105, 2023 for 10, 2022 for 2 —
+*vintage year* — 2025 for 91 countries, 2024 for 105, 2023 for 10, 2022 for 2 —
 so "one row per country" is simply false over the whole relation and true over
 the latest-available slice. The scoped test is the only way to state the real
 grain, and unscoped it would fail on correct data. It is also load-bearing:

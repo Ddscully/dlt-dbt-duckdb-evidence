@@ -118,8 +118,9 @@ def wdi_url(
     `start_year` adds the API's `date` range filter, which is what makes the
     incremental load cheap — see `wdi_start_year`. Without it the request is the
     whole series, 1960 onwards. `end_year` closes the window at something other
-    than today, which is what a partition backfill asks for; the incremental
-    path leaves it open-ended. `per_page` changes only for a stale series.
+    than today, which is what a year-range backfill (`just backfill-wdi`) asks
+    for; the incremental path leaves it open-ended. `per_page` changes only for a
+    stale series.
     """
     url = (
         f"https://api.worldbank.org/v2/country/all/indicator/{code}"
@@ -239,8 +240,8 @@ def wb_wdi(years: tuple[int, int] | None = None):
     a country-year the World Bank withdraws stays until a full reload.
 
     `years` is the backfill path — an explicit `(first, last)` window for every
-    indicator, which is what a Dagster partition key means here. The merge key
-    makes it idempotent.
+    indicator, which the Dagster asset takes as `YearRange` run config rather
+    than as partitions (docs/decisions/0002). The merge key makes it idempotent.
     """
     # Per-indicator watermarks: a code newly added to WB_WDI_INDICATORS has none
     # and pulls its whole series, where a table-wide one would give it five years.

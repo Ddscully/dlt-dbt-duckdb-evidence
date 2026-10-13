@@ -44,11 +44,15 @@ _no-dbt-dotenv:
         exit 1; \
     fi
 
-# One-time: install runtime + dev deps into the uv-managed venv, and the DuckDB extensions
+# The manifest is part of setup because a fresh clone has none (`dbt/target/` is
+# gitignored): without it the Dagster graph will not load and `just test` skips
+# every test that reads it, which on a fresh clone was 78 of them.
+# One-time: install runtime + dev deps, the DuckDB extensions, and dbt's packages and manifest
 [group('setup')]
 setup:
     uv sync --group dev --group orchestration
     just extensions
+    just dbt-parse
 
 # Binaries no lockfile can name; installing them here moves the download out of a
 # `dbt build` inside a Dagster op (the-lakehouse skill). httpfs and postgres are
@@ -266,7 +270,10 @@ test-pipeline: _no-dbt-dotenv
     fi
     echo "fixture warehouse: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
-    cd dbt && uv run dbt deps && uv run dbt build --target-path "$DBT_TARGET_PATH" && cd ..
+    # A subshell, not `cd dbt && … && cd ..`: `set -e` ignores a failure anywhere
+    # in an `&&` list but its last command, so a red build skipped the `cd ..` and
+    # the next step failed instead, from dbt/, with "No module named 'transform'".
+    (cd dbt && uv run dbt deps && uv run dbt build --target-path "$DBT_TARGET_PATH")
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status
@@ -582,10 +589,14 @@ course-sandbox: _no-dbt-dotenv
     export DBT_MANIFEST_PATH="$DBT_TARGET_PATH/manifest.json"
     export DBT_RUN_RESULTS_PATH="$DBT_TARGET_PATH/run_results.json"
     mkdir -p "$(dirname "$WAREHOUSE_PATH")"
-    rm -f "$WAREHOUSE_PATH" "$WAREHOUSE_PATH.wal"
+    # From scratch, landing zone included: merge tables only add and update, so a
+    # re-recorded fixture that drops rows (ROL and TRL, 2026-10-01) would leave
+    # them landed here and fail the next build on rows no fixture holds.
+    rm -rf "$WAREHOUSE_PATH" "$WAREHOUSE_PATH.wal" "$LAKEHOUSE_DIR"
     echo "course sandbox: $WAREHOUSE_PATH"
     uv run python -m ingest.pipeline
-    cd dbt && uv run dbt deps && uv run dbt build --target-path "$DBT_TARGET_PATH" && cd ..
+    # A subshell: see `test-pipeline`.
+    (cd dbt && uv run dbt deps && uv run dbt build --target-path "$DBT_TARGET_PATH")
     uv run python -m transform.co2_intensity
     uv run python -m transform.retail_rfm
     uv run python -m transform.pipeline_status

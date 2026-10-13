@@ -35,7 +35,7 @@ def test_source_tables_parses_past_comments():
     trusts."""
     tables = build_report.source_tables()
     assert "marts.fct_emissions_energy" in tables
-    # `-- co2_mt 214 …` and friends live in that file's comment block
+    # `-- co2_mt 215 …` and friends live in that file's comment block
     assert not any("co2_mt" in table for table in tables)
 
 

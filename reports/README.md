@@ -186,7 +186,7 @@ select * from warehouse.latest_years
 is whichever source runs furthest ahead: Eurostat's prices and the World Bank's
 series, currently a year beyond OWID's. Coverage also falls off at different rates per column.
 `primary_energy_twh` drops from ~210 countries to 79 in the latest year, while
-`co2_mt` holds at 214, so cutting an energy chart to the latest CO₂ year silently
+`co2_mt` holds at 215, so cutting an energy chart to the latest CO₂ year silently
 discards two thirds of its sample. Each family gets its own floor; see the
 comment block at the top of that file.
 

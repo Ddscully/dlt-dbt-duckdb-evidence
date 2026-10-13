@@ -333,3 +333,43 @@ unit_tests:
         - {weather_date: "2024-01-01", hdd_c: 12.0,  hdd_minmax_c: 12.0, cdd_c: 0.0}
         - {weather_date: "2024-01-02", hdd_c: null,  hdd_minmax_c: 12.0, cdd_c: null}
         - {weather_date: "2024-01-03", hdd_c: 0.0,   hdd_minmax_c: null, cdd_c: 3.0}
+
+  # OWID leaves `iso_code` empty on its aggregates and on Kosovo, and the
+  # fixtures carry neither (the recorder keeps a country list), so the offline
+  # build never reaches the filter these two pin. Reverting either model to the
+  # bare `iso_code` drops Kosovo with every data test green; each test below
+  # fails on that.
+  - name: stg_co2_keeps_kosovo_and_drops_the_aggregates
+    model: stg_co2
+    description: >
+      Kosovo is the one real country OWID ships without a code: 31 years of CO2,
+      8.05 Mt in 2024. It lands as `XKX`, the code the World Bank, Eurostat and
+      the weather archive use. The uncoded aggregates still drop out.
+    given:
+      - input: source('raw', 'owid_co2')
+        rows:
+          - {country: "Germany", iso_code: "DEU", year: 2024, co2: 572.3}
+          - {country: "Kosovo", iso_code: null, year: 2024, co2: 8.05}
+          - {country: "World", iso_code: null, year: 2024, co2: 37398.0}
+          - {country: "European Union (27)", iso_code: null, year: 2024, co2: 2391.0}
+          - {country: "USSR", iso_code: null, year: 1990, co2: 3800.0}
+    expect:
+      rows:
+        - {country_iso3: "DEU", year: 2024, co2_mt: 572.3}
+        - {country_iso3: "XKX", year: 2024, co2_mt: 8.05}
+
+  - name: stg_energy_keeps_kosovo_and_drops_the_aggregates
+    model: stg_energy
+    description: >
+      The same rule as `stg_co2`'s, held separately because each model has to
+      call the macro: Kosovo's 26 years of electricity data land as `XKX`.
+    given:
+      - input: source('raw', 'owid_energy')
+        rows:
+          - {country: "Germany", iso_code: "DEU", year: 2024, electricity_generation: 497.6}
+          - {country: "Kosovo", iso_code: null, year: 2024, electricity_generation: 6.2}
+          - {country: "Europe (Ember)", iso_code: null, year: 2024, electricity_generation: 4100.0}
+    expect:
+      rows:
+        - {country_iso3: "DEU", year: 2024, electricity_generation_twh: 497.6}
+        - {country_iso3: "XKX", year: 2024, electricity_generation_twh: 6.2}

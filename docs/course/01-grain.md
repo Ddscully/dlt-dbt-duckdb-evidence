@@ -86,9 +86,9 @@ Read the shape carefully, because both halves are load-bearing:
   row for (Kosovo, 1750) and ~20,000 of its friends. The spine is a full cross
   join; the fact is not.
 - The **left joins to each source** are what let a country-year that only *one*
-  source reports still reach the mart. In the real warehouse, 14 countries —
-  Puerto Rico, Kosovo, Monaco, Gibraltar, the Channel Islands — have **no OWID
-  emissions in any year**, and 13 of those have World Bank data. Off a source,
+  source reports still reach the mart. In the real warehouse, 13 countries —
+  Puerto Rico, Monaco, Gibraltar and the Channel Islands among them — have **no
+  OWID emissions in any year**, and 12 of those have World Bank data. Off a source,
   they do not exist. Off the spine, they are rows with nulls in the emissions
   columns.
 
@@ -113,7 +113,7 @@ sed -i 's|^left join co2 as c on|inner join co2 as c on|' \
 just course-rebuild
 ```
 
-**Observe.** The build finishes on `PASS=547 WARN=0 ERROR=0 SKIP=0`: the same
+**Observe.** The build finishes on `PASS=549 WARN=0 ERROR=0 SKIP=0`: the same
 verdict, to the row, as the healthy build. Every data test passes. Both grain
 contracts still hold, because the grain *is* still unique; the model simply has
 fewer rows in it.
@@ -151,7 +151,7 @@ Healthy: `4096`, `52`, `701`.
 | mart rows | 4,096 | 3,487 (−15%) |
 | distinct countries | **52** | **17** (−67%) |
 | rows carrying an EU price | 701 | 104 (−85%) |
-| `dbt build` | `PASS=547 ERROR=0` | `PASS=547 ERROR=0` |
+| `dbt build` | `PASS=549 ERROR=0` | `PASS=549 ERROR=0` |
 
 Row count fell 15% and country count fell 67%, which is the tell: the loss is not
 spread evenly, it is *whole countries*. The 17 survivors are exactly the CO2
@@ -240,25 +240,25 @@ where table_schema=\"marts\" and table_name=\"fct_emissions_energy\"'''))"
 
 | column | latest year with data | countries at that year | countries at 2023 |
 |---|---|---|---|
-| `co2_mt` | 2024 | 214 | 214 |
+| `co2_mt` | 2024 | 215 | 215 |
 | `consumption_co2` | 2023 | 120 | 120 |
-| `primary_energy_twh` | 2024 | **79** | 210 |
+| `primary_energy_twh` | 2024 | **79** | 211 |
 | `renewables_share_pct` | 2024 | 79 | 79 |
-| `carbon_intensity_elec_g_kwh` | 2025 | **90** | 205 |
-| `low_carbon_share_elec_pct` | 2025 | 90 | 205 |
+| `carbon_intensity_elec_g_kwh` | 2025 | **91** | 206 |
+| `low_carbon_share_elec_pct` | 2025 | 91 | 206 |
 | `gdp_constant_usd` | 2025 | 186 | 203 |
 | `electricity_price_eur_kwh` | 2025 | 39 | 39 |
 | `life_expectancy` | 2024 | 217 | 217 |
 
-1. **90 countries, against 205 at 2023.** The "latest year" cross-section drops
+1. **91 countries, against 206 at 2023.** The "latest year" cross-section drops
    115 countries (56% of the sample) and every one of them silently. The
-   result is not wrong-looking; it is a perfectly plausible 90-row table.
+   result is not wrong-looking; it is a perfectly plausible 91-row table.
 2. `max(year)` is **2025**, which is Eurostat's electricity price and the World
    Bank, both running ahead of OWID. Cutting an *energy* chart to the mart's
    `max(year)` is cutting it to a year defined by a completely different source.
 3. No. `primary_energy_twh` stops in 2024 and `low_carbon_share_elec_pct`
    reaches 2025, and their coverage differs by a factor of 2.6 at 2023 (79
-   against 205), because OWID's broad-coverage energy series is the
+   against 206), because OWID's broad-coverage energy series is the
    **electricity** mix, not the primary-energy mix. They answer different
    questions and are not interchangeable in levels.
 4. Latest year *per metric family*, each with its own coverage floor. That is
@@ -268,7 +268,7 @@ where table_schema=\"marts\" and table_name=\"fct_emissions_energy\"'''))"
 
 The same shape recurs across the warehouse with different clothes on:
 `dim_grid_emission_factors.is_latest_available` is a **filter, not a year**,
-because the most recent published factor resolves to 2025 for 90 countries, 2024
+because the most recent published factor resolves to 2025 for 91 countries, 2024
 for 105, 2023 for 10 and 2022 for 2, so `where year = 2025` drops more than half
 the world from a number with a legal consequence attached.
 </details>
@@ -320,7 +320,7 @@ Note the shape of the argument: the grain is not chosen for convenience or
 consistency, it is read off what the source actually asserts.
 </details>
 
-**(c)** The spine is 62,928 rows and the fact it feeds is 43,138: the fact is
+**(c)** The spine is 62,928 rows and the fact it feeds is 43,247: the fact is
 **smaller** than its own dimension. Why is that not a bug, and what would it mean
 if the fact were ever *larger*?
 

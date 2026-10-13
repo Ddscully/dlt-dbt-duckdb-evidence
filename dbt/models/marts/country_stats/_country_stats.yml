@@ -342,8 +342,8 @@ models:
           additivity: semi_additive
         description: >
           CO2 emitted since the country's first year of data, million tonnes
-          (OWID). That year is 1750 for five countries and 1900 or later for 140
-          of the 214, so the stock is each country's recorded total and not a
+          (OWID). That year is 1750 for five countries and 1900 or later for 141
+          of the 215, so the stock is each country's recorded total and not a
           total from one common start. Stock, not flow — it adds across
           countries and never across years, where it would count every earlier
           year again.

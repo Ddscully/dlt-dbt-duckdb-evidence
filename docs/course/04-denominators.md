@@ -140,26 +140,26 @@ With `max(year)` = **2025**:
 
 | year | co2_mt | primary_energy | grid intensity | gdp_constant | consumption_co2 |
 |---|---|---|---|---|---|
-| 2022 | 214 | 210 | 207 | 208 | 120 |
-| 2023 | 214 | 210 | 205 | 203 | 120 |
-| 2024 | 214 | **79** | 195 | 199 | **0** |
-| 2025 | **0** | 0 | 90 | 186 | 0 |
+| 2022 | 215 | 211 | 208 | 208 | 120 |
+| 2023 | 215 | 211 | 206 | 203 | 120 |
+| 2024 | 215 | **79** | 196 | 199 | **0** |
+| 2025 | **0** | 0 | 91 | 186 | 0 |
 
 Three separate things are visible in that table and they fail in three different
 ways:
 
-- **A cliff.** `primary_energy_twh` goes 210 → 79 in one year. A chart cut to
-  "the latest year with energy data" keeps 38% of its countries and reports the
+- **A cliff.** `primary_energy_twh` goes 211 → 79 in one year. A chart cut to
+  "the latest year with energy data" keeps 37% of its countries and reports the
   survivors as if they were the world.
 - **A cross-section that is empty.** `where year = (select max(year) …)` returns
-  214 rows with `co2_mt` null in every one of them. Not an error, not zero rows:
+  218 rows with `co2_mt` null in every one of them. Not an error, not zero rows:
   a full-height table of nulls.
 - **A column that stops entirely.** `consumption_co2` is one year behind, always.
 
 `marts.dim_grid_emission_factors` is the same problem where the number has a
-legal consequence. "The most recent published factor" is 2025 for 90 countries,
-2024 for 105, 2023 for 10 and 2022 for 2, so `where year = 2025` returns **90
-of 207** and silently drops 117 countries, Ukraine's 111 TWh grid among them. The
+legal consequence. "The most recent published factor" is 2025 for 91 countries,
+2024 for 105, 2023 for 10 and 2022 for 2, so `where year = 2025` returns **91
+of 208** and silently drops 117 countries, Ukraine's 111 TWh grid among them. The
 model ships `is_latest_available` as a **boolean filter, not a year**, precisely
 so the correct query cannot be written as a year literal.
 
@@ -388,7 +388,7 @@ sed -i 's/\* f\.avg_units_per_eur as electricity_price_usd_kwh/* f.period_end_un
 just course-rebuild
 ```
 
-**Observe.** `PASS=547 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy, and
+**Observe.** `PASS=549 WARN=0 ERROR=0 SKIP=0`: byte-identical to healthy, and
 every price is still a plausible price. Across all 1,373 rows the mean *signed*
 change is **+0.14%** — the errors very nearly cancel, because the closing rate is
 above the average about as often as below — while the mean *absolute* change is
@@ -578,9 +578,9 @@ the query.
 **2. The two worth arguing with are `n_elec >= 150` and `n_consumption >= 100`.**
 
 `n_elec >= 150` is the loosest floor in the file and it is buying the 2024
-grid-intensity cross-section at 195 countries rather than falling back to 2023.
+grid-intensity cross-section at 196 countries rather than falling back to 2023.
 Set it at 200 and the elec year becomes 2023; set it at 100 and it becomes 2025
-at 90 countries, which is under half the world. 150 is the number that keeps the
+at 91 countries, which is under half the world. 150 is the number that keeps the
 newest *defensible* year and rejects the newest year.
 
 `n_consumption >= 100` looks alarmingly low next to the others and is the only
@@ -597,12 +597,12 @@ filter written as `year < 2025` would catch one of the twenty-nine.
 
 **4. The two failures are not the same failure, and that is the point.**
 
-`fct_emissions_energy` at `max(year)` = 2025 returns **214 rows in which `co2_mt`
+`fct_emissions_energy` at `max(year)` = 2025 returns **218 rows in which `co2_mt`
 is null in every one**. The chart renders: axes, legend, correct country list,
 no bars. It looks like a rendering bug, someone reloads, and the actual cause
 (that the year is one no CO2 publisher has reached) is nowhere in the picture.
 
-`dim_grid_emission_factors` at `year = 2025` returns **90 of 207 rows, fully
+`dim_grid_emission_factors` at `year = 2025` returns **91 of 208 rows, fully
 populated**. The chart renders perfectly. It is a real cross-section of a real
 year, it is missing 117 countries including Ukraine's 111 TWh grid, and nothing
 about it looks wrong.
@@ -738,7 +738,7 @@ choice was ever made. Averaging is not the problem; averaging silently is.
 - An error that is common to a period cancels out of a level and doubles in a
   difference, which is the opposite of where people look.
 - Units errors are invisible to one-sided bounds and to every ratio downstream.
-  Twelve invented offices can out-emit Spain with `PASS=547 ERROR=0`.
+  Twelve invented offices can out-emit Spain with `PASS=549 ERROR=0`.
 - "Never compare floats for equality" is really "floats are order-dependent under
   aggregation". A reproduced scalar expression is bit-exact; a re-summed column
   is not.

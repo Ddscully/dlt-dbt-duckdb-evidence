@@ -16,7 +16,7 @@ lessons are about syntax. Everything expensive in this trade is somewhere else:
 | `.arrow()` handed straight to dlt | stored exactly **1,000,000** of 1,067,371 rows; the round number was the only clue |
 | `cast(… / 3 + 1 as integer)` for a fiscal quarter | March under an April year start is 4.67, which casts to **quarter 5** |
 | a per-column `coalesce` for a fallback row | paired one country's tonnage with another row's mark-up and produced a 100% implied tax rate that exists nowhere in the regulation |
-| `where year = (select max(year) …)` | a cross-section of grid carbon intensity that drops **117 of 207 countries** |
+| `where year = (select max(year) …)` | a cross-section of grid carbon intensity that drops **117 of 208 countries** |
 
 None of those raised. Every one produced a number a reviewer would accept. That
 is the subject of the course, and this repo is the material because it has

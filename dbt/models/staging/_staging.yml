@@ -86,7 +86,7 @@ models:
         description: >
           Every tonne on record, million tonnes: the stock behind the flow. OWID
           sums from each country's first year of data, not from a common year.
-          That is 1750 for five countries and 1900 or later for 140 of the 214.
+          That is 1750 for five countries and 1900 or later for 141 of the 215.
         data_tests:
           - dbt_utils.accepted_range:
               arguments: {min_value: 0}
