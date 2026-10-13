@@ -392,10 +392,11 @@ backfill-wdi start end='': where dbt-parse
     uv run --group orchestration dagster asset materialize \
         -m orchestration.definitions --select 'raw/wb_wdi' --config-json "$config"
 
-# Back to 1960, paced to Open-Meteo's budget: seven years is an hour's, the most
-# one run takes, and a longer range is refused before any request. Leave an hour
-# between runs (weather-models). Follow with `just dbt-build`.
-# Deepen the capital-city weather archive, e.g. `just backfill-weather 2020 2026`
+# Back to 1960, paced to Open-Meteo's budget: six years is an hour's with a
+# retried year to spare, the most one run takes, and a longer range is refused
+# before any request. Leave an hour between runs, and run two a day at most
+# (weather-models). Follow with `just dbt-build`.
+# Deepen the capital-city weather archive, e.g. `just backfill-weather 2021 2026`
 [group('dagster')]
 backfill-weather start end='': where dbt-parse
     #!/usr/bin/env bash

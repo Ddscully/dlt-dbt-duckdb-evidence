@@ -47,8 +47,9 @@ partition together is one read of one file.
 - `just materialize-select 'raw/wb_wdi*'` works. With the partitions, the CLI
   refused it with "Asset has partitions, but no '--partition' option was
   provided", while the README advertised it.
-- A weather range over an hour's allowance (a day's, until a ten-year dispatch
-  hung for six hours) has no partition count to bound it, so
+- A weather range an hour's allowance cannot hold with a retry to spare (a
+  day's allowance, until a ten-year dispatch hung for six hours) has no
+  partition count to bound it, so
   `check_weather_range_is_affordable` refuses it before any request
   (`weather-models`).
 - `tests/test_definitions.py` asserts that `full_refresh` and `publish_site`

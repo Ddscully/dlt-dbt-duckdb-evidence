@@ -1202,15 +1202,21 @@ def test_a_backfill_over_an_hours_allowance_is_refused_before_any_request(monkey
     hours (`test_refused_attempts_raise_rather_than_sleeping_through_the_day`).
     The Dagster UI once launched 1960-2026, ~42,800 units, when WDI and weather
     were yearly partitions. Refusing up front is the loud signal.
+
+    The hour also has to hold one retried year, since every attempt is charged:
+    seven years fit it exactly, and one 503 made a simulated run take an hour.
     """
     today = date(2026, 9, 17)
     hourly = dict(weather.WEATHER_RATE_LIMITS)[3600.0]
-    most = int(hourly // weather.weather_call_units(len(weather.WEATHER_COUNTRIES), 366))
-    assert most == 7, "the justfile, release-data.yml and the skills quote seven years a run"
+    most = int(hourly // weather.weather_call_units(len(weather.WEATHER_COUNTRIES), 366)) - 1
+    assert most == 6, "the justfile, release-data.yml and the skills quote six years a run"
 
-    # The largest range the refusal suggests fits, leap years and all.
+    # The largest range the refusal suggests fits, leap years and all, and the
+    # refusal says how many fit a day's allowance as well as an hour's.
     weather.check_weather_range_is_affordable((2025 - most + 1, 2025), today=today)
-    with pytest.raises(ValueError, match=r"just backfill-weather 2019 2025"):
+    with pytest.raises(
+        ValueError, match=r"at most 2 a day: e\.g\. `just backfill-weather 2020 2025`"
+    ):
         weather.check_weather_range_is_affordable((2025 - most, 2025), today=today)
 
     # And the resource refuses before it looks anything up, let alone fetches.
@@ -1250,32 +1256,52 @@ def test_refused_attempts_raise_rather_than_sleeping_through_the_day(monkeypatch
     monkeypatch.setattr(weather, "weather_locations", lambda: locations)
 
     # The first two years are refused five times each before being served, the
-    # rest are served first time: twelve charges fill an hour and most of a day.
+    # rest are served first time: twelve charges fill an hour and most of a day,
+    # and the sixth year's request is the one the daily window cannot hold.
     served = [{"daily": {"time": []}} for _ in locations]
     script = [_FakeResponse(429, text="Minutely API request limit exceeded.")] * 5
     script = [*script, _FakeResponse(200, payload=served)] * 2
     script += [_FakeResponse(200, payload=served)] * 5
     monkeypatch.setattr(requests, "get", lambda url, **kw: script.pop(0))
 
-    with pytest.raises(ResourceExtractionError, match="Re-run in an hour"):
-        list(weather.om_weather_daily((2019, 2025)))
+    # Only the daily window can refuse (the ceiling is above the hourly one), and
+    # Open-Meteo's tally for the address is at least the limiter's.
+    with pytest.raises(ResourceExtractionError, match="Re-run tomorrow"):
+        list(weather.om_weather_daily((2020, 2025)))
     assert max(slept) <= weather.WEATHER_MAX_WAIT_SECONDS, f"slept {max(slept):,.0f} s at once"
 
 
 def test_every_weather_attempt_and_wait_is_logged(monkeypatch, caplog):
     """A run that only paced itself and one refused six times look identical from
     outside, and under Dagster a `print` reaches no CI log at all, so the
-    attempts are logged (`tests/test_dagster_instance.py` holds the forwarding)."""
+    attempts are logged (`tests/test_dagster_instance.py` holds the forwarding).
+
+    A wait for the budget is logged before it starts: logged afterwards, an
+    hour's wait is an hour with nothing in the log, the silence this ended."""
     caplog.set_level("INFO", logger=weather.log.name)
+    clock = [0.0]
+    announced_by_then: list[bool] = []
+
+    def sleep(seconds: float) -> None:
+        announced_by_then.append(any("waiting" in r.getMessage() for r in caplog.records))
+        clock[0] += seconds
+
+    limiter = weather.WeightedWindowLimiter(
+        weather.WEATHER_RATE_LIMITS, clock=lambda: clock[0], sleep=sleep
+    )
+    limiter.charge(600.0)  # the minute's budget, spent: the first request waits it out
     result, _, _ = _weather_fetch(
         monkeypatch,
         [
             _FakeResponse(429, text="Minutely API request limit exceeded."),
             _FakeResponse(200, payload={"daily": {"time": []}}),
         ],
+        limiter=limiter,
     )
     assert result == {"daily": {"time": []}}
+    assert announced_by_then == [True], "the budget wait was not announced before it began"
     lines = [r.getMessage() for r in caplog.records if r.name == weather.log.name]
+    assert any("waiting 60 s for the 60 s window's budget" in line for line in lines), lines
     assert any("attempt 1 of 6" in line and "HTTP 429" in line for line in lines), lines
     assert any("retrying in 65 s" in line for line in lines), lines
     assert any("attempt 2 of 6" in line and "HTTP 200" in line for line in lines), lines
@@ -1609,11 +1635,12 @@ class _FakeResponse:
         return self._payload
 
 
-def _weather_fetch(monkeypatch, responses):
+def _weather_fetch(monkeypatch, responses, limiter=None):
     """Drive `get_weather_json` over a scripted sequence of outcomes.
 
     Each element is either a `_FakeResponse` or an exception instance to raise.
-    Returns `(result_or_error, attempts, sleeps)`.
+    Returns `(result_or_error, attempts, sleeps)`; `sleeps` are the retry waits,
+    not the limiter's, which by default has a frozen clock and never waits.
     """
     calls, sleeps = [], []
     remaining = list(responses)
@@ -1629,9 +1656,10 @@ def _weather_fetch(monkeypatch, responses):
     monkeypatch.setattr(time, "sleep", sleeps.append)
     monkeypatch.setattr(weather.fixtures, "enabled", lambda: False)
 
-    limiter = weather.WeightedWindowLimiter(
-        weather.WEATHER_RATE_LIMITS, clock=lambda: 0.0, sleep=lambda _: None
-    )
+    if limiter is None:
+        limiter = weather.WeightedWindowLimiter(
+            weather.WEATHER_RATE_LIMITS, clock=lambda: 0.0, sleep=lambda _: None
+        )
     try:
         return weather.get_weather_json("https://example/archive", limiter, 1.0), calls, sleeps
     except Exception as exc:  # noqa: BLE001 - the test decides whether this is the point

@@ -126,7 +126,10 @@ jobs:
       # `reports/evidence_site`, which runs npm (hence `setup-node`). Its
       # `sources:strict` makes an empty warehouse a red build rather than a site
       # of empty charts.
+      # Its own timeout under the job's, so a hang ends as a failure (red)
+      # rather than a cancelled job (grey), which reads as someone stopping it.
       - name: Build the warehouse and the site from live sources
+        timeout-minutes: 25
         run: just materialize-site
 
       - uses: actions/configure-pages@v6

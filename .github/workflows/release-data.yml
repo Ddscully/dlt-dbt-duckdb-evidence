@@ -30,7 +30,7 @@ on:
         type: boolean
         default: false
       weather_years:
-        description: "Re-fetch these weather years before the build, e.g. '2020 2026' (at most 7 a run, runs an hour apart)"
+        description: "Re-fetch these weather years before the build, e.g. '2021 2026' (at most 6 a run; runs an hour apart, two a day)"
         required: false
         type: string
 
@@ -52,8 +52,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     # GitHub's default is six hours, and the weather step below once spent all
-    # of them. The build is minutes; the rest is that step's own budget.
-    timeout-minutes: 100
+    # of them. A backstop over the two long steps' own timeouts, 75 + 20 minutes;
+    # a whole run without a re-fetch has taken five.
+    timeout-minutes: 110
     env:
       # The only variable this workflow owns; every `gh` call below reads it.
       # No INGEST_FIXTURES: see the note at the top. The three paths, and the
@@ -133,12 +134,13 @@ jobs:
       # asks only for the last ninety days. So a change to what the request
       # asks for (the model it names, a variable) reaches the published archive
       # only through this step, and until it runs the archive holds both the old
-      # answer and the new one. At most an hour's budget a run, seven years in
-      # about seven minutes; 2017-2026 was over it, slept for the hour, and with
-      # a few 429s from this runner's shared address asked to sleep most of a
-      # day (run 37100640862, cancelled at six hours). The source now refuses
-      # that wait and every attempt is logged (`weather-models`). The timeout
-      # covers one hourly wait after refused attempts, and nothing past it.
+      # answer and the new one. At most six years a run, an hour's budget with
+      # a retried year to spare, in about six minutes; 2017-2026 was over it,
+      # slept for the hour, and with a few 429s from this runner's shared address
+      # asked to sleep most of a day (run 37100640862, cancelled at six hours).
+      # The source now refuses that wait and logs every attempt (`weather-models`).
+      # The timeout covers one hourly wait after refused attempts, and nothing
+      # past it; a step that times out fails, where a job that does is cancelled.
       #
       # Through the environment and checked, like the tag: `just` interpolates
       # its arguments into a script. Not `WEATHER_YEARS`: dlt reads that as
@@ -161,6 +163,7 @@ jobs:
       # and unit tests run inside `dbt build`, so a warehouse that fails them
       # never reaches the release.
       - name: Build the warehouse from live sources
+        timeout-minutes: 20
         run: just materialize
 
       # Writes data/export/: the DuckDB copy, a Parquet per modelled table,

@@ -690,7 +690,7 @@ execute` (`just materialize`, `materialize-site`) and `dagster asset materialize
 (`materialize-select` and both `backfill-*` recipes) execute in the calling
 process: on the same throwaway instance, two overlapping `dagster asset
 materialize` runs both started at once, and neither was ever enqueued. So
-`just backfill-weather`, paced at about an hour a decade, runs beside a scheduled
+`just backfill-weather`, six years in about six minutes, runs beside a scheduled
 `full_refresh` rather than behind it. The two directions differ, and the same
 instance measured both for `just materialize`:
 

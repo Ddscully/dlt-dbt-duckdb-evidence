@@ -14,6 +14,8 @@ microseconds. A real `time.sleep` here would make the file take a day.
 
 from __future__ import annotations
 
+import pickle
+
 import pytest
 
 from modern_data_stack.ratelimit import WaitTooLong, WeightedWindowLimiter
@@ -239,7 +241,8 @@ def test_a_wait_past_max_wait_raises_instead_of_sleeping():
     limiter, clock = make(max_wait=3660.0)
     for _ in range(16):
         limiter.charge(641)
-        clock.advance(400)  # spread over 1.8 hours, so only the daily window binds
+        clock.advance(900)  # four an hour: the last hour holds three, so only the day binds
+    assert limiter.spent_within(3600.0) + 641 <= 5000.0
 
     with pytest.raises(WaitTooLong) as raised:
         limiter.acquire(641)
@@ -247,6 +250,8 @@ def test_a_wait_past_max_wait_raises_instead_of_sleeping():
     assert raised.value.window == 86400.0
     assert raised.value.spent == pytest.approx(16 * 641)
     assert raised.value.wait > 3660.0
+    # Survives what an error reporter or a worker process does to it.
+    assert str(pickle.loads(pickle.dumps(raised.value))) == str(raised.value)
 
 
 def test_a_wait_inside_max_wait_is_still_slept():
@@ -255,8 +260,13 @@ def test_a_wait_inside_max_wait_is_still_slept():
     limiter, clock = make(max_wait=3660.0)
     for _ in range(7):
         limiter.charge(641)  # 4,487 of the hour's 5,000, all at once
-    assert limiter.acquire(641) == pytest.approx(3600.0)
+    announced: list[tuple[float, float, list[float]]] = []
+    waited = limiter.acquire(641, on_wait=lambda s, w: announced.append((s, w, [*clock.slept])))
+    assert waited == pytest.approx(3600.0)
     assert clock.slept == [pytest.approx(3600.0)]
+    # Announced before the sleep, with the window that binds: announced after it,
+    # the hour is silent, which is the failure the ceiling was added for.
+    assert announced == [(pytest.approx(3600.0), 3600.0, [])]
 
 
 @pytest.mark.parametrize("max_wait", [0.0, -1.0])
