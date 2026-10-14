@@ -41,8 +41,9 @@ site = dg.AssetSelection.assets(assets.EVIDENCE_SITE)
 retail_ingest = dg.AssetSelection.assets(*assets.raw_retail_asset.keys)
 # By prefix, not by block: a new `@dlt_assets` block lands under `raw/` and is
 # excluded without anyone remembering to. The checks on these assets go with
-# them, which matters: `wdi_indicators_all_present` reads `stg_wdi`, which does
-# not exist yet when nothing upstream of it runs first.
+# them, because they judge what an ingest landed, and a job that lands nothing
+# has nothing for them to judge. A cache is saved only after a green
+# materialize that ran them, so they have already judged what it holds.
 landing_zone = dg.AssetSelection.key_prefixes("raw", "lake")
 
 load_retail_job = dg.define_asset_job(

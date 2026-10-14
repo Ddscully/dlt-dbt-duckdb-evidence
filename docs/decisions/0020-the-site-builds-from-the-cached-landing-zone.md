@@ -1,6 +1,6 @@
 # 0020. The site builds from the landing zone `live.yml` caches, unless a push can change what lands in `raw`
 
-Status: accepted 2026-10-14 (#148)
+Status: accepted 2026-10-14 (#148); its diff base superseded by 0021
 
 ## Context
 

@@ -189,9 +189,11 @@ def test_the_site_from_raw_is_the_site_without_the_landing_zone():
     Its selection is "everything but `raw/` and `lake/`", so the risk runs the
     other way from `full_refresh`'s: a model or check added downstream joins it
     automatically, and only a landing-zone asset can leak in. The checks matter
-    as much as the assets. `wdi_indicators_all_present` reads `stg_wdi`, so
-    selected without the ingest before it, it runs before dbt has built the view
-    and fails a deploy that nothing was wrong with.
+    as much as the assets: they judge what an ingest landed, and a cache is saved
+    only after a green materialize that ran them, so they have already judged
+    the landing zone this job reads. `wdi_indicators_all_present`, for one, reads
+    `lakehouse.raw.wb_wdi` through a copy of `stg_wdi`'s filter, so run
+    here it would only re-judge the fetch the cache came from.
     """
     from orchestration.definitions import defs
 

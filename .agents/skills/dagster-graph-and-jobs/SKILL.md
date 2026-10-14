@@ -259,9 +259,12 @@ CLI this project does not install
   - **By prefix, not by block**: a new `@dlt_assets` block lands under `raw/` and
     stays out without an edit. A selection that names the blocks and misses
     one is the mutation the test was checked against, and it goes red.
-  - **Subtracting assets subtracts their checks**, and that is load-bearing.
-    `wdi_indicators_all_present` reads `stg_wdi`, so left in a job without the
-    ingest it runs before dbt has built the view and fails a sound deploy.
+  - **Subtracting assets subtracts their checks**, and that is the intent. The
+    checks on `raw/` and `lake/` judge what an ingest landed —
+    `wdi_indicators_all_present` reads `lakehouse.raw.wb_wdi` through a copy of
+    `stg_wdi`'s filter, not the view — and a cache is saved only after a green
+    materialize that ran them, so they have already judged the landing zone
+    this job reads.
     `tests/test_definitions.py` asserts no check on `raw/` or `lake/` is in it.
 
 ## Not a `dg`-shaped project

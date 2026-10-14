@@ -6,9 +6,9 @@ name: live
 # endpoints and opens an issue when they've moved.
 #
 # It is also where the site's data comes from. The landing zone it fetches is
-# cached, and `pages.yml` rebuilds the site from that cache on every push that
-# cannot change what lands in `raw`, so a publisher that breaks reaches this
-# run's issue rather than an unrelated commit's deploy.
+# cached, and `pages.yml` rebuilds the site from that cache whenever nothing
+# since this run's commit can change what lands in `raw`, so a publisher that
+# breaks reaches this run's issue rather than an unrelated commit's deploy.
 #
 # Expected failure modes, all of which are worth a human looking:
 #   - a source renamed or dropped a column   -> stg_* breaks
@@ -36,7 +36,7 @@ permissions:
   issues: write
 
 # The cache `pages.yml` restores. actions/cache matches on the path string as
-# well as the key, so a mismatch is a miss rather than an error, and every push
+# well as the key, so a mismatch is a miss rather than an error, and every build
 # would go down the live path, green. `tests/test_workflows.py` holds both
 # workflows to the same values.
 env:
@@ -109,12 +109,13 @@ jobs:
 
       # Before the freshness check, which can fail on a publisher two years
       # behind while the landing zone it read is still sound. The key carries
-      # the epoch second, which `pages.yml` reads the cache's age from.
+      # the epoch second, which `pages.yml` reads the cache's age from, and the
+      # commit that fetched it, which `pages.yml` diffs its own commit from.
       - name: Name the cache entry for this landing zone
         id: stamp
         if: steps.borrow.outputs.carried == 'true'
         timeout-minutes: 1
-        run: echo "key=${RAW_CACHE_PREFIX}$(date +%s)-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+        run: echo "key=${RAW_CACHE_PREFIX}$(date +%s)-${GITHUB_RUN_ID}-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Cache the landing zone for pages.yml
         if: steps.stamp.outputs.key != ''
