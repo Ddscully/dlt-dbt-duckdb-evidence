@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 import dlt
 
@@ -36,7 +36,7 @@ from ingest.sources.eurostat import eu_elec_prices
 from ingest.sources.owid import owid_co2, owid_energy
 from ingest.sources.retail import retail_invoice_lines
 from ingest.sources.weather import om_weather_daily
-from ingest.sources.worldbank import wb_country, wb_wdi
+from ingest.sources.worldbank import wb_country, wb_wdi, wdi_full_reload_requested
 from lake.lakehouse import dlt_credentials
 
 
@@ -86,6 +86,15 @@ INCREMENTAL_RESOURCES = ("wb_wdi", "ecb_fx_rates", "retail_invoice_lines", "om_w
 YEAR_RANGE_RESOURCES = ("wb_wdi", "om_weather_daily")
 PARTITIONED_RESOURCES = ("retail_invoice_lines",)
 
+# The merge resources a flag can drop and re-fetch whole (`just ingest-fx-full`,
+# `just ingest-wdi-full`): a merge only adds and updates, so a row the source
+# withdraws stays in a local tree until then. `om_weather_daily` must never join:
+# its Open-Meteo budget means a dropped archive takes days to fetch again.
+FULL_RELOADS: dict[str, Callable[[], bool]] = {
+    "ecb_fx_rates": fx_full_reload_requested,
+    "wb_wdi": wdi_full_reload_requested,
+}
+
 
 def load_groups(resources: Iterable[str] | None = None) -> list[tuple[list[str], dict]]:
     """The resource groups to load, in order, each with the `run()` kwargs it needs.
@@ -95,11 +104,12 @@ def load_groups(resources: Iterable[str] | None = None) -> list[tuple[list[str],
     alone doesn't try to run a load with no resources in it.
     """
     wanted = None if resources is None else set(resources)
-    refreshed, merged = FULL_REFRESH_RESOURCES, INCREMENTAL_RESOURCES
-    # The one merge resource cheap enough to re-fetch whole: `just ingest-fx-full`.
-    if fx_full_reload_requested():
-        refreshed = (*refreshed, "ecb_fx_rates")
-        merged = tuple(name for name in merged if name != "ecb_fx_rates")
+    # A flagged merge resource loads with the refresh, which drops its table and
+    # its resource state (the WDI watermarks among it); the full fetch then
+    # writes a new one.
+    reloading = [name for name, requested in FULL_RELOADS.items() if requested()]
+    refreshed = (*FULL_REFRESH_RESOURCES, *reloading)
+    merged = tuple(name for name in INCREMENTAL_RESOURCES if name not in reloading)
     groups = []
     for names, kwargs in (
         (refreshed, {"refresh": REFRESH}),

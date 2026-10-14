@@ -287,6 +287,60 @@ def test_wb_wdi_does_not_retry_an_empty_series(monkeypatch):
     assert len(calls) == 1
 
 
+def _edition_page(lastupdated: str, page: int, pages: int, rows: list[dict]) -> list:
+    """A page whose `meta` names the edition it was cut from."""
+    meta, rows = _wdi_page(page, pages, rows)
+    return [{**meta, "lastupdated": lastupdated}, rows]
+
+
+def _serve_by_page_size_and_page(monkeypatch, pages: dict[tuple[int, int], list]) -> list[str]:
+    """Serve a page keyed on the URL's `(per_page, page)`, recording the URLs."""
+    calls: list[str] = []
+
+    def fake_get_json(url, **kwargs):
+        calls.append(url)
+        per_page = int(url.split("per_page=")[1].split("&")[0])
+        return pages[(per_page, int(url.split("&page=")[1].split("&")[0]))]
+
+    monkeypatch.setattr(http, "get_json", fake_get_json)
+    monkeypatch.setattr(worldbank, "WB_WDI_INDICATORS", {"NY.GDP.MKTP.KD": "gdp_constant_usd"})
+    return calls
+
+
+def test_wb_wdi_asks_again_when_its_pages_come_from_different_editions(monkeypatch):
+    """Each page is its own URL, cached on its own, so a fresh page 1 can front a
+    stale page 2. Judged together, page 1's codes hide page 2's empty ones, and
+    the stale rows would land; the editions disagreeing is what gives it away."""
+    retry, per_page = worldbank.WB_STALE_RETRY_PER_PAGE, worldbank.WB_PER_PAGE
+    calls = _serve_by_page_size_and_page(
+        monkeypatch,
+        {
+            (per_page, 1): _edition_page("2026-10-01", 1, 2, [_wdi_row("USA", "2024", 1.0)]),
+            (per_page, 2): _edition_page("2022-07-22", 2, 2, [_stale_row("2020")]),
+            (retry, 1): _edition_page("2026-10-01", 1, 2, [_wdi_row("USA", "2024", 1.0)]),
+            (retry, 2): _edition_page("2026-10-01", 2, 2, [_wdi_row("USA", "2020", 2.0)]),
+        },
+    )
+
+    rows = list(worldbank.wb_wdi())
+    assert [(r["country_iso3"], r["year"]) for r in rows] == [("USA", 2024), ("USA", 2020)]
+    assert [f"per_page={retry}&" in url for url in calls] == [False, False, True, True]
+
+
+def test_wb_wdi_raises_when_both_page_sizes_mix_editions(monkeypatch):
+    """A second mixed copy would land half a stale series; the error names both
+    editions, which no downstream check could recover."""
+    retry, per_page = worldbank.WB_STALE_RETRY_PER_PAGE, worldbank.WB_PER_PAGE
+    pages = {}
+    for size in (per_page, retry):
+        pages[(size, 1)] = _edition_page("2026-10-01", 1, 2, [_wdi_row("USA", "2024", 1.0)])
+        pages[(size, 2)] = _edition_page("2022-07-22", 2, 2, [_wdi_row("USA", "2020", 2.0)])
+    _serve_by_page_size_and_page(monkeypatch, pages)
+
+    with pytest.raises(ResourceExtractionError, match=r"NY\.GDP\.MKTP\.KD.*2026-10-01.*2022-07-22"):
+        list(worldbank.wb_wdi())
+
+
 def test_wdi_url_asks_for_the_whole_series_by_default():
     assert "date=" not in worldbank.wdi_url("SP.POP.TOTL")
 
@@ -419,6 +473,21 @@ def test_wb_wdi_full_reload_env_var_ignores_the_watermark(monkeypatch):
     list(worldbank.wb_wdi())
     assert all("date=" not in url for url in calls)  # the whole series again
     assert state[worldbank.WDI_WATERMARK_KEY] == {"SP.POP.TOTL": 2025}
+
+
+def test_wb_wdi_watermark_ignores_years_with_no_value(monkeypatch):
+    """The World Bank serves a row for a year it has not published yet, with a
+    null value. Counting it would move the watermark past the latest observed
+    year, and the lookback window would slide forward over years still open to
+    restatement."""
+    state = _state(monkeypatch, {})
+    _serve_wdi(
+        monkeypatch,
+        {"SP.POP.TOTL": [_wdi_row("USA", "2020", 1.0), _wdi_row("USA", "2024", None)]},
+    )
+
+    list(worldbank.wb_wdi())
+    assert state[worldbank.WDI_WATERMARK_KEY] == {"SP.POP.TOTL": 2020}
 
 
 # --------------------------------------------------------------------------- #
@@ -655,6 +724,28 @@ def test_ecb_fx_rates_merges_unless_a_full_reload_is_asked_for(monkeypatch):
     assert pipeline.load_groups(["ecb_fx_rates"]) == [(["ecb_fx_rates"], {})]
     monkeypatch.setenv("INGEST_FX_FULL", "0")
     assert pipeline.load_groups(["ecb_fx_rates"]) == [(["ecb_fx_rates"], {})]
+
+
+def test_a_wdi_full_reload_drops_and_refetches_the_table(monkeypatch):
+    """`INGEST_WDI_FULL=1` is the repair for a country-year the World Bank
+    withdrew. Merged, the full fetch would update every row it saw and keep the
+    withdrawn one forever; refreshed, the table and its watermarks are dropped
+    first."""
+    monkeypatch.delenv("INGEST_FX_FULL", raising=False)
+    monkeypatch.delenv("INGEST_WDI_FULL", raising=False)
+    assert pipeline.load_groups(["wb_wdi"]) == [(["wb_wdi"], {})]
+    monkeypatch.setenv("INGEST_WDI_FULL", "1")
+    assert pipeline.load_groups(["wb_wdi"]) == [(["wb_wdi"], {"refresh": pipeline.REFRESH})]
+    merged = [names for names, kwargs in pipeline.load_groups() if kwargs == {}]
+    assert merged == [[n for n in pipeline.INCREMENTAL_RESOURCES if n != "wb_wdi"]]
+
+
+def test_the_weather_archive_can_never_be_reloaded_in_full():
+    """A full reload drops the table before fetching it again, and the weather
+    archive's Open-Meteo budget means fetching it again takes days. Every full
+    reload must also be a merge resource, or `load_groups` would load it twice."""
+    assert set(pipeline.FULL_RELOADS) <= set(pipeline.INCREMENTAL_RESOURCES)
+    assert "om_weather_daily" not in pipeline.FULL_RELOADS
 
 
 def test_the_cli_refuses_a_resource_it_does_not_know(monkeypatch):

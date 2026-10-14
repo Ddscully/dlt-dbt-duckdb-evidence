@@ -75,12 +75,14 @@ deploy-deps:
 ingest: where
     uv run python -m ingest.pipeline
 
-# For a World Bank restatement older than the lookback window, or after the raw
-# table was dropped while dlt's watermark survived.
-# Re-fetch the whole WDI series instead of the incremental window
+# For a World Bank restatement older than the lookback window, a country-year
+# the World Bank withdrew (a merge never deletes), or a raw table dropped while
+# dlt's watermark survived. It drops the table and its watermarks, and loads
+# wb_wdi alone.
+# Drop and re-fetch the whole WDI series instead of the incremental window
 [group('pipeline')]
 ingest-wdi-full: where
-    INGEST_WDI_FULL=1 uv run python -m ingest.pipeline
+    INGEST_WDI_FULL=1 uv run python -m ingest.pipeline wb_wdi
 
 # A merge never deletes, so a currency or fixing the feed retracts stays in a
 # local tree and nowhere else — the release builds from empty. One request, no
