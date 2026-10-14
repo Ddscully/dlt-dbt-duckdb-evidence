@@ -17,15 +17,25 @@ of it estimated.
 - **Scored against an outside rubric, access governance is Absent and cannot be
   otherwise on an embedded database** ([§6](#6-scored-against-somebody-elses-rubric)).
 
-**The 90-second tour**, if you only open five files:
+**The 90-second tour**, if you only open six files. The first four are the
+extraction: what each publisher turned out to need beyond a GET.
 
 | File | Why |
 |------|-----|
-| [`reports/pages/findings/`](../reports/pages/findings/) | the analysis, a page per finding, each ending in its "So what" box |
-| [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including why WDI and weather backfill by run config rather than partitions |
-| [`dbt/models/marts/country_stats/fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql) | the join that hangs facts off an explicit country-year spine instead of off whichever source is widest. Also the repo's one versioned model, aliased back to the bare relation name so the rename is invisible to its consumers |
 | [`ingest/pipeline.py`](../ingest/pipeline.py) | eight resources, two write dispositions, and why that has to be two `run()` calls |
+| [`ingest/sources/worldbank.py`](../ingest/sources/worldbank.py) | `_fetch_wdi_indicator`: the World Bank sometimes serves an old edition of a series under a current URL, cached for a day at its origin and a day at each Cloudflare edge. The check spots it by the missing country codes and asks again on a URL neither cache has seen; a second stale copy fails the load, naming the edition |
+| [`ingest/sources/eurostat.py`](../ingest/sources/eurostat.py) | `check_one_category_per_filter`: the JSON-stat walk reads the first category of every dimension it does not walk, so a filter the API stopped applying would land the price excluding tax as the price including it, with no error. The load refuses the cube instead |
+| [`src/modern_data_stack/ratelimit.py`](../src/modern_data_stack/ratelimit.py) | a budget for an API that prices by volume rather than by call (one Open-Meteo request costs 600 units, the next 0.4), held across three windows at once, which refuses a wait rather than sleep for a day and look hung. [`ingest/sources/weather.py`](../ingest/sources/weather.py) is its caller |
+| [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including why WDI and weather backfill by run config rather than partitions |
 | [`AGENTS.md`](../AGENTS.md) | the gotchas every session needs, written down at the point they were learned — the rest are in the skills under `.agents/skills/` |
+
+Past those, the modelling's central join is
+[`fct_emissions_energy_v2.sql`](../dbt/models/marts/country_stats/fct_emissions_energy_v2.sql),
+which hangs facts off an explicit country-year spine instead of off whichever
+source is widest. It is also the repo's one versioned model, aliased back to the
+bare relation name so the rename is invisible to its consumers. The analysis is
+[`reports/pages/findings/`](../reports/pages/findings/), a page per finding, each
+ending in its "So what" box; §0 says why to read it after the engineering.
 
 ---
 
@@ -246,11 +256,21 @@ number before.
    one is already present. Dagster runs `in_process_executor` deliberately,
    because DuckDB takes one writer and a multiprocess executor would just lose
    races for the file lock. Wanting parallel model builds is exactly the point
-   where the warehouse stops being one file. That's the migration the shape is
-   designed for: dbt, the tests, the asset graph and Evidence all move to
-   Snowflake/BigQuery/MotherDuck on a profile change; dlt swaps a destination.
-   Evidence needs one extra step now that `reports/package.json` carries only
-   the DuckDB connector: `npm install --force @evidence-dev/snowflake` and a
+   where the warehouse stops being one file, and the shape makes that move
+   shorter, not free. dlt swaps a destination, and `WAREHOUSE_PATH` already
+   takes a MotherDuck database: built into one (`md:…`) with nothing else
+   changed, the dbt build went green and every mart table matched the local
+   row counts. The `staging` and `intermediate` views did not survive the move.
+   Queried there, each failed with `Catalog "lakehouse" does not exist!`,
+   because they read the DuckLake landing zone, which only the building
+   machine attaches; on a server they become tables, or the catalog moves
+   with them. Snowflake or BigQuery has not been tried, and is a port rather
+   than a profile change: the models are written in DuckDB's SQL (`arg_max`,
+   `arg_min`), the landing zone moves with them, and the single dbt target
+   becomes several ([`REUSING_THIS_STACK.md`](REUSING_THIS_STACK.md)).
+   Evidence needs one extra step on any of them now that
+   `reports/package.json` carries only the DuckDB connector: the warehouse's
+   own package (`npm install --force @evidence-dev/snowflake`, say) and a
    line in `evidence.config.yaml`'s `datasources`, which is the trade the size
    saving makes.
 
