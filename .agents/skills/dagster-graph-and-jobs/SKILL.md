@@ -1,6 +1,6 @@
 ---
 name: dagster-graph-and-jobs
-description: This repo's Dagster graph — why WDI and weather take their backfill years as run config rather than partitions (a partitioned job's Materialize button is a backfill), the one partitioned asset and the guards it needs to keep working unpartitioned, why there are three jobs and why load_retail runs first, the hand-maintained lists in definitions.py and the two traps in the test that guards them, and the costed decision not to be a dg-shaped project or to use declarative automation. Use when adding or registering an asset or asset check, changing a job or selection, running a backfill, or before reaching for dg, components or AutomationCondition.
+description: This repo's Dagster graph — why WDI and weather take their backfill years as run config rather than partitions (a partitioned job's Materialize button is a backfill), the one partitioned asset and the guards it needs to keep working unpartitioned, why there are four jobs and why load_retail runs first, the hand-maintained lists in definitions.py and the two traps in the test that guards them, and the costed decision not to be a dg-shaped project or to use declarative automation. Use when adding or registering an asset or asset check, changing a job or selection, running a backfill, or before reaching for dg, components or AutomationCondition.
 ---
 
 # The Dagster graph (`orchestration/`)
@@ -68,8 +68,9 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
 - **The Evidence site is an asset, excluded from `full_refresh` because it needs
   Node.** The `evidence_site` asset shells out to npm; `ci.yml`, `live.yml` and
   `release-data.yml` run `full_refresh` with no Node, and `pages.yml` runs
-  `publish_site`. Both selections name what they leave out, so a second
-  npm-shaped or partitioned asset has to be excluded by hand too.
+  `publish_site`, or `publish_site_from_raw` over the landing zone `live.yml`
+  cached. Every selection names what it leaves out, so a second npm-shaped or
+  partitioned asset has to be excluded by hand too.
   How the site meets the graph is `building-evidence-reports`.
 - **Importing `orchestration.assets` leaves a dlt pipeline active process-wide.**
   The `@dlt_assets` decorators call `build_pipeline()` at import time, so a later
@@ -207,7 +208,7 @@ CLI this project does not install
     reaches the *unpartitioned* downstream models, so a retail backfill targets
     the raw asset alone and you rebuild after it.
 
-## Registration, and the three jobs
+## Registration, and the four jobs
 
 - **Every asset and check is listed by hand in `definitions.py`, and nothing
   tells you when one isn't.** `dg.Definitions` takes explicit lists, so an
@@ -231,8 +232,8 @@ CLI this project does not install
     `isinstance` chain that tests the parent first swallows every check into the
     asset branch, where `.keys` is empty — the check half of the test then
     measures nothing and is green forever.
-- **A job takes its assets' partitions definition, which is why there are three
-  jobs.** `define_asset_job` resolves a selection to a single `partitions_def`,
+- **A job takes its assets' partitions definition, which is why `load_retail` is
+  a job of its own.** `define_asset_job` resolves a selection to a single `partitions_def`,
   and raises on two — `allow_different_partitions_defs` is hardcoded `False` for
   named asset jobs and `True` only for Dagster's own implicit global job. With
   `raw/retail_invoice_lines` inside it, `full_refresh` would be month-partitioned
@@ -250,6 +251,18 @@ CLI this project does not install
     not `ingest_retail` — `@dlt_assets(name="ingest_retail")` already holds that
     name, and the collision reports as `Conflicting definitions found in
     repository with name 'ingest_retail'` naming `__ASSET_JOB`.
+- **`publish_site_from_raw` is `publish_site` minus
+  `AssetSelection.key_prefixes("raw", "lake")`**, the job `pages.yml` runs over a
+  cached landing zone
+  ([`docs/decisions/0020-the-site-builds-from-the-cached-landing-zone.md`](../../../docs/decisions/0020-the-site-builds-from-the-cached-landing-zone.md)).
+  It needs no `load_retail` first, because it lands nothing.
+  - **By prefix, not by block**: a new `@dlt_assets` block lands under `raw/` and
+    stays out without an edit. A selection that names the blocks and misses
+    one is the mutation the test was checked against, and it goes red.
+  - **Subtracting assets subtracts their checks**, and that is load-bearing.
+    `wdi_indicators_all_present` reads `stg_wdi`, so left in a job without the
+    ingest it runs before dbt has built the view and fails a sound deploy.
+    `tests/test_definitions.py` asserts no check on `raw/` or `lake/` is in it.
 
 ## Not a `dg`-shaped project
 

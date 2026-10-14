@@ -9,8 +9,9 @@
   partitioned job's Materialize button is a backfill ([Running it](#running-it)).
 - **Runs go one at a time through a queue, and `just materialize` bypasses it**
   ([Running it](#running-it)).
-- **Three jobs exist for two reasons**: the site needs Node, and retail is
-  month-partitioned ([Three jobs, and why](#three-jobs-and-why)).
+- **Four jobs exist for three reasons**: the site needs Node, retail is
+  month-partitioned, and the site is usually rebuilt without calling a publisher
+  ([Four jobs, and why](#four-jobs-and-why)).
 - **`daily_refresh` ships stopped**; start it yourself
   ([What that buys](#what-that-buys-over-the-shell-chain)).
 
@@ -93,18 +94,25 @@ backfill waits in the queue. `just materialize` does not enter that queue, so
 don't start it beside a run the UI launched
 ([`RUNNING_AS_A_SERVICE.md`](./RUNNING_AS_A_SERVICE.md#missed-ticks-and-one-run-at-a-time--measured)).
 
-## Three jobs, and why
+## Four jobs, and why
 
 The site is the one asset held out of `full_refresh`. It shells out to npm, and
 CI, the weekly live run and the data release all want a graph that runs on a bare
 Python checkout. `publish_site` is `full_refresh` plus the site, and it's what
-the Pages workflow runs.
+the Pages workflow runs when a push can change what lands in `raw`.
+
+`publish_site_from_raw` is `publish_site` without anything that writes the
+landing zone: every `raw/` asset, `lake/snapshot_expiry`, and the checks on
+them. The Pages workflow runs it for every other build, over the landing zone
+`live.yml` cached, so most deploys call no publisher at all
+([`decisions/0020`](decisions/0020-the-site-builds-from-the-cached-landing-zone.md)).
+It excludes by key prefix, so a new source stays out of it without an edit.
 
 `load_retail` is separate for a different reason: retail is the one source
 partitioned in Dagster, by month, and a job takes its assets' partitions
 definition. With retail inside, `full_refresh` would be month-partitioned and its
-Materialize button a backfill. It has to run before `full_refresh`,
-because dbt reads the table it lands. The justfile recipes pair them, and all
+Materialize button a backfill. It has to run before `full_refresh` and
+`publish_site`, because dbt reads the table it lands. The justfile recipes pair them, and all
 four workflows run through those recipes.
 
 ## What that buys over the shell chain

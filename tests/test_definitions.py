@@ -172,7 +172,7 @@ def test_the_routine_jobs_are_not_partitioned():
     Materialize button is a backfill (`docs/decisions/0002`)."""
     from orchestration.definitions import defs
 
-    for name in ("full_refresh", "publish_site"):
+    for name in ("full_refresh", "publish_site", "publish_site_from_raw"):
         partitions = defs.resolve_job_def(name).partitions_def
         assert partitions is None, (
             f"`{name}` is partitioned ({type(partitions).__name__}), so its Materialize "
@@ -180,6 +180,33 @@ def test_the_routine_jobs_are_not_partitioned():
             "asset out of the selection, as `load_retail` does for retail, or give it "
             "run config instead (`YearRange` in orchestration/assets.py)."
         )
+
+
+def test_the_site_from_raw_is_the_site_without_the_landing_zone():
+    """`pages.yml` runs this job when a push cannot change `raw`, over a cached
+    landing zone, and it must call no publisher and write nothing there.
+
+    Its selection is "everything but `raw/` and `lake/`", so the risk runs the
+    other way from `full_refresh`'s: a model or check added downstream joins it
+    automatically, and only a landing-zone asset can leak in. The checks matter
+    as much as the assets. `wdi_indicators_all_present` reads `stg_wdi`, so
+    selected without the ingest before it, it runs before dbt has built the view
+    and fails a deploy that nothing was wrong with.
+    """
+    from orchestration.definitions import defs
+
+    def in_landing_zone(key: dg.AssetKey) -> bool:
+        return key.path[0] in {"raw", "lake"}
+
+    from_raw = _job_keys("publish_site_from_raw")
+    assert from_raw == {k for k in _job_keys("publish_site") if not in_landing_zone(k)}
+
+    graph = defs.resolve_job_def("publish_site_from_raw").asset_layer.asset_graph
+    checks = {(c.asset_key, c.name) for c in graph.asset_check_keys}
+    leaked = sorted(f"{k.to_user_string()}:{name}" for k, name in checks if in_landing_zone(k))
+    assert not leaked, f"checks on the landing zone, run with nothing to land it: {leaked}"
+    # Vacuity: the scan reads a job's checks at all.
+    assert "co2_intensity_rank_is_dense" in {name for _, name in checks}, sorted(checks)
 
 
 def test_the_backfill_recipes_address_the_op_that_takes_the_years():

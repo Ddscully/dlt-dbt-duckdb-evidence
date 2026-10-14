@@ -315,6 +315,12 @@ it cost to learn:
     `just`, so all four needed the same line" shape again, one asset further on;
     `tests/test_workflows.py` now derives which workflows restore and asserts each
     downloads every asset, with the names read from the code rather than retyped.
+  - **`pages.yml`'s cached build takes the database alone, on purpose.** Its
+    landing zone is the one `live.yml` cached, and `live.yml` restored the
+    tarball before fetching, so the archive is already in it. That makes
+    `live.yml` the workflow the test above matters most for, and both workflows
+    cache only when the borrow step reports `carried`, so a failed download
+    never puts a three-year archive in front of every push.
   - **It refuses to overwrite a destination that already holds carried state**,
     so running it against the real warehouse can't destroy months of local
     versions — `--force` if that is genuinely what you want. It also rejects a

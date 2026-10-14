@@ -1,6 +1,6 @@
 """Dagster entry point: `dagster dev` (see `[tool.dagster]` in pyproject.toml).
 
-Everything `just run` does, as one asset graph, plus the Evidence site. Three jobs:
+Everything `just run` does, as one asset graph, plus the Evidence site. Four jobs:
 
 * `load_retail` — the month-partitioned retail load. A job takes its
   partitions definition from its assets, so with retail inside it `full_refresh`
@@ -11,16 +11,22 @@ Everything `just run` does, as one asset graph, plus the Evidence site. Three jo
   Pure Python, so `ci.yml`, `live.yml` and `release-data.yml` run it without
   Node; the daily schedule targets it.
 * `publish_site` — `full_refresh` plus `reports/evidence_site`, which shells out
-  to npm. `pages.yml` runs it.
+  to npm. `pages.yml` runs it when a push can change what lands in `raw`.
+* `publish_site_from_raw` — `publish_site` without anything that writes the
+  landing zone: every `raw/` asset and `lake/snapshot_expiry`. It builds from
+  whatever `raw` already holds, which in `pages.yml` is the landing zone
+  `live.yml` cached, so a push that cannot change `raw` does not call a
+  publisher at all.
 
-`load_retail` must run first, because `dbt build` reads
-`raw.retail_invoice_lines`; the justfile recipes and all four workflows pair the
-jobs. It is not called `ingest_retail` because jobs share a namespace with ops,
-and the retail `@dlt_assets` op has that name.
+`load_retail` must run before the two jobs that ingest, because `dbt build`
+reads `raw.retail_invoice_lines`; the justfile recipes and all four workflows
+pair the jobs. It is not called `ingest_retail` because jobs share a namespace
+with ops, and the retail `@dlt_assets` op has that name.
 
-Both selections name what they exclude, so a new asset joins `full_refresh`
-automatically; a second npm-shaped or partitioned asset has to be excluded by
-hand, and `tests/test_definitions.py` fails on a partitioned one.
+Every selection names what it excludes, so a new asset joins `full_refresh`
+automatically and a new `raw/` asset stays out of `publish_site_from_raw`; a
+second npm-shaped or partitioned asset has to be excluded by hand, and
+`tests/test_definitions.py` fails on a partitioned one.
 """
 
 from __future__ import annotations
@@ -33,6 +39,11 @@ from orchestration.resources import RESOURCES
 
 site = dg.AssetSelection.assets(assets.EVIDENCE_SITE)
 retail_ingest = dg.AssetSelection.assets(*assets.raw_retail_asset.keys)
+# By prefix, not by block: a new `@dlt_assets` block lands under `raw/` and is
+# excluded without anyone remembering to. The checks on these assets go with
+# them, which matters: `wdi_indicators_all_present` reads `stg_wdi`, which does
+# not exist yet when nothing upstream of it runs first.
+landing_zone = dg.AssetSelection.key_prefixes("raw", "lake")
 
 load_retail_job = dg.define_asset_job(
     name="load_retail",
@@ -60,6 +71,16 @@ publish_site_job = dg.define_asset_job(
     description=(
         "`full_refresh`, then build the Evidence site from it. Requires Node >= 18 "
         "and, like `full_refresh`, a `load_retail` run before it."
+    ),
+)
+
+publish_site_from_raw_job = dg.define_asset_job(
+    name="publish_site_from_raw",
+    selection=dg.AssetSelection.all() - landing_zone,
+    description=(
+        "`publish_site` without the ingest: rebuild the dbt models, the derived "
+        "metrics and the Evidence site from what the landing zone already holds. "
+        "Calls no publisher, so it needs no `load_retail` run first."
     ),
 )
 
@@ -99,7 +120,7 @@ defs = dg.Definitions(
         assets.weather_revisions_are_derivable,
         assets.site_pages_all_rendered,
     ],
-    jobs=[load_retail_job, full_refresh_job, publish_site_job],
+    jobs=[load_retail_job, full_refresh_job, publish_site_job, publish_site_from_raw_job],
     schedules=[daily_schedule],
     resources=RESOURCES,
     # DuckDB takes one writer. The default multiprocess executor would run steps

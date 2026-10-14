@@ -91,3 +91,4 @@ test and not bypassed.
 Re-record when a source changes shape or a WDI indicator is added, and commit the
 result. `.github/workflows/live.yml` is what tells you it is time: it runs the
 same graph against the live endpoints weekly and opens an issue when they have moved.
+What it fetched is cached, and the site is rebuilt from it.

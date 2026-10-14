@@ -165,6 +165,7 @@ __all__ = [
     "publish",
     "read_only_connection",
     "refuse_remote_lakehouse",
+    "relink",
     "restore",
     "revisions",
     "rows",
@@ -665,8 +666,21 @@ def restore(source_dir: str | Path, lakehouse_dir: str | Path = LAKEHOUSE_DIR) -
     shutil.copytree(source, dest)
     # The published catalog's `data_path` is relative; a working one must be
     # absolute (see the module docstring). The mirror of `publish`.
-    set_data_path(catalog_path(dest), f"{data_path(dest)}/")
+    relink(dest)
     return {t: rows(t, dest) for t in PUBLISHED_TABLES if _has_table(dest, t)}
+
+
+def relink(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> None:
+    """Point a catalog copied into `lakehouse_dir` at the Parquet beside it.
+
+    DuckLake stores `data_path` as a string and checks it on every attach, so a
+    copy keeps naming the directory it was copied from: a release's catalog
+    names none (it is relative), and a cache restored by `pages.yml` names the
+    runner `live.yml` built it on. Writing to a copy before this would expire or
+    clean the original's files.
+    """
+    refuse_remote_lakehouse("relink the landing zone")
+    set_data_path(catalog_path(lakehouse_dir), f"{data_path(lakehouse_dir)}/")
 
 
 def _local_pipeline_state() -> Path | None:
@@ -756,7 +770,14 @@ def main() -> None:
         metavar="KEEP",
         help=f"first expire all but the last KEEP weather loads (default {KEEP_WEATHER_LOADS})",
     )
+    parser.add_argument(
+        "--relink",
+        action="store_true",
+        help="first point a copied catalog's data_path at the directory it now sits in",
+    )
     args = parser.parse_args()
+    if args.relink:
+        relink()
     if args.expire is not None:
         freed = expire(args.expire)
         print(

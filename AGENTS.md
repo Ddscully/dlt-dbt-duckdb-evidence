@@ -169,7 +169,7 @@ globs, holding dbt Labs' skills to this repo's paths.
 | `pipeline-observability` | `transform/pipeline_status.py` and the `pipeline_*` tables |
 | `the-lakehouse` | the DuckLake catalog |
 | `publishing-a-release` | the export, personal data at the boundary, what carries forward |
-| `dagster-graph-and-jobs` | backfill windows and partitions, registration, the three jobs |
+| `dagster-graph-and-jobs` | backfill windows and partitions, registration, the four jobs |
 | `building-evidence-reports` | the Evidence site |
 | `linting-and-type-checking` | sqlfluff, ruff and ty |
 | `dependency-versions` | what pins what, and the versions nothing watches |
@@ -387,7 +387,7 @@ the boundary is `publishing-a-release`. Two things not to need it for:
 ## Orchestration (`orchestration/`)
 
 Dagster wraps the existing layers rather than replacing them: `ingest`, `dbt`
-and `transform` stay independently runnable. Backfill windows, partitions, registration, the three
+and `transform` stay independently runnable. Backfill windows, partitions, registration, the four
 jobs and the rest are `dagster-graph-and-jobs`. What bites outside it:
 
 - **Asset keys are the join between the layers.** Rename a dbt source table
@@ -416,7 +416,8 @@ Two tiers, and the split is the point — see [`tests/README.md`](tests/README.m
   not that OWID was down.
 - `.github/workflows/live.yml` runs the graph against the *live* sources weekly
   and opens a `live-source-failure` issue — the signal that the fixtures have
-  drifted.
+  drifted. Its landing zone is cached, and `pages.yml` rebuilds the site from it
+  unless a push can change what lands in `raw`.
 
 The suite's own traps (asset-check wiring, CI's re-run set, fixture leaks) are
 `repo-guards`, and the mutation method is `unit-testing-dbt-models`. For any

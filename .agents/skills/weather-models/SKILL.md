@@ -172,9 +172,9 @@ its first source with a *finite budget*.
 - **A cold start fetches three years, not the whole series, and getting that
   wrong is a *hang* rather than a failure.** `WEATHER_FIRST_YEAR` (2007) is the
   backfill floor; `WEATHER_COLD_START_YEARS` is what a routine load asks
-  for when the destination is empty — which is the normal state of a fresh clone
-  and of `pages.yml`, `live.yml` and `release-data.yml`, all three of which
-  build from nothing against the live APIs. Starting a cold load at 2007 is the
+  for when the destination is empty — which is the normal state of a fresh clone,
+  and of every workflow until a release exists to carry the archive from,
+  because all of them build from an empty file. Starting a cold load at 2007 is the
   intuitive choice and costs ~12,600 units against a 10,000-a-day allowance; the
   limiter honours that allowance by **waiting**, so nothing errors. Simulated end
   to end with the injected clock: **24.1 hours, including one 22-hour sleep**.

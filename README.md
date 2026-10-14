@@ -21,8 +21,8 @@ credentials, no bill.
 [What is not done yet](#what-this-project-has-and-has-not-done-yet)
 
 **509 dbt tests** (469 data, 40 unit) · an enforced schema contract on every
-mart model · the whole pipeline run offline on every pull request · the site
-rebuilt from live sources weekly
+mart model · the whole pipeline run offline on every pull request · the sources
+fetched live weekly, and the site rebuilt from them whenever its code changes
 
 ```
 dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
@@ -46,9 +46,11 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
 - **The tests were measured, not assumed.** When seven models were deliberately
   broken 38 ways, the data tests caught 5. The unit tests exist because of that
   gap.
-- **CI does not depend on anyone else's API.** Every pull request runs the whole
-  pipeline against recorded fixtures, and a weekly job runs it against the live
-  sources and opens an issue when one changes.
+- **CI does not depend on anyone else's API, and neither does a deploy.** Every
+  pull request runs the whole pipeline against recorded fixtures. A weekly job
+  runs it against the live sources, opens an issue when one changes and caches
+  what it fetched, and the site is rebuilt from that cache unless a change could
+  alter what is fetched.
 - **The warehouse is published, not just the dashboard**: monthly, as DuckDB and
   Parquet, with attribution per source and the one column that identifies a
   person pseudonymised on the way out.
