@@ -124,8 +124,9 @@ linter, formatter and type checker those pins serve behave is
   The other three run on a bare uv checkout — see the Orchestration section for
   why the site is excluded from `full_refresh`.
 - **`pages.yml` triggers on a path *allowlist*, and `paths-ignore` would have
-  been wrong.** It is a full ingest → dbt → Polars → lake → Evidence run against
-  the **live** public APIs, and it once fired on every push to `main`,
+  been wrong.** It rebuilds the warehouse and the site, against the **live**
+  public APIs whenever the push can change what lands in `raw`, and it once
+  fired on every push to `main`,
   when 23 of the 94 commits on `main` had been documentation, skills or
   testing, and each one rebuilt and redeployed an identical site for the same
   Actions minutes and the same API load as a data change. The obvious

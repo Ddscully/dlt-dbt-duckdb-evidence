@@ -3,11 +3,15 @@ name: pages
 # Publishes the Evidence dashboard to GitHub Pages, with the dbt docs beside it
 # at /dbt/ (`publish/build_report.py` writes both).
 #
-# Unlike `ci.yml`, this runs against the LIVE sources. The published site is the
-# point of the repo, and a dashboard built from `tests/fixtures/ingest/` would
-# show the 17-country slice rather than the world. That means this workflow can
-# go red when an upstream source moves — `live.yml` is what alerts on that;
-# here the previous deployment simply stays up.
+# Unlike `ci.yml`, this builds from the real sources: a dashboard built from
+# `tests/fixtures/ingest/` would show the 17-country slice rather than the world.
+# But only a build that may need new data calls them. A push that cannot change
+# what lands in `raw` starts from the landing zone `live.yml` fetched and cached,
+# so a publisher that is down, or serving a stale copy, cannot turn the deploy of
+# a commit red when the commit could not have caused it. When a live build does
+# go red, `live.yml` is what alerts, and the previous deployment stays up. Why,
+# and what it measured:
+# docs/decisions/0020-the-site-builds-from-the-cached-landing-zone.md.
 #
 # Requires Pages to be enabled once, with Settings -> Pages -> Source set to
 # "GitHub Actions".
@@ -15,8 +19,8 @@ name: pages
 on:
   push:
     branches: [main]
-    # What the site is built from. This job is a full run against the live
-    # APIs, so a docs-only commit should not trigger it.
+    # What the site is built from. This job rebuilds the warehouse and the site,
+    # so a docs-only commit should not trigger it.
     #
     # Not `paths-ignore: ['**.md']`: the dashboard pages under `reports/pages/`
     # are markdown. An allowlist fails the right way round — a missing build
@@ -48,9 +52,16 @@ on:
       - ".github/actions/**"
   schedule:
     # Weekly, 06:40 UTC Monday. The sources publish annually, so a nightly
-    # rebuild would burn Actions minutes to republish identical numbers.
+    # rebuild would burn Actions minutes to republish identical numbers. It runs
+    # 80 minutes after `live.yml`'s Monday run, so it publishes what that fetched.
     - cron: "40 6 * * 1"
   workflow_dispatch:
+    inputs:
+      live:
+        description: "Fetch from the live sources instead of the landing zone live.yml cached"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -63,6 +74,17 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+# The landing zone `live.yml` caches and this workflow restores. actions/cache
+# matches on the path string as well as the key, so a mismatch is not an error:
+# it is a miss, every push goes down the live path, and the build stays green.
+# `tests/test_workflows.py` holds both workflows to the same values.
+env:
+  RAW_CACHE_PATH: data/lakehouse
+  RAW_CACHE_PREFIX: raw-lakehouse-
+  # `live.yml` refreshes the cache weekly, so this survives one failed refresh
+  # (a publisher down for a week) and not two. Past it a push goes live.
+  RAW_CACHE_MAX_AGE_DAYS: 15
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -71,7 +93,7 @@ jobs:
     timeout-minutes: 30
     # No INGEST_FIXTURES: see the note at the top. The three paths, and the
     # `dbt parse` the graph cannot load without, come from the setup action and
-    # `just materialize-site`'s own dependency chain.
+    # each build recipe's own dependency chain.
     steps:
       - uses: actions/checkout@v7
 
@@ -94,43 +116,202 @@ jobs:
           printf '\ndeployment:\n  basePath: /%s\n' \
             '${{ github.event.repository.name }}' >> reports/evidence.config.yaml
 
+      # Decided before anything is restored, because the two paths restore
+      # different things. A push goes live when it can change what lands in
+      # `raw`, or whether a cached catalog can still be read: the extraction
+      # code, the landing zone, the package modules those two import, and the
+      # dependency set, since a newer DuckDB may not read a catalog an older one
+      # wrote. A red live build is then the commit's or the publisher's; a red
+      # cached build can only be the commit's. `tests/test_workflows.py` holds
+      # LIVE_PATHS to the imports and to the trigger list above.
+      #
+      # `[[ == ]]` matches as GitHub's `paths:` does here: `*` crosses `/`.
+      - name: Decide whether this build needs the live sources
+        id: source
+        timeout-minutes: 2
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          FORCE_LIVE: ${{ inputs.live }}
+          LIVE_PATHS: |
+            ingest/**
+            lake/**
+            src/modern_data_stack/db.py
+            src/modern_data_stack/ducklake.py
+            src/modern_data_stack/env.py
+            src/modern_data_stack/fixtures.py
+            src/modern_data_stack/paths.py
+            src/modern_data_stack/ratelimit.py
+            src/modern_data_stack/workbook.py
+            uv.lock
+            .python-version
+        run: |
+          set -euo pipefail
+          want=cached
+          case "$EVENT" in
+            schedule) reason="the Monday rebuild, after live.yml's refresh" ;;
+            workflow_dispatch)
+              if [ "$FORCE_LIVE" = true ]; then want=live; reason="dispatched with live"
+              else reason="dispatched"; fi ;;
+            push)
+              # The checkout is one commit deep; the tree being diffed against
+              # is all that is needed, not the history between. Run outside a
+              # runner, this fetch makes a full clone shallow at $BEFORE (undo:
+              # `git fetch --unshallow`), so try the step in a scratch clone.
+              if git fetch --quiet --no-tags --depth=1 origin "$BEFORE"; then
+                hits=()
+                while IFS= read -r file; do
+                  while IFS= read -r pattern; do
+                    if [ -n "$pattern" ] && [[ $file == $pattern ]]; then
+                      hits+=("$file"); break
+                    fi
+                  done <<< "$LIVE_PATHS"
+                done < <(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+                if [ ${#hits[@]} -gt 0 ]; then
+                  want=live; reason="the push changes ${hits[*]:0:3}"
+                else
+                  reason="the push cannot change raw"
+                fi
+              else
+                want=live; reason="no tree to diff the push against"
+              fi ;;
+          esac
+          echo "want=$want" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+
+      # Lookup only: the age decides the path, and the path decides what the
+      # release step downloads. The key is never an exact hit, so the prefix
+      # picks the most recently created cache.
+      - name: Find the newest cached landing zone
+        id: lookup
+        if: steps.source.outputs.want == 'cached'
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.RAW_CACHE_PATH }}
+          key: ${{ env.RAW_CACHE_PREFIX }}lookup-${{ github.run_id }}
+          restore-keys: ${{ env.RAW_CACHE_PREFIX }}
+          lookup-only: true
+
+      # The key carries the epoch second it was saved at. No cache, or one too
+      # old, falls back to the live path, which is how every build ran before
+      # the cache existed; the run's summary says which path it took and why.
+      - name: Settle on the live sources or the cache
+        id: mode
+        timeout-minutes: 1
+        env:
+          WANT: ${{ steps.source.outputs.want }}
+          REASON: ${{ steps.source.outputs.reason }}
+          MATCHED: ${{ steps.lookup.outputs.cache-matched-key }}
+        run: |
+          set -euo pipefail
+          mode=$WANT reason=$REASON
+          if [ "$WANT" = cached ]; then
+            saved=${MATCHED#"$RAW_CACHE_PREFIX"}
+            saved=${saved%%-*}
+            if [ -z "$MATCHED" ]; then
+              mode=live reason="no cached landing zone: evicted, or never saved"
+            elif ! [[ $saved =~ ^[0-9]+$ ]]; then
+              mode=live reason="cannot read when $MATCHED was saved"
+            else
+              age=$(( ($(date +%s) - saved) / 86400 ))
+              if [ "$age" -gt "$RAW_CACHE_MAX_AGE_DAYS" ]; then
+                mode=live reason="the cached landing zone is $age days old"
+              else
+                reason="$reason; landing zone cached $age days ago"
+              fi
+            fi
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "built from the $mode path: $reason"
+          echo "Built from the **$mode** path: $reason." >> "$GITHUB_STEP_SUMMARY"
+
       # This job builds from an empty file, so without the latest release's
-      # history the Restatements page could show no revisions. Both assets: the
-      # weather archive is in `lakehouse.tar.gz`, and without it the ingest
-      # cold-starts at `WEATHER_COLD_START_YEARS` and the Weather page silently
-      # thins.
+      # history the Restatements page could show no revisions. A live build
+      # takes both assets: the weather archive is in `lakehouse.tar.gz`, and
+      # without it the ingest cold-starts at `WEATHER_COLD_START_YEARS` and the
+      # Weather page silently thins. A cached build takes the database alone,
+      # because the landing zone it restores was built on that archive.
       #
       # Soft-failing, unlike release-data.yml: here it is a display, and a
       # missing release should cost a section of a page, not the deploy.
       - name: Borrow snapshot history and the landing zone from the latest data release
+        id: borrow
         continue-on-error: true
+        timeout-minutes: 5
         env:
           GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.mode.outputs.mode }}
         run: |
           prev=$(gh release list --limit 30 --json tagName \
             --jq '[.[].tagName | select(startswith("data-"))] | first // empty')
           if [ -z "$prev" ]; then
             echo "No data-* release yet — Restatements shows version 1 only and"
             echo "the weather archive cold-starts."
+            echo "carried=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
           # Beside the database, where `restore_history` looks. `|| true`: a
           # release cut before the asset existed has none.
-          gh release download "$prev" --pattern lakehouse.tar.gz \
-            --dir prev-release || true
+          if [ "$MODE" = live ]; then
+            gh release download "$prev" --pattern lakehouse.tar.gz \
+              --dir prev-release || true
+          fi
           uv run python -m publish.restore_history prev-release/warehouse.duckdb
           rm -rf prev-release
+          echo "carried=true" >> "$GITHUB_OUTPUT"
+
+      # The exact key the lookup found, so the build reads the cache the age was
+      # read from. Then re-pointed: DuckLake keeps the catalog's data path as an
+      # absolute string, and `live.yml` wrote it on another runner. `--relink`
+      # also prints what the restored landing zone holds.
+      - name: Restore the cached landing zone
+        if: steps.mode.outputs.mode == 'cached'
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.RAW_CACHE_PATH }}
+          key: ${{ steps.lookup.outputs.cache-matched-key }}
+          fail-on-cache-miss: true
+
+      - name: Point the cached catalog at where it was restored
+        if: steps.mode.outputs.mode == 'cached'
+        timeout-minutes: 2
+        run: uv run python -m lake.lakehouse --relink
 
       # `materialize-site`: `publish_site` is `full_refresh` plus
       # `reports/evidence_site`, which runs npm (hence `setup-node`). Its
       # `sources:strict` makes an empty warehouse a red build rather than a site
-      # of empty charts.
-      # Its own timeout under the job's, so a hang ends as a failure (red)
-      # rather than a cancelled job (grey), which reads as someone stopping it.
-      - name: Build the warehouse and the site from live sources
+      # of empty charts. `materialize-site-from-raw` is the same job without the
+      # ingest.
+      # Each has its own timeout under the job's, so a hang ends as a failure
+      # (red) rather than a cancelled job (grey), which reads as someone stopping it.
+      - name: Build the warehouse and the site from the live sources
+        if: steps.mode.outputs.mode == 'live'
         timeout-minutes: 25
         run: just materialize-site
+
+      - name: Build the warehouse and the site from the cached landing zone
+        if: steps.mode.outputs.mode == 'cached'
+        timeout-minutes: 25
+        run: just materialize-site-from-raw
+
+      # A live build fetched a landing zone as good as `live.yml`'s, and the
+      # next push may need what it landed: a column an `ingest/` change added
+      # and a later dbt change reads. Only when the release's archive was
+      # carried in, so a failed download never caches a cold-started weather
+      # archive for every push after it.
+      - name: Name the cache entry for this landing zone
+        id: stamp
+        if: steps.mode.outputs.mode == 'live' && steps.borrow.outputs.carried == 'true'
+        timeout-minutes: 1
+        run: echo "key=${RAW_CACHE_PREFIX}$(date +%s)-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the landing zone for the pushes after this one
+        if: steps.stamp.outputs.key != ''
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.RAW_CACHE_PATH }}
+          key: ${{ steps.stamp.outputs.key }}
 
       - uses: actions/configure-pages@v6
 

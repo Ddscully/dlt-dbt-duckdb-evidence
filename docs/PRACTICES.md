@@ -312,7 +312,9 @@ endpoints is what tells you reality moved.** A red pull request therefore means
 an issue is the cue to re-record. *Software Engineering at Google* describes the
 same split as [record and replay](https://abseil.io/resources/swe-book/html/ch14.html):
 replay before a change merges, record against the real service after. There the
-recording is automatic, and here it is a step the weekly run prompts.
+recording is automatic, and here it is a step the weekly run prompts. The deploy
+is split the same way: the weekly run caches what it fetched, and the site is
+rebuilt from that unless a push can change what lands in `raw`.
 → [`tests/fixtures/ingest/`](../tests/fixtures/ingest/),
 [`.github/workflows/live.yml`](../.github/workflows/live.yml)
 

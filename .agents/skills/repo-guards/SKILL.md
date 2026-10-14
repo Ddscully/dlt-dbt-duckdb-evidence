@@ -146,6 +146,16 @@ section here. The mutation method these guards were written with is in the
     scan that stops matching passes by not looking, so the vacuity guard is a
     real test and the scan returns empty rather than raising, to make its
     message the one a reader sees.
+- **`pages.yml`'s `LIVE_PATHS` and the cache it shares with `live.yml` are two
+  more lists, and both fail green.** A push outside `LIVE_PATHS` builds from the
+  cached landing zone, so extraction code missing from the list deploys over
+  last week's data with nothing red; and a cache saved under a path or prefix
+  `pages.yml` does not look for is never found, so every push quietly takes the
+  live path. `tests/test_workflows.py` holds `LIVE_PATHS` to the package modules
+  `ingest/` and `lake/` import (an AST scan, transitive) and to the trigger list,
+  and both workflows to the same `RAW_CACHE_*` values, the setup action's landing
+  zone and an epoch-stamped key. Six mutations of the two workflows each turned
+  one of the three red.
 - **The eight `@dg.asset_check` bodies are unit tested in
   `tests/test_asset_checks.py`.**
   `tests/test_definitions.py` proved each check was *registered* — that it would

@@ -147,8 +147,9 @@ keep the split a split:
   - **One generic piece reaches through the example.** `pipeline_status`
     depends on the two Polars assets; with none, depend on
     `list(dbt_models.keys)`, because `deps=[dbt_models]` is refused.
-- `orchestration/definitions.py` — **three jobs, not two.** `full_refresh` (without
-  the site) and `publish_site` (with it) are about Node and carry over.
+- `orchestration/definitions.py` — **four jobs, not two.** `full_refresh` (without
+  the site) and `publish_site` (with it) are about Node and carry over, and so
+  does `publish_site_from_raw`, the site from the landing zone as it stands.
   `load_retail` and its selection exist only because retail is month-partitioned
   and a job holding it would be too; `just materialize` / `just materialize-site`
   run it by name. The `assets=` and `asset_checks=` lists name every example asset.
@@ -163,9 +164,10 @@ keep the split a split:
   step are generic; the snapshot carry-forward only matters if you have a
   snapshot. `release-data.yml`'s verify step checks rows in three of the example's
   relations and one Parquet file by name, and requires a lakehouse asset in every
-  release (§7). The one part to re-derive rather than copy is `pages.yml`'s `paths:`
-  allowlist, which names this repo's directories, and `tests/test_workflows.py`
-  with it, since that is what stops the allowlist drifting from your tree.
+  release (§7). The parts to re-derive rather than copy are `pages.yml`'s `paths:`
+  allowlist and its `LIVE_PATHS`, which name this repo's directories, and
+  `tests/test_workflows.py` with them, since that is what stops both drifting
+  from your tree.
 - `reports/sources/warehouse/connection.yaml` — the relative path to the DuckDB
   file, nothing else.
 - **The tests are mostly plumbing tests wired to the example's content.**

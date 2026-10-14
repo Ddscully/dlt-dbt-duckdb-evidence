@@ -1,7 +1,8 @@
 """`pages.yml`'s path allowlist classifies every tracked file, both ways.
 
-That workflow is a full ingest -> dbt -> Polars -> Evidence run against the live
-public APIs, so a docs-only push should not trigger it. The filter is an
+That workflow rebuilds the warehouse and the site, from the live public APIs
+whenever the push can change what lands in `raw`, so a docs-only push should not
+trigger it. The filter is an
 allowlist rather than `paths-ignore`, because the dashboard *is* markdown
 (`reports/pages/`) and a blanket `**.md` ignore would stop republishing the site
 exactly when a page changed. But a hand-maintained allowlist can omit a new
@@ -305,6 +306,10 @@ def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
     release's full archive. The Weather page renders correctly off the thin
     mart — green build, green checks, right shape, wrong depth.
 
+    `live.yml` is the one that matters most since `pages.yml` builds from its
+    cached landing zone: a thin archive there is a thin Weather page on every
+    push until the next refresh.
+
     The asset names come from the code rather than from string literals here, so
     renaming either one fails this instead of quietly matching nothing.
     """
@@ -313,8 +318,8 @@ def test_every_workflow_that_restores_a_release_downloads_both_of_its_assets():
     required = {Path(restore_history.DUCKDB_PATH).name, restore_history.LAKEHOUSE_ASSET}
     workflows = release_restoring_workflows()
 
-    assert {"pages.yml", "release-data.yml"} <= set(workflows), (
-        f"the restore scan found {sorted(workflows)}; both of those restore a "
+    assert {"pages.yml", "live.yml", "release-data.yml"} <= set(workflows), (
+        f"the restore scan found {sorted(workflows)}; all three restore a "
         "release — renaming the module would silently empty this scan"
     )
 
@@ -353,6 +358,133 @@ def test_the_release_never_tolerates_a_failed_download():
     tolerated = [line.strip() for line in downloads if "||" in line]
     assert not tolerated, f"release-data.yml tolerates a failed download: {tolerated}"
     assert "continue-on-error" not in text, "a soft-failing step would tolerate it too"
+
+
+# --------------------------------------------------------------------------- #
+# pages.yml builds from the landing zone live.yml caches
+# --------------------------------------------------------------------------- #
+
+CACHE_ACTIONS = ("actions/cache/save@", "actions/cache/restore@")
+PACKAGE = "modern_data_stack"
+
+
+def _workflow(name: str) -> dict:
+    yaml = pytest.importorskip("yaml")
+    return yaml.safe_load((WORKFLOWS_DIR / name).read_text())
+
+
+def _steps(workflow: dict) -> list[dict]:
+    return [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+
+
+def test_live_caches_the_landing_zone_where_pages_looks_for_it():
+    """The hand-off between the two workflows is two strings, and a mismatch is green.
+
+    actions/cache matches on the path as well as the key, so a cache saved under
+    another path or prefix is never found: every push falls back to the live
+    path, which builds and deploys exactly as before the cache existed. The one
+    trace is a line in each run's summary. So both workflows read the same two
+    env names, set identically; the path is the landing zone the setup action
+    points `LAKEHOUSE_DIR` at; and every key is stamped with the epoch second
+    that `pages.yml` reads the cache's age from.
+    """
+    pages, live = _workflow("pages.yml"), _workflow("live.yml")
+    for name in ("RAW_CACHE_PATH", "RAW_CACHE_PREFIX"):
+        assert pages["env"][name] == live["env"][name], f"{name} differs between the two"
+    path = pages["env"]["RAW_CACHE_PATH"]
+    assert f'LAKEHOUSE_DIR=$GITHUB_WORKSPACE/{path}"' in SETUP_ACTION.read_text(), (
+        f"the cache holds {path}, which is not the landing zone the setup action exports"
+    )
+
+    for name, workflow in (("pages.yml", pages), ("live.yml", live)):
+        steps = _steps(workflow)
+        cached = [s for s in steps if str(s.get("uses", "")).startswith(CACHE_ACTIONS)]
+        assert cached, f"{name} has no actions/cache step"
+        assert all(s["with"]["path"] == "${{ env.RAW_CACHE_PATH }}" for s in cached), name
+        stamps = [s for s in steps if s.get("id") == "stamp"]
+        assert stamps, f"{name} saves no cache entry"
+        assert all("key=${RAW_CACHE_PREFIX}$(date +%s)-" in s["run"] for s in stamps), name
+
+    (lookup,) = [s for s in _steps(pages) if s.get("id") == "lookup"]
+    assert lookup["with"]["restore-keys"] == "${{ env.RAW_CACHE_PREFIX }}"
+
+
+def _live_paths() -> list[str]:
+    (source,) = [s for s in _steps(_workflow("pages.yml")) if s.get("id") == "source"]
+    return source["env"]["LIVE_PATHS"].split()
+
+
+def _package_modules_reached_from(*dirs: str) -> set[str]:
+    """`src/modern_data_stack/<m>.py` for each package module the code under
+    `dirs` imports, directly or through another package module."""
+    import ast
+
+    def imported(path: Path, inside_package: bool) -> set[str]:
+        found = set()
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Import):
+                found |= {
+                    a.name.split(".")[1] for a in node.names if a.name.startswith(f"{PACKAGE}.")
+                }
+            elif isinstance(node, ast.ImportFrom):
+                relative = inside_package and node.level == 1
+                if relative or node.module == PACKAGE:
+                    found |= (
+                        {node.module} if relative and node.module else {a.name for a in node.names}
+                    )
+                elif node.module and node.module.startswith(f"{PACKAGE}."):
+                    found.add(node.module.split(".")[1])
+        return found
+
+    package_dir = REPO_ROOT / "src" / PACKAGE
+    todo = set()
+    for d in dirs:
+        for path in (REPO_ROOT / d).rglob("*.py"):
+            todo |= imported(path, inside_package=False)
+    reached: set[str] = set()
+    while todo:
+        module = todo.pop()
+        if module in reached or not (package_dir / f"{module}.py").exists():
+            continue
+        reached.add(module)
+        todo |= imported(package_dir / f"{module}.py", inside_package=True)
+    return {f"src/{PACKAGE}/{m}.py" for m in reached}
+
+
+def test_a_push_goes_live_whenever_it_can_change_what_lands_in_raw():
+    """A push that edits extraction code but takes the cached path is not a failure.
+
+    It deploys the new code over last week's landing zone, green, and the change
+    first meets the live sources at the next refresh: the delay the live path
+    exists to avoid, with nothing to say it happened. `LIVE_PATHS` is a list by
+    hand, so it is held to the imports: every package module `ingest/` and
+    `lake/` reach, directly or through another, must send a push live.
+    """
+    live = _live_paths()
+    # `uv.lock` for the catalog: a newer DuckDB may not read one an older wrote.
+    assert {"ingest/**", "lake/**", "uv.lock"} <= set(live), f"LIVE_PATHS read as {live}"
+    tracked = tracked_files()
+    stale = [p for p in live if not any(_matches(f, p) for f in tracked)]
+    assert not stale, f"LIVE_PATHS entries matching no tracked file: {stale}"
+
+    reached = _package_modules_reached_from("ingest", "lake")
+    assert f"src/{PACKAGE}/ratelimit.py" in reached, f"the import scan read {sorted(reached)}"
+    missing = sorted(m for m in reached if not any(_matches(m, p) for p in live))
+    assert not missing, (
+        f"package modules the extraction code imports, absent from LIVE_PATHS: {missing}"
+    )
+
+
+def test_every_path_that_sends_a_push_live_also_triggers_the_build():
+    """A live path outside the trigger list is dead: a push touching only it
+    never starts the workflow, so it never reaches the decision at all."""
+    allow, live = pages_allowlist(), _live_paths()
+    untriggered = sorted(
+        f
+        for f in tracked_files()
+        if any(_matches(f, p) for p in live) and not any(_matches(f, p) for p in allow)
+    )
+    assert not untriggered, f"sent live, but not in pages.yml's paths: {untriggered}"
 
 
 # --------------------------------------------------------------------------- #

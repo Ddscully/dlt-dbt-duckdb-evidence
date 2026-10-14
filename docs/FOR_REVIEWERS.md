@@ -127,7 +127,12 @@ release that would otherwise be first to meet a change, and opens (or comments
 on) a `live-source-failure` issue. That is the signal that an upstream publisher
 moved, and it's separate from PR CI on purpose: CI
 runs against recorded fixtures, so a red PR build means *the repo* broke, never
-that OWID was down.
+that OWID was down. The same split now holds for deploys: `live.yml` caches the
+landing zone it fetched, and the site is rebuilt from that cache unless a push
+can change what lands in `raw`, so a red deploy of an unrelated commit cannot be
+a publisher's either. Of the nine site builds a publisher broke before the
+change, seven were pushes and five of those changed no extraction code
+([`decisions/0020`](decisions/0020-the-site-builds-from-the-cached-landing-zone.md)).
 
 **What blocks.** Every dbt test runs inside `dbt build`, with
 `store_failures`, so a red test hands you `select * from

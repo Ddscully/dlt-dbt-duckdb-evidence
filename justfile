@@ -351,6 +351,14 @@ materialize-site: where dbt-parse
     uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
     uv run --group orchestration dagster job execute -m orchestration.definitions -j publish_site
 
+# What pages.yml runs for a push that cannot change `raw`, over the landing zone
+# live.yml cached. No `load_retail`: nothing here calls a publisher.
+# The site rebuilt from the landing zone as it stands, with no ingest (needs Node)
+[group('dagster')]
+materialize-site-from-raw: where dbt-parse
+    mkdir -p "$DAGSTER_HOME"
+    uv run --group orchestration dagster job execute -m orchestration.definitions -j publish_site_from_raw
+
 # A bare prefix is not a glob: `marts/*` means "downstream of the key `marts/`",
 # matches nothing and exits 0. Write `key:"marts/*"`; `group:`, `kind:`,
 # `sinks(...)` and `roots(...)` also work. Check with `just materialize-preview`.

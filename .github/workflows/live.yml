@@ -5,6 +5,11 @@ name: live
 # it runs the same asset graph against the live OWID / World Bank / Eurostat
 # endpoints and opens an issue when they've moved.
 #
+# It is also where the site's data comes from. The landing zone it fetches is
+# cached, and `pages.yml` rebuilds the site from that cache on every push that
+# cannot change what lands in `raw`, so a publisher that breaks reaches this
+# run's issue rather than an unrelated commit's deploy.
+#
 # Expected failure modes, all of which are worth a human looking:
 #   - a source renamed or dropped a column   -> stg_* breaks
 #   - a WDI indicator was retired            -> wdi_indicators_all_present fails
@@ -15,11 +20,11 @@ name: live
 
 on:
   schedule:
-    # Weekly, not daily: the only scheduled jobs that read the live sources are
-    # `pages.yml` (Monday 06:40) and `release-data.yml` (the 1st, 07:10), so a
-    # source that breaks mid-week reaches nothing until one of them runs. Each
-    # cron fires shortly before one of those, which is when the alert can still
-    # act. Two lines, because `20 5 1 * 1` means "the 1st or a Monday", which
+    # Weekly, not daily: what meets the live sources next is `pages.yml`'s
+    # Monday rebuild (06:40), which publishes what this run caches, and
+    # `release-data.yml` (the 1st, 07:10), which fetches its own. A source that
+    # breaks mid-week reaches neither until then. Each cron fires shortly before
+    # one of those, which is when the alert can still act. Two lines, because `20 5 1 * 1` means "the 1st or a Monday", which
     # nobody reads it as. 05:20 UTC — off the hour, since everyone's cron fires
     # on it.
     - cron: "20 5 * * 1"
@@ -30,6 +35,14 @@ permissions:
   contents: read
   issues: write
 
+# The cache `pages.yml` restores. actions/cache matches on the path string as
+# well as the key, so a mismatch is a miss rather than an error, and every push
+# would go down the live path, green. `tests/test_workflows.py` holds both
+# workflows to the same values.
+env:
+  RAW_CACHE_PATH: data/lakehouse
+  RAW_CACHE_PREFIX: raw-lakehouse-
+
 jobs:
   live:
     runs-on: ubuntu-latest
@@ -37,7 +50,7 @@ jobs:
     # release-data.yml's weather step. A backstop: the steps that can hang carry
     # their own, because a job that times out is *cancelled*, and the issue step
     # below runs on failure() and so not at all.
-    timeout-minutes: 45
+    timeout-minutes: 50
     # No INGEST_FIXTURES anywhere in this workflow — that is the entire point of
     # it. The three paths come from the setup action.
     steps:
@@ -46,6 +59,36 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           groups: --group dev --group orchestration
+
+      # What `pages.yml` and the release build on, so the landing zone cached
+      # below is one they could have fetched: the weather archive carried in
+      # rather than cold-started, the snapshots restored. Without it the cache
+      # would hold three years of weather, and the Weather page would thin for
+      # a week. The cold start itself is what the fixture pipeline in `ci.yml`
+      # covers. Soft-failing: a missing release should not stop the live check,
+      # only the caching, which reads `carried`.
+      - name: Borrow snapshot history and the landing zone from the latest data release
+        id: borrow
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(gh release list --limit 30 --json tagName \
+            --jq '[.[].tagName | select(startswith("data-"))] | first // empty')
+          if [ -z "$prev" ]; then
+            echo "No data-* release yet — the weather archive cold-starts."
+            echo "carried=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
+          # Beside the database, where `restore_history` looks. `|| true`: a
+          # release cut before the asset existed has none.
+          gh release download "$prev" --pattern lakehouse.tar.gz \
+            --dir prev-release || true
+          uv run python -m publish.restore_history prev-release/warehouse.duckdb
+          rm -rf prev-release
+          echo "carried=true" >> "$GITHUB_OUTPUT"
 
       # `just materialize` depends on `dbt-parse`, which writes the manifest
       # `@dbt_assets` reads at import time.
@@ -56,6 +99,22 @@ jobs:
       - name: Materialize the asset graph against live sources
         timeout-minutes: 35
         run: just materialize
+
+      # Before the freshness check, which can fail on a publisher two years
+      # behind while the landing zone it read is still sound. The key carries
+      # the epoch second, which `pages.yml` reads the cache's age from.
+      - name: Name the cache entry for this landing zone
+        id: stamp
+        if: steps.borrow.outputs.carried == 'true'
+        timeout-minutes: 1
+        run: echo "key=${RAW_CACHE_PREFIX}$(date +%s)-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the landing zone for pages.yml
+        if: steps.stamp.outputs.key != ''
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.RAW_CACHE_PATH }}
+          key: ${{ steps.stamp.outputs.key }}
 
       # `mart_covers_recent_years` is a WARN check, and a failed WARN check does
       # not fail the run: `just materialize` exits 0, so the issue step below
