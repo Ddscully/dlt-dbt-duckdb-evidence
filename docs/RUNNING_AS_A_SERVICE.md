@@ -867,8 +867,8 @@ keeps, extended with the ones only an always-on deployment meets:
     Nothing was wrong with either side. A laptop that shares a database with the
     compose stack wants its own `LAKEHOUSE_METADATA_SCHEMA`, or the same data
     path as the stack.
-- **DuckDB is one writer XOR many readers, across processes.** Measured on the
-  pinned 1.5.5, in both directions: a read-only connection fails while another
+- **DuckDB is one writer XOR many readers, across processes.** Measured on
+  DuckDB 1.5.5, in both directions: a read-only connection fails while another
   process holds the file read-write, and a writer fails while a read-only
   connection is open. So a forgotten interactive session blocks the next
   scheduled build, and the build blocks every reader, which is the strongest

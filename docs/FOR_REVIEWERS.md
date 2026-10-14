@@ -241,13 +241,14 @@ number before.
    `co2_intensity`'s null-GDP filter runs inside DuckDB. What cannot be made
    lazy is the shape of the work: a dense rank over each (income group, year),
    quintile break points over whole columns, a final sort, and a frame
-   collected in full before `db.write_frames` hands it back. The next step is
-   `collect(engine="streaming")`. Its first run broke `retail_rfm`'s
-   sort ties in a different order. Both sorts now end on a unique key, and
-   after that change it matched the default engine row for row, five runs
-   each. Past that, the window belongs in dbt SQL. The layer exists to
-   demonstrate heavy Python transforms, and these are not heavy enough to need
-   one.
+   collected in full before `db.write_frames` hands it back. Since Polars 2.0
+   the plan runs on the streaming engine, which `collect()` now picks by
+   default. Its first trial, on 1.x, broke `retail_rfm`'s sort ties in a
+   different order, so both sorts end on a unique key, and on the upgrade
+   both tables matched the in-memory engine's output row for row, in write
+   order, floats included. Past that, the window belongs in dbt SQL. The
+   layer exists to demonstrate heavy Python transforms, and these are not
+   heavy enough to need one.
 2. **The single-writer lock — and it is second here only because this list is
    ordered by *volume*.** It is not a scale limit at all: one writer xor many
    readers binds at 43k rows exactly as hard as at 43M, which is why `just
@@ -282,7 +283,7 @@ number before.
    fine as long as it asks for the same mode, and refused with a configuration
    error if it asks for the other one (`querying-the-warehouse`). The `quack`
    extension removes the process half: one DuckDB serves the file and the
-   others `ATTACH 'quack:…'` over its native protocol. On the pinned 1.5.5, two
+   others `ATTACH 'quack:…'` over its native protocol. On DuckDB 1.5.5, two
    separate processes pushed 200 rows each through `quack_serve` with no
    failures and all 400 still in the file afterwards.
 
@@ -385,7 +386,7 @@ below, and the profile is the point.
 | Organizational ownership | **Ad hoc** | Ownership is declared and enforced for all 32 models. There is one owner, who is also the only contributor. |
 
 **Access governance is Absent and cannot be otherwise here, which is the most
-useful line in the table.** DuckDB has no access control at all: on the pinned
+useful line in the table.** DuckDB has no access control at all: on DuckDB
 1.5.5, `create role`, `grant`, `create user` and `create policy` are each a
 *parser error* rather than an unsupported feature — re-verified while writing
 this. There is no principal to attach a policy to, so a "restricted" schema
