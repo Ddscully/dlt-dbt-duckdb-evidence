@@ -30,4 +30,12 @@ select
 from source
 -- Drops the aggregates ("World", "Europe") and keeps Kosovo, which OWID also
 -- leaves uncoded: see the macro.
-where length({{ owid_country_iso3() }}) = 3
+where
+    length({{ owid_country_iso3() }}) = 3
+    -- OWID writes 0.0 for Kosovo's CO2 in 1994-1999, years whose emissions it
+    -- counts inside Serbia's: a placeholder, not a measurement. A country of two
+    -- million people does not emit nothing, and a zero passes every range test.
+    -- Dropped rather than nulled, so the snapshot sees a withdrawn row and not
+    -- a revision. Its unmeasured years before 1994 are null, as every country's
+    -- are, and stay.
+    and not (country = 'Kosovo' and co2 is not distinct from 0)

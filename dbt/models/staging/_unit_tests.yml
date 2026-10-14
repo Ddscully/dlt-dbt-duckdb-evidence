@@ -342,9 +342,10 @@ unit_tests:
   - name: stg_co2_keeps_kosovo_and_drops_the_aggregates
     model: stg_co2
     description: >
-      Kosovo is the one real country OWID ships without a code: 31 years of CO2,
-      8.05 Mt in 2024. It lands as `XKX`, the code the World Bank, Eurostat and
-      the weather archive use. The uncoded aggregates still drop out.
+      Kosovo is the one real country OWID ships without a code: 25 years of CO2
+      from 2000, 8.05 Mt in 2024. It lands as `XKX`, the code the World Bank,
+      Eurostat and the weather archive use. The uncoded aggregates still drop
+      out.
     given:
       - input: source('raw', 'owid_co2')
         rows:
@@ -357,6 +358,42 @@ unit_tests:
       rows:
         - {country_iso3: "DEU", year: 2024, co2_mt: 572.3}
         - {country_iso3: "XKX", year: 2024, co2_mt: 8.05}
+
+  - name: stg_co2_reads_kosovo_by_name_whatever_its_code
+    model: stg_co2
+    description: >
+      OWID's COVID dataset codes Kosovo `OWID_KOS`. Coalescing a null code
+      would pass that through, and the three-letter filter would drop it as an
+      aggregate, so the macro matches the name.
+    given:
+      - input: source('raw', 'owid_co2')
+        rows:
+          - {country: "Kosovo", iso_code: "OWID_KOS", year: 2024, co2: 8.05}
+          - {country: "World", iso_code: "OWID_WRL", year: 2024, co2: 37398.0}
+    expect:
+      rows:
+        - {country_iso3: "XKX", year: 2024, co2_mt: 8.05}
+
+  - name: stg_co2_drops_kosovos_placeholder_zeros
+    model: stg_co2
+    description: >
+      OWID writes 0.0 for Kosovo in 1994-1999, years it counts inside Serbia's
+      emissions. Landed, they are zero emissions for two million people that
+      pass every range test. The rule is Kosovo's alone: a territory of two
+      thousand people can emit nothing measurable (Christmas Island, 2024), and
+      Kosovo's unmeasured years before 1994 stay null like every country's.
+    given:
+      - input: source('raw', 'owid_co2')
+        rows:
+          - {country: "Kosovo", iso_code: null, year: 1993, co2: null}
+          - {country: "Kosovo", iso_code: null, year: 1999, co2: 0.0}
+          - {country: "Kosovo", iso_code: null, year: 2000, co2: 4.807}
+          - {country: "Christmas Island", iso_code: "CXR", year: 2024, co2: 0.0}
+    expect:
+      rows:
+        - {country_iso3: "XKX", year: 1993, co2_mt: null}
+        - {country_iso3: "XKX", year: 2000, co2_mt: 4.807}
+        - {country_iso3: "CXR", year: 2024, co2_mt: 0.0}
 
   - name: stg_energy_keeps_kosovo_and_drops_the_aggregates
     model: stg_energy

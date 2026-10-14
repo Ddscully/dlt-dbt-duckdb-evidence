@@ -52,12 +52,22 @@ its first source with a *finite budget*.
     newest day when first loaded, which made it look like the two reanalyses
     reaching a day at different times; telling the two apart took a second
     fetch after later days had landed.
-  - **The incomplete days at a response's edge are dropped**, up to
-    `WEATHER_EDGE_DAYS`, and the lookback asks for them again — a precaution
-    against the two reanalyses reaching a day at different times, which has not
-    been measured. A partly null day *behind* the edge still lands, as does an
-    edge longer than the cap: a variable Open-Meteo stopped serving would
-    otherwise stall the archive, and nothing checks weather freshness.
+  - **The incomplete days at the archive's edge are dropped**, up to
+    `WEATHER_EDGE_DAYS` of them with something measured, and the lookback asks
+    for them again — a precaution against the two reanalyses reaching a day at
+    different times, which has not been measured. A partly null day *behind*
+    the edge still lands, as does an edge longer than the cap: a variable
+    Open-Meteo stopped serving would otherwise stall the archive, and nothing
+    checks weather freshness.
+    - **The edge belongs to the run, not to a request.** Windows split at
+      calendar years, so judged per response every 31 December looked like the
+      newest day: a partly null one was held back until it left the lookback,
+      and in a backfill it never landed. Early in January the current year's
+      window can be all lag, which puts the real edge at the end of December's.
+      A backfill that stops short of the archive's end has no edge at all.
+    - **The cap counts only the partly null days.** The all-null tail is lag,
+      weeks long when ERA5 falls behind; counted toward the cap, it lifted the
+      edge past it exactly when the two reanalyses were furthest apart.
 - **The binding constraint is a rate limit, not disk.** The obvious cost model
   prices rows, and on that basis the whole 1940- global archive is trivial: 211
   capitals x 86 years x 6 variables is ~110 MB in DuckDB, nowhere near the 2 GiB

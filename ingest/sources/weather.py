@@ -99,14 +99,14 @@ WEATHER_END_LAG_DAYS = 3
 
 # `era5_seamless` answers from two reanalyses, ERA5-Land for the temperatures
 # and ERA5 for the rest, so a day can be partly null. A precaution, not a
-# measured lag: the incomplete days at a response's newest end are dropped with
-# the all-null ones (`_weather_rows`), and the lookback asks for them again.
+# measured lag: the incomplete days at the archive's newest end are dropped with
+# the all-null ones (`_held_back`), and the lookback asks for them again.
 # 2026-09-25 is partly null for every capital, but as a gap in ERA5 that stayed
 # after the following days filled in, not as a day still arriving, and as a gap
-# it lands behind the edge. At most this many: a variable that stops
-# arriving for good leaves every day partly null, and those must still land
-# (where a missing temperature fails `stg_weather_daily`'s tests) rather than
-# stall the archive without a word.
+# it lands behind the edge. At most this many partly null days: a variable that
+# stops arriving for good leaves every day partly null, and those must still
+# land (where a missing temperature fails `stg_weather_daily`'s tests) rather
+# than stall the archive without a word.
 WEATHER_EDGE_DAYS = 14
 
 WEATHER_PRIMARY_KEY = ("country_iso3", "weather_date")
@@ -485,10 +485,33 @@ def get_weather_json(
     raise RuntimeError(f"failed to fetch weather from {url[:120]}…: {last}")
 
 
+def _held_back(measured_by_day: Sequence[dict]) -> int:
+    """How many of the newest days are the archive's edge, to hold back.
+
+    The edge is the incomplete days after the newest complete one, which one
+    reanalysis may have reached and the other not yet. The cap counts only the
+    days with something measured: the all-null tail is the archive's lag, which
+    runs to weeks when ERA5 falls behind, and counting it would lift the edge
+    past the cap exactly when the two reanalyses are furthest apart. Past the
+    cap, nothing is held back, so a variable Open-Meteo stopped serving lands.
+    """
+    edge = partial = 0
+    for measured in reversed(measured_by_day):
+        if all(value is not None for value in measured.values()):
+            break
+        edge += 1
+        if any(value is not None for value in measured.values()):
+            partial += 1
+    return edge if partial <= WEATHER_EDGE_DAYS else 0
+
+
 def _weather_rows(
-    payload: dict | list, locations: Sequence[tuple[str, float, float]]
+    responses: Sequence[dict | list],
+    locations: Sequence[tuple[str, float, float]],
+    *,
+    at_archive_end: bool,
 ) -> Iterable[dict]:
-    """Flatten one archive response into `(country, day)` rows.
+    """Flatten one run's archive responses, oldest window first, into `(country, day)` rows.
 
     Open-Meteo answers column-wise (`{"daily": {"time": [...], ...}}`), so this
     transposes to the merge key's grain.
@@ -498,40 +521,43 @@ def _weather_rows(
     2, …). A short response would shift every later country onto the wrong
     weather, which is why the length is checked and `weather_locations` fails
     closed.
-    """
-    entries = payload if isinstance(payload, list) else [payload]
-    if len(entries) != len(locations):
-        raise RuntimeError(
-            f"asked Open-Meteo for {len(locations)} locations and got {len(entries)} back — "
-            "the response is matched by position, so this cannot be resolved here"
-        )
 
-    for (country_iso3, _, _), entry in zip(locations, entries):
-        daily = entry.get("daily") or {}
-        days = daily.get("time") or []
-        columns = {name: daily.get(name) or [] for name in WEATHER_DAILY_VARIABLES}
-        measured_by_day = [
-            {
-                name: (values[index] if index < len(values) else None)
-                for name, values in columns.items()
-            }
-            for index in range(len(days))
-        ]
-        # The incomplete days after the newest complete one: the archive's edge,
-        # which one reanalysis may have reached and the other not yet.
-        edge = 0
-        for measured in reversed(measured_by_day):
-            if all(value is not None for value in measured.values()):
-                break
-            edge += 1
-        edge_start = len(days) - edge if edge <= WEATHER_EDGE_DAYS else len(days)
-        for index, (day, measured) in enumerate(zip(days, measured_by_day)):
+    The edge (`_held_back`) is found over the whole run, not per response.
+    Windows split at calendar years, so the newest day of a window is the
+    archive's newest only in the last one, and in early January even that window
+    can be all lag, leaving the real edge at the end of December's. A run that
+    stops short of the archive's end (`at_archive_end` false: a backfill of past
+    years) has no edge at all.
+    """
+    responses = [response if isinstance(response, list) else [response] for response in responses]
+    for entries in responses:
+        if len(entries) != len(locations):
+            raise RuntimeError(
+                f"asked Open-Meteo for {len(locations)} locations and got {len(entries)} back — "
+                "the response is matched by position, so this cannot be resolved here"
+            )
+
+    for position, (country_iso3, _, _) in enumerate(locations):
+        days: list[tuple[str, dict, dict]] = []
+        for entries in responses:
+            entry = entries[position]
+            daily = entry.get("daily") or {}
+            columns = {name: daily.get(name) or [] for name in WEATHER_DAILY_VARIABLES}
+            for index, day in enumerate(daily.get("time") or []):
+                measured = {
+                    name: (values[index] if index < len(values) else None)
+                    for name, values in columns.items()
+                }
+                days.append((day, measured, entry))
+
+        held_back = _held_back([measured for _, measured, _ in days]) if at_archive_end else 0
+        for day, measured, entry in days[: len(days) - held_back]:
             # The merge replaces the stored row at this key with the whole new
             # row, so a day with nothing measured, or one at the edge still
             # arriving, would overwrite a complete day loaded earlier. The next
             # run's lookback asks for the day again. A partly null day behind
             # the edge lands, and `stg_weather_daily`'s tests see it.
-            if index >= edge_start or all(value is None for value in measured.values()):
+            if all(value is None for value in measured.values()):
                 continue
             yield {
                 "country_iso3": country_iso3,
@@ -568,19 +594,26 @@ def om_weather_daily(years: tuple[int, int] | None = None):
     limiter = weather_limiter()
     watermark = None if years is not None else weather_watermark()
 
-    windows = weather_windows(years, watermark)
+    # One `today` for the windows and the edge test, so a run crossing midnight
+    # cannot ask up to one archive end and compare against the next.
+    today = datetime.now(UTC).date()
+    windows = weather_windows(years, watermark, today)
     if fixtures.enabled() and windows:
         # One request: the fixture route ignores dates, so per-year chunks would
         # parse the same file once per year. `tests/test_ingest.py` covers the
         # chunking directly.
         windows = [(windows[0][0], windows[-1][1])]
 
+    responses = []
     for start, end in windows:
         days = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1
-        payload = get_weather_json(
-            weather_url(locations, start, end),
-            limiter,
-            weather_call_units(len(locations), days),
-            label=f"om_weather_daily {start}..{end}",
+        responses.append(
+            get_weather_json(
+                weather_url(locations, start, end),
+                limiter,
+                weather_call_units(len(locations), days),
+                label=f"om_weather_daily {start}..{end}",
+            )
         )
-        yield list(_weather_rows(payload, locations))
+    at_archive_end = bool(windows) and windows[-1][1] == weather_end_date(today)
+    yield list(_weather_rows(responses, locations, at_archive_end=at_archive_end))
