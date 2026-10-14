@@ -82,8 +82,8 @@ from byte-identical sources gave 5,781 and 5,785 distinct values of
 `net_revenue_gbp`. It's `sum()` over doubles. Floating-point addition isn't
 associative and DuckDB's parallel aggregation doesn't fix an order, so the last
 bits of a few hundred customers' revenue differ per build, and exact equality is
-what a uniqueness count is made of. The share is stable to a tenth of a point;
-the count moves by single digits. Anything quoting the count as a fact is
+what a uniqueness count is made of. Over seven rebuilds of the same sources the
+`net_revenue_gbp` share ranged 96.9% to 97.2% and its count by 21 customers. Anything quoting the count as a fact is
 quoting one build.
 
 (The boundary is worth knowing precisely: `fct_retail_order_line`'s money
@@ -122,7 +122,7 @@ default.
 
 **`||`, never `concat()`.** DuckDB's `concat` *ignores* NULL arguments, so
 `concat(customer_id, $salt)` on a row with no customer hashes the bare salt, and
-all 243,007 anonymous order lines land on one identical pseudonym that's
+all 235,287 anonymous order lines land on one identical pseudonym that's
 indistinguishable from a real customer. The warehouse would have gained a
 fabricated shopper with a quarter of the business's transactions and no error
 anywhere. `||` propagates the NULL, which is the truth. `tests/test_privacy.py`

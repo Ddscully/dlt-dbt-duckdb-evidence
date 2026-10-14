@@ -13,7 +13,7 @@ version: 2
 #   | mutation                                    | data tests | net revenue  |
 #   |---------------------------------------------|------------|--------------|
 #   | drop `upper()` from `stock_code`            | 19 pass    | +GBP 1,702   |
-#   | `AMAZONFEE` falls through to `product`      | 19 pass    | -GBP 260,764 |
+#   | `AMAZONFEE` falls through to `product`      | 19 pass    | -GBP 221,521 |
 #   | `is_revenue_line` loses its adjustment term | 19 pass    | unchanged    |
 #   | `is_stock_write_off` loses `invoice_type`   | **1 fails**| unchanged    |
 #
@@ -33,7 +33,7 @@ unit_tests:
       The truth table the three invoice prefixes produce. A negative quantity is
       a return on a `C` invoice, a stock write-off on a plain one and neither on
       an `A` — so `is_stock_write_off` cannot be `quantity < 0`, and dropping the
-      `invoice_type` term takes it from 3,457 rows to 22,950. Two rows here are
+      `invoice_type` term takes it from 3,393 rows to 22,557. Two rows here are
       shapes the source has never sent, and they are the ones that earn the test:
       a negative adjustment, and a product on an adjustment invoice.
     given:
@@ -46,7 +46,7 @@ unit_tests:
           # revenue, negatively signed, and must not be a write-off.
           - {invoice: "C536379", line_number: 1, stock_code: "85123A", quantity: -6, unit_price: 2.55}
           # A write-off: negative quantity on a *sale* invoice, zero-priced. All
-          # 3,457 of these in the source are zero-priced, which is what makes the
+          # 3,393 of these in the source are zero-priced, which is what makes the
           # reading safe; `stg_retail_write_offs_are_never_priced` guards that.
           - {invoice: "536387", line_number: 1, stock_code: "85123A", quantity: -3, unit_price: 0.0}
           # Bad debt. The six `A` lines in the source are all stock code `B`, all
@@ -58,7 +58,7 @@ unit_tests:
           # A product on an adjustment invoice — also not in the source, and the
           # only row in the project that reaches `invoice_type <> 'adjustment'`.
           - {invoice: "A563188", line_number: 1, stock_code: "85123A", quantity: 5, unit_price: 2.55}
-          # C496350, the one positive-quantity cancellation line in 1.07M rows: a
+          # C496350, the one positive-quantity cancellation line in 1.04M rows: a
           # GBP 373.57 manual adjustment. Cancellation, but not a return and not
           # revenue, because `M` is not a product.
           - {invoice: "C496350", line_number: 1, stock_code: "M", quantity: 1, unit_price: 373.57}
@@ -88,12 +88,12 @@ unit_tests:
       Every branch of the `item_type` case, one row each, with the real codes.
       Seven of the eight families are a handful of codes that arrived in the same
       column as the mugs, and getting one wrong is worth money the tests cannot
-      see — moving AMAZONFEE into `product` costs GBP 260,764 with every data
+      see — moving AMAZONFEE into `product` costs GBP 221,521 with every data
       test green. The paired-case rows are here because `upper(trim(...))` turns
       out to be load-bearing for a whole branch: every one of the 100 voucher
       lines arrives lowercase (`gift_0001_20`), so without the fold the `voucher`
       family is empty and 100% of it books as product. Lowercase `m` is 5 more
-      lines against `M`'s 1,421. The padded `POST` is the same failure with no
+      lines against `M`'s 1,398. The padded `POST` is the same failure with no
       witness in the source yet — the workbook is read all-text, so a reader
       change is all it would take. Bare `GIFT` is the near-miss the underscore in
       `GIFT_` exists to exclude, and the source really does send one.
@@ -147,9 +147,9 @@ unit_tests:
   - name: stg_retail_lines_nulls_the_absent_customer_rather_than_blanking_it
     model: stg_retail_lines
     description: >
-      `customer_id` is the warehouse's one direct identifier and 243,007 lines
-      (22.8%) do not have one. The `nullif(trim(...), '')` is what makes that an
-      absence rather than an empty-string customer who bought 22.8% of the shop —
+      `customer_id` is the warehouse's one direct identifier and 235,287 lines
+      (22.5%) do not have one. The `nullif(trim(...), '')` is what makes that an
+      absence rather than an empty-string customer who bought 22.5% of the shop —
       and `customer_id` is deliberately untested for nullity in `_staging.yml`,
       so no data test on this model can see it either way. It is defensive today:
       the workbook read returns NULL for an empty cell, so the source currently
@@ -159,7 +159,7 @@ unit_tests:
       **All three text columns the model trims are here, because they must
       agree.** A `country` trimmed without `nullif` turns a blank country into a
       44th label rather than an absence —
-      unreachable in today's 1,067,371 rows, which is precisely the condition
+      unreachable in today's 1,044,848 rows, which is precisely the condition
       under which this project writes the fixture instead of arguing about the
       clause.
     given:
@@ -210,13 +210,13 @@ unit_tests:
       shows up there if the model still carries the row.
 
       Measured, by deleting `EIRE` from the seed and making the join inner
-      against a copy of the warehouse: **17,866 order lines and GBP 615,520
+      against a copy of the warehouse: **17,689 order lines and GBP 610,244
       disappear, four customers with them, and all 90 nodes pass** — the
       relationships test included. The grain contract still holds on what is
       left, every `not_null` holds on rows that are no longer there, and
       `dbt_utils.equal_rowcount` compares this model to
       `fct_retail_order_line`, which is downstream and shrinks by exactly the
-      same 17,866. Two things that fall together cannot measure each other.
+      same 17,689. Two things that fall together cannot measure each other.
 
       So the fourth row here is the test. `Poland` is deliberately absent from
       the mocked map — the shape of a country appearing in a re-ingest — and it
@@ -264,7 +264,7 @@ unit_tests:
       nothing compares them.** `invoice_month` is computed at ingest, in the
       DuckDB query that reads the workbook (`strftime(invoice_ts, '%Y-%m')` in
       `ingest/sources/retail.py`); `invoice_date` is computed here. They agree on
-      all 1,067,371 rows today, and no test says they must — so this fixture
+      all 1,044,848 rows today, and no test says they must — so this fixture
       states the relation once, on the rows where it is least obvious.
 
       Those rows are the last minutes of a day and of a year, and the source has
@@ -273,9 +273,9 @@ unit_tests:
       boundary. That is worth knowing before trusting the hazard
       `RETAIL_COLUMNS` describes to be visible — dlt's default `timestamp` maps
       to TIMESTAMP WITH TIME ZONE and renders a naive 07:45 as 08:45+01:00 on a
-      CET machine, and at that offset **not one of the 1,067,371 rows changes
+      CET machine, and at that offset **not one of the 1,044,848 rows changes
       date**. Push the same drift to six hours, the offset of a machine east of
-      here, and it is not subtle any more and still not visible: **28,286 order
+      here, and it is not subtle any more and still not visible: **27,340 order
       lines move to a different `invoice_date`, 521 of them onto a date whose
       month contradicts the `invoice_month` the ingest layer computed, and the
       build finishes PASS=83 ERROR=0** across `stg_retail_lines` and everything

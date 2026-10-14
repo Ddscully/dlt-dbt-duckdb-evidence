@@ -161,7 +161,7 @@ recorded bytes. Why loads and not days is
   - **What ships is an allowlist (`PUBLISHED_TABLES`), for two reasons that would
     each be sufficient.** Cost: only the weather archive is unreproducible within
     the budget; everything else in `raw` is a free re-fetch. Disclosure:
-    `raw.retail_invoice_lines` and dlt's `raw_staging` copy hold 824,364 clear
+    `raw.retail_invoice_lines` and dlt's `raw_staging` copy hold 809,561 clear
     customer ids between them, and shipping `raw` whole would undo the largest
     privacy gain of the move.
   - **And it cannot be fixed by dropping afterwards, which is why the catalog is

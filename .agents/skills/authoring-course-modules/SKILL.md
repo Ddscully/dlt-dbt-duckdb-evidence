@@ -235,8 +235,8 @@ call.
 **A shape test protects the shape, not the quantity — and the boundary decides
 whether it fires.** Truncating the retail read to 10,000 rows *does* fail
 `stg_retail_has_exactly_one_positive_cancellation_line`. The real 1,000,000-row
-truncation would **not** have: `C496350` sits at position ~76,800 of 1,067,371
-(7% in, first sheet), and a 1M cut drops only the last 67,371 rows. So the
+truncation would **not** have: `C496350` sits at position ~76,800 of 1,044,848
+(7% in, first sheet), and a 1M cut drops only the last 44,848 rows. So the
 fixture slice fails a check production passes — the mirror image of the
 17-country trap, and the reason `tests/test_ingest.py` counts rows against the
 workbook's own count instead.

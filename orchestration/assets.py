@@ -249,7 +249,7 @@ def raw_by_year_assets(context: AssetExecutionContext, dlt: DagsterDltResource, 
     window = f"{years[0]}-{years[1]} (backfill)" if years else "incremental lookback"
 
     # `load_groups` merges these without `refresh`, which would drop their watermarks.
-    for names, kwargs in load_groups(selected):
+    for names, kwargs in load_groups(selected, partial=years is not None):
         context.log.info("loading %s over %s", ", ".join(names), window)
         yield from dlt.run(
             context=context,
@@ -306,7 +306,7 @@ def raw_retail_asset(context: AssetExecutionContext, dlt: DagsterDltResource):
     else:
         context.log.info("loading retail_invoice_lines whole (no partition key)")
 
-    for names, kwargs in load_groups(PARTITIONED_RESOURCES):
+    for names, kwargs in load_groups(PARTITIONED_RESOURCES, partial=months is not None):
         yield from dlt.run(
             context=context,
             dlt_source=public_indicators(retail_months=months).with_resources(*names),

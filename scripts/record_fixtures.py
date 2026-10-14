@@ -230,13 +230,25 @@ def record_retail() -> None:
 
     One sheet where the real workbook has two, because DuckDB's xlsx writer
     replaces the file per `COPY`; `tests/test_workbook.py` covers the multi-sheet
-    union directly. At ~1.9 MB it is the largest fixture and does not compress
-    further — an `.xlsx` is already a deflated zip.
+    union directly. Each invoice is written from the one sheet `retail_sql`
+    keeps: both sheets hold 1-9 December 2010, and copied into one sheet the two
+    copies would share a `sheet_name`, which is all the load tells them apart
+    by, and land twice. At ~1.9 MB it is the largest fixture and does not
+    compress further — an `.xlsx` is already a deflated zip.
     """
     con = workbook.connect()
     con.execute(f"create or replace view sheets as {workbook.sheets_sql(retail_workbook())}")
     con.execute(f"create or replace view typed as {retail_sql()}")
     con.execute(RETAIL_FIXTURE_SELECTION)
+    con.execute(
+        """create or replace table kept_copies as
+           select distinct invoice, sheet_name from typed
+           where invoice in (select invoice from kept_invoices)"""
+    )
+    # In file order, which the line numbers are read from: the semi join the
+    # `in` becomes does not keep it.
+    kept_lines = """from (select *, row_number() over () as file_row from sheets)
+        where ("Invoice", sheet_name) in (select invoice, sheet_name from kept_copies)"""
 
     with tempfile.TemporaryDirectory() as tmp:
         book = Path(tmp) / RETAIL_WORKBOOK_NAME
@@ -244,8 +256,8 @@ def record_retail() -> None:
             f"""copy (
                     select "Invoice", "StockCode", "Description", "Quantity",
                            "InvoiceDate", "Price", "Customer ID", "Country"
-                    from sheets
-                    where "Invoice" in (select invoice from kept_invoices)
+                    {kept_lines}
+                    order by file_row
                 )
                 to '{book}' (format xlsx, header true, sheet '{RETAIL_FIXTURE_SHEET}')"""
         )
@@ -254,10 +266,7 @@ def record_retail() -> None:
             archive.write(book, RETAIL_WORKBOOK_NAME)
         _write(path_for(RETAIL_ARCHIVE), buffer.getvalue())
 
-    kept = scalar(
-        con,
-        'select count(*) from sheets where "Invoice" in (select invoice from kept_invoices)',
-    )
+    kept = scalar(con, f"select count(*) {kept_lines}")
     total = scalar(con, "select count(*) from sheets")
     print(f"  {'':<28} {kept:>9,} of {total:,} rows ({100 * kept / total:.1f}%)")
 
@@ -293,7 +302,7 @@ regular_invoices as (
     select distinct invoice from typed
     where customer_id in (select customer_id from regulars)
 ),
-anonymous as (                   -- the 22.8% with no customer id are real revenue
+anonymous as (                   -- the 22.5% with no customer id are real revenue
     select distinct invoice from typed where customer_id is null
     qualify row_number() over (order by md5(invoice)) <= 40
 ),

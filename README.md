@@ -41,7 +41,7 @@ dlt  ─▶  DuckLake  ─▶  dbt  ─▶  Polars  ─▶  Evidence
   hand.
 - **Two grains with opposite hard parts.** For the country-year facts the hard
   part is coverage: which country is missing from which series, and what a join
-  quietly drops. For the 1.07M-line transaction log it is definitions: a customer
+  quietly drops. For the 1.04M-line transaction log it is definitions: a customer
   return and a stock write-off are both a negative quantity.
 - **The tests were measured, not assumed.** When seven models were deliberately
   broken 38 ways, the data tests caught 5. The unit tests exist because of that

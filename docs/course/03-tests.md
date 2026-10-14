@@ -129,8 +129,8 @@ the test runs over, and several of this project's most important tests use it:
 | test | rows in the relation | rows examined |
 |---|---|---|
 | `dim_grid_emission_factors` grain, `where: is_latest_available` | 5,587 | **208** |
-| `stg_retail_lines` write-off check, `where: is_stock_write_off` | 1,067,371 | **3,457** |
-| `fct_retail_returns` match check, `where: is_matched` | 18,286 | 16,398 |
+| `stg_retail_lines` write-off check, `where: is_stock_write_off` | 1,044,848 | **3,393** |
+| `fct_retail_returns` match check, `where: is_matched` | 17,974 | 16,110 |
 | `cbam_default_values` sum check, `where:` all three columns non-null | 12,540 | **2,781** |
 
 None of those is a weakened test. `dim_grid_emission_factors` is one row per

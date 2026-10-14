@@ -1,4 +1,4 @@
--- Daily aggregate of the order-line fact. The fact itself is 1.07M rows, which
+-- Daily aggregate of the order-line fact. The fact itself is 1.04M rows, which
 -- is far too much to ship to a browser as Parquet — this is the roll-up the
 -- page's time series and weekday charts read.
 --

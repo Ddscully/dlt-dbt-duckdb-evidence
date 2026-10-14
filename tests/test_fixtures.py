@@ -82,6 +82,34 @@ def test_owid_fixture_is_a_readable_csv_slice():
     assert iso_codes == set(COUNTRIES)
 
 
+def test_retail_fixture_holds_each_invoice_of_the_sheet_overlap_once():
+    """Both sheets of the real workbook hold 1-9 December 2010, and the fixture
+    is one sheet, so it must hold only the copy the load keeps. Copied from both
+    sheets, the two copies share a `sheet_name`, the load cannot tell them apart,
+    and the fixture pipeline lands them twice and stays green: it did, until
+    `record_retail` wrote one copy. A doubled invoice has every line in pairs,
+    and none of the overlap's invoices does once each is held once.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        book = workbook.extract_member(fixtures.path_for(RETAIL_ARCHIVE), tmp, ".xlsx")
+        con = workbook.connect()
+        con.execute(f"create or replace view sheets as {workbook.sheets_sql(book)}")
+        invoices, doubled = con.sql(
+            f"""with line_groups as (
+                    select * exclude (line_number), count(*) as n
+                    from ({retail_sql()})
+                    where invoice_ts >= timestamp '2010-12-01'
+                      and invoice_ts < timestamp '2010-12-10'
+                    group by all
+                )
+                select count(distinct invoice), count(*) filter (where paired)
+                from (select invoice, bool_and(n % 2 = 0) as paired
+                      from line_groups group by invoice)"""
+        ).fetchone()
+    assert invoices > 0, "the slice must reach the overlap for this to test anything"
+    assert doubled == 0, f"{doubled} overlap invoice(s) hold every line twice: re-record"
+
+
 def test_retail_fixture_holds_every_shape_the_models_handle():
     """The retail slice is defined by shapes, not by a row count.
 
@@ -131,7 +159,7 @@ def test_retail_fixture_holds_every_shape_the_models_handle():
     assert row.positive_cancellations == 1, "the line that disproves 'C implies negative'"
     assert row.cancellations > 100
     assert row.write_offs > 50, "write-offs are what make 'negative quantity' not mean 'return'"
-    assert row.anonymous_lines > 1_000, "22.8% of the source has no customer"
+    assert row.anonymous_lines > 1_000, "22.5% of the source has no customer"
     assert row.negative_prices > 0, "only the A-prefixed adjustments have these"
     assert row.null_descriptions > 0
     assert row.non_product_codes > 20, "POST, DOT, M, AMAZONFEE, TEST001…"

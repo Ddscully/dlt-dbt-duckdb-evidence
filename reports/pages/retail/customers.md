@@ -97,7 +97,7 @@ Fifty-eight customers out of <Value data={concentration_stats} column=n_customer
 A campaign that lifts overall repeat rate by two points but misses the top
 percentile has moved almost nothing; losing the top nine of those 58 customers
 costs more than losing the bottom 2,900 combined. It also sets the reporting grain: an average order
-value or a blended churn rate over 5,835 customers is dominated by people who
+value or a blended churn rate over 5,838 customers is dominated by people who
 contribute a rounding error, which is the argument for the segmentation below
 rather than a single headline metric.
 

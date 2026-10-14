@@ -15,7 +15,7 @@ import requests
 from dlt.common.schema.typing import TColumnSchema
 
 from ingest import fixtures
-from modern_data_stack import workbook
+from modern_data_stack import env, workbook
 from modern_data_stack.paths import cache_dir
 from modern_data_stack.workbook import excel_serial_to_timestamp, extract_member
 
@@ -112,29 +112,14 @@ def retail_workbook() -> Path:
     return extract_member(archive, extracted.parent, ".xlsx")
 
 
-def retail_sql(months: tuple[str, str] | None = None) -> str:
-    """The SQL that turns the workbook into `raw.retail_invoice_lines`.
-
-    `months` is the partition filter: DuckDB still parses the whole workbook,
-    but only the selected rows are converted and handed to dlt.
-
-    * `line_number` comes from file position: the source has no line id and
-      34,337 rows duplicate another exactly. `preserve_insertion_order` is set
-      explicitly (in `modern_data_stack.workbook`) because the key's determinism
-      rests on it; `tests/test_ingest.py` reads the fixture twice and compares.
-    * Every column is cast from text exactly once, here — see
-      `modern_data_stack.workbook` for why the read is all-text.
-    * Nothing is cleaned: invoice prefixes, signs and blank customer ids land as
-      sent, and staging decides what they mean.
-    """
+def _typed_cte() -> str:
+    """The `source` and `typed` CTEs over the `sheets` view: every column cast
+    from text exactly once, plus `file_row`, the file position the line numbers
+    and the sheet rule are read from. Shared, so the guard judges the very rows
+    `retail_sql` lands."""
     ts = excel_serial_to_timestamp('"InvoiceDate"')
-    # In WHERE, before the window, so it cannot renumber a kept invoice's lines:
-    # it removes whole invoices only, since no invoice spans a month boundary.
-    where = ""
-    if months is not None:
-        where = f"where strftime(invoice_ts, '%Y-%m') between '{months[0]}' and '{months[1]}'"
     return f"""
-        with source as (
+        source as (
             select *, row_number() over () as file_row from sheets
         ),
         typed as (
@@ -150,10 +135,53 @@ def retail_sql(months: tuple[str, str] | None = None) -> str:
                 sheet_name,
                 file_row
             from source
+        )"""
+
+
+def retail_sql(months: tuple[str, str] | None = None) -> str:
+    """The SQL that turns the workbook into `raw.retail_invoice_lines`.
+
+    `months` is the partition filter: DuckDB still parses the whole workbook,
+    but only the selected rows are converted and handed to dlt.
+
+    * **Each invoice comes from one sheet.** The workbook's two sheets overlap:
+      both hold 1–9 December 2010, line for line. Each sheet's year starts on
+      1 December, so those days belong to the later sheet and the earlier one
+      runs nine days past its year; `deduped` keeps an invoice from the later
+      sheet only. The copies differ only in the order of 769 lines, so the
+      choice decides which order numbers them, and those lines' keys name
+      different lines than in a load from before the rule. It is not a
+      `distinct`: 11,812 lines of the landed table repeat another exactly, and
+      those are genuine repeated lines on one invoice. The rule is safe only
+      because the two copies are identical, which `retail_sheet_conflicts_sql`
+      checks before every load.
+    * `line_number` comes from file position: the source has no line id, and
+      exact repeats leave nothing in the content to tell lines apart.
+      `preserve_insertion_order` is set explicitly (in
+      `modern_data_stack.workbook`) because the key's determinism rests on it;
+      `tests/test_ingest.py` reads the fixture twice and compares.
+    * Every column is cast from text exactly once, in `_typed_cte` — see
+      `modern_data_stack.workbook` for why the read is all-text.
+    * Nothing is cleaned: invoice prefixes, signs and blank customer ids land as
+      sent, and staging decides what they mean.
+    """
+    # In WHERE, before the window, so it cannot renumber a kept invoice's lines:
+    # it removes whole invoices only, since no invoice spans a month boundary.
+    # After `deduped`, so an overlapping invoice is cut to one sheet first.
+    where = ""
+    if months is not None:
+        where = f"where strftime(invoice_ts, '%Y-%m') between '{months[0]}' and '{months[1]}'"
+    return f"""
+        with {_typed_cte()},
+        deduped as (
+            select * from typed
+            qualify sheet_name = last_value(sheet_name) over (
+                partition by invoice order by file_row
+                rows between unbounded preceding and unbounded following)
         ),
         filtered as (
             select *, strftime(invoice_ts, '%Y-%m') as invoice_month
-            from typed
+            from deduped
             {where}
         )
         select
@@ -170,6 +198,59 @@ def retail_sql(months: tuple[str, str] | None = None) -> str:
             sheet_name
         from filtered
     """
+
+
+def retail_sheet_conflicts_sql() -> str:
+    """The invoices held by more than one sheet whose copies differ.
+
+    Each copy is compared as a multiset: its lines are grouped on every column
+    with a count, so a repeated line counts as many times as it appears and
+    line order is ignored (the real copies differ in order and nothing else).
+    A group, count included, missing from any sheet that holds the invoice is a
+    conflict. One row per conflicting invoice, ordered, with how many of its
+    line groups differ.
+
+    The columns come from `typed` with a `*`, never a list: a column a list left
+    out would drop from the comparison, and a copy differing only there would be
+    dropped as identical.
+    """
+    return f"""
+        with {_typed_cte()},
+        copies as (
+            select * exclude (file_row), count(*) as n
+            from typed
+            group by all
+        ),
+        sheets_holding as (
+            select invoice, count(distinct sheet_name) as n_sheets
+            from typed
+            group by invoice
+            having count(distinct sheet_name) > 1
+        ),
+        groups as (
+            select * exclude (sheet_name), count(*) as n_holding
+            from copies
+            where invoice in (select invoice from sheets_holding)
+            group by all
+        )
+        select invoice, count(*) as differing_groups
+        from groups
+        join sheets_holding using (invoice)
+        where n_holding < n_sheets
+        group by invoice
+        order by invoice
+    """
+
+
+def retail_full_reload_requested() -> bool:
+    """`INGEST_RETAIL_FULL=1` drops the landing table and reloads the workbook.
+
+    The merge key is `(invoice, line_number)`, so a reload under a new rule
+    updates keys 1..N of an invoice and leaves any higher ones it no longer
+    yields: a landing zone loaded before the sheet rule keeps the overlap's
+    second copies until this runs. The workflows build from empty.
+    """
+    return env.flag("INGEST_RETAIL_FULL")
 
 
 @dlt.resource(
@@ -189,5 +270,16 @@ def retail_invoice_lines(months: tuple[str, str] | None = None):
     silently keeps only the first. `tests/test_ingest.py` pins the row count.
     """
     con = workbook.connect()
-    con.execute(f"create or replace view sheets as {workbook.sheets_sql(retail_workbook())}")
+    # A table, not a view: the guard and the load each read every row, and as a
+    # view each would parse the workbook again, which doubled the resource's
+    # time on the real file for no saving in peak memory.
+    con.execute(f"create temp table sheets as {workbook.sheets_sql(retail_workbook())}")
+    # Dropping one sheet's copy is safe only while the copies are identical, so
+    # a workbook whose sheets disagree about an invoice is refused, not loaded.
+    conflicts = con.sql(retail_sheet_conflicts_sql()).fetchall()
+    if conflicts:
+        raise RuntimeError(
+            f"{len(conflicts)} invoice(s) appear in more than one sheet with different "
+            f"lines, first {conflicts[0][0]!r}; keeping one sheet's copy would lose data"
+        )
     yield from con.sql(retail_sql(months)).to_arrow_reader(RETAIL_BATCH_ROWS)

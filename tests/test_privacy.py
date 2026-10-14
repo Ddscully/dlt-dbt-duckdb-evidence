@@ -92,7 +92,7 @@ def test_a_null_identifier_stays_null_because_the_expression_uses_pipes(warehous
     DuckDB's `concat` *ignores* NULL arguments, so `concat(customer_id, $salt)`
     on a row with no customer hashes the bare salt — and every anonymous row in
     the file lands on one identical pseudonym that is indistinguishable from a
-    real customer. Here that would silently invent a shopper with 243,007 order
+    real customer. Here that would silently invent a shopper with 235,287 order
     lines. `||` propagates, which is the truth: no identifier, no pseudonym.
     """
     naive, correct = warehouse.execute(

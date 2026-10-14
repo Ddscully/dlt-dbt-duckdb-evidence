@@ -23,7 +23,7 @@ It speaks the OpenAI chat-completions API, which Ollama serves at `/v1`, as do
 vLLM, LiteLLM and the hosted APIs; the endpoint and model are configuration.
 Nothing here is specific to one server.
 
-Run:  uv run python -m agent.loop "Why did revenue fall from 2010 to 2011?"
+Run:  uv run python -m agent.loop "What drove the change in revenue from 2010 to 2011?"
 """
 
 from __future__ import annotations

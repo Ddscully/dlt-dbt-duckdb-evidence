@@ -750,7 +750,7 @@ select count(*) from lakehouse.raw.om_weather_daily;
   `dim_retail_customer`, `fct_retail_returns` and `fct_retail_customer_cohorts`;
   `analytics.retail_rfm` scores each customer. Three things to read first: a
   negative quantity on a *sale* invoice is a stock write-off and not a return
-  (`is_stock_write_off`), 22.8% of lines carry no customer id so every
+  (`is_stock_write_off`), 22.5% of lines carry no customer id so every
   per-customer table covers a subset of the business, and returns are matched to
   the sale they reverse by inference — `match_status` says how confidently, per
   row, because the source has no key linking the two. All four fact and

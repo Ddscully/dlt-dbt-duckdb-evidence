@@ -676,7 +676,7 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [invoice, line_number]
-      # The classification's load-bearing assumption. Every one of the 3,457
+      # The classification's load-bearing assumption. Every one of the 3,393
       # negative-quantity lines on a sale invoice is zero-priced, which is what
       # makes "write-off, not return" a safe reading rather than a guess. If a
       # priced one ever appears, this fails with the row rather than booking it
@@ -706,9 +706,9 @@ models:
       - name: line_number
         description: >
           Position within the invoice, assigned at ingest from file order. The
-          source has no line identifier and 34,337 rows are exact duplicates of
-          another row, so content cannot key them — see `retail_sql` in
-          `ingest/pipeline.py`.
+          source has no line identifier and 11,812 rows repeat another line of
+          their invoice exactly, so content cannot key them — see `retail_sql` in
+          `ingest/sources/retail.py`.
         data_tests: [not_null]
       - name: invoice_type
         description: >
@@ -728,7 +728,7 @@ models:
       - name: item_type
         description: >
           What the line is for. Only `product` is merchandise; the rest are
-          postage, fees (AMAZONFEE alone nets -GBP 260,764), discounts, samples,
+          postage, fees (AMAZONFEE alone nets -GBP 221,521), discounts, samples,
           vouchers, manual adjustments and a literal test SKU.
         data_tests:
           - not_null
@@ -740,7 +740,7 @@ models:
         data_tests: [not_null]
       - name: unit_price
         description: >
-          GBP. Zero on 6,202 lines and negative on the six bad-debt adjustments,
+          GBP. Zero on 6,024 lines and negative on the six bad-debt adjustments,
           so it carries no non-negative bound — the range is a fact about the
           source, not a defect.
         data_tests: [not_null]
@@ -749,8 +749,8 @@ models:
         data_tests: [not_null]
       - name: customer_id
         description: >
-          Null on 243,007 lines (22.8%) — real sales nobody signed in for, worth
-          13.8% of net revenue. Deliberately not tested for nullity.
+          Null on 235,287 lines (22.5%) — real sales nobody signed in for, worth
+          13.5% of net revenue. Deliberately not tested for nullity.
         meta:
           pii: direct_identifier
       - name: country
@@ -806,6 +806,6 @@ models:
         description: >
           The model's one opinion: a product sale or genuine return that a
           customer was charged for — products only, no write-offs or
-          adjustments. Sums to GBP 19,384,356 against GBP 19,287,251
+          adjustments. Sums to GBP 18,981,993 against GBP 18,909,762
           for every line in the table.
         data_tests: [not_null]

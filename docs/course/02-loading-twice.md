@@ -253,8 +253,8 @@ missing rows: a pivot is the transformation that hands you a second chance.
 
 ## 🔧 Drill 2 — the truncated read, at two scales
 
-**Symptom.** `lakehouse.raw.retail_invoice_lines` lands `1000000` rows. The workbook has
-1,067,371. Nothing errored.
+**Symptom.** `lakehouse.raw.retail_invoice_lines` lands `1000000` rows. A full load lands
+1,044,848. Nothing errored.
 
 This one really happened here, and what caught it was **a human noticing a round
 number**, not a test. The drill stages the same mistake at fixture scale so you
@@ -288,7 +288,7 @@ just course-sandbox
 just course-query 'select count(*) from marts.fct_retail_order_line'
 ```
 
-Healthy: `41089`.
+Healthy: `40243`.
 
 <details>
 <summary>Reveal</summary>
@@ -320,18 +320,18 @@ select
      where sheet_name = 'Year 2009-2010' and invoice_ts <= timestamp '2010-02-01 08:24:00')
     as rows_before_it,
   (select count(*) from lakehouse.raw.retail_invoice_lines) as total_rows;
--- 76800, 1067371
+-- 76800, 1044848
 ```
 
-The row is at position **~76,800 of 1,067,371: 7% into the file**, in the first
-of two sheets. A 1,000,000-row truncation drops the last **67,371** rows, i.e.
-the final 6.3%. The pinned shape is nowhere near the boundary, so the test sails
-through while 67,371 rows are missing.
+The row is at position **~76,800 of 1,044,848: 7% into the file**, in the first
+of two sheets. A 1,000,000-row truncation drops the last **44,848** rows, i.e.
+the final 4.3%. The pinned shape is nowhere near the boundary, so the test sails
+through while 44,848 rows are missing.
 
 **The lesson, and it is the module's most transferable one:** a shape test
 protects the shape it names, not the *quantity* of data. Its power depends
 entirely on where the missing rows fall relative to what it pins, and at fixture
-scale (10,000 of 41,089) the boundary swept up the pinned row, while at
+scale (10,000 of 40,243) the boundary swept up the pinned row, while at
 production scale it did not. A check that fires in CI and not in production is
 worse than no check, because it is *believed*.
 

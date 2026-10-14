@@ -192,7 +192,7 @@ select
   (select count(*) from marts.fct_retail_order_line)   as retail_lines"
 ```
 
-Expected: `62928`, `4096`, `41089`. If the first two look surprising against each
+Expected: `62928`, `4096`, `40243`. If the first two look surprising against each
 other — 62,928 spine rows and 4,096 mart rows out of the same build — that is
 module 01, and it is the most important idea in the repo.
 

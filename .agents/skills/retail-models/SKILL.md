@@ -6,8 +6,8 @@ description: The dbt retail group — fct_retail_order_line, the retail dimensio
 # Retail transactions (the `retail_*` models, `analytics.retail_rfm`, `reports/pages/retail.md`)
 
 [UCI Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
-— a UK gift wholesaler's complete transaction log, 1,067,371 lines over
-2009-12-01 to 2011-12-09. **The first grain below a country**, the first source
+— a UK gift wholesaler's complete transaction log, 1,044,848 lines over
+2009-12-01 to 2011-12-09 (the workbook's 1,067,371 rows hold nine days twice). **The first grain below a country**, the first source
 that is a bulk file drop rather than an API, and the first fact recording what a
 person did rather than what an agency published. Six dbt models plus a Polars
 one; the page is `retail.md`.
@@ -17,7 +17,7 @@ one; the page is `retail.md`.
 - **The mess is the deliverable.** Nothing about this source has been cleaned by
   anyone, so the modelling *is* the value — and each decision has a wrong answer
   that produces a plausible number. The three that matter, all measured:
-  - **A negative quantity is not a return.** 3,457 negative lines sit on *sale*
+  - **A negative quantity is not a return.** 3,393 negative lines sit on *sale*
     invoices, every one priced at exactly zero with no customer: inventory
     write-offs (damage, stock counts, one row labelled `check`). Reading them as
     returns inflates the return count by a fifth and the returned value by
@@ -35,25 +35,56 @@ one; the page is `retail.md`.
     came out negative, and a bar of returns per product drew below the axis. It
     is 1..80,995 now, with an `accepted_range` holding it. A sign convention that
     is only written down in one of the two models that use it isn't one.
-  - **`item_type` is not decoration.** A bare revenue sum carries £463,931 of
-    postage and −£338,803 of bank fees as if they were sales.
+  - **`item_type` is not decoration.** A bare revenue sum carries £448,963 of
+    postage and −£285,923 of bank fees as if they were sales.
   - **`upper(trim(stock_code))` is load-bearing for a whole family of it.** All
     100 voucher lines arrive lowercase (`gift_0001_20`, never `GIFT_`), so the
     `voucher` branch is reachable *only* through the case fold — drop it and
     every one of them books as product. Lowercase `m` is 5 more lines against
-    `M`'s 1,421, and the source sends one bare `GIFT` that really is a product,
+    `M`'s 1,398, and the source sends one bare `GIFT` that really is a product,
     which is why the pattern carries the underscore. None of this is visible to a
     data test: `accepted_values` on `item_type` sees `product` and is satisfied.
     Mutated, all 19 of the model's data tests stay green while net revenue moves
-    £1,702 — and sending `AMAZONFEE` to `product` moves it £260,764 with the same
+    £1,702 — and sending `AMAZONFEE` to `product` moves it £221,521 with the same
     19 green. `dbt/models/staging/_unit_tests.yml` is what catches both now.
+- **The workbook's two sheets overlap, and the load keeps each invoice from one
+  of them.** "Year 2009-2010" and "Year 2010-2011" both hold 1–9 December 2010,
+  because each sheet's year starts on 1 December: 22,523 lines (2.11% of the
+  workbook's rows), £377,488 of value, 1,088 invoices and 622 customers landed
+  twice until `retail_sql` started keeping an invoice from the later sheet only.
+  Every uniqueness test passed throughout, because `line_number` numbers an
+  invoice's lines across both sheets, so a second copy arrives with fresh keys.
+  - **Not a `distinct`.** 11,812 landed lines repeat another line of their
+    invoice exactly, and those are genuine repeated lines, which a `distinct`
+    would delete along with the copies. The copies are dropped by *sheet*, never
+    by content.
+  - **Only an identical copy is dropped, and the guard fails closed.** The two
+    copies match as multisets (769 lines sit in a different order within their
+    invoice, and nothing else differs), so keeping one loses nothing.
+    `retail_sheet_conflicts_sql` compares every shared invoice's copies, counting
+    repeated lines, before each load, and the resource raises on any difference
+    rather than choosing a sheet's version of a disagreement.
+  - **A landing zone loaded before the rule keeps the second copies**: the merge
+    key updates an invoice's lines 1..N and leaves N+1..2N where they are.
+    `just ingest-retail-full` drops the table, reloads it and rebuilds the
+    retail models, once. A partitioned Dagster run refuses the flag, since the
+    drop would leave only its month. The workflows build from empty and never
+    hold the old copies.
+  - **The fixture once held both copies, in one sheet, so CI landed them after
+    the fix, green.** The recorded workbook is one sheet, and `record_retail`
+    copied each kept invoice from both real sheets into it: the 37 overlapping
+    invoices sat there twice under one `sheet_name`, where a rule that tells
+    copies apart by sheet cannot reach them. It now writes only the copy the
+    load keeps. A rule keyed on where a row came from needs a fixture that keeps
+    where it came from; the two-sheet tests in `tests/test_ingest.py` are the
+    rule's only cover.
 ### Returns, customers and cohorts
 
 - **Returns have no foreign key**, so `fct_retail_returns` infers the link with
   an `asof left join` to the same customer's most recent earlier purchase of the
-  same product. 87.7% match cleanly, 2.0% match a *smaller* purchase, 8.4% have
-  no prior purchase in the window, 1.9% have no customer id. **The 2.0% is the
-  interesting number**, not the 87.7% — it is the rule being wrong rather than
+  same product. 87.6% match cleanly, 2.0% match a *smaller* purchase, 8.5% have
+  no prior purchase in the window, 1.8% have no customer id. **The 2.0% is the
+  interesting number**, not the 87.6% — it is the rule being wrong rather than
   the data being absent. Reported per row instead of tuned into one headline; the
   median return comes back in 10 days, which is the evidence the rule isn't
   latching onto arbitrary sales.
@@ -87,18 +118,18 @@ one; the page is `retail.md`.
 - **Six mutations to `fct_retail_returns`, none caught by its data tests** (`dbt/models/marts/_unit_tests.yml`
   holds the three that do). The `accepted_values` on `match_status` is the same
   trap as `item_type`: reordering the `case` so "no prior purchase" is tested
-  before "no customer id" relabels 352 rows and stays green. `>=` for "quantity
-  exceeds purchase" moves 5,633 rows; `<` for `quantity_is_consistent` moves
-  5,613, which is **34% of all matches**, because a complete return is ordinary.
-  Dropping `item_type = 'product'` from the `returns` CTE adds 1,207 cancelled
+  before "no customer id" relabels 332 rows and stays green. `>=` for "quantity
+  exceeds purchase" moves 5,491 rows; `<` for `quantity_is_consistent` moves
+  the same 5,491, which is **34% of all matches**, because a complete return is ordinary.
+  Dropping `item_type = 'product'` from the `returns` CTE adds 1,190 cancelled
   postage and fee lines. Dropping `quantity > 0` from `purchases` does nothing —
   every write-off is anonymous, so the customer filter already excludes them,
   and `return_matches_never_point_at_a_stock_write_off` is the fixture that
   reaches it anyway (a write-off carrying a customer id, which the source has
   never sent, becomes the matched "purchase" and reports a negative
   `original_quantity`).
-- **`dim_retail_customer` covers a subset of the business and says so.** 22.8%
-  of lines have no customer id — £2.67M, 13.8% of revenue. The two shares differ
+- **`dim_retail_customer` covers a subset of the business and says so.** 22.5%
+  of lines have no customer id — £2.57M, 13.5% of revenue. The two shares differ
   because an order nobody signed in for is a smaller order, and quoting the line
   share as the revenue share overstates the hole by nine points. Also: 5,881 of
   the 5,942 ids reach the dimension (61 never purchased), and `cohort_month` is
@@ -163,16 +194,16 @@ one; the page is `retail.md`.
     *overlapping* conditions, so the label depends on branch order — invisible in
     review. Monetary is deliberately not in the grid: R and F say what the
     relationship is doing, M says what it is worth.
-  - Champions are 14.9% of the identified base and 62.7% of its revenue.
+  - Champions are 14.9% of the identified base and 62.6% of its revenue.
 ### First-order value against lifetime value
 
 - **`dim_retail_customer.first_order_gbp` is the page's only forward-looking
   number, and the statistic that describes it is not the obvious one.** Pearson
-  *r* against lifetime value is 0.641 and is almost entirely one customer: drop
-  the single largest first order (£33,168 → £235,833) and it falls to **0.398**;
-  under £5,000 it is 0.344. The **rank** correlation does not move — 0.592,
-  0.592, 0.590 across the same three cuts — so that is what the page quotes,
-  with the quintile medians (£191 → £410 → £714 → £905 → £1,885, repeat rate
+  *r* against lifetime value is 0.643 and is almost entirely one customer: drop
+  the single largest first order (£33,168 → £233,804) and it falls to **0.400**;
+  under £5,000 it is 0.348. The **rank** correlation does not move — 0.598,
+  0.598, 0.595 across the same three cuts — so that is what the page quotes,
+  with the quintile medians (£190 → £406 → £705 → £892 → £1,904, repeat rate
   58% → 78%) as what it means in money. A Pearson *r* on a heavy-tailed money
   column is a statistic about the tail.
   - **An invoice, not a day.** `n_orders` counts invoices, so "order" has to
@@ -214,9 +245,9 @@ reimplemented by one. The bar set and what it was chosen over are
 - **The window comes from the fact's first and last `invoice_date`, never from
   a year's own last sale.** 2010's last sale is 23 Dec because the business
   closes over New Year; read as the end of coverage, a closure becomes missing
-  data. 2010 against 2011 is compared over 1 Jan–9 Dec: net revenue falls
-  **3.19% in EUR, not the 6.86% the full years show**, and pro-rating 2011
-  instead reads +0.43%
+  data. 2010 against 2011 is compared over 1 Jan–9 Dec: net revenue **rises
+  1.30% in EUR, where the full years show a fall of 2.71%**, and pro-rating
+  2011 instead reads +4.84% in GBP
   ([`docs/decisions/0013-compare-aligned-periods.md`](../../../docs/decisions/0013-compare-aligned-periods.md)).
 - **Every aggregate becomes a `Fraction`**, so the bars sum to the change with
   `==`. As floats the GBP bars miss by about 1e-9, which makes the identity
@@ -240,8 +271,8 @@ reimplemented by one. The bar set and what it was chosen over are
   columns mean is `just describe-model <model>`. The metric rules are
   `contracts-and-data-quality`.
 - **The answer for 2010 → 2011 is mostly churn**: continuing SKUs sold fewer
-  units (volume −€2.23m) at slightly lower prices (−€0.26m) with a richer mix
-  (+€0.59m), and new SKUs (+€2.74m) replaced most of it.
+  units (volume −€1.85m) at slightly lower prices (−€0.23m) with a richer mix
+  (+€0.65m), and new SKUs (+€2.74m) more than replaced it.
 
 ### Where retail touches the rest of the warehouse
 
@@ -254,8 +285,8 @@ reimplemented by one. The bar set and what it was chosen over are
   market pays, is a join now and was impossible before.
   - **34 of the 43 match `dim_country_year.country_name` exactly, which is the
     trap rather than the good news.** A join on name succeeds silently for those
-    and drops the other nine: 19,898 lines and GBP 652,387, and `EIRE` alone is
-    GBP 615,520 — the retailer's *second-largest market* — so a regional rollup
+    and drops the other nine: 19,721 lines and GBP 647,112, and `EIRE` alone is
+    GBP 610,244 — the retailer's *second-largest market* — so a regional rollup
     built that way loses Ireland and looks complete.
   - **Six labels are human judgements.** `EIRE`→IRL, `RSA`→ZAF, `USA`→USA,
     `Czech Republic`→CZE (the dimension says Czechia), `Hong Kong`→HKG (Hong
@@ -274,7 +305,7 @@ reimplemented by one. The bar set and what it was chosen over are
     `relationships(country → retail_country_map)`, the test whose whole job is to
     name an unmapped label, *passes*, because the rows it would have read are the
     ones that were deleted. Measured against a warehouse copy by removing `EIRE`
-    from the seed and making the join inner: **17,866 lines and GBP 615,520 gone,
+    from the seed and making the join inner: **17,689 lines and GBP 610,244 gone,
     four customers with them, and all 90 nodes green.**
     `dbt_utils.equal_rowcount` cannot see it either — it compares
     `stg_retail_lines` to `fct_retail_order_line`, which is downstream and
@@ -285,10 +316,10 @@ reimplemented by one. The bar set and what it was chosen over are
     customers transact from two countries; two independent aggregates can name
     one country and code another.
 
-- **The FX carry-forward stops being theoretical here.** 139,658 lines (13.1%)
-  convert on a rate the ECB published earlier, and **every one is a Sunday**:
-  this business trades Sunday and not Saturday (139,256 lines against 402), and
-  it closes on exactly the days TARGET does, so no weekday closure ever
+- **The FX carry-forward stops being theoretical here.** 136,933 lines (13.1%)
+  convert on a rate the ECB published earlier, and **every one falls on a
+  weekend**, all but 402 of them on a Sunday: this business trades on Sundays and
+  hardly ever on Saturdays (136,531 lines against 402), and it closes on exactly the days TARGET does, so no weekday closure ever
   coincides with an order. A model assuming "weekend" means Saturday and Sunday
   equally reads it backwards.
 - **`fct_retail_order_line` carries a plain `year` beside `iso_year`**, because

@@ -221,9 +221,9 @@ Then delete:
 - all of `reports/pages` and `reports/sources/warehouse/*.sql` **except
   `pipeline.md` and the four `pipeline_*.sql` queries**, which render the
   observability tables and name nothing in the example;
-- the nine justfile recipes that exist only for the example (`ingest-wdi-full`,
-  `ingest-fx-full`, `backfill-*`, `disclosure-risk`, `course-*`), and the two
-  transform lines in `transform` and `test-pipeline`;
+- the ten justfile recipes that exist only for the example (`ingest-*-full`,
+  `backfill-*`, `disclosure-risk`, `course-*`), and the two transform lines in
+  `transform` and `test-pipeline`;
 - `docs/course/`, and seven of the eighteen skills: country stats, compliance,
   retail, currency and calendar, weather, unit-tested models, course authoring;
 - the docs about this warehouse's data. What stays is `STYLE_GUIDE.md`,
@@ -476,7 +476,7 @@ the one people reach for.
 the modelled layers in a 282 MB DuckDB file, plus a DuckLake landing zone that
 snapshot expiry holds to about 100 MiB: the live Parquet and one load's
 rewrites. The largest relation is
-`fct_retail_order_line` at 1,067,371 rows. A full `dbt build`, every test
+`fct_retail_order_line` at 1,044,848 rows. A full `dbt build`, every test
 included, takes **24.5 s** of dbt's own time on four threads. `analytics.pipeline_runs` records that per build, so the trend is a query rather
 than a memory.
 
@@ -495,7 +495,7 @@ the porting decision the ordering implies, which is shorter than the mechanism:
 - **The first volume limit is whatever materialises a whole relation in
   memory**, which here is the two Polars transforms. Note *which* relation: they
   read a mart, not a landing table, so they are bounded by what dbt already
-  aggregated — 43,138 and 5,881 rows against a 1.07M-row source. Porting this
+  aggregated — 43,138 and 5,881 rows against a 1.04M-row source. Porting this
   shape, the equivalent question is what your heavy-transform layer reads, not
   how much you ingest.
 - **The file itself is not the constraint.** DuckDB handles far more than this

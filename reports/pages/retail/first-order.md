@@ -89,15 +89,15 @@ above it is everyone who came back, and returns pull only 21 of them below it.
 
 ### Why the correlation coefficient is the wrong number here
 
-The temptation is to quote a Pearson *r*, which is **0.641** and looks
+The temptation is to quote a Pearson *r*, which is **0.643** and looks
 convincing. It is almost entirely one customer: the largest first order in the
-file is £33,168, from an account that went on to spend £235,833, and deleting
-that single row takes *r* down to **0.398**. Below £5,000 of first order it is
-0.344. A statistic that moves by a quarter of its range when you remove one of
+file is £33,168, from an account that went on to spend £233,804, and deleting
+that single row takes *r* down to **0.400**. Below £5,000 of first order it is
+0.348. A statistic that moves by a quarter of its range when you remove one of
 4,868 points is measuring the outlier, not the relationship.
 
-The **rank** correlation does not move at all: 0.592 with the outlier, 0.592
-without it, 0.590 below £5,000. Ranks are indifferent to how far out the far end
+The **rank** correlation does not move at all: 0.598 with the outlier, 0.598
+without it, 0.595 below £5,000. Ranks are indifferent to how far out the far end
 goes. That is the number to quote, and the quintile table is what it means in
 money.
 
@@ -144,14 +144,14 @@ order by quintile
     <Column id=pct_revenue title="% of cohort revenue" fmt='0.0"%"'/>
 </DataTable>
 
-Median lifetime value runs £191 → £410 → £714 → £905 → £1,885 across the
+Median lifetime value runs £190 → £406 → £705 → £892 → £1,904 across the
 quintiles. The top fifth spent 6.8 times what the bottom fifth did on day one
-(median £751 against £110) and went on to be worth **9.9 times** as much, so the
-signal amplifies instead of merely persisting, and that fifth accounts for 44.8%
+(median £745 against £110) and went on to be worth **10.0 times** as much, so the
+signal amplifies instead of merely persisting, and that fifth accounts for 45.1%
 of the cohort's revenue.
 
-One wrinkle: the repeat rate is not monotonic. It climbs 58% → 64% → 73%, dips
-to 72% in the fourth quintile, then reaches 78% in the fifth. Whatever separates
+One wrinkle: the repeat rate is not monotonic. It climbs 58% → 64% → 74%, dips
+to 71% in the fourth quintile, then reaches 78% in the fifth. Whatever separates
 a £300 first order from a £400 one, it is not whether the customer comes back.
 
 <Alert status=info>
@@ -159,12 +159,12 @@ a £300 first order from a £400 one, it is not whether the customer comes back.
 **So what.** This is the only genuinely forward-looking number in the retail section. The
 [concentration curve](/retail/customers) says a small group carries the business; this says that
 group is largely identifiable on the day it arrives, from data that already exists
-at the point of sale. A first order over £516 puts a customer in the fifth that
-generates 45% of revenue, at just under 78% odds of ordering again.
+at the point of sale. A first order over £508 puts a customer in the fifth that
+generates 45% of revenue, at just over 78% odds of ordering again.
 
 **Who acts:** whoever owns acquisition spend and onboarding. Bidding the same
 amount for every new customer, or running the same welcome sequence at all of
-them, is leaving the difference between £191 and £1,885 of expected value on the
+them, is leaving the difference between £190 and £1,904 of expected value on the
 table.
 
 **Cost of getting it wrong:** the causation runs the other way just as easily. A
