@@ -381,12 +381,12 @@ def test_live_caches_the_landing_zone_where_pages_looks_for_it():
     """The hand-off between the two workflows is two strings, and a mismatch is green.
 
     actions/cache matches on the path as well as the key, so a cache saved under
-    another path or prefix is never found: every push falls back to the live
+    another path or prefix is never found: every build falls back to the live
     path, which builds and deploys exactly as before the cache existed. The one
     trace is a line in each run's summary. So both workflows read the same two
     env names, set identically; the path is the landing zone the setup action
     points `LAKEHOUSE_DIR` at; and every key is stamped with the epoch second
-    that `pages.yml` reads the cache's age from.
+    that `pages.yml` reads the cache's age from and the commit it diffs from.
     """
     pages, live = _workflow("pages.yml"), _workflow("live.yml")
     for name in ("RAW_CACHE_PATH", "RAW_CACHE_PREFIX"):
@@ -403,7 +403,10 @@ def test_live_caches_the_landing_zone_where_pages_looks_for_it():
         assert all(s["with"]["path"] == "${{ env.RAW_CACHE_PATH }}" for s in cached), name
         stamps = [s for s in steps if s.get("id") == "stamp"]
         assert stamps, f"{name} saves no cache entry"
-        assert all("key=${RAW_CACHE_PREFIX}$(date +%s)-" in s["run"] for s in stamps), name
+        assert all(
+            "key=${RAW_CACHE_PREFIX}$(date +%s)-${GITHUB_RUN_ID}-${GITHUB_SHA}" in s["run"]
+            for s in stamps
+        ), name
 
     (lookup,) = [s for s in _steps(pages) if s.get("id") == "lookup"]
     assert lookup["with"]["restore-keys"] == "${{ env.RAW_CACHE_PREFIX }}"
@@ -414,7 +417,7 @@ def test_no_workflow_reads_a_failed_download_as_an_absent_asset():
     release has no such asset", which `restore_history` reads as nothing to
     carry. In `live.yml` and a live `pages.yml` build that is worse than in the
     release: the borrow step still reports `carried`, and the cold-started
-    weather archive is cached for every push until the next refresh. Every
+    weather archive is cached for every build until the next refresh. Every
     workflow that restores asks the release what it holds instead.
     """
     problems = {}
@@ -430,22 +433,28 @@ def test_no_workflow_reads_a_failed_download_as_an_absent_asset():
     assert not problems, f"downloads whose failure reads as an absent asset: {problems}"
 
 
-def test_a_push_is_diffed_from_the_last_build_that_succeeded():
-    """Diffed from the push's own `before`, an `ingest/` change whose run the
-    concurrency group cancelled while it waited, or whose live build failed,
-    reaches the site over the old landing zone when the next push builds from
-    the cache. Diffed with renames on, a file moved out of `ingest/` is listed
-    only where it went. And without `actions: read` the lookup of the last
-    success fails, which falls back to live: every push, green, coupled to the
-    publishers again.
+def test_every_build_is_diffed_from_the_commit_that_built_its_cache():
+    """The cache is only as new as the code that fetched it, so that commit is
+    the one to diff from, whatever started the run.
+
+    Diffed from the last successful run, a cached build or a live one whose
+    borrow soft-failed saves no cache but still becomes the base, and an
+    `ingest/` change before it reaches the site over a landing zone the old
+    code fetched. Diffed from the push's own `before`, so does one whose run
+    the concurrency group cancelled while it waited. Diffed on a push alone,
+    the Monday rebuild and a plain dispatch take any cache, including one a
+    `live.yml` run that started before the change finished saving. Diffed with
+    renames on, a file moved out of `ingest/` is listed only where it went.
     """
-    pages = _workflow("pages.yml")
-    (source,) = [s for s in _steps(pages) if s.get("id") == "source"]
-    run = source["run"]
-    assert "gh run list --workflow pages.yml --branch main --status success" in run
-    assert 'git diff --no-renames --name-only "$base" "$GITHUB_SHA"' in run
-    assert "github.event.before" not in str(source), "diffed from the push, not the last build"
-    assert pages["permissions"].get("actions") == "read", pages["permissions"]
+    (mode,) = [s for s in _steps(_workflow("pages.yml")) if s.get("id") == "mode"]
+    run = mode["run"]
+    assert 'git diff --no-renames --name-only "$sha" "$GITHUB_SHA"' in run
+    assert "gh run list" not in run, "diffed from the last successful run"
+    assert "github.event.before" not in str(mode), "diffed from the push, not the cache"
+    assert "push)" not in run, "diffed only when a push started the run"
+    assert "event_name" not in str(mode) and "$EVENT" not in run, (
+        "the decision branches on what started the run, so some event skips the diff"
+    )
 
 
 def test_no_workflow_uploads_the_warehouse_or_the_landing_zone_in_the_clear():
@@ -473,8 +482,8 @@ def test_no_workflow_uploads_the_warehouse_or_the_landing_zone_in_the_clear():
 
 
 def _live_paths() -> list[str]:
-    (source,) = [s for s in _steps(_workflow("pages.yml")) if s.get("id") == "source"]
-    return source["env"]["LIVE_PATHS"].split()
+    (mode,) = [s for s in _steps(_workflow("pages.yml")) if s.get("id") == "mode"]
+    return mode["env"]["LIVE_PATHS"].split()
 
 
 def _package_modules_reached_from(*dirs: str) -> set[str]:

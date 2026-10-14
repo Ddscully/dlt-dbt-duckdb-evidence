@@ -192,7 +192,7 @@ last 40:
 |----------|--------|-------|---|--------------|
 | `ci` | **191 s** | 170–290 | 40 | pytest + the whole asset graph against fixtures, offline |
 | `live` | **175 s** | 89–999 | 39 | the same graph against live sources |
-| `pages` | **271 s** | 164–712 | 40 | live build + the Evidence site + deploy |
+| `pages` | **271 s** | 164–712 | 40 | live build + the Evidence site + deploy; measured on live builds, and a cached build skips the ingest (160 s on the first one on `main`, run 38605126706) |
 | `release-data` | **171 s** | 109–247 | 6 | live build + export + a dated GitHub release |
 
 **The medians go stale, which is why the range and `n` ship beside them.**

@@ -5,13 +5,13 @@ name: pages
 #
 # Unlike `ci.yml`, this builds from the real sources: a dashboard built from
 # `tests/fixtures/ingest/` would show the 17-country slice rather than the world.
-# But only a build that may need new data calls them. A push that cannot change
-# what lands in `raw` starts from the landing zone `live.yml` fetched and cached,
-# so a publisher that is down, or serving a stale copy, cannot turn the deploy of
-# a commit red when the commit could not have caused it. When a live build does
-# go red, `live.yml` is what alerts, and the previous deployment stays up. Why,
-# and what it measured:
-# docs/decisions/0020-the-site-builds-from-the-cached-landing-zone.md.
+# But only a build that may need new data calls them. A build where nothing
+# since the commit that built the newest cache can change what lands in `raw`
+# starts from the landing zone that commit fetched and cached, so a publisher
+# that is down, or serving a stale copy, cannot turn the deploy of a commit red
+# when the commit could not have caused it. When a live build does go red,
+# `live.yml` is what alerts, and the previous deployment stays up. Why, and what
+# it measured: docs/decisions/0020-the-site-builds-from-the-cached-landing-zone.md.
 #
 # Requires Pages to be enabled once, with Settings -> Pages -> Source set to
 # "GitHub Actions".
@@ -67,9 +67,6 @@ permissions:
   contents: read
   pages: write
   id-token: write
-  # To find the last successful build, which a push is diffed against. Without
-  # it every push would fall back to the live path, green.
-  actions: read
 
 # Let a running deploy finish rather than cancelling it: a half-deployed site is
 # worse than a slightly stale one. Per ref, so a dry run on a branch never holds
@@ -80,13 +77,13 @@ concurrency:
 
 # The landing zone `live.yml` caches and this workflow restores. actions/cache
 # matches on the path string as well as the key, so a mismatch is not an error:
-# it is a miss, every push goes down the live path, and the build stays green.
+# it is a miss, every build goes down the live path, and stays green.
 # `tests/test_workflows.py` holds both workflows to the same values.
 env:
   RAW_CACHE_PATH: data/lakehouse
   RAW_CACHE_PREFIX: raw-lakehouse-
   # `live.yml` refreshes the cache weekly, so this survives one failed refresh
-  # (a publisher down for a week) and not two. Past it a push goes live.
+  # (a publisher down for a week) and not two. Past it a build goes live.
   RAW_CACHE_MAX_AGE_DAYS: 15
 
 jobs:
@@ -120,23 +117,46 @@ jobs:
           printf '\ndeployment:\n  basePath: /%s\n' \
             '${{ github.event.repository.name }}' >> reports/evidence.config.yaml
 
+      # Lookup only: the key decides the path, and the path decides what the
+      # release step downloads. The key is never an exact hit, so the prefix
+      # picks the most recently created cache. Skipped only when dispatched
+      # with `live`, which needs no cache.
+      - name: Find the newest cached landing zone
+        id: lookup
+        if: inputs.live != true
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.RAW_CACHE_PATH }}
+          key: ${{ env.RAW_CACHE_PREFIX }}lookup-${{ github.run_id }}
+          restore-keys: ${{ env.RAW_CACHE_PREFIX }}
+          lookup-only: true
+
       # Decided before anything is restored, because the two paths restore
-      # different things. A push goes live when it can change what lands in
-      # `raw`, or whether a cached catalog can still be read: the extraction
-      # code, the landing zone, the package modules those two import, and the
-      # dependency set, since a newer DuckDB may not read a catalog an older one
-      # wrote. A red live build is then the commit's or the publisher's; a red
-      # cached build can only be the commit's. `tests/test_workflows.py` holds
-      # LIVE_PATHS to the imports and to the trigger list above.
+      # different things. A build goes live when anything since the commit that
+      # built the newest cache can change what lands in `raw`, or whether a
+      # cached catalog can still be read: the extraction code, the landing zone,
+      # the package modules those two import, and the dependency set, since a
+      # newer DuckDB may not read a catalog an older one wrote. A red live build
+      # is then the commit's or the publisher's; a red cached build can only be
+      # the commit's. `tests/test_workflows.py` holds LIVE_PATHS to the imports
+      # and to the trigger list above.
+      #
+      # Every event is diffed, the Monday rebuild and a plain dispatch as much as
+      # a push: the cache is only as new as the code that fetched it, whatever
+      # started this run. The key carries that commit, and the epoch second it
+      # was saved at. No cache, one too old, or one whose commit cannot be read
+      # falls back to the live path, which is how every build ran before the
+      # cache existed; the run's summary says which path it took and why. Why
+      # the commit and not the last successful run:
+      # docs/decisions/0021-a-build-is-diffed-from-the-commit-that-built-its-cache.md.
       #
       # `[[ == ]]` matches as GitHub's `paths:` does here: `*` crosses `/`.
-      - name: Decide whether this build needs the live sources
-        id: source
+      - name: Decide between the live sources and the cache
+        id: mode
         timeout-minutes: 2
         env:
-          EVENT: ${{ github.event_name }}
           FORCE_LIVE: ${{ inputs.live }}
-          GH_TOKEN: ${{ github.token }}
+          MATCHED: ${{ steps.lookup.outputs.cache-matched-key }}
           LIVE_PATHS: |
             ingest/**
             lake/**
@@ -151,88 +171,46 @@ jobs:
             .python-version
         run: |
           set -euo pipefail
-          want=cached
-          case "$EVENT" in
-            schedule) reason="the Monday rebuild, after live.yml's refresh" ;;
-            workflow_dispatch)
-              if [ "$FORCE_LIVE" = true ]; then want=live; reason="dispatched with live"
-              else reason="dispatched"; fi ;;
-            push)
-              # Diffed from the last build that succeeded, not from the push's
-              # own `before`: the concurrency group cancels a run still waiting
-              # when a newer one queues, and a failed live build leaves its
-              # change unbuilt, so one push at a time would let an `ingest/`
-              # change reach the site over a landing zone the old code fetched.
-              # From the last success, pushes keep going live until one builds.
-              # A lookup that fails falls back to live rather than going red.
-              base=$(gh run list --workflow pages.yml --branch main --status success \
-                --limit 1 --json headSha --jq '.[0].headSha // empty') || base=
-              # The checkout is one commit deep; the tree being diffed against
-              # is all that is needed, not the history between. Run outside a
-              # runner, this fetch makes a full clone shallow at $base (undo:
-              # `git fetch --unshallow`), so try the step in a scratch clone.
-              if [ -n "$base" ] && git fetch --quiet --no-tags --depth=1 origin "$base"; then
-                hits=()
-                # `--no-renames`: a file moved out of `ingest/` is listed under
-                # both paths, not only the one it moved to.
-                while IFS= read -r file; do
-                  while IFS= read -r pattern; do
-                    if [ -n "$pattern" ] && [[ $file == $pattern ]]; then
-                      hits+=("$file"); break
-                    fi
-                  done <<< "$LIVE_PATHS"
-                done < <(git diff --no-renames --name-only "$base" "$GITHUB_SHA")
-                if [ ${#hits[@]} -gt 0 ]; then
-                  want=live; reason="${hits[*]:0:3} changed since the last build (${base:0:7})"
-                else
-                  reason="nothing since the last build (${base:0:7}) can change raw"
-                fi
-              else
-                want=live; reason="no successful build to diff the push against"
-              fi ;;
-          esac
-          echo "want=$want" >> "$GITHUB_OUTPUT"
-          echo "reason=$reason" >> "$GITHUB_OUTPUT"
-
-      # Lookup only: the age decides the path, and the path decides what the
-      # release step downloads. The key is never an exact hit, so the prefix
-      # picks the most recently created cache.
-      - name: Find the newest cached landing zone
-        id: lookup
-        if: steps.source.outputs.want == 'cached'
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.RAW_CACHE_PATH }}
-          key: ${{ env.RAW_CACHE_PREFIX }}lookup-${{ github.run_id }}
-          restore-keys: ${{ env.RAW_CACHE_PREFIX }}
-          lookup-only: true
-
-      # The key carries the epoch second it was saved at. No cache, or one too
-      # old, falls back to the live path, which is how every build ran before
-      # the cache existed; the run's summary says which path it took and why.
-      - name: Settle on the live sources or the cache
-        id: mode
-        timeout-minutes: 1
-        env:
-          WANT: ${{ steps.source.outputs.want }}
-          REASON: ${{ steps.source.outputs.reason }}
-          MATCHED: ${{ steps.lookup.outputs.cache-matched-key }}
-        run: |
-          set -euo pipefail
-          mode=$WANT reason=$REASON
-          if [ "$WANT" = cached ]; then
-            saved=${MATCHED#"$RAW_CACHE_PREFIX"}
-            saved=${saved%%-*}
-            if [ -z "$MATCHED" ]; then
-              mode=live reason="no cached landing zone: evicted, or never saved"
-            elif ! [[ $saved =~ ^[0-9]+$ ]]; then
-              mode=live reason="cannot read when $MATCHED was saved"
+          mode=live
+          # `<prefix><epoch>-<run id>-<sha>`: the epoch before the first `-`,
+          # the commit after the last.
+          stamp=${MATCHED#"$RAW_CACHE_PREFIX"}
+          saved=${stamp%%-*} sha=${stamp##*-}
+          if [ "$FORCE_LIVE" = true ]; then
+            reason="dispatched with live"
+          elif [ -z "$MATCHED" ]; then
+            reason="no cached landing zone: evicted, or never saved"
+          elif ! [[ $saved =~ ^[0-9]+$ && $sha =~ ^[0-9a-f]{40}$ ]]; then
+            reason="cannot read when $MATCHED was saved, or which commit built it"
+          else
+            age=$(( ($(date +%s) - saved) / 86400 ))
+            cache="the cache ${sha:0:7} built $age days ago"
+            if [ "$age" -gt "$RAW_CACHE_MAX_AGE_DAYS" ]; then
+              reason="$cache is past the $RAW_CACHE_MAX_AGE_DAYS-day limit"
+            # The checkout is one commit deep; the tree being diffed against is
+            # all that is needed, not the history between. Run outside a
+            # runner, this fetch makes a full clone shallow at $sha (undo:
+            # `git fetch --unshallow`), so try the step in a scratch clone.
+            elif ! git fetch --quiet --no-tags --depth=1 origin "$sha"; then
+              reason="cannot fetch ${sha:0:7}, which built the cache $age days ago"
+            # `--no-renames`: a file moved out of `ingest/` is listed under both
+            # paths, not only the one it moved to.
+            elif ! changed=$(git diff --no-renames --name-only "$sha" "$GITHUB_SHA"); then
+              reason="cannot diff from ${sha:0:7}, which built the cache $age days ago"
             else
-              age=$(( ($(date +%s) - saved) / 86400 ))
-              if [ "$age" -gt "$RAW_CACHE_MAX_AGE_DAYS" ]; then
-                mode=live reason="the cached landing zone is $age days old"
+              hits=()
+              while IFS= read -r file; do
+                while IFS= read -r pattern; do
+                  if [ -n "$file" ] && [ -n "$pattern" ] && [[ $file == $pattern ]]; then
+                    hits+=("$file"); break
+                  fi
+                done <<< "$LIVE_PATHS"
+              done <<< "$changed"
+              if [ ${#hits[@]} -gt 0 ]; then
+                reason="${hits[*]:0:3} changed since ${sha:0:7}, which built the cache $age days ago"
               else
-                reason="$reason; landing zone cached $age days ago"
+                mode=cached
+                reason="nothing since ${sha:0:7}, which built the cache $age days ago, can change raw"
               fi
             fi
           fi
@@ -269,7 +247,7 @@ jobs:
           # Beside the database, where `restore_history` looks. Whether the
           # release has one is asked, as release-data.yml asks, never inferred
           # from a failed download: that would cold-start the weather archive,
-          # report `carried` and cache the thin archive for every push after.
+          # report `carried` and cache the thin archive for every build after.
           if [ "$MODE" = live ]; then
             assets=$(gh release view "$prev" --json assets --jq '.assets[].name')
             if grep -qx 'lakehouse.tar.gz' <<<"$assets"; then
@@ -282,8 +260,8 @@ jobs:
           rm -rf prev-release
           echo "carried=true" >> "$GITHUB_OUTPUT"
 
-      # The exact key the lookup found, so the build reads the cache the age was
-      # read from. Then re-pointed: DuckLake keeps the catalog's data path as an
+      # The exact key the lookup found, so the build reads the cache the decision
+      # was read from. Then re-pointed: DuckLake keeps the catalog's data path as an
       # absolute string, and `live.yml` wrote it on another runner. `--relink`
       # also prints what the restored landing zone holds.
       - name: Restore the cached landing zone
@@ -317,17 +295,18 @@ jobs:
         run: just materialize-site-from-raw
 
       # A live build fetched a landing zone as good as `live.yml`'s, and the
-      # next push may need what it landed: a column an `ingest/` change added
-      # and a later dbt change reads. Only when the release's archive was
+      # next build may need what it landed: a column an `ingest/` change added
+      # and a later dbt change reads. The key ends in the commit that fetched
+      # it, which the next build diffs from. Only when the release's archive was
       # carried in, so a failed download never caches a cold-started weather
-      # archive for every push after it.
+      # archive for every build after it.
       - name: Name the cache entry for this landing zone
         id: stamp
         if: steps.mode.outputs.mode == 'live' && steps.borrow.outputs.carried == 'true'
         timeout-minutes: 1
-        run: echo "key=${RAW_CACHE_PREFIX}$(date +%s)-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+        run: echo "key=${RAW_CACHE_PREFIX}$(date +%s)-${GITHUB_RUN_ID}-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
-      - name: Cache the landing zone for the pushes after this one
+      - name: Cache the landing zone for the builds after this one
         if: steps.stamp.outputs.key != ''
         uses: actions/cache/save@v6
         with:

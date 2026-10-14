@@ -2,7 +2,7 @@ blank_issues_enabled: true
 contact_links:
   - name: The live dashboard
     url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/
-    about: Nothing to install — the numbers, rebuilt from the live sources on every push.
+    about: Nothing to install — the numbers, fetched weekly from the live sources.
 
   - name: Why a figure looks the way it does
     url: https://ddscully.github.io/dlt-dbt-duckdb-evidence/coverage
