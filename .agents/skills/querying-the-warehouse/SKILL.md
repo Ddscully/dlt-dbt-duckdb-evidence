@@ -35,7 +35,7 @@ the five unwindowed dlt resources (the four `replace` ones plus `ecb_fx_rates`)
 in one op: parallel steps would just fight over the lock.
 
 For interactive poking, `just sql` opens the DuckDB CLI read-only, which is the
-right default — but **it does not let you sit alongside a build.** Measured on the pinned DuckDB 1.5.5 against
+right default — but **it does not let you sit alongside a build.** Measured on DuckDB 1.5.5 against
 `data/warehouse.duckdb` itself, driving the recipe rather than a library: `just
 sql` exits 1 with `Could not set lock on file … Conflicting lock is held`, and
 the Python client agrees. Both directions, across processes:
@@ -208,7 +208,7 @@ print(len(revisions(WEATHER_TABLE, v[-2], v[-1])), 'rows genuinely restated') if
 
 Any JDBC client meets the lock and the catalog attach, without `just sql` to
 handle either. What follows was measured with DBeaver and its DuckDB JDBC driver
-1.5.5.1; the `ATTACH` rules were re-measured on the pinned DuckDB 1.5.5
+1.5.5.1; the `ATTACH` rules were re-measured on DuckDB 1.5.5
 through the Python client, and the bootstrap statement through that driver
 called directly. The menu names are from DBeaver's own documentation, read
 against 26.2.
