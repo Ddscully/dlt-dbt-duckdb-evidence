@@ -120,6 +120,17 @@ linter, formatter and type checker those pins serve behave is
   is to "simplify" it back to a major. It was once in four workflows,
   which is four places for a Dependabot bump to disagree with
   itself.
+- **`[build-system]`'s `uv_build` range moves with uv, and Dependabot moves only
+  the uv.** It bumps the `ghcr.io/astral-sh/uv` tag in both Dockerfiles; the
+  range in `pyproject.toml` is a uv pin it cannot see. A uv outside the
+  range still builds: it fetches `uv_build` from PyPI rather than using its
+  built-in backend, so the only symptom is a download nobody reads. uv's own
+  release notes say to raise the upper bound with each minor. The range sat at
+  `<0.13.0` while the images and CI ran 0.13.1, until
+  `tests/test_packaging.py` began holding it to the Dockerfiles' pin, so the
+  Dependabot PR that moves uv past it is now the one that goes red. CI's
+  `setup-uv` names no uv version and takes the newest, so CI can run a uv the
+  range has not caught up with, which costs a download and nothing else.
 - **`pages.yml` is the only workflow that needs Node** (24; the Evidence build).
   The other three run on a bare uv checkout — see the Orchestration section for
   why the site is excluded from `full_refresh`.
