@@ -99,11 +99,14 @@ ingest-fx-full: where dbt-deps
 # invoice from one sheet. The merge key is (invoice, line_number), so a reload
 # updates the first copy's keys and leaves the second copy's higher ones: a
 # landing zone loaded before that rule needs this once. The workflows build from
-# empty. It drops the table and loads retail_invoice_lines alone.
-# Drop and reload the retail workbook instead of merging over the old lines
+# empty. It drops the table and loads retail_invoice_lines alone, then rebuilds
+# the retail tables, which would otherwise keep the old copies until a full build.
+# Drop and reload the retail workbook, then rebuild everything that reads it
 [group('pipeline')]
-ingest-retail-full: where
+ingest-retail-full: where dbt-deps
     INGEST_RETAIL_FULL=1 uv run python -m ingest.pipeline retail_invoice_lines
+    cd dbt && uv run dbt build --select stg_retail_lines+
+    uv run python -m transform.retail_rfm
 
 # It lives in dlt's own directory, keyed on the pipeline name, so no warehouse
 # query shows it. `just dlt-state modern_data_stack_fixtures` reads the fixtures'.

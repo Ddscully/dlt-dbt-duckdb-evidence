@@ -98,18 +98,30 @@ FULL_RELOADS: dict[str, Callable[[], bool]] = {
 }
 
 
-def load_groups(resources: Iterable[str] | None = None) -> list[tuple[list[str], dict]]:
+def load_groups(
+    resources: Iterable[str] | None = None, *, partial: bool = False
+) -> list[tuple[list[str], dict]]:
     """The resource groups to load, in order, each with the `run()` kwargs it needs.
 
     `resources` restricts the result to a subset — Dagster passes whichever raw
     assets were selected. Empty groups are dropped, so materialising `raw/wb_wdi`
     alone doesn't try to run a load with no resources in it.
+
+    `partial` says the run loads only part of each resource: a year range or a
+    retail partition. A full reload drops the table first, so on such a run it
+    would leave the table holding that part alone, and it is refused.
     """
     wanted = None if resources is None else set(resources)
     # A flagged merge resource loads with the refresh, which drops its table and
     # its resource state (the WDI watermarks among it); the full fetch then
     # writes a new one.
     reloading = [name for name, requested in FULL_RELOADS.items() if requested()]
+    dropped = [name for name in reloading if wanted is None or name in wanted]
+    if partial and dropped:
+        raise ValueError(
+            f"a full reload of {', '.join(dropped)} drops the table, and this run "
+            "loads only part of it: unset the INGEST_*_FULL flag, or run without a range"
+        )
     refreshed = (*FULL_REFRESH_RESOURCES, *reloading)
     merged = tuple(name for name in INCREMENTAL_RESOURCES if name not in reloading)
     groups = []

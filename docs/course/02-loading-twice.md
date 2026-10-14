@@ -288,7 +288,7 @@ just course-sandbox
 just course-query 'select count(*) from marts.fct_retail_order_line'
 ```
 
-Healthy: `41089`.
+Healthy: `40243`.
 
 <details>
 <summary>Reveal</summary>
@@ -331,7 +331,7 @@ through while 44,848 rows are missing.
 **The lesson, and it is the module's most transferable one:** a shape test
 protects the shape it names, not the *quantity* of data. Its power depends
 entirely on where the missing rows fall relative to what it pins, and at fixture
-scale (10,000 of 41,089) the boundary swept up the pinned row, while at
+scale (10,000 of 40,243) the boundary swept up the pinned row, while at
 production scale it did not. A check that fires in CI and not in production is
 worse than no check, because it is *believed*.
 

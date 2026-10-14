@@ -704,10 +704,18 @@ def test_load_groups_drops_groups_the_selection_empties():
     assert pipeline.load_groups([]) == []
 
 
+def _no_full_reloads(monkeypatch) -> None:
+    """Clear every full-reload flag: `just test` loads `.env`, and one left set
+    there would change what every `load_groups` test sees."""
+    for flag in ("INGEST_FX_FULL", "INGEST_WDI_FULL", "INGEST_RETAIL_FULL"):
+        monkeypatch.delenv(flag, raising=False)
+
+
 def test_a_full_fx_reload_refreshes_ecb_fx_rates_and_nothing_else(monkeypatch):
     """`INGEST_FX_FULL=1` is the repair for rows the ECB feed retracted, which a
     merge keeps forever. It must drop `ecb_fx_rates` and no other merge table:
     a refresh on `om_weather_daily` would cost days of Open-Meteo budget."""
+    _no_full_reloads(monkeypatch)
     monkeypatch.setenv("INGEST_FX_FULL", "1")
     groups = {tuple(names): kwargs for names, kwargs in pipeline.load_groups()}
     assert groups[(*pipeline.FULL_REFRESH_RESOURCES, "ecb_fx_rates")] == {
@@ -720,7 +728,7 @@ def test_a_full_fx_reload_refreshes_ecb_fx_rates_and_nothing_else(monkeypatch):
 
 
 def test_ecb_fx_rates_merges_unless_a_full_reload_is_asked_for(monkeypatch):
-    monkeypatch.delenv("INGEST_FX_FULL", raising=False)
+    _no_full_reloads(monkeypatch)
     assert pipeline.load_groups(["ecb_fx_rates"]) == [(["ecb_fx_rates"], {})]
     monkeypatch.setenv("INGEST_FX_FULL", "0")
     assert pipeline.load_groups(["ecb_fx_rates"]) == [(["ecb_fx_rates"], {})]
@@ -731,13 +739,48 @@ def test_a_wdi_full_reload_drops_and_refetches_the_table(monkeypatch):
     withdrew. Merged, the full fetch would update every row it saw and keep the
     withdrawn one forever; refreshed, the table and its watermarks are dropped
     first."""
-    monkeypatch.delenv("INGEST_FX_FULL", raising=False)
-    monkeypatch.delenv("INGEST_WDI_FULL", raising=False)
+    _no_full_reloads(monkeypatch)
     assert pipeline.load_groups(["wb_wdi"]) == [(["wb_wdi"], {})]
     monkeypatch.setenv("INGEST_WDI_FULL", "1")
     assert pipeline.load_groups(["wb_wdi"]) == [(["wb_wdi"], {"refresh": pipeline.REFRESH})]
     merged = [names for names, kwargs in pipeline.load_groups() if kwargs == {}]
     assert merged == [[n for n in pipeline.INCREMENTAL_RESOURCES if n != "wb_wdi"]]
+
+
+def test_a_retail_full_reload_drops_and_reloads_the_table(monkeypatch):
+    """`INGEST_RETAIL_FULL=1` is the repair for a landing zone loaded before
+    each invoice came from one sheet. Merged, the reload would update an
+    invoice's lines 1..N and keep the old second copy under N+1..2N, so the
+    repair would look done and change nothing."""
+    _no_full_reloads(monkeypatch)
+    assert pipeline.load_groups(["retail_invoice_lines"]) == [(["retail_invoice_lines"], {})]
+    monkeypatch.setenv("INGEST_RETAIL_FULL", "1")
+    assert pipeline.load_groups(["retail_invoice_lines"]) == [
+        (["retail_invoice_lines"], {"refresh": pipeline.REFRESH})
+    ]
+    merged = [names for names, kwargs in pipeline.load_groups() if kwargs == {}]
+    assert merged == [[n for n in pipeline.INCREMENTAL_RESOURCES if n != "retail_invoice_lines"]]
+
+
+def test_a_full_reload_is_refused_on_a_run_that_loads_part_of_the_table(monkeypatch):
+    """A full reload drops the table before it loads, so on a retail partition
+    or a year range it would leave that month or those years and nothing else.
+    A flag left set in a service's environment would do it on the next
+    partition run, with no error."""
+    _no_full_reloads(monkeypatch)
+    monkeypatch.setenv("INGEST_RETAIL_FULL", "1")
+    with pytest.raises(ValueError, match="retail_invoice_lines"):
+        pipeline.load_groups(pipeline.PARTITIONED_RESOURCES, partial=True)
+    assert pipeline.load_groups(pipeline.PARTITIONED_RESOURCES) == [
+        (["retail_invoice_lines"], {"refresh": pipeline.REFRESH})
+    ]
+    # A range over resources the flag does not name is not refused.
+    assert pipeline.load_groups(pipeline.YEAR_RANGE_RESOURCES, partial=True) == [
+        (list(pipeline.YEAR_RANGE_RESOURCES), {})
+    ]
+    monkeypatch.setenv("INGEST_WDI_FULL", "1")
+    with pytest.raises(ValueError, match="wb_wdi"):
+        pipeline.load_groups(pipeline.YEAR_RANGE_RESOURCES, partial=True)
 
 
 def test_the_weather_archive_can_never_be_reloaded_in_full():
@@ -1012,8 +1055,8 @@ def test_retail_yields_every_row_the_workbook_holds(retail_con):
     """`DuckDBPyRelation.arrow()` returns a streaming reader whose default batch
     is 1,000,000 rows; treated as a table it lands the first batch and no
     warning (1,000,000 of the 1,044,848 lines the live workbook lands). Pinned
-    against the fixture workbook's own count, which has one sheet and so no
-    overlap to drop, so a batch-size change cannot bring it back.
+    against the fixture workbook's own count, which holds each invoice from one
+    sheet and so nothing to drop, so a batch-size change cannot bring it back.
     """
     expected = retail_con.sql("select count(*) from sheets").fetchone()[0]
     batches = list(retail.retail_invoice_lines())
@@ -1024,9 +1067,8 @@ def test_retail_yields_every_row_the_workbook_holds(retail_con):
 def test_retail_line_number_is_stable_across_reads(retail_con):
     """The merge key rests on file order, so file order has to be deterministic.
 
-    11,812 lines of the live table repeat another line exactly — same invoice,
-    product, quantity, price, timestamp — so nothing in the content can tell
-    them apart. `workbook.connect()` pins `preserve_insertion_order`, and
+    11,812 lines of the live table repeat another line of their invoice in
+    every column, so nothing in the content can tell them apart. `workbook.connect()` pins `preserve_insertion_order`, and
     this is the assertion that holds it there.
 
     Sorted before comparing, because the claim is about the *assignment* and not
@@ -1108,15 +1150,16 @@ def test_retail_lands_the_source_verbatim(retail_con):
 
 
 # The two sheets of the real workbook both hold 1-9 December 2010. The recorded
-# fixture is one sheet and has never held the overlap, so CI's fixture pipeline
-# cannot see it: these tests are its only cover. DuckDB writes one sheet per
+# fixture is one sheet holding each invoice once (`record_retail` writes the copy
+# the load keeps), so CI's fixture pipeline cannot see the overlap: these tests
+# are its only cover. DuckDB writes one sheet per
 # file, so the two sheets are two files unioned into the `sheets` view, as in
 # `tests/test_workbook.py`. `InvoiceDate` is an Excel serial.
 _SHEET_1, _SHEET_2 = "Year 2009-2010", "Year 2010-2011"
 _NOV_30, _DEC_02 = 40512.5, 40514.5  # 2010-11-30 and 2010-12-02, at noon
 
-# (invoice, stock code, quantity, unit price, serial). Invoice A sits in the first
-# sheet only and C in the second; B is in both, its lines in a different order,
+# (invoice, stock code, quantity, unit price, serial[, other columns]). Invoice A
+# sits in the first sheet only and C in the second; B is in both, its lines in a different order,
 # each copy repeating one line exactly, as genuine repeated lines on one invoice do.
 _ONLY_IN_SHEET_1 = [("A1", "P1", 2, 1.0, _NOV_30), ("A1", "P2", 1, 3.0, _NOV_30)]
 _B_IN_SHEET_1 = [
@@ -1135,15 +1178,20 @@ _ONLY_IN_SHEET_2 = [("C1", "P5", 3, 1.0, _DEC_02)]
 def _two_sheet_view(con, tmp_path, first, second) -> str:
     """Write each sheet's lines to its own workbook and return the union that
     stands in for one two-sheet workbook."""
+
+    def line(inv, code, qty, price, serial, other=None) -> str:
+        rest = {"Description": "item", "Customer ID": "17850", "Country": "United Kingdom"}
+        rest |= other or {}
+        return (
+            f"select '{inv}' as \"Invoice\", '{code}' as \"StockCode\", "
+            f'{qty} as "Quantity", {serial} as "InvoiceDate", {price} as "Price", '
+            + ", ".join(f"'{value}' as \"{column}\"" for column, value in rest.items())
+        )
+
     books = []
     for name, sheet, lines in (("one.xlsx", _SHEET_1, first), ("two.xlsx", _SHEET_2, second)):
         book = tmp_path / name
-        rows = " union all ".join(
-            f"select '{inv}' as \"Invoice\", '{code}' as \"StockCode\", 'item' as \"Description\", "
-            f'{qty} as "Quantity", {serial} as "InvoiceDate", {price} as "Price", '
-            f"'17850' as \"Customer ID\", 'United Kingdom' as \"Country\""
-            for inv, code, qty, price, serial in lines
-        )
+        rows = " union all ".join(line(*fields) for fields in lines)
         con.execute(f"copy ({rows}) to '{book}' (format xlsx, header true, sheet '{sheet}')")
         books.append((book, sheet))
     sql = " union all by name ".join(workbook.sheets_sql(book, [sheet]) for book, sheet in books)
@@ -1207,6 +1255,32 @@ def test_retail_refuses_sheets_that_disagree_about_an_invoice(
     )
     with pytest.raises(ResourceExtractionError, match="1 invoice.*'B1'"):
         list(retail.retail_invoice_lines())
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        ("B1", "P9", 2, 2.0, _DEC_02),
+        ("B1", "P4", 2, 2.5, _DEC_02),
+        ("B1", "P4", 2, 2.0, _DEC_02 + 1),
+        ("B1", "P4", 2, 2.0, _DEC_02, {"Description": "other item"}),
+        ("B1", "P4", 2, 2.0, _DEC_02, {"Customer ID": "12346"}),
+        ("B1", "P4", 2, 2.0, _DEC_02, {"Country": "France"}),
+    ],
+    ids=["stock_code", "unit_price", "invoice_ts", "description", "customer_id", "country"],
+)
+def test_retail_guard_compares_every_column_the_load_lands(overlapping_sheets, tmp_path, changed):
+    """A copy that differs in any landed column is a conflict, not only in
+    quantity: dropping it would lose that column's other value. The guard reads
+    its columns from `typed`, so a column added there is compared too."""
+    _two_sheet_view(
+        overlapping_sheets,
+        tmp_path,
+        _ONLY_IN_SHEET_1 + [changed, *_B_IN_SHEET_1[::2]],
+        _B_IN_SHEET_2 + _ONLY_IN_SHEET_2,
+    )
+    conflicts = overlapping_sheets.sql(retail.retail_sheet_conflicts_sql()).fetchall()
+    assert [c[0] for c in conflicts] == ["B1"]
 
 
 def test_retail_guard_counts_repeated_lines(overlapping_sheets, tmp_path):

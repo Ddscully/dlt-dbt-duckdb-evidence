@@ -196,9 +196,9 @@ unit_tests:
       `item_type = 'product'` on the `returns` filter the warehouse gains 1,190
       rows and reports returning things nobody buys. The last pair is bought and
       returned in the same instant, which the asof condition admits because it is
-      `>=` — and that boundary is worth more than it looks: 88 matches in the
+      `>=` — and that boundary is worth more than it looks: 86 matches in the
       warehouse share their purchase's instant, so tightening it to `>` costs 2
-      of them a match and silently re-points the other 86 at an older sale,
+      of them a match and silently re-points the other 84 at an older sale,
       rewriting five columns with no change to the row count. Asserted on the
       rows that exist as well as on the match, because the POST line's whole
       failure mode is being present.

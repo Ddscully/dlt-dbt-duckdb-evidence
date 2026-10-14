@@ -66,16 +66,24 @@ one; the page is `retail.md`.
     rather than choosing a sheet's version of a disagreement.
   - **A landing zone loaded before the rule keeps the second copies**: the merge
     key updates an invoice's lines 1..N and leaves N+1..2N where they are.
-    `just ingest-retail-full` drops the table and reloads it, once. The
-    workflows build from empty and never hold the old copies.
-  - **The fixture cannot show it**: the recorded workbook is one sheet. The
-    two-sheet tests in `tests/test_ingest.py` are the only cover.
+    `just ingest-retail-full` drops the table, reloads it and rebuilds the
+    retail models, once. A partitioned Dagster run refuses the flag, since the
+    drop would leave only its month. The workflows build from empty and never
+    hold the old copies.
+  - **The fixture once held both copies, in one sheet, so CI landed them after
+    the fix, green.** The recorded workbook is one sheet, and `record_retail`
+    copied each kept invoice from both real sheets into it: the 37 overlapping
+    invoices sat there twice under one `sheet_name`, where a rule that tells
+    copies apart by sheet cannot reach them. It now writes only the copy the
+    load keeps. A rule keyed on where a row came from needs a fixture that keeps
+    where it came from; the two-sheet tests in `tests/test_ingest.py` are the
+    rule's only cover.
 ### Returns, customers and cohorts
 
 - **Returns have no foreign key**, so `fct_retail_returns` infers the link with
   an `asof left join` to the same customer's most recent earlier purchase of the
   same product. 87.6% match cleanly, 2.0% match a *smaller* purchase, 8.5% have
-  no prior purchase in the window, 1.9% have no customer id. **The 2.0% is the
+  no prior purchase in the window, 1.8% have no customer id. **The 2.0% is the
   interesting number**, not the 87.6% — it is the rule being wrong rather than
   the data being absent. Reported per row instead of tuned into one headline; the
   median return comes back in 10 days, which is the evidence the rule isn't

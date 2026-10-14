@@ -145,12 +145,16 @@ def retail_sql(months: tuple[str, str] | None = None) -> str:
     but only the selected rows are converted and handed to dlt.
 
     * **Each invoice comes from one sheet.** The workbook's two sheets overlap:
-      both hold 1–9 December 2010, line for line, because each sheet's year
-      starts on 1 December. `deduped` keeps an invoice from the later sheet
-      only. It is not a `distinct`: 11,812 lines of the landed table repeat
-      another exactly, and those are genuine repeated lines on one invoice. The
-      rule is safe only because the two copies are identical, which
-      `retail_sheet_conflicts_sql` checks before every load.
+      both hold 1–9 December 2010, line for line. Each sheet's year starts on
+      1 December, so those days belong to the later sheet and the earlier one
+      runs nine days past its year; `deduped` keeps an invoice from the later
+      sheet only. The copies differ only in the order of 769 lines, so the
+      choice decides which order numbers them, and those lines' keys name
+      different lines than in a load from before the rule. It is not a
+      `distinct`: 11,812 lines of the landed table repeat another exactly, and
+      those are genuine repeated lines on one invoice. The rule is safe only
+      because the two copies are identical, which `retail_sheet_conflicts_sql`
+      checks before every load.
     * `line_number` comes from file position: the source has no line id, and
       exact repeats leave nothing in the content to tell lines apart.
       `preserve_insertion_order` is set explicitly (in
@@ -205,13 +209,15 @@ def retail_sheet_conflicts_sql() -> str:
     A group, count included, missing from any sheet that holds the invoice is a
     conflict. One row per conflicting invoice, ordered, with how many of its
     line groups differ.
+
+    The columns come from `typed` with a `*`, never a list: a column a list left
+    out would drop from the comparison, and a copy differing only there would be
+    dropped as identical.
     """
     return f"""
         with {_typed_cte()},
         copies as (
-            select
-                invoice, sheet_name, stock_code, description, quantity,
-                invoice_ts, unit_price, customer_id, country, count(*) as n
+            select * exclude (file_row), count(*) as n
             from typed
             group by all
         ),
@@ -222,10 +228,7 @@ def retail_sheet_conflicts_sql() -> str:
             having count(distinct sheet_name) > 1
         ),
         groups as (
-            select
-                invoice, stock_code, description, quantity, invoice_ts,
-                unit_price, customer_id, country, n,
-                count(*) as n_holding
+            select * exclude (sheet_name), count(*) as n_holding
             from copies
             where invoice in (select invoice from sheets_holding)
             group by all
