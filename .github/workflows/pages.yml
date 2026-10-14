@@ -319,8 +319,12 @@ jobs:
         with:
           path: reports/build
 
+  # A dispatch from any other branch is a dry run: it builds, which is how a
+  # change to this workflow is tried before merging, and stops. The environment
+  # only accepts `main` anyway, so without this the run would end red.
   deploy:
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
