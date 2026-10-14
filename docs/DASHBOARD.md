@@ -59,10 +59,10 @@ slice the tests run on would be worse than none — weekly, on demand, and on an
 markdown and ignoring markdown would stop republishing exactly when a page
 changed.
 
-**Only a build that may need new data calls the publishers.** A push that
-changes the extraction code, the landing zone or the dependency set runs
-`publish_site`, live. Every other build restores the landing zone
-`live.yml` fetched and cached that week, and runs `publish_site_from_raw`, the
+**Only a build that may need new data calls the publishers.** A push runs
+`publish_site`, live, when anything since the last successful build changed the
+extraction code, the landing zone or the dependency set. Every other build restores the newest cached landing
+zone (`live.yml` refreshes it weekly), and runs `publish_site_from_raw`, the
 same job without the ingest, so a publisher that is down cannot turn an
 unrelated commit's deploy red. The run's summary says which path it took and
 why ([`decisions/0020`](decisions/0020-the-site-builds-from-the-cached-landing-zone.md)).

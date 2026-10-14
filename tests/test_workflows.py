@@ -409,6 +409,45 @@ def test_live_caches_the_landing_zone_where_pages_looks_for_it():
     assert lookup["with"]["restore-keys"] == "${{ env.RAW_CACHE_PREFIX }}"
 
 
+def test_no_workflow_reads_a_failed_download_as_an_absent_asset():
+    """`|| true` on a release download turns a transient error into "this
+    release has no such asset", which `restore_history` reads as nothing to
+    carry. In `live.yml` and a live `pages.yml` build that is worse than in the
+    release: the borrow step still reports `carried`, and the cold-started
+    weather archive is cached for every push until the next refresh. Every
+    workflow that restores asks the release what it holds instead.
+    """
+    problems = {}
+    for name, text in release_restoring_workflows().items():
+        commands = text.replace("\\\n", " ")  # one line per continued command
+        tolerated = [
+            line.strip()
+            for line in commands.splitlines()
+            if "gh release download" in line and "||" in line
+        ]
+        if tolerated:
+            problems[name] = tolerated
+    assert not problems, f"downloads whose failure reads as an absent asset: {problems}"
+
+
+def test_a_push_is_diffed_from_the_last_build_that_succeeded():
+    """Diffed from the push's own `before`, an `ingest/` change whose run the
+    concurrency group cancelled while it waited, or whose live build failed,
+    reaches the site over the old landing zone when the next push builds from
+    the cache. Diffed with renames on, a file moved out of `ingest/` is listed
+    only where it went. And without `actions: read` the lookup of the last
+    success fails, which falls back to live: every push, green, coupled to the
+    publishers again.
+    """
+    pages = _workflow("pages.yml")
+    (source,) = [s for s in _steps(pages) if s.get("id") == "source"]
+    run = source["run"]
+    assert "gh run list --workflow pages.yml --branch main --status success" in run
+    assert 'git diff --no-renames --name-only "$base" "$GITHUB_SHA"' in run
+    assert "github.event.before" not in str(source), "diffed from the push, not the last build"
+    assert pages["permissions"].get("actions") == "read", pages["permissions"]
+
+
 def _live_paths() -> list[str]:
     (source,) = [s for s in _steps(_workflow("pages.yml")) if s.get("id") == "source"]
     return source["env"]["LIVE_PATHS"].split()

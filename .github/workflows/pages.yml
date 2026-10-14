@@ -67,11 +67,15 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # To find the last successful build, which a push is diffed against. Without
+  # it every push would fall back to the live path, green.
+  actions: read
 
 # Let a running deploy finish rather than cancelling it: a half-deployed site is
-# worse than a slightly stale one.
+# worse than a slightly stale one. Per ref, so a dry run on a branch never holds
+# up a deploy from `main`, or gets a waiting one cancelled.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 
 # The landing zone `live.yml` caches and this workflow restores. actions/cache
@@ -131,8 +135,8 @@ jobs:
         timeout-minutes: 2
         env:
           EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
           FORCE_LIVE: ${{ inputs.live }}
+          GH_TOKEN: ${{ github.token }}
           LIVE_PATHS: |
             ingest/**
             lake/**
@@ -154,26 +158,37 @@ jobs:
               if [ "$FORCE_LIVE" = true ]; then want=live; reason="dispatched with live"
               else reason="dispatched"; fi ;;
             push)
+              # Diffed from the last build that succeeded, not from the push's
+              # own `before`: the concurrency group cancels a run still waiting
+              # when a newer one queues, and a failed live build leaves its
+              # change unbuilt, so one push at a time would let an `ingest/`
+              # change reach the site over a landing zone the old code fetched.
+              # From the last success, pushes keep going live until one builds.
+              # A lookup that fails falls back to live rather than going red.
+              base=$(gh run list --workflow pages.yml --branch main --status success \
+                --limit 1 --json headSha --jq '.[0].headSha // empty') || base=
               # The checkout is one commit deep; the tree being diffed against
               # is all that is needed, not the history between. Run outside a
-              # runner, this fetch makes a full clone shallow at $BEFORE (undo:
+              # runner, this fetch makes a full clone shallow at $base (undo:
               # `git fetch --unshallow`), so try the step in a scratch clone.
-              if git fetch --quiet --no-tags --depth=1 origin "$BEFORE"; then
+              if [ -n "$base" ] && git fetch --quiet --no-tags --depth=1 origin "$base"; then
                 hits=()
+                # `--no-renames`: a file moved out of `ingest/` is listed under
+                # both paths, not only the one it moved to.
                 while IFS= read -r file; do
                   while IFS= read -r pattern; do
                     if [ -n "$pattern" ] && [[ $file == $pattern ]]; then
                       hits+=("$file"); break
                     fi
                   done <<< "$LIVE_PATHS"
-                done < <(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+                done < <(git diff --no-renames --name-only "$base" "$GITHUB_SHA")
                 if [ ${#hits[@]} -gt 0 ]; then
-                  want=live; reason="the push changes ${hits[*]:0:3}"
+                  want=live; reason="${hits[*]:0:3} changed since the last build (${base:0:7})"
                 else
-                  reason="the push cannot change raw"
+                  reason="nothing since the last build (${base:0:7}) can change raw"
                 fi
               else
-                want=live; reason="no tree to diff the push against"
+                want=live; reason="no successful build to diff the push against"
               fi ;;
           esac
           echo "want=$want" >> "$GITHUB_OUTPUT"
@@ -251,11 +266,17 @@ jobs:
             exit 0
           fi
           gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
-          # Beside the database, where `restore_history` looks. `|| true`: a
-          # release cut before the asset existed has none.
+          # Beside the database, where `restore_history` looks. Whether the
+          # release has one is asked, as release-data.yml asks, never inferred
+          # from a failed download: that would cold-start the weather archive,
+          # report `carried` and cache the thin archive for every push after.
           if [ "$MODE" = live ]; then
-            gh release download "$prev" --pattern lakehouse.tar.gz \
-              --dir prev-release || true
+            assets=$(gh release view "$prev" --json assets --jq '.assets[].name')
+            if grep -qx 'lakehouse.tar.gz' <<<"$assets"; then
+              gh release download "$prev" --pattern lakehouse.tar.gz --dir prev-release
+            else
+              echo "$prev has no lakehouse.tar.gz — the weather archive cold-starts."
+            fi
           fi
           uv run python -m publish.restore_history prev-release/warehouse.duckdb
           rm -rf prev-release

@@ -24,9 +24,9 @@ on:
     # Monday rebuild (06:40), which publishes what this run caches, and
     # `release-data.yml` (the 1st, 07:10), which fetches its own. A source that
     # breaks mid-week reaches neither until then. Each cron fires shortly before
-    # one of those, which is when the alert can still act. Two lines, because `20 5 1 * 1` means "the 1st or a Monday", which
-    # nobody reads it as. 05:20 UTC — off the hour, since everyone's cron fires
-    # on it.
+    # one of those, which is when the alert can still act. Two lines, because
+    # `20 5 1 * 1` means "the 1st or a Monday", which nobody reads it as.
+    # 05:20 UTC — off the hour, since everyone's cron fires on it.
     - cron: "20 5 * * 1"
     - cron: "20 5 1 * *"
   workflow_dispatch:
@@ -65,8 +65,9 @@ jobs:
       # rather than cold-started, the snapshots restored. Without it the cache
       # would hold three years of weather, and the Weather page would thin for
       # a week. The cold start itself is what the fixture pipeline in `ci.yml`
-      # covers. Soft-failing: a missing release should not stop the live check,
-      # only the caching, which reads `carried`.
+      # covers. Soft-failing: a failed download should not stop the live check,
+      # only the caching, which reads `carried`. No release at all is not a
+      # failure: there is nothing to carry, and the cache is as good as any.
       - name: Borrow snapshot history and the landing zone from the latest data release
         id: borrow
         continue-on-error: true
@@ -82,10 +83,16 @@ jobs:
             exit 0
           fi
           gh release download "$prev" --pattern warehouse.duckdb --dir prev-release
-          # Beside the database, where `restore_history` looks. `|| true`: a
-          # release cut before the asset existed has none.
-          gh release download "$prev" --pattern lakehouse.tar.gz \
-            --dir prev-release || true
+          # Beside the database, where `restore_history` looks. Whether the
+          # release has one is asked, as release-data.yml asks, never inferred
+          # from a failed download: that would cold-start the weather archive,
+          # report `carried` and cache the thin archive for `pages.yml`.
+          assets=$(gh release view "$prev" --json assets --jq '.assets[].name')
+          if grep -qx 'lakehouse.tar.gz' <<<"$assets"; then
+            gh release download "$prev" --pattern lakehouse.tar.gz --dir prev-release
+          else
+            echo "$prev has no lakehouse.tar.gz — the weather archive cold-starts."
+          fi
           uv run python -m publish.restore_history prev-release/warehouse.duckdb
           rm -rf prev-release
           echo "carried=true" >> "$GITHUB_OUTPUT"

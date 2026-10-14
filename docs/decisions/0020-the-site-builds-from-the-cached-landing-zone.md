@@ -34,11 +34,15 @@ fixtures.
   the release do, and caches `data/lakehouse` under
   `raw-lakehouse-<epoch second>-<run id>`.
 - **`pages.yml` decides per build, and says which in the run's summary:**
-  - **Live**, when a push changes `LIVE_PATHS`: `ingest/`, `lake/`, the package
-    modules those two import, `uv.lock` and `.python-version`. A dependency
-    bump is live because a newer DuckDB may not read a catalog an older one
-    wrote. A live build saves its landing zone to the cache, so a later push
-    that reads what it landed finds it.
+  - **Live**, when the commits since the last successful build change
+    `LIVE_PATHS`: `ingest/`, `lake/`, the package modules those two import,
+    `uv.lock` and `.python-version`. A dependency bump is live because a newer
+    DuckDB may not read a catalog an older one wrote. The diff runs from the
+    last success rather than from the push, because GitHub cancels a run still
+    waiting when a newer one queues, and a failed live build leaves its change
+    unbuilt: diffed one push at a time, either would let an `ingest/` change
+    reach the site over the old landing zone. A live build saves its landing
+    zone to the cache, so a later push that reads what it landed finds it.
   - **Live**, when dispatched with `live`, when no cache exists, or when the
     newest is more than 15 days old: one failed weekly refresh is survived, two
     are not.
@@ -61,8 +65,9 @@ fixtures.
   repository. `raw.retail_invoice_lines` holds 824,364 clear customer ids, which
   the export pseudonymises, and that is why `lakehouse.tar.gz` ships the weather
   archive alone. GitHub serves a cache only to workflow runs in this
-  repository: a pull request's run can read it once a maintainer lets it run,
-  and what it would find is the file UCI publishes.
+  repository, a pull request's among them (only a first-time contributor's
+  waits for a maintainer's approval), and what one would find there is the file
+  UCI publishes.
 - **A new refresh workflow.** `live.yml` already fetched everything on the
   schedule wanted, and its issue is the alert; a second job would fetch the same
   data twice a week.
@@ -89,7 +94,12 @@ fixtures.
   covered and builds from the cache.
 - **Two workflows write the cache**, and both save only when the release's
   archive was carried in, so a failed download never caches a thin weather
-  archive.
+  archive. Whether a release holds the archive is asked of the release, never
+  read from a download that failed.
+- **A `live.yml` run that started before an extraction change merged can finish
+  after it** and become the newest cache, fetched by the old code. The window
+  is that run's length on a Monday morning, so it is accepted rather than
+  closed.
 - **Worth revisiting** if cached builds keep missing (eviction between pushes),
   which would argue for a refresh more often than weekly; or if the 15-day limit
   starts sending pushes live because a publisher stays broken.
