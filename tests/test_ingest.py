@@ -13,7 +13,7 @@ import json
 import re
 import time
 import zipfile
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
@@ -1504,7 +1504,7 @@ def test_weather_rows_match_the_response_to_the_request_by_position():
         # As the API sends it: `location_id` present on the second, absent above.
         {**_weather_entry(["2022-01-01"], [-1.5], latitude=52.3, longitude=21.0), "location_id": 1},
     ]
-    rows = list(weather._weather_rows(payload, locations))
+    rows = list(weather._weather_rows([payload], locations, at_archive_end=True))
     assert [(r["country_iso3"], r["temperature_2m_mean"]) for r in rows] == [
         ("DEU", 10.8),
         ("POL", -1.5),
@@ -1519,7 +1519,9 @@ def test_weather_rows_refuse_a_response_of_the_wrong_length():
     with pytest.raises(RuntimeError, match="matched by position"):
         list(
             weather._weather_rows(
-                [_weather_entry(["2022-01-01"], [1.0])], [("DEU", 1.0, 2.0), ("POL", 3.0, 4.0)]
+                [[_weather_entry(["2022-01-01"], [1.0])]],
+                [("DEU", 1.0, 2.0), ("POL", 3.0, 4.0)],
+                at_archive_end=True,
             )
         )
 
@@ -1528,7 +1530,11 @@ def test_weather_rows_accept_the_single_location_object_shape():
     """One location comes back as a bare object rather than a one-element array —
     a shape the resource never asks for today, and would meet the moment the
     scope was narrowed to one country."""
-    rows = list(weather._weather_rows(_weather_entry(["2022-01-01"], [3.0]), [("DEU", 1.0, 2.0)]))
+    rows = list(
+        weather._weather_rows(
+            [_weather_entry(["2022-01-01"], [3.0])], [("DEU", 1.0, 2.0)], at_archive_end=True
+        )
+    )
     assert len(rows) == 1 and rows[0]["country_iso3"] == "DEU"
 
 
@@ -1536,7 +1542,11 @@ def test_weather_rows_cover_every_declared_column():
     """The landing schema is declared, not inferred, so a variable added to
     `WEATHER_DAILY_VARIABLES` and not to `WEATHER_COLUMNS` would be dropped by
     dlt without a word."""
-    rows = list(weather._weather_rows(_weather_entry(["2022-01-01"], [3.0]), [("DEU", 1.0, 2.0)]))
+    rows = list(
+        weather._weather_rows(
+            [_weather_entry(["2022-01-01"], [3.0])], [("DEU", 1.0, 2.0)], at_archive_end=True
+        )
+    )
     assert set(rows[0]) == set(weather.WEATHER_COLUMNS)
 
 
@@ -1553,7 +1563,7 @@ def test_a_day_the_archive_has_not_finished_with_is_not_landed_at_all():
     for name in weather.WEATHER_DAILY_VARIABLES:
         entry["daily"][name] = [entry["daily"][name][0], None]
 
-    rows = list(weather._weather_rows(entry, [("DEU", 1.0, 2.0)]))
+    rows = list(weather._weather_rows([entry], [("DEU", 1.0, 2.0)], at_archive_end=True))
 
     assert [r["weather_date"] for r in rows] == ["2022-01-01"]
 
@@ -1566,7 +1576,7 @@ def test_a_day_missing_only_some_variables_behind_the_edge_is_still_landed():
     entry = _weather_entry(["2022-01-01", "2022-01-02"], [10.8, -1.5])
     entry["daily"]["precipitation_sum"] = [None, 0.0]
 
-    rows = list(weather._weather_rows(entry, [("DEU", 1.0, 2.0)]))
+    rows = list(weather._weather_rows([entry], [("DEU", 1.0, 2.0)], at_archive_end=True))
 
     assert [r["weather_date"] for r in rows] == ["2022-01-01", "2022-01-02"]
     assert rows[0]["temperature_2m_mean"] == 10.8
@@ -1593,7 +1603,7 @@ def test_a_partly_null_day_at_the_edge_is_not_landed(late):
     for name in weather.WEATHER_DAILY_VARIABLES:
         entry["daily"][name][2] = None
 
-    rows = list(weather._weather_rows(entry, [("DEU", 1.0, 2.0)]))
+    rows = list(weather._weather_rows([entry], [("DEU", 1.0, 2.0)], at_archive_end=True))
 
     assert [r["weather_date"] for r in rows] == ["2026-09-24"]
 
@@ -1606,10 +1616,146 @@ def test_a_variable_that_stops_arriving_lands_rather_than_stalling_the_archive()
     entry = _weather_entry(days, [1.0] * len(days))
     entry["daily"]["temperature_2m_mean"] = [None] * len(days)
 
-    rows = list(weather._weather_rows(entry, [("DEU", 1.0, 2.0)]))
+    rows = list(weather._weather_rows([entry], [("DEU", 1.0, 2.0)], at_archive_end=True))
 
     assert len(rows) == len(days)
     assert all(r["temperature_2m_mean"] is None for r in rows)
+
+
+def _partly_null(entry: dict, *indices: int) -> dict:
+    """ERA5's variables missing on these days, ERA5-Land's present."""
+    for name in ("precipitation_sum", "wind_speed_10m_max", "shortwave_radiation_sum"):
+        for index in indices:
+            entry["daily"][name][index] = None
+    return entry
+
+
+def _all_null(entry: dict, *indices: int) -> dict:
+    for name in weather.WEATHER_DAILY_VARIABLES:
+        for index in indices:
+            entry["daily"][name][index] = None
+    return entry
+
+
+def test_the_last_day_of_a_year_window_is_not_the_archives_edge():
+    """Windows split at calendar years, so 31 December ends a window without
+    ending the archive. Judged per window, a partly null 31 December was held
+    back as the edge on every run until it left the lookback, and in a backfill
+    it never landed: no run asks for that year again."""
+    december = _partly_null(_weather_entry(["2025-12-30", "2025-12-31"], [1.0, 2.0]), 1)
+    january = _weather_entry(["2026-01-01", "2026-01-02"], [3.0, 4.0])
+
+    rows = list(
+        weather._weather_rows([december, january], [("DEU", 1.0, 2.0)], at_archive_end=True)
+    )
+
+    assert [r["weather_date"] for r in rows] == [
+        "2025-12-30",
+        "2025-12-31",
+        "2026-01-01",
+        "2026-01-02",
+    ]
+    assert rows[1]["precipitation_sum"] is None
+
+
+def test_the_edge_can_end_an_earlier_window():
+    """Early in January the current year's window can be all lag, every day
+    null, so the newest days anything has reached sit at the end of December's
+    window. Those are the edge, and they are held back."""
+    december = _partly_null(
+        _weather_entry(["2025-12-29", "2025-12-30", "2025-12-31"], [1.0, 2.0, 3.0]), 1, 2
+    )
+    january = _all_null(_weather_entry(["2026-01-01", "2026-01-02"], [4.0, 5.0]), 0, 1)
+
+    rows = list(
+        weather._weather_rows([december, january], [("DEU", 1.0, 2.0)], at_archive_end=True)
+    )
+
+    assert [r["weather_date"] for r in rows] == ["2025-12-29"]
+
+
+def test_a_run_short_of_the_archives_end_has_no_edge():
+    """A backfill of past years stops at a 31 December the archive passed long
+    ago. Nothing there is still arriving, so a partly null last day is a gap,
+    and it lands."""
+    entry = _partly_null(_weather_entry(["2014-12-30", "2014-12-31"], [1.0, 2.0]), 1)
+
+    rows = list(weather._weather_rows([entry], [("DEU", 1.0, 2.0)], at_archive_end=False))
+
+    assert [r["weather_date"] for r in rows] == ["2014-12-30", "2014-12-31"]
+
+
+def test_the_edge_cap_counts_only_partly_null_days():
+    """The all-null tail is the archive's lag, weeks long when ERA5 falls
+    behind. Counted toward the cap, it lifted the edge past `WEATHER_EDGE_DAYS`
+    and landed the partly null days, when the two reanalyses were furthest
+    apart."""
+    lag = weather.WEATHER_EDGE_DAYS
+    days = [f"2026-08-{d:02d}" for d in range(1, 5 + lag)]
+    entry = _weather_entry(days, [1.0] * len(days))
+    _partly_null(entry, 1, 2, 3)
+    _all_null(entry, *range(4, len(days)))
+
+    rows = list(weather._weather_rows([entry], [("DEU", 1.0, 2.0)], at_archive_end=True))
+
+    assert [r["weather_date"] for r in rows] == ["2026-08-01"]
+
+
+def _serve_windows_with_a_partly_null_last_day(monkeypatch) -> list[tuple[str, str]]:
+    """Stub the archive: each window comes back complete for one location except
+    its last day, which lacks precipitation. Returns the windows asked for."""
+    asked: list[tuple[str, str]] = []
+    monkeypatch.setattr(weather.fixtures, "enabled", lambda: False)
+    monkeypatch.setattr(weather, "weather_locations", lambda: [("DEU", 52.5, 13.4)])
+    monkeypatch.setattr(weather, "weather_url", lambda locations, start, end: (start, end))
+
+    def serve(window, limiter, units, label=""):
+        asked.append(window)
+        first, last = (date.fromisoformat(day) for day in window)
+        days = [(first + timedelta(n)).isoformat() for n in range((last - first).days + 1)]
+        entry = _weather_entry(days, [1.0] * len(days))
+        entry["daily"]["precipitation_sum"][-1] = None
+        return entry
+
+    monkeypatch.setattr(weather, "get_weather_json", serve)
+    return asked
+
+
+def _landed(resource) -> list[str]:
+    items = []
+    for item in resource:
+        items.extend(item if isinstance(item, list) else [item])
+    return sorted(row["weather_date"] for row in items)
+
+
+def test_a_weather_backfill_lands_every_year_end(monkeypatch):
+    """Through the resource, so the test fails if it stops telling a backfill of
+    past years from a run that reaches the archive's end."""
+    asked = _serve_windows_with_a_partly_null_last_day(monkeypatch)
+
+    landed = _landed(weather.om_weather_daily((2020, 2021)))
+
+    assert asked == [("2020-01-01", "2020-12-31"), ("2021-01-01", "2021-12-31")]
+    assert len(landed) == 366 + 365
+    assert "2020-12-31" in landed and "2021-12-31" in landed
+
+
+def test_a_routine_weather_load_holds_back_only_the_archives_newest_day(monkeypatch):
+    """The other half: a routine load asks up to the archive's end, and only the
+    newest day there is the edge. Any year end inside the lookback lands."""
+    asked = _serve_windows_with_a_partly_null_last_day(monkeypatch)
+    today = datetime.now(UTC).date()
+    monkeypatch.setattr(
+        weather, "weather_watermark", lambda *a, **kw: (today - timedelta(days=10)).isoformat()
+    )
+
+    landed = _landed(weather.om_weather_daily())
+
+    archive_end = weather.weather_end_date(today)
+    assert asked[-1][1] == archive_end
+    assert archive_end not in landed
+    assert landed[-1] == (date.fromisoformat(archive_end) - timedelta(days=1)).isoformat()
+    assert all(end in landed for _, end in asked[:-1])
 
 
 def test_weather_retry_reads_the_window_off_the_429_message():
