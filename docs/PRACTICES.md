@@ -52,12 +52,12 @@ source names countries in its own words (`EIRE`, `RSA`, `USA`, `Korea`) while
 every other model here keys on ISO3, so the two halves of the warehouse could not
 be joined at all. 34 of the 43 labels happen to match the country dimension's
 names, which is the trap: joining on name succeeds quietly and drops the other
-nine, worth 19,898 lines and £652,387, of which `EIRE` alone is £615,520 and the
+nine, worth 19,721 lines and £647,112, of which `EIRE` alone is £610,244 and the
 retailer's second-largest market. A seed resolves all 43 once, in staging, and
 the join is a *left* one for a reason an inner join makes vivid: it deletes the
 rows it cannot resolve, so the `relationships` test that exists to catch them
 then passes, because the rows were the evidence. Measured by deleting one label
-from the seed — 17,866 lines and £615,520 gone, all 90 nodes green.
+from the seed — 17,689 lines and £610,244 gone, all 90 nodes green.
 → [`dbt/seeds/retail_country_map.csv`](../dbt/seeds/retail_country_map.csv),
 [`stg_retail_lines.sql`](../dbt/models/staging/stg_retail_lines.sql)
 

@@ -698,17 +698,17 @@ unit_tests:
   #
   # | mutation                                      | effect                                          |
   # |-----------------------------------------------|-------------------------------------------------|
-  # | `match_status` checks "no prior purchase" first | 352 unmatchable rows change bucket            |
-  # | "quantity exceeds" uses `>=`                  | matched 16,032 -> 10,416, excess 366 -> 5,982   |
-  # | `quantity_is_consistent` uses `<`             | consistent 16,032 -> 10,416                     |
-  # | `returns` drops `item_type = 'product'`       | +1,207 rows: postage and fee cancellations      |
+  # | `match_status` checks "no prior purchase" first | 332 unmatchable rows change bucket            |
+  # | "quantity exceeds" uses `>=`                  | matched 15,746 -> 10,255, excess 364 -> 5,855   |
+  # | `quantity_is_consistent` uses `<`             | consistent 15,746 -> 10,255                     |
+  # | `returns` drops `item_type = 'product'`       | +1,190 rows: postage and fee cancellations      |
   # | `purchases` drops `quantity > 0`              | **nothing** — every write-off is anonymous, so  |
   # |                                               | `customer_id is not null` already excludes them |
-  # | asof `>=` becomes `>`                         | 88 rows re-resolved: 2 unmatched, 86 moved to   |
+  # | asof `>=` becomes `>`                         | 86 rows re-resolved: 2 unmatched, 84 moved to   |
   # |                                               | an older sale. `matched` *rises* by 2           |
   #
-  # The middle two land on the same 10,416 because both turn on
-  # `quantity_returned = original_quantity` (5,616 rows).
+  # The middle two land on the same 10,255 because both turn on
+  # `quantity_returned = original_quantity` (5,491 rows).
   #
   # `accepted_values` on `match_status` is the trap the retail skill already
   # names: it proves the answer is in the list, never that it is the right
@@ -775,7 +775,7 @@ unit_tests:
   # |                                             | 615 active customers and GBP 342k with it       |
   # | `is_complete_period` `<` to `<=`            | 300 complete -> 325. Every still-open period    |
   # |                                             | is relabelled finished; no other column moves   |
-  # | revenue uses activity's filter              | +GBP 949,283 and +12.4% on                      |
+  # | revenue uses activity's filter              | +GBP 942,997 and +12.6% on                      |
   # |                                             | `revenue_per_active_customer_gbp`               |
   # | drop `quantity > 0` from `activity`         | nothing at all                                  |
   #
@@ -886,8 +886,8 @@ unit_tests:
       So a customer whose only March purchase is postage is **active and worth
       nothing**, and `revenue_per_active_customer_gbp` is a ratio across two
       populations — 88 of 25,598 active customer-months in the warehouse.
-      Pointing the money at activity's filter instead moves GBP 949,283 and
-      12.4% of that ratio with every data test green. Whether the two should be
+      Pointing the money at activity's filter instead moves GBP 942,997 and
+      12.6% of that ratio with every data test green. Whether the two should be
       reconciled is a modelling decision; this pins which one is in force.
     overrides:
       vars:
@@ -939,9 +939,9 @@ unit_tests:
   # | drop `, invoice` from the tie-break     | **not reproducible between builds** — see below   |
   # | `cohort_month` off `lines`, not         | left-censored 955 -> 1,030; tenure +14,914 days   |
   # | `purchases`                             |                                                   |
-  # | `first_order_gbp` over every line       | its 47 nulls become values; total +GBP 53,664     |
+  # | `first_order_gbp` over every line       | its 47 nulls become values; total +GBP 53,486     |
   # | `min(country)` for `max(country)`       | 13 customers relabelled — caught now, see below   |
-  # | drop the sign flip on `return_rate_pct` | mean +5.89% -> -5.89%                             |
+  # | drop the sign flip on `return_rate_pct` | mean +5.81% -> -5.81%                             |
   # | `n_orders >= 1` for repeat customers    | 4,255 -> 5,881, i.e. everyone                     |
   # | `n_orders` counts every invoice type    | 36,975 -> 44,811 (+21%)                           |
   # | `left join` to `first_purchase`         | nothing — see the caveat                          |
@@ -953,9 +953,8 @@ unit_tests:
   # **The tie-break is the one that matters, and it is the `fct_retail_returns`
   # failure again.** Removing `, invoice` from `first_order_line`'s window makes
   # the model non-deterministic: four builds against byte-identical sources gave
-  # `sum(first_order_gbp)` of 2,389,787.55 / 2,392,164.88 / 2,392,755.43 /
-  # 2,392,698.88 against a baseline of 2,394,006.56 that held to the penny over
-  # three runs. 10 customers have two invoices tied on their earliest timestamp
+  # `sum(first_order_gbp)` GBP 4,219.01 / 1,841.68 / 1,251.13 / 1,307.68 below
+  # a baseline of 2,381,532.23 that held to the penny over three runs. 10 customers have two invoices tied on their earliest timestamp
   # and the tie-break decides all ten; the worst single swing is GBP 1,182.10,
   # and customer 12709's two tied invoices differ by whether `first_order_gbp`
   # is a value or a null at all. `accepted_range` cannot see any of it, because
@@ -1074,7 +1073,7 @@ unit_tests:
       in the extract, whose orders are a Manual adjustment or the test SKU. Zero
       would say they bought nothing; null says this order has no revenue
       reading. Dropping the filter takes all 47 nulls to values and the total up
-      by GBP 53,664, under an `accepted_range` that never sees a null either way.
+      by GBP 53,486, under an `accepted_range` that never sees a null either way.
     given: *customer_fixture
     expect:
       rows:
@@ -1093,8 +1092,8 @@ unit_tests:
       `returned_gbp` is negative — a return is a negative line amount — so
       `return_rate_pct` carries a `-100.0` to come out positive, and "a 25%
       return rate" reads the way anyone would expect. The column has **no data
-      test at all**: dropping the sign flip turns the warehouse mean from +5.89%
-      to -5.89% and nothing anywhere goes red. It is also measured by value and
+      test at all**: dropping the sign flip turns the warehouse mean from +5.81%
+      to -5.81% and nothing anywhere goes red. It is also measured by value and
       not by order count, deliberately — a customer who returns one item from
       each of ten orders is not the same risk as one who sends back a pallet.
       Null, not zero, where there is nothing to divide — and C3 and C4 are blank

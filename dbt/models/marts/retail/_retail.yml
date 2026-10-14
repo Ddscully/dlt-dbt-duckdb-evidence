@@ -17,10 +17,11 @@ models:
       instant, so the daily fixing is its rate; the spot-or-average question of
       `fct_fx_rates_periods` arises only on aggregation, and summing converted
       lines answers it. The rate may be carried forward, and the row says so:
-      139,658 lines (13.1%) fall on a day the ECB did not quote, so
+      136,933 lines (13.1%) fall on a day the ECB did not quote, so
       `fx_rate_source_date` and `fx_rate_is_carried_forward` travel with the
-      amount. Every one is a Sunday: this business trades on Sundays (139,256
-      lines, against 402 on Saturdays) and closes on the TARGET holidays.
+      amount. Every one falls on a weekend, all but 402 on a Sunday: this
+      business trades on Sundays (136,531 lines, against 402 on Saturdays) and
+      closes on the TARGET holidays.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -382,11 +383,11 @@ models:
         enforced: true
     description: >
       One row per identified customer (5,881 of the 5,942 ids that appear; the
-      other 61 never made a purchase). Covers 86.2% of net revenue — the rest is
+      other 61 never made a purchase). Covers 86.5% of net revenue — the rest is
       anonymous and structurally cannot be attributed, which every per-customer
       figure downstream (cohorts, RFM, average order value) inherits and which
-      the Evidence page states rather than implies. The 243,007 anonymous lines
-      are 22.8% of lines but 13.8% of revenue: quote the share you mean.
+      the Evidence page states rather than implies. The 235,287 anonymous lines
+      are 22.5% of lines but 13.5% of revenue: quote the share you mean.
       `fct_retail_order_line` keeps every line.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
@@ -579,11 +580,11 @@ models:
         enforced: true
     description: >
       Returns matched back to the sale they reverse, one row per return line
-      (18,286). The source carries no link between the two — no order reference,
+      (17,974). The source carries no link between the two — no order reference,
       no RMA — so the join is inferred by an `asof` on the same customer's most
       recent prior purchase of the same product, and the model reports how often
-      that failed: 87.7% match cleanly, 2.0% match to a smaller purchase, 8.4%
-      have no prior purchase in the window and 1.9% have no customer id. Lines
+      that failed: 87.6% match cleanly, 2.0% match to a smaller purchase, 8.5%
+      have no prior purchase in the window and 1.8% have no customer id. Lines
       with no customer id stay, rather than flattering the rate; most misses are
       goods bought before the extract opens on 2009-12-01. The 2.0% is the rule
       being wrong rather than the data absent, and an upper bound. The median
@@ -701,7 +702,7 @@ models:
       - name: original_invoice
         description: >
           The inferred purchase, not a recorded one: the source carries no link
-          between a return and its order. Null on the 1,888 unmatched rows, and
+          between a return and its order. Null on the 1,864 unmatched rows, and
           `is_matched` is the column to filter on rather than this one.
         data_type: VARCHAR
         meta:
@@ -732,9 +733,9 @@ models:
           additivity: semi_additive
         description: >
           The matched *purchase* line's quantity, carried onto the return. It
-          belongs to the purchase and not to this row: 16,398 matched returns
+          belongs to the purchase and not to this row: 16,110 matched returns
           point at 15,312 distinct purchase lines, so summing it across returns
-          counts 1,086 purchases more than once. Compare it per row; aggregate
+          counts 798 purchases more than once. Compare it per row; aggregate
           `quantity_returned` instead.
       - name: original_unit_price
         data_type: DOUBLE

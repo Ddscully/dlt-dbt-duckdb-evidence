@@ -34,7 +34,7 @@ from ingest import fixtures
 from ingest.sources.ecb import ecb_fx_rates, fx_full_reload_requested
 from ingest.sources.eurostat import eu_elec_prices
 from ingest.sources.owid import owid_co2, owid_energy
-from ingest.sources.retail import retail_invoice_lines
+from ingest.sources.retail import retail_full_reload_requested, retail_invoice_lines
 from ingest.sources.weather import om_weather_daily
 from ingest.sources.worldbank import wb_country, wb_wdi, wdi_full_reload_requested
 from lake.lakehouse import dlt_credentials
@@ -87,12 +87,14 @@ YEAR_RANGE_RESOURCES = ("wb_wdi", "om_weather_daily")
 PARTITIONED_RESOURCES = ("retail_invoice_lines",)
 
 # The merge resources a flag can drop and re-fetch whole (`just ingest-fx-full`,
-# `just ingest-wdi-full`): a merge only adds and updates, so a row the source
-# withdraws stays in a local tree until then. `om_weather_daily` must never join:
+# `just ingest-wdi-full`, `just ingest-retail-full`): a merge only adds and
+# updates, so a row the source withdraws, or a rule stops yielding, stays in a
+# local tree until then. `om_weather_daily` must never join:
 # its Open-Meteo budget means a dropped archive takes days to fetch again.
 FULL_RELOADS: dict[str, Callable[[], bool]] = {
     "ecb_fx_rates": fx_full_reload_requested,
     "wb_wdi": wdi_full_reload_requested,
+    "retail_invoice_lines": retail_full_reload_requested,
 }
 
 

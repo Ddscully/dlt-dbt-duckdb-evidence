@@ -1,6 +1,7 @@
 # 0013. Two years of different coverage are compared over the window both cover, and the answer says so
 
-Status: accepted 2026-09-28 (#113)
+Status: accepted 2026-09-28 (#113); its figures predate #152, which removed the
+retail sheet overlap: aligned now +1.30%, full calendar years −2.71%
 
 ## Context
 

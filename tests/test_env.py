@@ -1,5 +1,5 @@
 """`modern_data_stack.env.flag`, which every on/off switch reads through:
-`INGEST_FIXTURES`, `INGEST_FX_FULL` and `INGEST_WDI_FULL`."""
+`INGEST_FIXTURES`, `INGEST_FX_FULL`, `INGEST_WDI_FULL` and `INGEST_RETAIL_FULL`."""
 
 from __future__ import annotations
 

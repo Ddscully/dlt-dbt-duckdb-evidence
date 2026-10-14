@@ -63,7 +63,7 @@ not: January scoring Q2 under a July year start passes every test in the
 project. `stg_retail_lines` is the same problem in a different shape — it is two
 `case` expressions and two boolean flags built off them, and `accepted_values`
 proves an answer is in the list, never that it is the right member of it.
-Misclassifying `AMAZONFEE` as a product moves net revenue by £260,764 with every
+Misclassifying `AMAZONFEE` as a product moves net revenue by £221,521 with every
 one of that model's data tests green; dropping the `upper()` from `stock_code`
 sends all 100 voucher lines, which arrive lowercase, into product with the same
 tests green.
@@ -102,7 +102,7 @@ term has never once been the deciding one — removing it changes nothing in the
 warehouse at all, and neither does removing the `nullif` from `country` (no row
 is blank) or `quantity > 0` from the purchase universe behind
 `int_retail_return_matches` (every stock write-off is anonymous, so the customer
-filter has already excluded all 3,457). Each is posed by a fixture instead: a
+filter has already excluded all 3,393). Each is posed by a fixture instead: a
 blank country, and a write-off carrying a customer id, which an unfiltered
 purchase universe turns into a matched sale with a negative quantity.
 
@@ -171,8 +171,8 @@ Half of them are non-additive, which is the number that makes the exercise worth
 doing. The interesting cases are the middle row: `population` adds across
 countries and gives person-years across years; `cumulative_co2` is a stock and
 counts every earlier year again; `cohort_size` is constant down a cohort's rows;
-`original_quantity` belongs to the matched purchase, and 16,398 matched returns
-point at 15,312 distinct purchases, so summing it counts 1,086 of them twice.
+`original_quantity` belongs to the matched purchase, and 16,110 matched returns
+point at 15,312 distinct purchases, so summing it counts 798 of them twice.
 The label alone cannot say any of that, which is why a `semi_additive` column
 with no description is a test failure.
 

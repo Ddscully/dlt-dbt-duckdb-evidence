@@ -193,7 +193,7 @@ unit_tests:
     model: int_retail_return_matches
     description: >
       Two rules about which rows reach the join at all. The POST cancellation is here to stay out: without
-      `item_type = 'product'` on the `returns` filter the warehouse gains 1,207
+      `item_type = 'product'` on the `returns` filter the warehouse gains 1,190
       rows and reports returning things nobody buys. The last pair is bought and
       returned in the same instant, which the asof condition admits because it is
       `>=` — and that boundary is worth more than it looks: 88 matches in the
@@ -223,7 +223,7 @@ unit_tests:
     description: >
       `purchases` requires `quantity > 0`, and that clause has never once been
       the deciding one: a negative quantity on a *sale* invoice is inventory
-      shrinkage, all 3,457 of them are anonymous, and `customer_id is not null`
+      shrinkage, all 3,393 of them are anonymous, and `customer_id is not null`
       excludes every one before this filter is reached. Delete it and no number
       in the warehouse moves — which is why it was recorded as a "nothing moves"
       mutation and left untested, and why it is the same category as

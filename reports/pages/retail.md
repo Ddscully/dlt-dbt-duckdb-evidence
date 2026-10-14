@@ -213,7 +213,7 @@ be worth about ten times the bottom fifth. **[The first order →](/retail/first
 
 ## Also on this data
 
-- **[Returns and missing customers](/retail/returns)**: 18,286 return lines
+- **[Returns and missing customers](/retail/returns)**: 17,974 return lines
   matched to their sales with no key to join on, and the revenue no customer id
   can be attached to.
 

@@ -42,16 +42,16 @@ writes the answer; the tools compute every figure in it. There are four:
   origin ([below](#a-carbon-price-scenario)).
 
 ```
-$ AGENT_MODEL=gemma4:26b-a4b-it-q4_K_M just ask "Why did revenue fall from 2010 to 2011, in euros?"
+$ AGENT_MODEL=gemma4:26b-a4b-it-q4_K_M just ask "What drove the change in revenue from 2010 to 2011, in euros?"
 called explain_change({"currency":"EUR","year_a":2010,"year_b":2011})
-Net revenue fell from €10,744.6k to €10,401.3k due to:
-* **Continuing SKUs (sold in both years):** -€1,901.2k (driven by volume: -€2,227.6k, mix: +€590.9k, and price: -€264.5k)
-* **Returns (product cancellations):** -€263.6k
-* **FX (GBP to EUR rate):** -€133.3k
+Net revenue in EUR increased by €133.7k (from €10,267.6k to €10,401.3k) between 2010 and 2011. The change was driven by:
 
-This was partially offset by **Catalogue churn** of +€1,954.8k (New SKUs: +€2,737.2k; Discontinued SKUs: -€782.4k).
+*   **Catalogue churn (+€1,956.8k):** Primarily due to new SKUs (+€2,735.1k) offsetting discontinued SKUs (-€778.4k).
+*   **Continuing SKUs (-€1,426.3k):** A decrease in volume (-€1,847.7k) and price (-€227.4k) was partially offset by a more favorable product mix (+€648.8k).
+*   **Returns (-€271.4k)**
+*   **FX (-€125.4k)**
 
-Periods aligned: the data covers 2009-12-01 to 2011-12-09, so each year is compared over 1 Jan to 9 Dec only (2010-01-01 to 2010-12-09 and 2011-01-01 to 2011-12-09; 343 and 343 days). Over the full calendar years the change would read -6.86%, against -3.19% aligned.
+Periods aligned: the data covers 2009-12-01 to 2011-12-09, so each year is compared over 1 Jan to 9 Dec only (2010-01-01 to 2010-12-09 and 2011-01-01 to 2011-12-09; 343 and 343 days). Over the full calendar years the change would read -2.71%, against +1.30% aligned.
 ```
 
 The last paragraph is not the model's: the loop appends it
@@ -85,7 +85,7 @@ Desktop ([below](#from-an-mcp-client)).
 3. **Ask, with the question quoted** — `?` is a glob to the shell:
 
    ```sh
-   just ask "Why did revenue fall from 2010 to 2011?"
+   just ask "What drove the change in revenue from 2010 to 2011?"
    ```
 
    Each tool call is printed to stderr as `called …` when the model makes it,
@@ -180,9 +180,9 @@ $ just metric net_revenue_gbp orders customers --by year
 net_revenue_gbp, orders, customers by year, all dates, 2009-12-01 to 2011-12-09
 year  net_revenue_gbp  orders  customers
 2009       781,541.69   1,820        951
-2010     9,570,429.41  20,625      4,205
+2010     9,168,065.90  20,625      4,205
 2011     9,032,384.97  18,916      4,215
-all     19,384,356.08  41,361      5,853
+all     18,981,992.57  41,361      5,853
 customers is a distinct count, and its rows add up to more than "all": one can be counted in several rows.
 
 Partly covered: 2009 (1 Dec to 31 Dec only), 2011 (1 Jan to 9 Dec only). To compare periods, use explain_change, which aligns them.
@@ -287,7 +287,9 @@ What no check here catches:
 
 ## Measured
 
-Warehouse built 2026-09-28; Ollama in the container above. Every run called
+Warehouse built 2026-09-28, except the two 2010 → 2011 rows, re-run on
+2026-10-14 on a build without the retail sheet overlap (#152); Ollama in the
+container above. Every run called
 one tool once, the right one, with the right arguments, and none had a number
 flagged.
 
@@ -296,8 +298,8 @@ flagged.
 
 | Model | Question | What the answer got wrong |
 |---|---|---|
-| `granite4.1:8b` (5.3 GB), about a minute | 2010 → 2011, EUR | two subtotals given to one of their bars: the continuing-SKU total, −17.69 pts, as volume's, and the churn total, +€1,954.8k, as new SKUs' |
-| `gemma4:26b-a4b-it-q4_K_M` (17 GB), about a minute and a half | 2010 → 2011, EUR | nothing: each subtotal with its own bars under it |
+| `granite4.1:8b` (5.3 GB), about two minutes | 2010 → 2011, EUR | two subtotals given to one of their bars: the continuing-SKU total, −13.89 pts, as volume's, and the churn total, +€1,956.8k, as new SKUs' |
+| `gemma4:26b-a4b-it-q4_K_M` (17 GB), about a minute | 2010 → 2011, EUR | nothing: each subtotal with its own bars under it |
 | `granite4.1:8b`, under half a minute | 2008 → 2009 | nothing: the tool's refusal relayed, that the data starts on 2009-12-01 |
 | `granite4.1:8b`, under half a minute | 2009 → 2010, GBP | "the comparison covers the full calendar years", above the note saying 1–31 December. A system-prompt line telling it not to describe the period changed nothing on a re-run, and was taken out |
 | `granite4.1:8b`, under a minute | net revenue by quarter in 2011 (`query_metric`) | nothing: the four quarters and the `all` row as the year's total, with the Q4 note appended |
@@ -328,7 +330,8 @@ Claude Code as the client (`claude -p`, with `sonnet` as the model), started
 outside the repo, so none of its instructions applied, with its built-in tools
 off and this server alone loaded. Every note it was sent was quoted verbatim, and no answer
 held a number missing from the tool output (checked with the loop's check,
-`agent.loop.unverified`).
+`agent.loop.unverified`). The 2010 → 2011 row was re-run on 2026-10-14, on a
+build without the retail sheet overlap (#152).
 
 <details>
 <summary>The runs</summary>
@@ -338,7 +341,7 @@ held a number missing from the tool output (checked with the loop's check,
 | net revenue by quarter in 2011 | `query_metric`, by quarter, 2011 | nothing: the four quarters and the `all` row, and the Q4 note |
 | which region bought the most in 2010, and its average order value | `query_metric` by region, then again for the average order value filtered to that region | nothing |
 | can `unit_price` be added up | `describe_model` | nothing: no, because it is non-additive, with the metric to use instead |
-| why did revenue fall from 2010 to 2011 | `explain_change`, in EUR by default | nothing: the aligned −3.19% with the note, and each subtotal with its own bars |
+| what drove the change in revenue from 2010 to 2011 | `explain_change`, in EUR by default | nothing: the aligned +1.30% with the note, and each subtotal with its own bars |
 | a tonne of unwrought aluminium from China, 2027, at €100 | `run_scenario` | nothing |
 | the cheapest source of grey portland cement in 2026, and how much cheaper than the dearest, at €90 | `run_scenario` | nothing |
 | 500 t of urea from Egypt, 2028, at €80 | `run_scenario` twice: six urea goods listed, then one chosen | nothing; it added the cheapest, median and dearest sources unasked |

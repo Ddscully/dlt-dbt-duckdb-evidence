@@ -131,7 +131,7 @@ def test_retail_fixture_holds_every_shape_the_models_handle():
     assert row.positive_cancellations == 1, "the line that disproves 'C implies negative'"
     assert row.cancellations > 100
     assert row.write_offs > 50, "write-offs are what make 'negative quantity' not mean 'return'"
-    assert row.anonymous_lines > 1_000, "22.8% of the source has no customer"
+    assert row.anonymous_lines > 1_000, "22.5% of the source has no customer"
     assert row.negative_prices > 0, "only the A-prefixed adjustments have these"
     assert row.null_descriptions > 0
     assert row.non_product_codes > 20, "POST, DOT, M, AMAZONFEE, TEST001…"

@@ -95,6 +95,16 @@ ingest-fx-full: where dbt-deps
     INGEST_FX_FULL=1 uv run python -m ingest.pipeline ecb_fx_rates
     cd dbt && uv run dbt build --select stg_fx_rates+ --full-refresh
 
+# The workbook's two sheets both hold 1-9 Dec 2010, and the load now keeps each
+# invoice from one sheet. The merge key is (invoice, line_number), so a reload
+# updates the first copy's keys and leaves the second copy's higher ones: a
+# landing zone loaded before that rule needs this once. The workflows build from
+# empty. It drops the table and loads retail_invoice_lines alone.
+# Drop and reload the retail workbook instead of merging over the old lines
+[group('pipeline')]
+ingest-retail-full: where
+    INGEST_RETAIL_FULL=1 uv run python -m ingest.pipeline retail_invoice_lines
+
 # It lives in dlt's own directory, keyed on the pipeline name, so no warehouse
 # query shows it. `just dlt-state modern_data_stack_fixtures` reads the fixtures'.
 # Show dlt's incremental state — the WDI watermark and the ECB's last fixing

@@ -234,8 +234,8 @@ def test_a_semi_additive_column_says_which_direction_fails():
     "Summable in some directions" without saying which leaves a reader exactly
     where they started. `cohort_size` adds across cohorts and multiplies down
     one; `population` adds across countries and gives person-years across years;
-    `original_quantity` belongs to the purchase, and 16,398 matched returns point
-    at 15,312 distinct purchases, so summing it counts 1,086 of them twice. None
+    `original_quantity` belongs to the purchase, and 16,110 matched returns point
+    at 15,312 distinct purchases, so summing it counts 798 of them twice. None
     of that is recoverable from the label.
     """
     silent = sorted(

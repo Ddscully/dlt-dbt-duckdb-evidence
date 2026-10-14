@@ -10,7 +10,7 @@ sidebar_position: 5
 
 ## Matching returns to sales with no key to join on
 
-18,286 lines reverse a sale, and none of them reference the sale being reversed.
+17,974 lines reverse a sale, and none of them reference the sale being reversed.
 There is no foreign key and no credit-note number, so the link has to be
 inferred: for each returned line, take the same customer's most recent earlier
 purchase of the same product.

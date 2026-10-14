@@ -14,7 +14,7 @@ renamed as (
         invoice,
         line_number,
         upper(trim(stock_code)) as stock_code,
-        -- Nulls kept (4,382); `dim_retail_product` picks one label per code.
+        -- Nulls kept (4,275); `dim_retail_product` picks one label per code.
         nullif(trim(description), '') as description,
         quantity,
         unit_price,

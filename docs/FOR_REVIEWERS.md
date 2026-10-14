@@ -180,8 +180,8 @@ is one load's worth of rewrites, the price of keeping the weather diff's pair
 `just ingest`, the backfills and `load_retail` do not expire; their snapshots
 go at the next of those two.
 
-Warehouse contents: 1,648,214 staging rows and 1,960,177 mart rows — of which
-1,067,371 are the retail order lines, 668,679 the three FX tables and 43,138 the
+Warehouse contents: 1,625,691 staging rows and 1,937,342 mart rows — of which
+1,044,848 are the retail order lines, 668,679 the three FX tables and 43,138 the
 wide country-year fact — plus 9,821 snapshot rows across the two `history`
 tables.
 
@@ -300,7 +300,7 @@ number before.
    `+materialized: table` and rebuilt whole (19 tables, 12 views, one
    incremental). That is deliberate rather than pending: each one re-derives a
    source that gets fully re-fetched, so rebuilding is *how* an upstream
-   restatement is picked up, and the whole graph, 1.07M-row retail fact
+   restatement is picked up, and the whole graph, 1.04M-row retail fact
    included, rebuilds in 24.5 s. The exception is the one model where the
    argument reverses: `fct_fx_rates_published` is `incremental`, because a
    published ECB fixing never changes and the table grows ~30 rows a day

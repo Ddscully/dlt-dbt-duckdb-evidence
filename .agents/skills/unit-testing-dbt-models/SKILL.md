@@ -88,10 +88,10 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   row-level constraint can see it. Mutated against a warehouse copy, running the
   model's data tests each time: dropping `upper()` from `stock_code` moves net
   revenue by **+GBP 1,702** and all pass; sending `AMAZONFEE` to `product`
-  moves it by **-GBP 260,764** and all pass; removing
+  moves it by **-GBP 221,521** and all pass; removing
   `invoice_type <> 'adjustment'` from `is_revenue_line` changes **nothing at all**
   and all 19 pass. Only the fourth mutation goes red — `is_stock_write_off`
-  losing its `invoice_type` term takes the flag from 3,457 rows to 22,950 — and
+  losing its `invoice_type` term takes the flag from 3,393 rows to 22,557 — and
   only as a side effect of `stg_retail_write_offs_are_never_priced`, which
   notices because cancellations carry a price.
   - **The `upper()` number is the one to remember, because its scale is
@@ -112,7 +112,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     `nullif(trim(...), '')`, so a blank country would have survived as `''` and
     joined the seed as a 44th label — a country in its own right, and one the
     `relationships` test could not name, because a *null* code is what that test
-    skips. Unreachable today (0 null and 0 blank countries in 1,067,371 rows),
+    skips. Unreachable today (0 null and 0 blank countries in 1,044,848 rows),
     so putting the `nullif` back moves nothing and taking it away again is
     **PASS=83, ERROR=0**; two fixture rows are the whole guard.
   - **`invoice_date` had no test of any kind, and the interesting part is how
@@ -122,9 +122,9 @@ reasoning behind each is in `compliance-models`, `retail-models` and
     recency window. The hazard `RETAIL_COLUMNS` warns about is dlt typing the
     column `TIMESTAMP WITH TIME ZONE`, which renders a naive 07:45 as
     08:45+01:00 on a CET machine — and **at that offset not one of the
-    1,067,371 rows changes date**, because the tills run 06:10 to 21:52 and
+    1,044,848 rows changes date**, because the tills run 06:10 to 21:52 and
     nothing is within two hours of midnight. Push the drift to six hours and
-    **28,286 order lines move to a different date, 521 of them onto a month that
+    **27,340 order lines move to a different date, 521 of them onto a month that
     contradicts the `invoice_month` the ingest layer computed from the same
     column — and the build is still PASS=83, ERROR=0.** Two derivations of one
     fact, in two layers, with nothing comparing them; the fixture states the
@@ -293,9 +293,9 @@ reasoning behind each is in `compliance-models`, `retail-models` and
 - **`fct_retail_returns` is the sixth, and unit-testing it turned up that the
   model is not deterministic.** Six mutations, every data test green on
   every one: checking "no prior purchase" before "no customer id" relabels the
-  352 unmatchable rows; `>=` for "quantity exceeds purchase" takes matched from
-  16,031 to 10,398; `<` for `quantity_is_consistent` takes consistent to 10,404;
-  dropping `item_type = 'product'` from `returns` adds **1,207 rows** of
+  332 unmatchable rows; `>=` for "quantity exceeds purchase" takes matched from
+  15,746 to 10,255; `<` for `quantity_is_consistent` takes consistent to 10,255;
+  dropping `item_type = 'product'` from `returns` adds **1,190 rows** of
   cancelled postage and fees; the asof `>` costs 2 rows; and dropping
   `quantity > 0` from `purchases` does **nothing at all**, because every stock
   write-off is anonymous and `customer_id is not null` already excludes them
@@ -421,7 +421,7 @@ reasoning behind each is in `compliance-models`, `retail-models` and
   caught**: `min(country)` for `max` relabels 13 customers, the repeat flag on
   `>= 1` makes all 5,881 repeat customers, `n_orders` over every invoice type
   moves it 36,975 to 44,811, and dropping the sign flip takes the mean return
-  rate from +5.89% to -5.89%.
+  rate from +5.81% to -5.81%.
   - **The ninth defect was not reachable by mutation at all, and that is the
     lesson.** `max_by(country_iso3, country)` pairs the code to the label
     `max(country)` picked — but DuckDB's `arg_max` **skips rows whose value

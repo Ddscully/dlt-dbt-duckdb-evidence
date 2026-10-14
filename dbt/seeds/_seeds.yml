@@ -397,7 +397,7 @@ seeds:
       name. A name join is not a failure that announces itself: it silently
       succeeds for the 34 and silently drops `EIRE`, `USA`, `RSA`, `Korea`,
       `Czech Republic`, `Hong Kong` and the three labels that are not countries
-      — 19,898 lines and GBP 652,387, of which `EIRE` alone is GBP 615,520 and
+      — 19,721 lines and GBP 647,112, of which `EIRE` alone is GBP 610,244 and
       the retailer's **second-largest market**. A regional rollup built that way
       loses Ireland and reads as complete.
 
@@ -435,7 +435,7 @@ seeds:
       - name: retail_country
         description: >
           The label exactly as `stg_retail_lines.country` trims it. `unique` is
-          load-bearing rather than hygiene: this seed is left-joined to 1,067,371
+          load-bearing rather than hygiene: this seed is left-joined to 1,044,848
           order lines, so a duplicated label fans the fact table out silently.
         data_tests: [not_null, unique]
       - name: country_iso3

@@ -293,7 +293,7 @@ regular_invoices as (
     select distinct invoice from typed
     where customer_id in (select customer_id from regulars)
 ),
-anonymous as (                   -- the 22.8% with no customer id are real revenue
+anonymous as (                   -- the 22.5% with no customer id are real revenue
     select distinct invoice from typed where customer_id is null
     qualify row_number() over (order by md5(invoice)) <= 40
 ),

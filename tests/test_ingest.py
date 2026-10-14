@@ -1011,8 +1011,9 @@ def test_retail_cache_notices_a_re_recorded_archive(monkeypatch, tmp_path):
 def test_retail_yields_every_row_the_workbook_holds(retail_con):
     """`DuckDBPyRelation.arrow()` returns a streaming reader whose default batch
     is 1,000,000 rows; treated as a table it lands the first batch and no
-    warning (1,000,000 of the live workbook's 1,067,371). Pinned against the
-    workbook's own count so a batch-size change cannot bring it back.
+    warning (1,000,000 of the 1,044,848 lines the live workbook lands). Pinned
+    against the fixture workbook's own count, which has one sheet and so no
+    overlap to drop, so a batch-size change cannot bring it back.
     """
     expected = retail_con.sql("select count(*) from sheets").fetchone()[0]
     batches = list(retail.retail_invoice_lines())
@@ -1023,9 +1024,9 @@ def test_retail_yields_every_row_the_workbook_holds(retail_con):
 def test_retail_line_number_is_stable_across_reads(retail_con):
     """The merge key rests on file order, so file order has to be deterministic.
 
-    34,337 rows in the full workbook are exact duplicates of another row — same
-    invoice, product, quantity, price, timestamp — so nothing in the content can
-    tell them apart. `workbook.connect()` pins `preserve_insertion_order`, and
+    11,812 lines of the live table repeat another line exactly — same invoice,
+    product, quantity, price, timestamp — so nothing in the content can tell
+    them apart. `workbook.connect()` pins `preserve_insertion_order`, and
     this is the assertion that holds it there.
 
     Sorted before comparing, because the claim is about the *assignment* and not
@@ -1104,6 +1105,122 @@ def test_retail_lands_the_source_verbatim(retail_con):
     assert negative_price > 0
     assert no_customer > 0
     assert lowercase > 0, "case collisions must reach staging, which is what upper() is for"
+
+
+# The two sheets of the real workbook both hold 1-9 December 2010. The recorded
+# fixture is one sheet and has never held the overlap, so CI's fixture pipeline
+# cannot see it: these tests are its only cover. DuckDB writes one sheet per
+# file, so the two sheets are two files unioned into the `sheets` view, as in
+# `tests/test_workbook.py`. `InvoiceDate` is an Excel serial.
+_SHEET_1, _SHEET_2 = "Year 2009-2010", "Year 2010-2011"
+_NOV_30, _DEC_02 = 40512.5, 40514.5  # 2010-11-30 and 2010-12-02, at noon
+
+# (invoice, stock code, quantity, unit price, serial). Invoice A sits in the first
+# sheet only and C in the second; B is in both, its lines in a different order,
+# each copy repeating one line exactly, as genuine repeated lines on one invoice do.
+_ONLY_IN_SHEET_1 = [("A1", "P1", 2, 1.0, _NOV_30), ("A1", "P2", 1, 3.0, _NOV_30)]
+_B_IN_SHEET_1 = [
+    ("B1", "P3", 1, 5.0, _DEC_02),
+    ("B1", "P4", 2, 2.0, _DEC_02),
+    ("B1", "P3", 1, 5.0, _DEC_02),
+]
+_B_IN_SHEET_2 = [
+    ("B1", "P4", 2, 2.0, _DEC_02),
+    ("B1", "P3", 1, 5.0, _DEC_02),
+    ("B1", "P3", 1, 5.0, _DEC_02),
+]
+_ONLY_IN_SHEET_2 = [("C1", "P5", 3, 1.0, _DEC_02)]
+
+
+def _two_sheet_view(con, tmp_path, first, second) -> str:
+    """Write each sheet's lines to its own workbook and return the union that
+    stands in for one two-sheet workbook."""
+    books = []
+    for name, sheet, lines in (("one.xlsx", _SHEET_1, first), ("two.xlsx", _SHEET_2, second)):
+        book = tmp_path / name
+        rows = " union all ".join(
+            f"select '{inv}' as \"Invoice\", '{code}' as \"StockCode\", 'item' as \"Description\", "
+            f'{qty} as "Quantity", {serial} as "InvoiceDate", {price} as "Price", '
+            f"'17850' as \"Customer ID\", 'United Kingdom' as \"Country\""
+            for inv, code, qty, price, serial in lines
+        )
+        con.execute(f"copy ({rows}) to '{book}' (format xlsx, header true, sheet '{sheet}')")
+        books.append((book, sheet))
+    sql = " union all by name ".join(workbook.sheets_sql(book, [sheet]) for book, sheet in books)
+    con.execute(f"create or replace view sheets as {sql}")
+    return sql
+
+
+@pytest.fixture
+def overlapping_sheets(tmp_path):
+    con = workbook.connect()
+    _two_sheet_view(
+        con, tmp_path, _ONLY_IN_SHEET_1 + _B_IN_SHEET_1, _B_IN_SHEET_2 + _ONLY_IN_SHEET_2
+    )
+    return con
+
+
+def test_retail_keeps_each_invoice_from_one_sheet_where_the_sheets_overlap(overlapping_sheets):
+    """An invoice both sheets hold lands once, from the later sheet, and its
+    repeated line survives: dropping the copy is not a `distinct`."""
+    rows = overlapping_sheets.sql(
+        f"""select invoice, sheet_name, line_number, quantity * unit_price as amount
+            from ({retail.retail_sql()}) order by invoice, line_number"""
+    ).fetchall()
+    b = [r for r in rows if r[0] == "B1"]
+    assert [r[2] for r in b] == [1, 2, 3]
+    assert {r[1] for r in b} == {_SHEET_2}
+    assert sum(r[3] for r in b) == 14.0
+    assert sum(r[3] for r in rows) == 5.0 + 14.0 + 3.0
+
+
+def test_retail_month_filter_keeps_an_overlapping_invoice_once(overlapping_sheets):
+    """A partition load cuts to one sheet before it filters the month, so the
+    month holding the overlap gets B's three lines once, not six."""
+    rows = overlapping_sheets.sql(
+        f"select invoice, count(*) from ({retail.retail_sql(('2010-12', '2010-12'))}) group by 1 order by 1"
+    ).fetchall()
+    assert rows == [("B1", 3), ("C1", 1)]
+
+
+def _serve_two_sheets(monkeypatch, tmp_path, first, second) -> None:
+    """Point the resource at the two-file stand-in for a two-sheet workbook."""
+    sql = _two_sheet_view(workbook.connect(), tmp_path, first, second)
+    monkeypatch.setattr(retail, "retail_workbook", lambda: tmp_path / "one.xlsx")
+    monkeypatch.setattr(retail.workbook, "sheets_sql", lambda path, sheets=None: sql)
+
+
+def test_retail_refuses_sheets_that_disagree_about_an_invoice(
+    overlapping_sheets, monkeypatch, tmp_path
+):
+    """Keeping one sheet's copy is safe only while the copies are identical, so
+    a copy that differs fails the load rather than losing a line."""
+    changed = [("B1", "P4", 3, 2.0, _DEC_02), *_B_IN_SHEET_1[::2]]
+    _two_sheet_view(
+        overlapping_sheets, tmp_path, _ONLY_IN_SHEET_1 + changed, _B_IN_SHEET_2 + _ONLY_IN_SHEET_2
+    )
+    conflicts = overlapping_sheets.sql(retail.retail_sheet_conflicts_sql()).fetchall()
+    assert [c[0] for c in conflicts] == ["B1"]
+
+    _serve_two_sheets(
+        monkeypatch, tmp_path, _ONLY_IN_SHEET_1 + changed, _B_IN_SHEET_2 + _ONLY_IN_SHEET_2
+    )
+    with pytest.raises(ResourceExtractionError, match="1 invoice.*'B1'"):
+        list(retail.retail_invoice_lines())
+
+
+def test_retail_guard_counts_repeated_lines(overlapping_sheets, tmp_path):
+    """A copy missing one of an invoice's repeated lines holds the same set of
+    lines and one fewer of them. That is a conflict: the guard compares
+    multisets, not sets."""
+    assert overlapping_sheets.sql(retail.retail_sheet_conflicts_sql()).fetchall() == []
+    short = _B_IN_SHEET_1[:2]
+    _two_sheet_view(
+        overlapping_sheets, tmp_path, _ONLY_IN_SHEET_1 + short, _B_IN_SHEET_2 + _ONLY_IN_SHEET_2
+    )
+    assert [
+        c[0] for c in overlapping_sheets.sql(retail.retail_sheet_conflicts_sql()).fetchall()
+    ] == ["B1"]
 
 
 # --------------------------------------------------------------------------- #

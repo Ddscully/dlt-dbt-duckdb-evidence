@@ -77,7 +77,7 @@ The retailer's grain is a single invoice line at a timestamp, below a country
 rather than beside one, and it is the only source here that is not a statistical
 publication. Nothing about it has been cleaned by anyone, so the modelling is the
 value: what counts as a return, which rows are revenue, and who the customer is
-when 22.8% of lines have no id. See the
+when 22.5% of lines have no id. See the
 [Retail page](https://ddscully.github.io/dlt-dbt-duckdb-evidence/retail).
 
 ### Two write dispositions, two load calls
@@ -149,8 +149,8 @@ groups in `dbt/models/_groups.yml` — and the relations in the `marts/` layer a
 release layout and the asset keys ignore the nesting.
 
 - **Consolidating models was measured against.** Pairs that share a grain are
-  sparse against each other — `fct_retail_returns` is 18,286 rows against
-  `fct_retail_order_line`'s 1,067,371, and `fct_country_weather_year` covers 41
+  sparse against each other — `fct_retail_returns` is 17,974 rows against
+  `fct_retail_order_line`'s 1,044,848, and `fct_country_weather_year` covers 41
   countries against 228 — so merging means columns null on nearly every row. One
   fact table per business *process*, not per grain.
 - **Country attributes stay on the facts.** Normalising `country_name`, `region`

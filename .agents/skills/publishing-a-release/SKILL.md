@@ -67,7 +67,7 @@ it cost to learn:
   tables, and dlt's `raw_staging` merge scratch shipped 824,364 clear ids when
   `raw` still lived in the file. The export then verifies what it rewrote against
   `^[0-9a-f]{16}$`, which a five-digit id cannot match.
-- **`||`, never `concat()`.** `concat` ignores NULLs, so all 243,007 anonymous
+- **`||`, never `concat()`.** `concat` ignores NULLs, so all 235,287 anonymous
   rows would hash the bare salt onto one pseudonym indistinguishable from a real
   customer. `||` propagates. Pinned in `tests/test_privacy.py`.
 - **The salt is required and never defaulted**: the ids run 12346–18287, so the

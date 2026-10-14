@@ -111,17 +111,17 @@ models:
 
       **The tie-break, and the one copy of its figures.** An `asof join` over
       rows tied on its inequality key picks one arbitrarily — DuckDB's parallel
-      join draws a different one per run — and 33,518 (customer, product,
-      instant) groups are tied, covering 70,174 of the 802,716 purchase lines;
-      604 return lines land on one. `match_candidates` keeps the lowest
+      join draws a different one per run — and 20,139 (customer, product,
+      instant) groups are tied, covering 42,349 of the 788,270 purchase lines;
+      302 return lines land on one. `match_candidates` keeps the lowest
       `(invoice, line_number)` of each group, so it holds 766,060 lines and
-      36,656 purchase lines (4.6%) are not there — a separate CTE, because a
+      22,210 purchase lines (2.8%) are not there — a separate CTE, because a
       `purchases` quietly meaning "some of the purchases" would short any count
       later computed from it. The choice is arbitrary but fixed, and one line
       rather than the tied lines' sum, which would redefine `original_quantity`
-      and leave `original_line_number` pointing at nothing. The cost: of the 604
-      tied matches, 63 are flagged 'matched, quantity exceeds purchase' and 56
-      would be plain matches if the tied lines were summed, so that bucket (366
+      and leave `original_line_number` pointing at nothing. The cost: of the 302
+      tied matches, 58 are flagged 'matched, quantity exceeds purchase' and 52
+      would be plain matches if the tied lines were summed, so that bucket (364
       rows) is an upper bound on the rule picking the wrong sale.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
