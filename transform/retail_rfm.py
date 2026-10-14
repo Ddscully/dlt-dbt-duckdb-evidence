@@ -9,7 +9,7 @@ pair off a grid to get a segment name.
 Polars rather than SQL for one narrow reason: cutting a column into quintiles.
 SQL's primitive, `ntile`, splits equal values across buckets (see
 `assign_quintiles`); the correct SQL is four quantiles and a five-branch `case`
-per column, where Polars has `qcut`.
+per column, where Polars has `bin_quantiles`.
 
 Run:  uv run python -m transform.retail_rfm
 """
@@ -79,22 +79,27 @@ def assign_quintiles(values: pl.Expr, *, higher_is_better: bool = True) -> pl.Ex
 
     `ntile(5)` fills equal-sized buckets, so it splits tied values wherever a
     boundary falls: 3,227 of the 5,881 customers share a frequency with someone
-    it would score differently. `qcut` cuts on break points, so equal values
-    score equally and bucket sizes follow the data (frequency: 1,626 / 944 /
-    1,150 / 1,033 / 1,128). `allow_duplicates` leaves a bucket empty, rather than
-    failing, when ties put two break points on one value.
+    it would score differently. `bin_quantiles` cuts on break points, so equal
+    values score equally and bucket sizes follow the data (frequency: 1,626 /
+    944 / 1,150 / 1,033 / 1,128). Ties that put two break points on one value
+    leave a bucket empty.
+
+    `bin_quantiles` replaced `qcut`, deprecated in Polars 2.0, and scores every
+    customer the same on all three columns. Not its sibling `bin_ranks`, which
+    splits on position like `ntile`. `right_closed=True` keeps `qcut`'s
+    `(left, right]` bins, and it is load-bearing: left-closed, a break point on
+    the frequency 1,626 customers share moves 3,227 scores and empties the
+    bottom quintile. Polars marks `bin_quantiles` experimental, so the tests
+    and `rfm_scores_do_not_split_ties` are what hold its behaviour.
 
     An expression, not a Series function, so it runs inside the lazy plan. The
     break points are quantiles of the whole column, so this is a full-column
     operation whichever engine runs it.
     """
-    labels = [str(i) for i in range(1, len(QUINTILES) + 2)]
+    # `labels=False` returns the bin's 0-based index, so no label has to be
+    # read back out of a categorical.
     scores = (
-        values.qcut(list(QUINTILES), labels=labels, allow_duplicates=True)
-        # Via String: casting a Categorical straight to an integer yields its
-        # physical dictionary index, not the label.
-        .cast(pl.String)
-        .cast(pl.Int32)
+        values.bin_quantiles(list(QUINTILES), labels=False, right_closed=True).cast(pl.Int32) + 1
     )
     # `name.keep`: an expression takes its leftmost operand's name, which here
     # is the literal, so the inverted score would come out named "literal".

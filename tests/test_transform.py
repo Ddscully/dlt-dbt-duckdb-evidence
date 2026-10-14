@@ -181,8 +181,8 @@ def test_quintiles_score_by_value_so_ties_never_split():
 
     Twelve rows over three distinct values: `ntile(5)` would cut them into five
     buckets of two or three regardless of where the values change, so a run of
-    equal values lands in more than one. `qcut` cuts on the break points, so a
-    value maps to exactly one score.
+    equal values lands in more than one. `bin_quantiles` cuts on the break
+    points, so a value maps to exactly one score.
     """
     values = pl.Series("frequency", [1] * 6 + [2] * 3 + [9] * 3)
     scores = _quintiles(values)
