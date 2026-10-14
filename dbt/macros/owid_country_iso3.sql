@@ -3,15 +3,19 @@
 
   OWID leaves `iso_code` empty on its aggregates ("World", "Europe (GCP)") and
   on Kosovo, which has no ISO 3166 code. Filtering on a null code therefore
-  dropped a country with 31 years of CO2 along with the aggregates, while the
-  World Bank, Eurostat and the weather archive all carry it as `XKX` — the
-  code `stg_country` uses. The other null-code entities are aggregates or
+  dropped a country with 25 years of CO2 (2000 on) along with the aggregates,
+  while the World Bank, Eurostat and the weather archive all carry it as `XKX`
+  — the code `stg_country` uses. The other null-code entities are aggregates or
   states that no longer exist (USSR, Yugoslavia), which no country-year joins.
+
+  Kosovo is matched by name, whatever its code. OWID's COVID dataset codes it
+  `OWID_KOS`, eight characters, which the three-letter filter would drop as an
+  aggregate if these files ever did the same.
 
   One definition, because `stg_co2` and `stg_energy` both clean OWID; a model
   that kept the bare `iso_code` would lose Kosovo again with every test green,
   which is what their unit tests are for.
 #}
 {% macro owid_country_iso3(iso_code='iso_code', country='country') -%}
-    coalesce({{ iso_code }}, case when {{ country }} = 'Kosovo' then 'XKX' end)
+    case when {{ country }} = 'Kosovo' then 'XKX' else {{ iso_code }} end
 {%- endmacro %}
