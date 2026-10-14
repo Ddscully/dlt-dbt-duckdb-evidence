@@ -168,6 +168,6 @@ Cutting on the break points instead keeps equal values together. The buckets
 then come out uneven, which is a fact about the customer base and not about the
 method. A pipeline check counts any value carrying more than one score, because
 the tidier method would still produce five neat buckets and a believable segment
-mix. (It is why this step is a Polars `qcut` rather than SQL's `ntile`.)
+mix. (It is why this step is Polars' `bin_quantiles` rather than SQL's `ntile`.)
 
 </Alert>

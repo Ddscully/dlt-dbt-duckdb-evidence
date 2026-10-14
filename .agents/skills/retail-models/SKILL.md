@@ -128,18 +128,24 @@ one; the page is `retail.md`.
   run of equal values wherever the boundary lands. 1,626 customers have placed
   exactly one order, and across the four tied values that straddle a boundary
   **3,227 of 5,881 customers** could be scored differently from someone whose
-  behaviour is identical. `qcut` cuts on break points, so equal values always
-  score equally and the buckets come out uneven — which is a fact about the
+  behaviour is identical. `bin_quantiles` cuts on break points, so equal values
+  always score equally and the buckets come out uneven — which is a fact about the
   customer base, not an artefact. `rfm_scores_do_not_split_ties` is a blocking
   asset check, because a regression to `ntile` still yields five tidy buckets and
   a plausible segment mix.
-  - **Casting a Polars Categorical straight to an integer gives the physical
-    dictionary index**, i.e. order of first appearance, not label order. Via
-    `String` is the only reading that means what it says.
+  - **`bin_quantiles` replaced `qcut` when Polars 2.0 deprecated it**, and
+    scores all 5,881 customers identically on R, F and M. Polars offers two
+    replacements and only this one fits: `bin_ranks` splits on position, which
+    is `ntile` again. `right_closed=True` is load-bearing, because the bins
+    default to left-closed and on frequency that moves 3,227 scores and empties
+    the bottom quintile. It is marked experimental, so the transform's tests and
+    the asset check are what hold it. `labels=False` returns the bin index,
+    which also retired `qcut`'s trap: a Categorical cast straight to an integer
+    gives its dictionary index, not the label.
   - **Monetary is null for 28 customers, and the check now says so rather than
     not looking.** `monetary_gbp` is `net_revenue_gbp`, which `dim_retail_customer`
     already publishes as null for the customers whose orders held no revenue
-    line — so `qcut` returns null and `concat_str`/`+` propagate it into
+    line — so `bin_quantiles` returns null and `concat_str`/`+` propagate it into
     `rfm_cell` and `rfm_total`. Kept null rather than coalesced to 0: a 0 scores
     them into the bottom quintile, which reads as "measured, worth nothing"
     instead of "nothing to measure". `segment` is unaffected, because the grid is
