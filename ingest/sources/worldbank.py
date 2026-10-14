@@ -154,8 +154,39 @@ def wdi_start_year(last_loaded_year: int | None) -> int | None:
 
 
 def wdi_full_reload_requested() -> bool:
-    """`INGEST_WDI_FULL=1` ignores the watermark and re-fetches everything."""
+    """`INGEST_WDI_FULL=1` drops the landing table and re-fetches every series.
+
+    `ingest.pipeline.load_groups` moves `wb_wdi` into the refreshed group, which
+    drops the table and its watermarks; the resource then ignores the (now empty)
+    watermark and asks for each series whole. A merge only adds and updates, so
+    a country-year the World Bank withdraws stays in a local tree until this
+    runs; the workflows never hold one, because they build from empty.
+    """
     return env.flag("INGEST_WDI_FULL")
+
+
+def _edition(meta: dict) -> tuple:
+    """What identifies the edition a page was cut from: two pages of one series
+    that disagree on any of these came from different copies."""
+    return (meta.get("lastupdated"), meta.get("sourceid"), meta.get("total"), meta.get("pages"))
+
+
+def _mixed_editions(metas: list[dict]) -> bool:
+    """Pages of one request that came from more than one edition.
+
+    Each page is its own URL, cached on its own, so a fresh page 1 can sit in
+    front of a stale page 2; judging the rows together, the codes on page 1
+    would hide the empty ones on page 2.
+    """
+    return len({_edition(meta) for meta in metas}) > 1
+
+
+def _editions(metas: list[dict]) -> str:
+    """The distinct editions among `metas`, in page order, for a log line or an error."""
+    seen = list(dict.fromkeys(_edition(meta) for meta in metas))
+    return " vs ".join(
+        f"lastupdated {e[0]}, sourceid {e[1]}, total {e[2]}, pages {e[3]}" for e in seen
+    )
 
 
 def _is_stale(rows: list[dict]) -> bool:
@@ -172,26 +203,38 @@ def _is_stale(rows: list[dict]) -> bool:
 def _fetch_wdi_indicator(
     code: str, start_year: int | None = None, end_year: int | None = None
 ) -> list[dict]:
-    """All rows for one WDI indicator, asked for again once if the copy is stale.
+    """All rows for one WDI indicator, asked for again once if the copy is stale
+    or its pages come from different editions.
 
     The stale copy is cached per URL, twice: the origin keeps it for a day, and
     each Cloudflare edge for a day from its own fetch. The origin ignores the
     order of query parameters, so the retry changes a value, `per_page`, which
-    is a URL new to both. A second stale copy raises, naming the edition, rather
-    than landing rows that `stg_wdi` would drop.
+    is a URL new to both. Every page is a URL of its own, so the pages of one
+    request can mix editions; the retry changes every page's URL at once. A
+    second failure raises, naming the edition or editions, rather than landing
+    rows that `stg_wdi` would drop.
     """
-    rows, meta = _fetch_wdi_pages(code, start_year, end_year, WB_PER_PAGE)
-    if not _is_stale(rows):
+    rows, metas = _fetch_wdi_pages(code, start_year, end_year, WB_PER_PAGE)
+    if _mixed_editions(metas):
+        reason = f"pages from different editions ({_editions(metas)})"
+    elif _is_stale(rows):
+        reason = f"a stale copy (lastupdated {metas[0].get('lastupdated')})"
+    else:
         return rows
     log.warning(
-        "wb_wdi: %s served a stale copy (lastupdated %s); asking again with per_page=%d",
-        code, meta.get("lastupdated"), WB_STALE_RETRY_PER_PAGE,
+        "wb_wdi: %s served %s; asking again with per_page=%d",
+        code, reason, WB_STALE_RETRY_PER_PAGE,
     )  # fmt: skip
-    rows, meta = _fetch_wdi_pages(code, start_year, end_year, WB_STALE_RETRY_PER_PAGE)
+    rows, metas = _fetch_wdi_pages(code, start_year, end_year, WB_STALE_RETRY_PER_PAGE)
+    if _mixed_editions(metas):
+        raise RuntimeError(
+            f"World Bank served pages of {code} from different editions at two page "
+            f"sizes ({_editions(metas)}): {wdi_url(code, 1, start_year, end_year)}"
+        )
     if _is_stale(rows):
         raise RuntimeError(
             f"World Bank served a stale copy of {code} at two page sizes "
-            f"(lastupdated {meta.get('lastupdated')}, {len(rows)} rows, "
+            f"(lastupdated {metas[0].get('lastupdated')}, {len(rows)} rows, "
             f"no countryiso3code): {wdi_url(code, 1, start_year, end_year)}"
         )
     return rows
@@ -199,11 +242,11 @@ def _fetch_wdi_indicator(
 
 def _fetch_wdi_pages(
     code: str, start_year: int | None, end_year: int | None, per_page: int
-) -> tuple[list[dict], dict]:
-    """Every page of one request, until `meta.pages` is exhausted, and the first
-    page's `meta`."""
+) -> tuple[list[dict], list[dict]]:
+    """Every page of one request, until `meta.pages` is exhausted, and every
+    page's `meta`, so the caller can tell whether they agree on the edition."""
     rows_out: list[dict] = []
-    first_meta: dict = {}
+    metas: list[dict] = []
     page = 1
     while True:
         payload = http.get_json(wdi_url(code, page, start_year, end_year, per_page=per_page))
@@ -212,7 +255,7 @@ def _fetch_wdi_pages(
         if not (isinstance(payload, list) and len(payload) == 2):
             raise RuntimeError(f"unexpected World Bank payload for {code}: {payload!r:.300}")
         meta, rows = payload
-        first_meta = first_meta or meta
+        metas.append(meta)
         rows_out.extend(
             {
                 "indicator": code,
@@ -227,7 +270,7 @@ def _fetch_wdi_pages(
         if page >= int(meta.get("pages", 1)):
             break
         page += 1
-    return rows_out, first_meta
+    return rows_out, metas
 
 
 @dlt.resource(
@@ -241,7 +284,9 @@ def wb_wdi(years: tuple[int, int] | None = None):
 
     Merge makes a partial fetch safe: re-fetched rows replace their previous
     versions, so a five-year window leaves 1960 onwards intact. The cost is that
-    a country-year the World Bank withdraws stays until a full reload.
+    a country-year the World Bank withdraws stays until `just ingest-wdi-full`,
+    which drops the table and re-fetches it (the workflows never hold one: they
+    build from empty).
 
     `years` is the backfill path — an explicit `(first, last)` window for every
     indicator, which the Dagster asset takes as `YearRange` run config rather
@@ -268,7 +313,11 @@ def wb_wdi(years: tuple[int, int] | None = None):
         }
         for code, future in pending.items():
             rows = future.result()
-            loaded = [row["year"] for row in rows if row["year"] is not None]
+            # The latest *observed* year: the World Bank serves a row for a year
+            # it has not published yet, with a null value.
+            loaded = [
+                row["year"] for row in rows if row["year"] is not None and row["value"] is not None
+            ]
             if loaded and years is None:
                 # Committed only if the load succeeds. Clamped to this year: the
                 # World Bank serves projections, and a 2050 watermark asks for a

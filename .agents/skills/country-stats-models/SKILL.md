@@ -107,9 +107,11 @@ carries it forward is `publishing-a-release`.
   `(indicator, country_code, year)` is what makes the partial fetch safe. Two
   things it gives up, both deliberate: a country-year the World Bank *withdraws*
   stays in `raw.wb_wdi` until a full reload, and a restatement older than the
-  window is never seen — `just ingest-wdi-full` (`INGEST_WDI_FULL=1`) re-fetches
-  everything, and `just backfill-wdi 1997` re-fetches exactly that year, a year
-  range passed to the asset as run config. The lookback and the backfill sit
+  window is never seen — `just ingest-wdi-full` (`INGEST_WDI_FULL=1`) drops the
+  table and its watermarks and re-fetches every series, loading `wb_wdi` alone
+  (`FULL_RELOADS` in `ingest/pipeline.py`), and `just backfill-wdi 1997`
+  re-fetches exactly that year, a year range passed to the asset as run config,
+  which merges and so restates without deleting. The lookback and the backfill sit
   *beside* each other on purpose: the daily path stays cheap and unattended, and
   reaching further back is an explicit act with a window you can point at. dlt resets its own state when the destination is empty, so
   deleting the warehouse still gives you a full load; dropping *just* the raw
