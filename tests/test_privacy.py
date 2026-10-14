@@ -26,7 +26,13 @@ import yaml
 
 from modern_data_stack import privacy
 from modern_data_stack.paths import project_root
-from publish.export_warehouse import EXTRA_CLASSIFICATIONS, MASKED_LABELS, SALT_ENV, pseudonymise
+from publish.export_warehouse import (
+    EXTRA_CLASSIFICATIONS,
+    MASKED_LABELS,
+    SALT_ENV,
+    pseudonymise,
+    pseudonymised_copy,
+)
 
 LABELS = {"direct_identifier", "quasi_identifier", "non_personal"}
 
@@ -134,6 +140,62 @@ def test_the_same_identifier_gets_the_same_pseudonym_and_a_new_salt_changes_it(t
 
     assert build("one", 1) == build("one", 2), "the same salt has to be reproducible"
     assert build("one", 3) != build("two", 4)
+
+
+def test_the_uploadable_copy_holds_no_clear_id_and_links_to_nothing(tmp_path, monkeypatch):
+    """`live.yml` uploads a copy of the warehouse, and anyone signed in to GitHub
+    can download a public repository's artifacts. The copy gets the release's
+    preparation under a salt it makes and keeps nowhere, so: no clear id in any
+    table; the source untouched; and two copies give a customer different
+    pseudonyms, as a copy and the release do.
+
+    Built in the production shape, with the ids in a DuckLake and `staging` a
+    view over it, because only there does the order of the preparation show:
+    pseudonymise before staging is made a table, and the table is filled from
+    the catalog's clear ids after the rewrite has run.
+    """
+    from modern_data_stack.ducklake import attach
+
+    monkeypatch.delenv(SALT_ENV, raising=False)  # it needs none: it makes its own
+    lake = tmp_path / "lakehouse"
+    (lake / "data").mkdir(parents=True)
+    source = tmp_path / "source" / "warehouse.duckdb"
+    source.parent.mkdir()
+    con = duckdb.connect(str(source))
+    attach(con, lake / "catalog.duckdb", lake / "data", alias="lakehouse")
+    con.execute("create schema lakehouse.raw")
+    con.execute(
+        "create table lakehouse.raw.lines as select * from (values "
+        "('12345', 10.0), ('12345', 5.0), ('67890', 7.0), (NULL, 3.0)) t(customer_id, amount)"
+    )
+    con.execute("create schema staging")
+    con.execute("create schema marts")
+    con.execute("create view warehouse.staging.stg_lines as select * from lakehouse.raw.lines")
+    con.execute(
+        "create table marts.dim_customer as select customer_id, sum(amount) as revenue "
+        "from staging.stg_lines where customer_id is not null group by 1"
+    )
+    con.execute("detach lakehouse")
+    con.close()
+
+    by_revenue = "select customer_id from marts.dim_customer order by revenue"
+    copies = []
+    for run in ("a", "b"):
+        dest = tmp_path / run / "warehouse.duckdb"
+        pseudonymised_copy(dest, source=source, lakehouse_dir=lake)
+        con = duckdb.connect(str(dest), read_only=True)
+        for relation in ("staging.stg_lines", "marts.dim_customer"):
+            clear = con.execute(
+                f"select count(*) from {relation} where customer_id in ('12345', '67890')"
+            ).fetchone()[0]
+            assert clear == 0, f"{relation} kept {clear} clear ids in run {run}"
+        copies.append(con.execute(by_revenue).fetchall())
+        con.close()
+
+    con = duckdb.connect(str(source), read_only=True)
+    assert con.execute(by_revenue).fetchall() == [("67890",), ("12345",)], "the source changed"
+    con.close()
+    assert copies[0] != copies[1], "two copies share a salt, so their pseudonyms link"
 
 
 def test_a_view_and_the_mart_below_it_still_agree_after_the_rewrite(warehouse):

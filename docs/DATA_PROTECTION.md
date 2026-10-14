@@ -137,6 +137,14 @@ surrogate key is for, and still can't recover who they are. `just export-data`
 generates a throwaway salt locally, because a laptop's copy isn't a release and
 shouldn't look like one.
 
+`live.yml`'s diagnostic artifact, the warehouse a weekly live run built, is a
+throwaway too. Anyone signed in to GitHub can download a public repository's
+artifacts, and the warehouse holds the id in clear, so what is uploaded is
+`pseudonymised_copy`: the release's own preparation, staging made tables and
+every identifier rewritten, under a salt made for that run and kept nowhere. Its
+pseudonyms link to nothing, not to the release and not to another run's copy,
+and if the copy cannot be made nothing is uploaded.
+
 ## Why the boundary and not the model
 
 The obvious place to mask a column is the staging model that reads it, so that

@@ -448,6 +448,30 @@ def test_a_push_is_diffed_from_the_last_build_that_succeeded():
     assert pages["permissions"].get("actions") == "read", pages["permissions"]
 
 
+def test_no_workflow_uploads_the_warehouse_or_the_landing_zone_in_the_clear():
+    """Everything under `data/` holds clear customer ids: the warehouse, where the
+    id is pseudonymised only at the export, and the landing zone. Anyone signed
+    in to GitHub can download a public repository's artifacts, and `live.yml`
+    once uploaded `data/warehouse.duckdb` itself. Its artifact is the copy
+    `pseudonymised_copy` writes, and nothing else.
+    """
+    uploads: dict[str, list[str]] = {}
+    for path in sorted(WORKFLOWS_DIR.glob("*.yml")):
+        for step in _steps(_workflow(path.name)):
+            if str(step.get("uses", "")).startswith("actions/upload-artifact@"):
+                uploads.setdefault(path.name, []).append(str(step["with"]["path"]).strip())
+    assert "live.yml" in uploads, f"the upload scan found {uploads}"
+    clear = {name: [p for p in paths if p.startswith("data/")] for name, paths in uploads.items()}
+    assert not any(clear.values()), f"artifacts uploaded from under data/: {clear}"
+
+    (copy,) = [
+        s for s in _steps(_workflow("live.yml")) if "pseudonymised_copy" in str(s.get("run"))
+    ]
+    assert all(path in copy["run"] for path in uploads["live.yml"]), (
+        f"live.yml uploads {uploads['live.yml']}, which its pseudonymising step does not write"
+    )
+
+
 def _live_paths() -> list[str]:
     (source,) = [s for s in _steps(_workflow("pages.yml")) if s.get("id") == "source"]
     return source["env"]["LIVE_PATHS"].split()

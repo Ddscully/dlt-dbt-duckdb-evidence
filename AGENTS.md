@@ -265,6 +265,10 @@ measurements and the mechanism are `publishing-a-release`, and the reasoning is
   anonymous row the same pseudonym.
 - **An Evidence source query names its columns**: a `select *` ships every
   column to every visitor.
+- **A copy of the warehouse leaves the machine only through the export's
+  preparation** — the release, or `live.yml`'s artifact via
+  `pseudonymised_copy` — because anyone signed in to GitHub can download a
+  public repository's artifacts, and the warehouse holds the id in clear.
 - **Quote shares, never counts, of anything aggregated over floats** — two
   builds on identical sources disagreed on the number of distinct values.
 
