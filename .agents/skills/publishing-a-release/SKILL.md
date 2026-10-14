@@ -85,6 +85,14 @@ it cost to learn:
   with a classified one, and nowhere else.
 - **The site is a second way out.** A `select *` source query ships every column
   to every visitor; `building-evidence-reports` has the rule its queries follow.
+- **A workflow artifact is a third.** Anyone signed in to GitHub can download a
+  public repository's artifacts, and `live.yml` keeps the warehouse its live run
+  built for a week. It uploads `pseudonymised_copy`, the release's preparation
+  under a salt made for the run and discarded, never `data/warehouse.duckdb`.
+  The preparation needs the landing zone attached, because `privacy.verify`
+  binds the staging views too: pseudonymising a bare copy fails on
+  `Catalog "lakehouse" does not exist!`. `tests/test_workflows.py` fails on any
+  artifact uploaded from under `data/`.
 
 ## What the manifest tells a consumer they cannot see
 

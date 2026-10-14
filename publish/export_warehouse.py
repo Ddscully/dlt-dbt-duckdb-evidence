@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 from datetime import UTC
 from pathlib import Path
 
@@ -44,7 +45,13 @@ import duckdb
 
 from modern_data_stack import privacy
 from modern_data_stack.ducklake import catalog_metadata
-from modern_data_stack.export import default_tag, describe_relations, export, loaded_at
+from modern_data_stack.export import (
+    default_tag,
+    describe_relations,
+    export,
+    loaded_at,
+    snapshot_warehouse,
+)
 from modern_data_stack.paths import dbt_manifest_path, warehouse_path
 
 DUCKDB_PATH = warehouse_path()
@@ -71,6 +78,7 @@ __all__ = [
     "main",
     "prepare_published_copy",
     "pseudonymise",
+    "pseudonymised_copy",
     "publish_lakehouse",
     "release_notes",
     "run",
@@ -342,7 +350,9 @@ def publish_lakehouse(dest_dir: Path, lakehouse_dir: str | Path | None = None) -
 
 
 def prepare_published_copy(
-    con: duckdb.DuckDBPyConnection, lakehouse_dir: str | Path | None = None
+    con: duckdb.DuckDBPyConnection,
+    lakehouse_dir: str | Path | None = None,
+    salt: str | None = None,
 ) -> dict:
     """Everything the copy needs before it is read: stand alone, then anonymise.
 
@@ -351,7 +361,7 @@ def prepare_published_copy(
     them untouched, and the published `staging` would disagree with `marts` about
     who a customer is, with matching row counts and no error.
     """
-    return {**solidify_staging(con, lakehouse_dir), **pseudonymise(con)}
+    return {**solidify_staging(con, lakehouse_dir), **pseudonymise(con, salt=salt)}
 
 
 def solidify_staging(
@@ -465,6 +475,32 @@ def landed_at(
         return loaded_at(con, raw_database=ATTACH_ALIAS)
     finally:
         con.execute(f"detach {ATTACH_ALIAS}")
+
+
+def pseudonymised_copy(
+    dest: str | Path,
+    source: str | Path = DUCKDB_PATH,
+    lakehouse_dir: str | Path | None = None,
+) -> dict:
+    """Write `source` to `dest` as the release would ship it. Returns provenance.
+
+    For a copy that leaves the machine without being a release: `live.yml`'s
+    artifact, which anyone signed in to GitHub can download from a public
+    repository. It gets the release's own preparation (`prepare_published_copy`:
+    staging made tables, then every direct identifier rewritten), so it also
+    opens without the landing zone. The salt is made here and never kept, so its
+    pseudonyms link to nothing: not to the release, and not to another run's
+    copy. `dest` keeps the source's file name, which the views need
+    (`snapshot_warehouse`).
+    """
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_warehouse(Path(source), dest)
+    con = duckdb.connect(str(dest))
+    try:
+        return prepare_published_copy(con, lakehouse_dir, salt=secrets.token_hex(32))
+    finally:
+        con.close()
 
 
 def pseudonymise(

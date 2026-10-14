@@ -50,7 +50,7 @@ jobs:
     # release-data.yml's weather step. A backstop: the steps that can hang carry
     # their own, because a job that times out is *cancelled*, and the issue step
     # below runs on failure() and so not at all.
-    timeout-minutes: 50
+    timeout-minutes: 55
     # No INGEST_FIXTURES anywhere in this workflow — that is the entire point of
     # it. The three paths come from the setup action.
     steps:
@@ -146,12 +146,27 @@ jobs:
       # A build artifact, not a release: handy for diffing what the live sources
       # actually returned on the day the run went red. `release-data.yml` is the
       # durable, versioned, publicly downloadable version of the same file.
+      #
+      # Never the warehouse itself. It holds `customer_id` in clear, because the
+      # id is pseudonymised at the export and never in a model, and anyone
+      # signed in to GitHub can download a public repository's artifacts. The
+      # upload is the copy the release would ship (staging made tables, every
+      # direct identifier rewritten) under a salt made for this run and kept
+      # nowhere, so its pseudonyms link to nothing. If the copy cannot be made,
+      # nothing is uploaded. `tests/test_workflows.py` holds both halves.
+      - name: Make a copy of the warehouse that is safe to upload
+        if: always()
+        timeout-minutes: 3
+        run: >-
+          uv run python -c "from publish.export_warehouse import pseudonymised_copy;
+          pseudonymised_copy('artifact/warehouse.duckdb')"
+
       - name: Upload the warehouse
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: warehouse-${{ github.run_id }}
-          path: data/warehouse.duckdb
+          path: artifact/warehouse.duckdb
           retention-days: 7
           if-no-files-found: warn
 
