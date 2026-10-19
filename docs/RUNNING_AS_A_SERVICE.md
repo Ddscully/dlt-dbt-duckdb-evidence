@@ -101,6 +101,7 @@ serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
     #!/usr/bin/env bash
     set -euo pipefail
     # … refuse to start if $SITE_ROOT holds no site …
+    # … create the instance's storage, before either process races to …
     # … traps, so a signal exits 0 and a dead child exits 1 …
     uv run --group orchestration dagster-webserver -h {{ host }} -p {{ dagster_port }} &
     uv run --group orchestration dagster-daemon run &
@@ -132,6 +133,17 @@ serving 404s that look like a broken build.
 Cold start on a warm venv is **17 s** from `just serve` to both ports answering,
 `dbt deps` and `dbt parse` included — the dependency below is most of it.
 
+**The first start creates the instance before it starts anything.** On an empty
+`DAGSTER_HOME` the webserver and the daemon would each create the SQLite storage
+tables, and one of them dies on `table secondary_indexes already exists` or
+`table runs already exists`; then `wait -n` stops the other and the recipe exits
+1. Measured as ten paired instance initialisations on an empty directory, 12 of
+the 20 processes died, and none once one `DagsterInstance.get()` had run first,
+which is the line the recipe runs. `just clean` empties `.dagster/` down to its
+`dagster.yaml`, so this is every start after a clean, not only the first deploy.
+`dagster dev` does the same in its own parent process, which is why `just
+dagster` needs no such line.
+
 Four things in that block are load-bearing:
 
 - **`dagster-webserver` and `dagster-daemon`, not `dagster dev`.** Checked
@@ -147,21 +159,22 @@ Four things in that block are load-bearing:
 
   **The wording to know about:** the explicit "intended for local development
   *only*" warning is written on the docs page about **`dg dev`**, the newer
-  CLI's equivalent, and `dg` is a tool this project deliberately does not
-  install. The reasons it gives are about process architecture rather than about
-  which CLI typed them, and the shipped `dagster dev` help says "local
-  deployment" in its own words, so the conclusion carries. But the sentence
-  somebody will go looking for is not phrased about the command used here.
+  CLI's equivalent. `dg dev` writes a workspace file and hands it to
+  `dagster dev`'s own code, so the warning covers both, and `just dagster` runs
+  `dagster dev` because `dg dev` cannot build that file on this layout
+  ([`0022`](decisions/0022-dg-runs-where-it-can-dagster-dev-stays-where-dg-dev-cannot.md)).
+  The reasons it gives are about process architecture rather than about which
+  CLI typed them, so the conclusion carries.
 - **`dbt-parse` as a dependency, not an afterthought. Measured, and it is the
-  one thing that actually breaks.** `prepare_if_dev()` in
-  [`orchestration/resources.py`](../orchestration/resources.py) fires only under
-  the dev CLI, which sets `DAGSTER_IS_DEV_CLI`, so running the webserver directly
-  does not prepare the dbt project. Both halves were run:
-
-  | With `dbt/target/manifest.json` | webserver + daemon, separately | `dagster dev` |
-  |---|---|---|
-  | present | code location loads (`RepositoryLocation`), daemon alive | loads |
-  | **absent** | **code location fails** (`PythonError`), webserver still answering | **regenerates the manifest** |
+  one thing that actually breaks.** Nothing in
+  [`orchestration/resources.py`](../orchestration/resources.py) prepares the dbt
+  project — `prepare_if_dev()` would run on every `dg` command
+  ([`0022`](decisions/0022-dg-runs-where-it-can-dagster-dev-stays-where-dg-dev-cannot.md)) — so
+  the manifest has to exist before the webserver starts. Measured
+  with the webserver and daemon run separately: with `dbt/target/manifest.json`
+  present the code location loads (`RepositoryLocation`) and the daemon stays
+  alive; **absent, the code location fails** (`PythonError`) and the webserver
+  keeps answering.
 
   The failure is legible, which is the good news:
   `dagster_dbt.errors.DagsterDbtManifestNotFoundError: …/dbt/target/manifest.json
@@ -169,8 +182,8 @@ Four things in that block are load-bearing:
   way**: it answers HTTP and the daemon keeps running, and only the code
   location inside it is broken. A liveness check on the port would call this
   deployment fine. `dbt/target/` is gitignored, so it bites on every fresh
-  deploy; the justfile already records the prerequisite at every headless recipe,
-  and [Standing it up](#standing-it-up) makes it a step.
+  deploy; the justfile records the prerequisite at every recipe that loads the
+  graph, and [Standing it up](#standing-it-up) makes it a step.
 - **`--group orchestration` on the Dagster processes; on the file server it is
   harmless.** `uv run` only ever *adds* what its groups need and never removes a
   package (measured on uv 0.12.12: a bare `uv run` left Dagster
@@ -508,15 +521,16 @@ way, confirm the code location actually loaded, and do not skip this on the
 grounds that the port answers:
 
 ```sh
-uv run dagster definitions validate -m orchestration.definitions
+# exits 1 if the code location does not load
+uv run --group orchestration dg list defs --json > /dev/null
 ```
 
 **A broken code location does not take the webserver down.** Measured (see [`just serve`](#just-serve-and-the-container-built-on-it)): with
 `dbt/target/manifest.json` missing, the webserver still answers HTTP and the
 daemon still runs, while the only thing in the deployment that does any work
 fails to load. A liveness probe on the port reports a healthy service that
-cannot materialise anything. `definitions validate` is what distinguishes them,
-and it names the cause: `DagsterDbtManifestNotFoundError`.
+cannot materialise anything. `dg list defs` is what distinguishes them, and
+it names the cause: `DagsterDbtManifestNotFoundError`.
 
 **5. Turn the schedule on. It is off until you do**, and this is instance state
 in `DAGSTER_HOME`, not code, so it is also the step to repeat if that directory
@@ -528,7 +542,7 @@ uv run dagster schedule start daily_refresh    # never with -m
 
 The UI toggle is the same action against the same instance; use either. What is
 *not* equivalent is editing `default_status` in `definitions.py`, which changes
-what `dagster dev` does for everyone who clones the repo.
+what `just dagster` does for everyone who clones the repo.
 
 **6. Refresh the site, and know that the schedule will not.** `daily_refresh`
 targets `full_refresh`, which excludes `reports/evidence_site` ([The schedule](#the-schedule-bootstrap-is-not-steady-state)) — so the
@@ -618,7 +632,7 @@ running and is not:
   the same fact from the other side. So it survives a restart only if that
   storage is durable, and a wipe silently returns the service to ingesting
   nothing. Flipping `default_status` instead is a code change that changes what
-  `dagster dev` does for everyone who clones the repo.
+  `just dagster` does for everyone who clones the repo.
 
   Under `deploy/dagster.yaml` the schedule storage is Postgres rather than
   SQLite, so the durable thing is the `dagster` database and `DAGSTER_HOME` holds
@@ -685,13 +699,13 @@ this file the second stayed `QUEUED` until the first finished. The file is read
 at process start, so a change to it takes a restart.
 
 **The queue governs what enters it, and no recipe that materialises enters it.**
-The UI, its backfills included, and the schedule submit to it. `dagster job
-execute` (`just materialize`, `materialize-site`) and `dagster asset materialize`
-(`materialize-select` and both `backfill-*` recipes) execute in the calling
-process: on the same throwaway instance, two overlapping `dagster asset
-materialize` runs both started at once, and neither was ever enqueued. So
-`just backfill-weather`, six years in about six minutes, runs beside a scheduled
-`full_refresh` rather than behind it. The two directions differ, and the same
+The UI, its backfills included, and the schedule submit to it. `dg launch`
+(`just materialize`, `materialize-site`, `materialize-select` and both
+`backfill-*` recipes) executes in the calling process, through the same code as
+`dagster job execute` and `dagster asset materialize`: on the same throwaway
+instance, two overlapping `dagster asset materialize` runs both started at once,
+and neither was ever enqueued. So `just backfill-weather`, six years in about
+six minutes, runs beside a scheduled `full_refresh` rather than behind it. The two directions differ, and the same
 instance measured both for `just materialize`:
 
 | | Result |
@@ -762,7 +776,7 @@ keeps, extended with the ones only an always-on deployment meets:
 
 - **dlt's data dir moves with `$HOME`.** A different service user resets the
   watermark with no error ([The state](#the-state-that-must-outlive-a-restart)).
-- **`prepare_if_dev()` does not fire outside `dagster dev`.** The code location
+- **Nothing parses dbt for the graph.** Without `just dbt-parse` the code location
   fails to load, or loads against a stale manifest ([`just serve`](#just-serve-and-the-container-built-on-it)).
 - **A `STOPPED` schedule survives a `.dagster/` wipe as stopped.** The service
   runs, serves an increasingly old site, and ingests nothing ([The schedule](#the-schedule-bootstrap-is-not-steady-state)).
@@ -810,7 +824,7 @@ keeps, extended with the ones only an always-on deployment meets:
   prints `Started schedule daily_refresh` and writes a row the running service
   never reads: the instigator's selector id hashes the *code location name*, and
   `-m` names the location after the module while `pyproject.toml`'s
-  `[tool.dagster]` names it `modern_data_stack`. Measured against the
+  `[tool.dg.project]` names it `modern_data_stack`. Measured against the
   deployed instance: the two spellings put **two `RUNNING` rows for one
   schedule** in `instigators`, and the bare `dagster schedule list` — which
   resolves the location the same way the webserver and daemon do — still read
@@ -819,8 +833,8 @@ keeps, extended with the ones only an always-on deployment meets:
   and the daemon then marked the run `FAILURE` with
   `DagsterCodeLocationNotFoundError: Location orchestration.definitions does not
   exist in workspace`. Dropping `-m` made the same launch succeed. **Against a
-  service, never pass `-m`**: let the CLI fall back to `[tool.dagster]`, which is
-  what the service itself falls back to.
+  service, never pass `-m`**: let the CLI fall back to `[tool.dg.project]`, which
+  is what the service itself falls back to.
 - **A `DAGSTER_HOME` outside the checkout has no `dagster.yaml`.** The host runbook puts it on
   the durable volume, where Dagster finds no config, prints one notice at start
   and falls back to its defaults — ten runs at once rather than one, so a restart
@@ -833,11 +847,10 @@ keeps, extended with the ones only an always-on deployment meets:
   writing to `$DAGSTER_STORAGE_DIR`. It is a display quirk of that command and
   not a config that failed to load — read it back off the instance rather than
   out of `instance info` before changing anything to chase it.
-- **The recipes do not queue behind the service.** `just materialize` and
-  `materialize-site` run `dagster job execute`, and `materialize-select` and both
-  `backfill-*` recipes run `dagster asset materialize`; each executes in its own
-  process, beside whatever the service is running, and only the other direction
-  waits ([The schedule](#the-schedule-bootstrap-is-not-steady-state)).
+- **The recipes do not queue behind the service.** `just materialize*` and both
+  `backfill-*` recipes run `dg launch`, which executes in its own process,
+  beside whatever the service is running, and only the other direction waits
+  ([The schedule](#the-schedule-bootstrap-is-not-steady-state)).
 - **A bare `uv sync` uninstalls Dagster.** `default-groups` is unset, so
   `uv sync` without `--group orchestration`, typed against a *running* service,
   strips 46 packages out of the venv under it. The running processes hold their

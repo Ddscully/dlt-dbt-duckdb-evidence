@@ -8,8 +8,8 @@ telemetry:
 # serialises steps *within* a run; this serialises runs, which otherwise start
 # ten at once (Dagster's default) and contend for the lock. It governs only
 # runs submitted to it — UI launches and backfills, the schedule — and not the
-# in-process `dagster job execute` or `dagster asset materialize`, one of which
-# every recipe that materialises runs, the `backfill-*` recipes included.
+# in-process `dg launch`, which every recipe that materialises runs, the
+# `backfill-*` recipes included.
 concurrency:
   runs:
     max_concurrent_runs: 1

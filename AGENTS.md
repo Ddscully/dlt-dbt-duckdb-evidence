@@ -404,7 +404,7 @@ jobs and the rest are `dagster-graph-and-jobs`. What bites outside it:
 - **`load_retail` runs before `full_refresh`**: dbt reads what it lands, so
   `full_refresh` alone against a fresh warehouse fails in dbt.
 - **Every asset and check is listed by hand in `definitions.py`**, and an
-  omission is silent — `dagster definitions validate` passes.
+  omission is silent — `just validate` passes.
 - **`orchestration/assets.py` must not use `from __future__ import annotations`**:
   Dagster inspects the `context` parameter's annotation object.
 

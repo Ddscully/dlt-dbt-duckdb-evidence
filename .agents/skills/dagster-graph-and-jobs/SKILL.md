@@ -1,6 +1,6 @@
 ---
 name: dagster-graph-and-jobs
-description: This repo's Dagster graph — why WDI and weather take their backfill years as run config rather than partitions (a partitioned job's Materialize button is a backfill), the one partitioned asset and the guards it needs to keep working unpartitioned, why there are four jobs and why load_retail runs first, the hand-maintained lists in definitions.py and the two traps in the test that guards them, and the costed decision not to be a dg-shaped project or to use declarative automation. Use when adding or registering an asset or asset check, changing a job or selection, running a backfill, or before reaching for dg, components or AutomationCondition.
+description: This repo's Dagster graph — why WDI and weather take their backfill years as run config rather than partitions (a partitioned job's Materialize button is a backfill), the one partitioned asset and the guards it needs to keep working unpartitioned, why there are four jobs and why load_retail runs first, the hand-maintained lists in definitions.py and the two traps in the test that guards them, which dg commands run here and why dg dev and dg check defs cannot, and the costed decisions against components and declarative automation. Use when adding or registering an asset or asset check, changing a job or selection, running a backfill, or before reaching for dg, components or AutomationCondition.
 ---
 
 # The Dagster graph (`orchestration/`)
@@ -33,11 +33,13 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   serialises steps *within* a run; two runs are two processes. `.dagster/dagster.yaml`
   sets `concurrency: runs: max_concurrent_runs: 1` (Dagster's default is 10), so
   a UI launch, a UI backfill or a schedule tick queues behind a run in progress.
-  Three edges, all measured on 1.13.22:
-  - **`dagster job execute` and `dagster asset materialize` bypass the queue,
-    and every recipe that materialises runs one of them**, the `backfill-*`
-    recipes included. The queue still *counts* such a run — a UI launch waits for
-    a `just materialize` to end — but no recipe waits for anything.
+  Its edges, measured on 1.13.22 unless a bullet names a later version:
+  - **`dg launch` bypasses the queue, and every recipe that materialises runs
+    it**, the `backfill-*` recipes included: it executes in process, through
+    the code behind `dagster job execute` and `dagster asset materialize`
+    (measured for `dg launch` on 1.13.26). The queue still *counts* such a
+    run — a UI launch waits for a `just materialize` to end — but no recipe
+    waits for anything.
   - **The file is read at process start.** Editing it changes nothing until
     `just serve` or `just dagster` restarts; `dagster instance info` prints what
     the instance loaded.
@@ -54,14 +56,15 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   - **`deploy/` is the container's instance, and a host must not point at it.**
     Nothing in Dagster checks whether it is running in a container, so a host
     process resolves the launcher and starts cleanly, then fails when the daemon
-    dequeues a run: `no container '<hostname>' on this Docker daemon`. Behind
-    that, eleven of the launcher's eighteen copied variables are unset on such a
-    host, and no host configuration satisfies the list. In-process recipes
-    (`just materialize*`, `backfill-*`) work under either instance, so the break
-    shows only on a UI click, a schedule tick or a backfill
+    dequeues a run (1.13.23): `no container '<hostname>' on this Docker
+    daemon`. Behind that, eleven of the launcher's eighteen copied variables are
+    unset on such a host, and no host configuration satisfies the list.
+    In-process recipes (`just materialize*`, `backfill-*`) work under either
+    instance, so the break shows only on a UI click, a schedule tick or a
+    backfill
     ([`docs/decisions/0011-deploy-is-the-containers-instance.md`](../../../docs/decisions/0011-deploy-is-the-containers-instance.md)).
-  - **The limit survives the container boundary, measured.** Two runs launched
-    ten seconds apart against the compose stack gave one run
+  - **The limit survives the container boundary, measured on 1.13.23.** Two
+    runs launched ten seconds apart against the compose stack gave one run
     container and one `QUEUED` row; the second started only when the first
     finished, and `auto_remove` left no exited containers. So `DockerRunLauncher`
     changes where a run executes and not how many execute.
@@ -94,7 +97,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   the evidence (measured).
 - **Against a running service, never pass `-m` to the CLI.** A schedule's
   identity includes the code location *name*, which `-m orchestration.definitions`
-  sets to the module while `[tool.dagster]` sets it to `modern_data_stack`, so
+  sets to the module while `[tool.dg.project]` sets it to `modern_data_stack`, so
   `dagster schedule start -m …` prints success and flips a row the daemon does
   not read, and `dagster job launch -m …` returns 0 and then fails the run with
   `DagsterCodeLocationNotFoundError`. Both measured
@@ -104,13 +107,15 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   `python_pointer_options` alone (`-m`, `-f`, `--package-name`), so a bare
   `dagster asset list` exits with `Error: Invalid set of CLI arguments for
   loading repository/job`; `dagster job list` and `dagster definitions validate`
-  take `workspace_options`, which do fall back to `[tool.dagster]`. Measured:
+  take `workspace_options`, which do fall back to `pyproject.toml`. Measured:
 
   | Command | `-m` | `DAGSTER_HOME` |
   |---|---|---|
   | `dagster asset list` (`just materialize-preview`) | **required** | not read |
   | `dagster job list` | optional — omit it | not read |
   | `dagster definitions validate` | optional — omit it | a temp dir if unset |
+  | `dg list defs` (`just validate`) | not needed: it reads `[tool.dg]` | not needed |
+  | `dg launch` (`just materialize*`, `backfill-*`) | not needed: it reads `[tool.dg]` | **a throwaway instance if unset**: exit 0, the run recorded nowhere, and none of `dagster.yaml` applied — the loggers and the telemetry opt-out included |
   | `dagster run list`, `dagster schedule list` | n/a | **required** |
 
   What requires `-m` builds the definitions in a throwaway code server and
@@ -123,9 +128,11 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   `just` recipe has it exported already.
 
 **This file is the Dagster knowledge for this repo**, not a supplement to a
-vendor skill: `dagster-expert` is not enabled, because it is written around a `dg`
-CLI this project does not install
-([`docs/decisions/0004-agent-plugins-kept-by-measured-use.md`](../../../docs/decisions/0004-agent-plugins-kept-by-measured-use.md)).
+vendor skill. Dagster's skill (the `dagster@dagster` plugin, which replaced
+`dagster-expert`) is not enabled: it was retired on measured use
+([`docs/decisions/0004-agent-plugins-kept-by-measured-use.md`](../../../docs/decisions/0004-agent-plugins-kept-by-measured-use.md)),
+and it assumes a project `dg dev`, `dg check defs` and scaffolding can run in,
+which this one is not (`dg` below).
 
 ## Backfill windows, and the one partition
 
@@ -140,11 +147,13 @@ CLI this project does not install
     current year, past which the World Bank serves projections. Validated in the
     body, before any load. From the UI, a backfill is the Launchpad with
     `ops: {ingest_by_year: {config: {first_year: 1990, last_year: 1995}}}`.
-  - **`dagster asset materialize` silently ignores config for an op it does not
-    know.** A stale op name in `--config-json` loads the lookback and exits 0,
-    where `dagster job execute` refuses the same config; a misspelt *field* is
-    refused by both. The justfile spells the op, so `tests/test_definitions.py`
-    holds both backfill recipes to `raw_by_year_assets.op.name`.
+  - **`dg launch --assets` silently ignores config for an op it does not
+    know**, because it runs `dagster asset materialize`'s code, where that was
+    measured: a stale op name in `--config-json` loads the lookback and exits 0,
+    where `dagster job execute` (`dg launch --job`) refuses the same config; a
+    misspelt *field* is refused by both. The justfile spells the op, so
+    `tests/test_definitions.py` holds both backfill recipes to
+    `raw_by_year_assets.op.name`.
   - **A backfill deliberately doesn't move the WDI watermark.** The watermark
     means "everything up to here is loaded", which a run over one window can't
     claim: a 2020–2025 backfill into an empty warehouse would otherwise leave a
@@ -213,7 +222,7 @@ CLI this project does not install
 - **Every asset and check is listed by hand in `definitions.py`, and nothing
   tells you when one isn't.** `dg.Definitions` takes explicit lists, so an
   omission is not an error — the asset is simply not in the graph,
-  `AssetSelection.all()` never sees it, and `dagster definitions validate`
+  `AssetSelection.all()` never sees it, and `just validate`
   passes. That is how `raw/retail_invoice_lines`, `analytics/retail_rfm` and two
   asset checks sat unregistered from the retail and currency commits until
   `full_refresh` failed in CI with `Catalog Error: Table with name
@@ -243,10 +252,10 @@ CLI this project does not install
   first** because dbt reads the table it lands. The justfile recipes and all four
   workflows pair them; running `full_refresh` by itself against a fresh warehouse
   reproduces the catalog error above.
-  - `dagster asset materialize --select '*'` is not a way round it: the CLI
-    refuses the partitioned retail asset without `--partition` ("Asset has
-    partitions, but no '--partition' option was provided"), so the unpartitioned
-    whole-graph run only exists as a job.
+  - `dg launch --assets '*'` is not a way round it: it runs `dagster asset
+    materialize`'s code, which refuses the partitioned retail asset without
+    `--partition` ("Asset has partitions, but no '--partition' option was
+    provided"), so the unpartitioned whole-graph run only exists as a job.
   - **A job shares a namespace with the ops**, so the job is `load_retail` and
     not `ingest_retail` — `@dlt_assets(name="ingest_retail")` already holds that
     name, and the collision reports as `Conflicting definitions found in
@@ -267,91 +276,116 @@ CLI this project does not install
     this job reads.
     `tests/test_definitions.py` asserts no check on `raw/` or `lake/` is in it.
 
-## Not a `dg`-shaped project
+## `dg`: where it runs, and `dagster dev` where it cannot
 
-- **This is deliberately not a `dg`-shaped project, and the two halves of that
-  decision are separable.** `create-dagster` scaffolds a `defs/` tree that
-  autoloads, a `[tool.dg.project]` block and YAML components; `dagster-expert`,
-  the vendor skill, was written around the `dg` CLI and assumed all of it.
-  Costed rather than assumed:
-  - **The autoloading half is already here and free.** `dagster.components` and
-    `dagster.load_from_defs_folder` ship in `dagster` core — no extra package.
-    What it would buy is deleting `tests/test_definitions.py`, because an
-    unregistered asset becomes impossible rather than merely caught. That trade
-    is close to a wash: the test costs ~1s and *also* documents two traps that
-    the framework would silently absorb (`get_all_asset_keys()` is too wide;
-    `AssetChecksDefinition` subclasses `AssetsDefinition`, so an `isinstance`
-    chain in the wrong order measures nothing).
-  - **The CLI half is +20 packages on a 159-package tree** — `uv pip install
-    --dry-run dagster-dg-cli` resolves 88 and installs 20, removing none and
-    pulling `dagster-cloud-cli`, `github3-py`, `cryptography`, `pyjwt`, `httpx`,
-    `questionary` and `yaspin` into a project with no Dagster Plus deployment.
-    It no longer moves `dagster` itself: `dagster-dg-cli` ships at the version
-    already locked. That is the harlequin/marimo shape exactly — a dev tool that
-    duplicates capability the stack already has is weight, and it is measured in
-    the `dependency-versions` skill.
-  - **Every Dagster CLI command this repo runs is `@superseded`, and a
-    supersession is not a removal clock.** All four carry
-    `emit_runtime_warning=True` in the installed `dagster/_cli/`, so each prints
-    one line before it works — `SupersessionWarning: Function dev_command is
-    superseded and its usage is discouraged. Use 'dg dev' instead.`
+- **`dg launch` and `dg list defs` run here; `dg dev` and `dg check defs` cannot,
+  and the reason is the layout, not taste**
+  ([`docs/decisions/0022-dg-runs-where-it-can-dagster-dev-stays-where-dg-dev-cannot.md`](../../../docs/decisions/0022-dg-runs-where-it-can-dagster-dev-stays-where-dg-dev-cannot.md)).
+  Every `dg` command needs `[tool.dg]` in `pyproject.toml`; without it, it exits
+  with "must be run inside a Dagster project directory". `dg dev` and `dg check
+  defs` then build a workspace file from that block, and
+  `DgContext.get_path_for_local_module` looks for the root module under
+  `<root>/src/` **whenever `src/` exists**, else at the root, never both. `src/`
+  holds only `modern_data_stack`, so both fail with `Cannot find module
+  'orchestration' in the current project`, and neither takes `-m`. `dg launch`
+  and `dg list defs` resolve the target as a module and never reach the lookup.
+  **Check `get_path_for_local_module` on each Dagster bump**: a lookup that tries
+  both places makes the pair usable here.
+  - **Pointing `dg` at the package under `src/` is not a way round it.**
+    `root_module = "modern_data_stack"` wants a `defs/` folder inside the
+    domain-neutral package, and with one the code location's working directory
+    becomes `src/`, where `orchestration` does not import. It loads only with the
+    repo root on `PYTHONPATH` as well, which the decision record rejects.
+- **Each superseded command but `dagster dev` has a replacement here, and only
+  `just dagster` prints a `SupersessionWarning`.** Four commands carry
+  `@superseded` with `emit_runtime_warning=True` in the installed
+  `dagster/_cli/`:
 
-    | Superseded | What it names instead | Where it runs here |
-    |---|---|---|
-    | `dagster dev` | `dg dev` | `just dagster` |
-    | `dagster job execute` | `dg launch --job` | `just materialize`, `just materialize-site`, and the workflows through them |
-    | `dagster asset materialize` | `dg launch --assets` | `just materialize-select`, `just backfill-wdi`, `just backfill-weather` |
-    | `dagster definitions validate` | `dg check defs` | `just validate`, which CI runs, so every build log carries the warning |
+  | Superseded | Runs here instead | Recipe |
+  |---|---|---|
+  | `dagster dev` | itself: `dg dev` writes a workspace file and runs `dagster dev`'s code, and cannot write one here | `just dagster` |
+  | `dagster job execute` | `dg launch --job` | `just materialize`, `materialize-site`, `materialize-site-from-raw` |
+  | `dagster asset materialize` | `dg launch --assets` | `just materialize-select`, `backfill-wdi`, `backfill-weather` |
+  | `dagster definitions validate` | `dg list defs`, which exits 1 on an import or a definition error, and `validate_partitions()` in `tests/test_definitions.py`, which `dg list defs` skips | `just validate`, `just test` |
 
-    **`superseded` and `deprecated` are different annotations in dagster's own
-    taxonomy, and only `deprecated` takes a `breaking_version`.** On
-    `dev_command` that second decorator is applied to the `--dagit-port` and
-    `--dagit-host` *arguments*, not to the command, so none of the four is
-    scheduled for removal at 2.0. Revisit when a `breaking_version` appears on
-    one of them, not when the warning is noticed again.
-  - **The replacements are not drop-in, which is what keeps the decision
-    standing.** `dg dev` takes no module pointer — it launches the project or
-    workspace it is *run inside* — and `dg check defs` here exits with `This
-    command must be run inside a Dagster workspace or project directory`,
-    naming `tool.dg.directory_type = "project"` in the nearest
-    `pyproject.toml`. So silencing one warning means adopting the project
-    declaration, which is the half costed above: the warning is a nag on a
-    supported path, not a migration notice.
-  - **`uvx dg` is the trap, and this repo has already refused it twice.** It
-    dodges the lockfile — which is the argument that lost pyright to ty
-    ("an unpinned global binary no lockfile here can see") and the reason
-    `ty-lsp` runs `uv run ty server` rather than a bare `ty`.
-  - **Components would delete the explanation, which is the deliverable.** The
-    skill's own dbt page reserves the pythonic `@dbt_assets` path for "complex
-    customization" — `FolderGroupDbtTranslator` is exactly that, and its comment
-    is longer than its code on purpose.
-  - **Declarative automation is the adjacent question, and the answer is the
-    same for a different reason: nothing here runs a daemon.** All four
-    workflows are one-shot `dagster job execute`; the daemon exists only under
-    `just dagster`, locally, to serve the UI. An `AutomationCondition` is
-    evaluated by an automation sensor *in the daemon*, so DA here would never
-    fire at all — it would restate one legible eight-line `ScheduleDefinition`
-    across nine asset definitions and be strictly *less* functional than the
-    STOPPED schedule it replaced. Dagster's own decision tree routes "simple,
-    fixed time-based execution" to schedules and reserves DA for partition-aware
-    and graph-state-dependent triggering; `ScheduleDefinition` raises no
-    deprecation warning on 1.13, so this is not a legacy path being tolerated.
-    - **The partition angle is the near-miss.** One asset here *is* partitioned
-      (the yearly sources take run config instead), which is DA's stated niche — but backfills
-      are deliberately manual (`just backfill-wdi`, "an explicit act with a
-      window you can point at"), so DA would automate precisely what this
-      project chose to keep explicit.
-    - **What would change it is circumstance, not taste**: a long-running daemon
-      *and* cadences that diverge — FX is daily, OWID annual, retail a closed
-      archive. Today everything moves together on one cron, so there is nothing
-      for a condition to express. Note the repo already runs the *observability*
-      half of that world: `FreshnessPolicy` on every asset. Heavy use of
-      Dagster's modelling with almost none of its runtime is a coherent position
-      here, not a half-finished adoption.
-  - **The skill's depth and this repo's content are close to disjoint**, which is
-    the part worth knowing before reaching for it. Grepping its 172 reference
-    files for what `assets.py` actually calls: `FreshnessPolicy` 1 (in a
-    components file, dead here), `BackfillPolicy` 0,
-    `asset_check` 1 (in passing), against `AutomationCondition` 10 — which this
-    project uses nowhere. It is worth loading for **asset selection syntax** and
-    the **dagster-dbt/dlt integration pages**, and not for anything else here.
+  `dagster asset list` (`just materialize-preview`), `dagster job launch` (the
+  compose recipe), `dagster-webserver`, `dagster-daemon` and `dagster api` are
+  not superseded. **`dagster job launch` has to stay**: it submits to the queue,
+  and `dg launch` does not.
+- **`dagster dev` is not `just serve`'s pair under another name, so the pair is
+  no way round its warning.** It creates the instance first and serves the
+  webserver and the daemon from one code server. Run separately, each imports
+  the graph into a code server of its own, and on an empty `DAGSTER_HOME` both
+  create the storage tables at once: 12 of 20 processes died on `table …
+  already exists` across ten paired starts. `just serve` creates the instance
+  before starting either (`docs/RUNNING_AS_A_SERVICE.md`).
+- **`dg launch` is `dagster job execute` under another name.** It calls
+  `job_execute_command_impl` and `asset_materialize_command_impl` in process, so
+  everything above about the queue, `-m` and ignored op config holds for it. Its
+  own source carries a TODO to launch through the instance's run launcher
+  instead; **when that lands, the recipes start queueing** behind the service and
+  the one-writer edges at the top of this file change. Re-measure on a bump.
+- **The `dg` group sets `DAGSTER_IS_DEV_CLI` for every subcommand**
+  (`dagster_dg_cli/cli/__init__.py`), the variable
+  `DbtProject.prepare_if_dev()` reads. With that call in `resources.py`, every
+  `dg launch` and `dg list defs` runs `dbt deps` and `dbt parse` on load: 15.8 s
+  against 4.9 s without it, for `load_retail` on fixtures. So there is no
+  `prepare_if_dev()`, and `just dagster` depends on `dbt-parse` like the rest.
+- **`dg`'s telemetry is off only while `DAGSTER_HOME` is set.** It needs both the
+  user's own `dg` config and `$DAGSTER_HOME/dagster.yaml` to allow it; the repo's
+  file says no and every recipe exports `DAGSTER_HOME`, but a bare `uv run dg …`
+  outside `just` reports. `pyproject.toml` cannot turn it off: `dg` reads that
+  setting from the user file alone.
+- **The package is `dagster-dg-cli`, in the `orchestration` group: +16 packages
+  on a 164-package tree**, removing none and pulling `dagster-cloud-cli`,
+  `github3-py`, `httpx`, `questionary` and `yaspin` into a project with no
+  Dagster Plus deployment, at the version of `dagster` already locked. The image
+  installs the group, so it carries them too.
+- **`uvx dg` is the trap, and this repo has already refused it twice.** It
+  dodges the lockfile — which is the argument that lost pyright to ty
+  ("an unpinned global binary no lockfile here can see") and the reason
+  `ty-lsp` runs `uv run ty server` rather than a bare `ty`.
+- **The `defs/` half is separable, and still not taken.** `create-dagster`
+  scaffolds a `defs/` tree that autoloads; `dg.load_from_defs_folder` ships in
+  `dagster` core, and a `defs/` folder merges with the hand-written
+  `Definitions` (`dg.Definitions.merge`, measured). What it would buy is deleting
+  `tests/test_definitions.py`, because an unregistered asset becomes impossible
+  rather than merely caught. That trade is close to a wash: the test costs ~1s and
+  *also* documents two traps that the framework would silently absorb
+  (`get_all_asset_keys()` is too wide; `AssetChecksDefinition` subclasses
+  `AssetsDefinition`, so an `isinstance` chain in the wrong order measures
+  nothing).
+- **Components would delete the explanation, which is the deliverable.** The
+  vendor skill's dbt page reserves the pythonic `@dbt_assets` path for "complex
+  customization" — `FolderGroupDbtTranslator` is exactly that, and its comment
+  is longer than its code on purpose.
+- **Declarative automation is the adjacent question, and the answer is no
+  for reasons of shape, not of plumbing.** An `AutomationCondition` is
+  evaluated by an automation sensor *in the daemon*, and the daemon runs only
+  under `just dagster` and the service (`just serve`, compose); the four
+  workflows are one-shot `dg launch` with none. Where it would fire, it would
+  restate one legible eight-line `ScheduleDefinition`
+  across nine asset definitions and be strictly *less* functional than the
+  STOPPED schedule it replaced. Dagster's own decision tree routes "simple,
+  fixed time-based execution" to schedules and reserves DA for partition-aware
+  and graph-state-dependent triggering; `ScheduleDefinition` raises no
+  deprecation warning on 1.13, so this is not a legacy path being tolerated.
+  - **The partition angle is the near-miss.** One asset here *is* partitioned
+    (the yearly sources take run config instead), which is DA's stated niche —
+    but backfills are deliberately manual (`just backfill-wdi`, "an explicit
+    act with a window you can point at"), so DA would automate precisely what
+    this project chose to keep explicit.
+  - **What would change it is circumstance, not taste**: cadences that
+    diverge, on the service's daemon — FX is daily, OWID annual, retail a closed
+    archive. Today everything moves together on one cron, so there is nothing
+    for a condition to express. Note the repo already runs the *observability*
+    half of that world: `FreshnessPolicy` on every asset. Heavy use of
+    Dagster's modelling with almost none of its runtime is a coherent position
+    here, not a half-finished adoption.
+- **The vendor skill's depth and this repo's content are close to
+  disjoint**, which is the part worth knowing before reaching for it. Grepping
+  its 172 reference files for what `assets.py` actually calls:
+  `FreshnessPolicy` 1 (in a components file, dead here), `BackfillPolicy` 0,
+  `asset_check` 1 (in passing), against `AutomationCondition` 10 — which this
+  project uses nowhere. It is worth loading for **asset selection syntax** and
+  the **dagster-dbt/dlt integration pages**, and not for anything else here.

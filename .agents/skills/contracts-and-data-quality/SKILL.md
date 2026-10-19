@@ -20,8 +20,8 @@ account of the same ground is `docs/DATA_QUALITY.md`.
 - **`dbt deps` first, always.** `dbt/dbt_packages/` and the manifest in
   `dbt/target/` are gitignored, so a fresh clone needs `dbt deps` before
   `dbt build`, `dbt parse` or `sqlfluff`, and `dbt parse` before the asset graph
-  will load. The recipes depend on `dbt-deps` and `dbt-parse`; `prepare_if_dev()`
-  does both, but only under `dagster dev`.
+  will load. The recipes depend on `dbt-deps` and `dbt-parse`, `just dagster`
+  included; nothing in the graph parses for you (docs/decisions/0022).
 - **One `unit_tests:` key per yml.** A second block parses and dbt *merges* the
   lists, warning `DuplicateYAMLKeysDeprecation` — gone in Fusion, and silent until
   then.

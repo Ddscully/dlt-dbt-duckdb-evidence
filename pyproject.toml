@@ -52,6 +52,9 @@ dev = [
 orchestration = [
     "dagster>=1.13.15",           # asset graph, schedules, freshness policies
     "dagster-dbt>=0.29.15",       # dbt manifest -> assets + tests as asset checks
+    # `dg launch` and `dg list defs` in the justfile; `dg dev` and `dg check defs`
+    # cannot run on this layout (docs/decisions/0022). Same version as dagster.
+    "dagster-dg-cli>=1.13.15",
     "dagster-dlt>=0.29.15",       # dlt resources -> assets, with subset loading
     "dagster-webserver>=1.13.15", # the UI behind `just dagster`
 ]
@@ -168,7 +171,17 @@ skip_covered = false
 # not fail, it buries real diagnostics under phantom missing imports.
 python = "./.venv"
 
-[tool.dagster]
-# Lets `uv run dagster dev` find the code location with no extra flags.
-module_name = "orchestration.definitions"
+# The one place the code location is named. Without it every `dg` command refuses
+# to run, and `dagster dev`, `dagster-webserver`, `dagster-daemon` and the rest of
+# the `dagster` CLI fall back to it with no `-m`, which names the location
+# `modern_data_stack`; `-m` names it after the module instead (the
+# dagster-graph-and-jobs skill). The target is `root_module`'s `definitions`, the
+# default. It is not enough for `dg dev` or `dg check defs`: they look for
+# `orchestration/` under `src/` because `src/` exists, and `src/` holds only the
+# domain-neutral package (docs/decisions/0022).
+[tool.dg]
+directory_type = "project"
+
+[tool.dg.project]
+root_module = "orchestration"
 code_location_name = "modern_data_stack"

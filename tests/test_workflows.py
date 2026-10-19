@@ -858,6 +858,8 @@ WRITING_COMMANDS = (
     "python -m transform.",
     "python -m publish.restore_history",
     "dbt build",
+    "dg launch",
+    # Superseded by `dg launch` but still working, so a recipe can still use them.
     "dagster job execute",
     "dagster asset materialize",
 )

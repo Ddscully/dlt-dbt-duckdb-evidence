@@ -2,7 +2,7 @@
 
 `dg.Definitions` takes an explicit list, and nothing complains about an omission:
 the asset simply isn't in the graph, so `AssetSelection.all()` never sees it and
-`dagster definitions validate` passes. An unlisted asset fails somewhere
+`just validate` passes. An unlisted asset fails somewhere
 downstream; an unlisted check fails *silently*, because it just never runs.
 
 The explicit list stays (it is the one place that says what the graph is); this
@@ -72,6 +72,21 @@ def test_every_asset_check_defined_is_in_the_graph():
         "asset checks defined in orchestration/assets.py but not listed in "
         f"orchestration/definitions.py: {sorted(k.to_user_string() for k in missing)}"
     )
+
+
+def test_every_partition_mapping_resolves():
+    """The check `just validate` lost when it moved to `dg list defs`.
+
+    `dagster definitions validate` called `validate_partitions()` after loading;
+    `dg list defs` loads and stops (docs/decisions/0022). Measured by mutation:
+    an unpartitioned asset reading the monthly retail asset through a
+    `StaticPartitionMapping` exits 0 under `dg list defs` and fails here and
+    under `definitions validate`. Two partitions definitions in one job do not
+    need this test: resolving the job fails the load first.
+    """
+    from orchestration.definitions import defs
+
+    defs.resolve_asset_graph().validate_partitions()
 
 
 def test_every_raw_resource_has_an_asset_description():

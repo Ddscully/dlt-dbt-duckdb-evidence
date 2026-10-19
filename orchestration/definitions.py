@@ -1,4 +1,4 @@
-"""Dagster entry point: `dagster dev` (see `[tool.dagster]` in pyproject.toml).
+"""Dagster entry point: `just dagster` (see `[tool.dg]` in pyproject.toml).
 
 Everything `just run` does, as one asset graph, plus the Evidence site. Four jobs:
 
@@ -90,7 +90,7 @@ daily_schedule = dg.ScheduleDefinition(
     job=full_refresh_job,
     cron_schedule="0 6 * * *",
     execution_timezone="UTC",
-    # Off by default: this is a demo repo, and `dagster dev` shouldn't start
+    # Off by default: this is a demo repo, and `just dagster` shouldn't start
     # hitting public APIs on a timer just because someone opened the UI.
     default_status=dg.DefaultScheduleStatus.STOPPED,
 )

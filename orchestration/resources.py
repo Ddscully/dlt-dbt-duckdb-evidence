@@ -12,10 +12,11 @@ DBT_DIR = dbt_dir()
 # `profiles.yml` lives next to `dbt_project.yml` in this repo, so both dirs match.
 dbt_project = DbtProject(project_dir=DBT_DIR, profiles_dir=DBT_DIR)
 
-# Under `dagster dev` only, run `dbt deps` and `dbt parse` on every code-location
-# load, so a new model reaches the asset graph without a manual parse. Everywhere
-# else the manifest in dbt/target/ has to exist before the graph will load.
-dbt_project.prepare_if_dev()
+# No `prepare_if_dev()`: the `dg` CLI sets the variable it reads for every
+# subcommand, so it would run `dbt deps` and `dbt parse` on each `dg launch` and
+# `dg list defs`, about 11 s each (docs/decisions/0022). The manifest in
+# dbt/target/ has to exist before the graph will load, so every recipe that loads
+# it depends on `just dbt-parse`.
 
 RESOURCES = {
     "dbt": DbtCliResource(project_dir=dbt_project),
