@@ -1,6 +1,6 @@
 # 0022. `dg` runs where it can; `dagster dev` stays where `dg dev` cannot
 
-Status: proposed (#154); becomes `accepted YYYY-MM-DD (#PR)` when it merges
+Status: accepted 2026-10-19 (#155)
 
 ## Context
 
