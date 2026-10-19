@@ -54,7 +54,10 @@ the latest release:
   daemon's is replaced every 60 s, and on an empty `DAGSTER_HOME` both create
   the storage tables at once. In ten paired instance initialisations on an empty
   directory, 12 of the 20 processes died on `table … already exists`, and none
-  once the instance had been created first.
+  once the instance had been created first. Each code server also builds the
+  dlt pipeline on import: on an empty dlt state directory the two collided on
+  `FileExistsError` in 3 of 10 cold starts of the compose stack under load, and
+  none once the definitions had been imported first.
 - **`dg list defs` fails where `dagster definitions validate` fails to load**:
   exit 1, error on stderr, for an import error and for an asset requiring a
   resource nobody provides. It stops there. `definitions validate` then calls
@@ -106,10 +109,10 @@ Only `just dagster` prints a `SupersessionWarning`, and nothing in CI runs it.
 - **`dagster-webserver` and `dagster-daemon run` for `just dagster`, as
   `just serve` runs them.** No warning, but it gives up the one shared code
   server and the instance created before either process starts, and so brought
-  in the race above. `just dagster` runs only on a laptop, where the warning is
+  in the races above. `just dagster` runs only on a laptop, where the warning is
   one line in a terminal; `just serve` has reasons of its own to run the pair
   ([0005](0005-just-serve-first-container-second.md)) and now creates the
-  instance first.
+  instance and imports the definitions first.
 - **Staying on the superseded commands everywhere.** Supported, with no removal
   date, but every CI build would keep warning about a gap that measured
   replacements close.

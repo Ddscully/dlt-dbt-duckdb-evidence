@@ -523,7 +523,7 @@ report-clean: dbt-deps
 export SITE_ROOT := env("SITE_ROOT", justfile_directory() / "reports/build")
 
 # Every choice here — no `dagster dev`, `dbt-parse`, the bind addresses, the
-# instance created first, `wait -n`, killing recorded PIDs — is
+# instance and the definitions loaded first, `wait -n`, killing recorded PIDs — is
 # docs/RUNNING_AS_A_SERVICE.md, "`just serve`, and the container built on it".
 # The `daily_refresh` schedule ships STOPPED ("Standing it up").
 # Run the graph and the dashboard as one always-on service (blocks; ctrl-c to stop)
@@ -536,6 +536,12 @@ serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
     # Started together on an empty DAGSTER_HOME, the webserver and the daemon both
     # create the storage tables and one dies on `table … already exists`.
     uv run --group orchestration python -c 'import dagster as dg; dg.DagsterInstance.get()'
+    # And each starts a code server that imports the definitions, which create
+    # dlt's pipeline folder: with no dlt state yet, one loses on `FileExistsError`
+    # and the webserver shows the location as broken. Not fatal, so definitions
+    # that do not load still reach the UI as an error instead of a restart loop.
+    uv run --group orchestration python -c 'import orchestration.definitions' \
+        || echo "serve: the definitions do not load; starting anyway" >&2
 
     pids=()
     stop() {

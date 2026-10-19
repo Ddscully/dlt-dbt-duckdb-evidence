@@ -102,6 +102,7 @@ serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
     set -euo pipefail
     # … refuse to start if $SITE_ROOT holds no site …
     # … create the instance's storage, before either process races to …
+    # … import the definitions once, so dlt's state exists before two code servers race to create it …
     # … traps, so a signal exits 0 and a dead child exits 1 …
     uv run --group orchestration dagster-webserver -h {{ host }} -p {{ dagster_port }} &
     uv run --group orchestration dagster-daemon run &
@@ -143,6 +144,21 @@ which is the line the recipe runs. `just clean` empties `.dagster/` down to its
 `dagster.yaml`, so this is every start after a clean, not only the first deploy.
 `dagster dev` does the same in its own parent process, which is why `just
 dagster` needs no such line.
+
+**Then it imports the definitions once, for dlt.** Each of the pair's code
+servers imports `orchestration.definitions`, which builds the dlt pipeline, and
+with no dlt state yet dlt wipes the pipeline's folder and creates it again with
+`exists_ok=False`. Two processes doing that at once collide on
+`FileExistsError: …/pipelines/modern_data_stack/`, and the webserver shows the
+location as an error. The compose stack runs that race on every start with an
+empty `mds_dlt`; a host whose `~/.dlt` already holds the pipeline never does. Measured
+on that stack from empty volumes, without the import: none of eight cold starts
+on an idle machine failed, and 3 of 10 with other work running. With it, 0 of 14.
+The mechanism is the stronger evidence: once the import has run, importing the
+definitions again takes dlt's attach path three times and its create path never.
+A failed import does not stop the recipe, so definitions that do not load still
+reach the UI as an error rather than a restart loop; it costs about four seconds
+a start.
 
 Four things in that block are load-bearing:
 

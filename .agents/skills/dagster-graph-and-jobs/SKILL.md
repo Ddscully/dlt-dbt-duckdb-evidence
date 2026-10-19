@@ -317,8 +317,11 @@ which this one is not (`dg` below).
   webserver and the daemon from one code server. Run separately, each imports
   the graph into a code server of its own, and on an empty `DAGSTER_HOME` both
   create the storage tables at once: 12 of 20 processes died on `table …
-  already exists` across ten paired starts. `just serve` creates the instance
-  before starting either (`docs/RUNNING_AS_A_SERVICE.md`).
+  already exists` across ten paired starts. With no dlt state yet, both code
+  servers also create dlt's pipeline folder at once, and the webserver's lost
+  on `FileExistsError` in 3 of 10 loaded cold starts of the compose stack.
+  `just serve` creates the instance and imports the definitions before starting
+  either (`docs/RUNNING_AS_A_SERVICE.md`).
 - **`dg launch` is `dagster job execute` under another name.** It calls
   `job_execute_command_impl` and `asset_materialize_command_impl` in process, so
   everything above about the queue, `-m` and ignored op config holds for it. Its
