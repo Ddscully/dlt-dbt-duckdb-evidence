@@ -289,9 +289,11 @@ unit tests are `unit-testing-dbt-models`. What bites outside those tasks:
 - **Contracts are enforced on every mart model**, so a column changing type
   fails the build before it writes. **Never round-trip these ymls through
   PyYAML**: it reflows every description to add a scalar.
-- **Select an asset prefix as `key:"marts/*"`.** A bare `marts/*` materialises
-  nothing and exits 0; `just materialize-preview` shows what a selection
-  resolves to.
+- **Select an asset prefix as `key:"marts/*"`.** A bare `marts/*` names a key
+  that does not exist, and **a selection matching no assets launches every
+  asset**, live ingest included. `just materialize-select` refuses one; a bare
+  `dg launch --assets` does not. `just materialize-preview` shows what a
+  selection resolves to.
 
 ## Pipeline observability (`transform/pipeline_status.py`)
 

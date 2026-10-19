@@ -153,9 +153,13 @@ account of the same ground is `docs/DATA_QUALITY.md`.
     prefix and with it the model's materialisation history.
     `FolderGroupDbtTranslator.get_asset_key` puts the schema back.
   - **Select a prefix as `key:"marts/*"`.** A bare `marts/*` reads `marts/` as an
-    asset key, finds none, takes everything downstream of the empty set,
-    materialises nothing and exits 0. `just materialize-preview` shows what a
-    selection resolves to first.
+    asset key and finds none: `dg launch` exits 1 with `DagsterInvalidSubsetError`,
+    and `just materialize-preview` prints nothing. A well-formed selection that
+    matches nothing is worse. `execute_job` reads an empty selection as no
+    selection, so the launch runs every asset, ingest and the site included,
+    under `dagster asset materialize` as under `dg launch`.
+    `just materialize-select` resolves the selection first and refuses an empty
+    one; `just materialize-preview` shows what a selection resolves to.
 - **The bus matrix is derived from the manifest** (`just bus-matrix`, rendered
   into `docs/WAREHOUSE.md`) — business processes down, conformed dimensions
   across, the one thing groups and contracts do not say.
