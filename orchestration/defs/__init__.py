@@ -7,9 +7,10 @@
 
 `ingest.py` is the dlt layer, `models.py` the dbt one, `analytics.py` the Polars
 assets, `site.py` the Evidence site, and `checks.py` the asset checks dbt
-cannot express. `orchestration/definitions.py` loads this folder with
-`dg.load_from_defs_folder`, so every asset and check defined at module level in
-here is registered, and nothing outside it is.
+cannot express. `orchestration/definitions.py` loads this package with
+`dg.load_assets_from_package_module` and its checks counterpart, so every asset
+and check defined at module level in here is registered, once even when another
+module imports it, and nothing outside it is.
 
 The layers are wired by *asset key*, not by ordering:
 
@@ -23,9 +24,4 @@ The layers are wired by *asset key*, not by ordering:
 
 So changing a `ref()` or adding a source table moves the graph without a shell
 script to keep in sync.
-
-A module that needs another layer's asset imports the *module*
-(`from orchestration.defs import analytics`), not the asset: a definition
-imported by name is a second registration of it. Keys and constants import by
-name.
 """

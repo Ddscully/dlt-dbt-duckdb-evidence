@@ -1,6 +1,6 @@
 ---
 name: dagster-graph-and-jobs
-description: This repo's Dagster graph — why WDI and weather take their backfill years as run config rather than partitions (a partitioned job's Materialize button is a backfill), the one partitioned asset and the guards it needs to keep working unpartitioned, why there are four jobs and why load_retail runs first, how assets and checks register by living in orchestration/defs/ and the import rule that keeps each registered once, which dg commands run here and why dg dev and dg check defs cannot, and the costed decisions against components and declarative automation. Use when adding or registering an asset or asset check, changing a job or selection, running a backfill, or before reaching for dg, components or AutomationCondition.
+description: This repo's Dagster graph — why WDI and weather take their backfill years as run config rather than partitions (a partitioned job's Materialize button is a backfill), the one partitioned asset and the guards it needs to keep working unpartitioned, why there are four jobs and why load_retail runs first, how assets and checks register by living in orchestration/defs/ and why the package loaders load it rather than load_from_defs_folder, which dg commands run here and why dg dev and dg check defs cannot, and the costed decisions against components and declarative automation. Use when adding or registering an asset or asset check, changing a job or selection, running a backfill, or before reaching for dg, components or AutomationCondition.
 ---
 
 # The Dagster graph (`orchestration/`)
@@ -8,7 +8,7 @@ description: This repo's Dagster graph — why WDI and weather take their backfi
 Dagster wraps the existing layers; it doesn't replace them. The facts that must
 not depend on this skill loading — asset keys as the join between layers, the
 `from __future__ import annotations` ban, the single-process executor, the job
-order and hand registration — stay as one-liners in `AGENTS.md`'s
+order and registration by living in `orchestration/defs/` — stay as one-liners in `AGENTS.md`'s
 *Orchestration* section. This file is the whole account.
 
 ## Standing rules of the graph
@@ -75,7 +75,8 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   cached. Every selection names what it leaves out, so a second npm-shaped or
   partitioned asset has to be excluded by hand too.
   How the site meets the graph is `building-evidence-reports`.
-- **Importing `orchestration.defs` leaves a dlt pipeline active process-wide.**
+- **Importing `orchestration.defs.ingest` leaves a dlt pipeline active
+  process-wide**, and loading the definitions imports it.
   The `@dlt_assets` decorators call `build_pipeline()` at import time, so a later
   test calling a resource directly reads the real `~/.dlt` state and fails on
   pagination it never got wrong — only in a full-suite run, only on a machine
@@ -221,30 +222,25 @@ which this one is not (`dg` below).
 
 - **Every asset and check registers by living in `orchestration/defs/`**, one
   module per layer (`ingest`, `models`, `analytics`, `site`, `checks`), which
-  `definitions.py` loads with `dg.load_from_defs_folder` and merges with the
-  jobs, schedule, resources and executor it still writes out
+  `definitions.py` loads with `dg.load_assets_from_package_module` and
+  `dg.load_asset_checks_from_package_module`, beside the jobs, schedule,
+  resources and executor it still writes out
   ([`0023`](../../../docs/decisions/0023-assets-register-by-living-in-orchestration-defs.md)).
   The hand-written lists it replaced let `raw/retail_invoice_lines`,
   `analytics/retail_rfm` and two checks sit unregistered until `full_refresh`
-  failed in CI one layer downstream, in dbt. Three rules come with the folder:
+  failed in CI one layer downstream, in dbt. Two rules come with the folder:
   - **A definition outside it is silently absent**, as an unlisted one was:
     `just validate` passes. Helpers that are not definitions belong outside it
     (`orchestration/freshness.py`, `resources.py`), because everything at
     module level in it that *is* one joins the graph.
-  - **Import another layer's module, not its definition**
-    (`from orchestration.defs import analytics`, then `analytics.co2_intensity`).
-    A definition imported by name is registered a second time — measured, nine
-    asset definitions became twelve. The graph collapses them while they are the
-    same object, so it is a listing that lies, not an error. Keys and constants
-    import by name.
   - **The checks stay in one module**, because `tests/test_asset_checks.py`
     patches their configuration on it (`repo-guards`).
-  - **Compare *executable* asset keys, not `get_all_asset_keys()`**, in anything
-    reading a job's or the graph's assets. An asset that something depends on but
-    nothing defines still appears as an external node, and `full_refresh`'s job
-    graph contains `raw/retail_invoice_lines` as an unexecutable node, so the
-    wider set passes exclusion tests while asserting nothing (`_job_keys` in
-    `tests/test_definitions.py`).
+- **Compare *executable* asset keys, not `get_all_asset_keys()`**, in anything
+  reading a job's or the graph's assets. An asset that something depends on but
+  nothing defines still appears as an external node, and `full_refresh`'s job
+  graph contains `raw/retail_invoice_lines` as an unexecutable node, so the
+  wider set passes exclusion tests while asserting nothing (`_job_keys` in
+  `tests/test_definitions.py`).
 - **A job takes its assets' partitions definition, which is why `load_retail` is
   a job of its own.** `define_asset_job` resolves a selection to a single `partitions_def`,
   and raises on two — `allow_different_partitions_defs` is hardcoded `False` for
@@ -352,12 +348,23 @@ which this one is not (`dg` below).
   dodges the lockfile — which is the argument that lost pyright to ty
   ("an unpinned global binary no lockfile here can see") and the reason
   `ty-lsp` runs `uv run ty server` rather than a bare `ty`.
-- **The `defs/` half is taken, and works here although `dg dev` does not.**
-  `dg.load_from_defs_folder` imports the defs module by name from `[tool.dg]`,
-  so the `src/` path guess that blocks `dg dev` and `dg check defs` never runs
-  (0022, 0023). A `defs.yaml` with `post_processing` also works on this layout
-  (measured: it tagged exactly the `analytics/*` assets), and nothing uses one
-  yet.
+- **The `defs/` folder is taken, its loader is not.** `dg.load_from_defs_folder`
+  works on this layout (it imports the defs module by name from `[tool.dg]`, so
+  the `src/` guess that blocks `dg dev` never runs), and so does a `defs.yaml`
+  with `post_processing`. Measured against the package loaders, it lost (0023):
+  all cost and no use while nothing here is a component.
+  - **A module-level `dg.Definitions` in a defs module replaces the module.** The
+    loader returns that object and skips every asset and check beside it, with
+    no error; the package loaders ignore it.
+  - **Importing the definitions needs `pyproject.toml`'s `[tool.dg]`**, which
+    before only the CLI read.
+  - **Every load scans every installed Dagster integration's entry points** and
+    attaches about 95 KB of `plugin_component_types_json` to the repository
+    metadata, which each code server ships; the import took 2.77 s against 2.60.
+  - **It loads each file as a component of its own**, so a definition imported
+    by name into a second module is registered twice (nine asset definitions
+    became twelve). The package loaders collect by object identity and count it
+    once.
 - **Components cannot express this graph, measured, not just disliked**
   ([`0023`](../../../docs/decisions/0023-assets-register-by-living-in-orchestration-defs.md)).
   `DltLoadCollectionComponent` names every op `dlt_assets_<source>_<dataset>`,

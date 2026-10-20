@@ -26,7 +26,8 @@ DuckDB import to a caller that only wants `paths`.
 Deliberately *not* here: `RawSchemaDltTranslator`, which stays in
 `orchestration/defs/ingest.py`. Keying dlt resources as `raw/<resource>` so they meet
 the keys dagster-dbt derives is the convention worth stealing from this repo, but
-the code for it is twenty lines wrapped around two of that module's constants,
+the code for it is twenty lines wrapped around `RAW_DESCRIPTIONS` and a freshness
+policy,
 and moving it would put Dagster (an optional dependency group) behind a package
 import.
 

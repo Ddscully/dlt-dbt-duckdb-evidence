@@ -20,9 +20,9 @@ pytestmark = pytest.mark.skipif(
     reason="needs dbt/target/manifest.json — run `just dbt-deps` and `dbt parse` first",
 )
 
-# The dlt-pipeline-deactivation fixture this file needs (importing orchestration
-# leaves a dlt pipeline active process-wide) lives in conftest.py, shared with
-# test_asset_checks.py.
+# The dlt-pipeline-deactivation fixture this file needs (loading the definitions
+# imports orchestration.defs.ingest, which leaves a dlt pipeline active
+# process-wide) lives in conftest.py.
 
 
 def test_every_partition_mapping_resolves():

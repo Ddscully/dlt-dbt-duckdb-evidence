@@ -27,7 +27,7 @@ def _lakehouse_on_disk(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True, scope="module")
 def _release_the_dlt_pipeline():
-    """Importing `orchestration.defs` leaves a dlt pipeline *active* process-wide.
+    """Importing `orchestration.defs.ingest` leaves a dlt pipeline *active* process-wide.
 
     The `@dlt_assets` decorators call `build_pipeline()` at import time, and dlt
     records the result as the ambient pipeline. Any later test that calls a
@@ -38,9 +38,11 @@ def _release_the_dlt_pipeline():
     machine that has loaded WDI at least once, and names pagination as the
     culprit.
 
-    Shared here because `test_asset_checks.py` and `test_definitions.py` both
-    import the orchestration layer. Module scope means each test module still
-    gets its own teardown.
+    Loading `orchestration.definitions` imports that module, as
+    `test_definitions.py` does; `orchestration.defs.checks` does not, so
+    `test_asset_checks.py` alone leaves nothing active. Here and autouse because
+    the next file to load the definitions will not know to ask for it. Module
+    scope means each test module still gets its own teardown.
     """
     yield
     ctx = Container()[PipelineContext]
