@@ -270,11 +270,10 @@ and the shared environment action)
 
 **Register by location, not by list, because an omission is not an error.**
 Dagster takes explicit lists, so a forgotten asset is simply not in the graph and
-`just validate` passes. Three assets and two checks sat
+`just validate` passes. Two assets and two checks sat
 unregistered until a downstream job failed in CI naming the symptom and not the
-cause; the checks failed more quietly still, by never running. A test caught it
-after that; now every definition in one folder is loaded by import, so there is
-no list to forget.
+cause; the checks failed more quietly still, by never running. Every definition
+in one folder is loaded by import, so there is no list to forget.
 → [`orchestration/definitions.py`](../orchestration/definitions.py),
 [decision 0023](decisions/0023-assets-register-by-living-in-orchestration-defs.md)
 

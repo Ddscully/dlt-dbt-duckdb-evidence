@@ -27,12 +27,24 @@ Measured on dagster 1.13.26:
   keys each of the four jobs materializes, the resources and the executor all
   matched the hand-listed build at `76b9f11`, and the webserver's code server
   reported the location loaded.
-- **A definition imported by name into a second module is registered twice.** A
-  sibling module importing three assets from another raised the registered
-  asset definitions from nine to twelve. The graph collapsed them, because they
-  were the same objects, so it is a listing that lies rather than an error.
-- **`dg.load_assets_from_modules`** (and its checks counterpart) loaded the same
-  set from the single module, undeprecated. It names modules instead of assets.
+- **But it costs four things here, and buys nothing yet.** It returns a defs
+  module's own `dg.Definitions` object when the module has one and skips every
+  asset and check beside it, without an error (`PythonFileComponent.build_defs`):
+  one stray `Definitions(resources={})` in `checks.py` would drop all eight
+  checks while `just validate` and `tests/test_asset_checks.py` stay green.
+  Importing the definitions needs `pyproject.toml`'s `[tool.dg]`, which before
+  only the CLI read: the code copied without that file fails with `Could not
+  find config file`. Every load scans every installed Dagster integration's
+  entry points and attaches about 95 KB of `plugin_component_types_json` to the
+  repository metadata (the import took 2.77 s against 2.60). And it loads each
+  file as a component of its own, so a definition imported by name into a
+  second module registered twice: nine asset definitions became twelve.
+- **`dg.load_assets_from_package_module`** and
+  `dg.load_asset_checks_from_package_module`, public and undeprecated, return
+  the same nine assets and eight checks from the package, with no list of
+  modules. They collect by object identity across modules, so an imported
+  definition counts once, and they ignore a module-level `Definitions` (both
+  measured in a scratch package). They read no config and attach no metadata.
 - **A per-folder `defs.yaml` works here too**: a `post_processing` block tagged
   and set owners on exactly the three `analytics/*` assets.
 - **The integration components cannot express this graph.**
@@ -51,14 +63,13 @@ Measured on dagster 1.13.26:
 - Every asset and asset check is a module-level definition in
   `orchestration/defs/`: `ingest.py` (dlt, and the landing zone's snapshot
   expiry), `models.py` (dbt), `analytics.py` (Polars), `site.py` (Evidence) and
-  `checks.py`. `definitions.py` merges `dg.load_from_defs_folder` with what has
-  no layer of its own: the four jobs, the schedule, the resources and the
-  executor, still written out.
+  `checks.py`. `definitions.py` loads the package with
+  `dg.load_assets_from_package_module` and
+  `dg.load_asset_checks_from_package_module`, beside what has no layer of its
+  own: the four jobs, the schedule, the resources and the executor, still
+  written out.
 - What is not a definition stays outside the folder: the freshness policies in
   `orchestration/freshness.py`, the resources in `orchestration/resources.py`.
-- A module needing another layer's definition imports the module
-  (`from orchestration.defs import analytics`), never the definition. Keys and
-  constants import by name.
 - The checks stay in one module, `checks.py`.
 - The registration tests are deleted: there is no list for an asset to be
   missing from.
@@ -75,7 +86,14 @@ Measured on dagster 1.13.26:
 - **`load_assets_from_modules` over the one module.** The same guarantee for
   one file, with nothing moved. Split by layer, it needs every module named, so
   the hand-maintained list survives one level up, and a forgotten module is the
-  old omission again.
+  old omission again. The package loaders are the version that needs no names.
+- **`dg.load_from_defs_folder`**, which `dg scaffold` writes and Dagster's
+  current docs use. What it adds over the package loaders is the components
+  system: YAML component instances, `defs.yaml` per folder, and `dg dev` and
+  `dg check defs` understanding the tree. None of that is in use, the two
+  commands still fail here (0022), and the components cannot express this
+  graph (above), so all that would remain are its four costs. Switching is
+  one line in `definitions.py`, because the folder is already its shape.
 - **One check beside each asset**, the usual layout. `tests/test_asset_checks.py`
   points the checks at throwaway files by patching their module's globals
   (`DUCKDB_PATH`, `LAKEHOUSE_DIR` and four more). Spread over four modules, a
@@ -98,9 +116,6 @@ Measured on dagster 1.13.26:
 
 - **An asset defined outside `orchestration/defs/` is silently absent**, the old
   failure narrowed to one rule a reader can see. `AGENTS.md` states it.
-- **A definition imported by name into another `defs/` module registers twice**,
-  which the graph tolerates while it is the same object. `defs/__init__.py`
-  states the rule.
 - **Anything at module level in `defs/` that is a definition joins the graph**,
   including one half-written. `full_refresh` and `publish_site_from_raw` select
   by exclusion already, so a new asset joining unannounced is how they work.
@@ -110,7 +125,8 @@ Measured on dagster 1.13.26:
 - **`dg dev` and `dg check defs` are still out of reach**, and `just dagster` still
   runs `dagster dev` (0022). Splitting the module did not change that.
 
-**Revisit when** a layer outgrows its module (a folder per layer, with a
-`defs.yaml` if one needs shared tags or owners), or when the integration
-components accept several loads of one source and run config, which is what
-would make the dlt half expressible in YAML.
+**Revisit when** something here becomes a component — a layer outgrowing its
+module into a folder that wants a `defs.yaml` for shared tags or owners, `dg dev`
+working on this layout, or the integration components accepting several loads
+of one source and run config, which is what would make the dlt half expressible
+in YAML. Each of those is a reason to move to `dg.load_from_defs_folder`.

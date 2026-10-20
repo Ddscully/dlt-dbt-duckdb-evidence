@@ -40,9 +40,13 @@ ruff is configured in `pyproject.toml` and run only through pre-commit
   enables 413). ruff is not in the `dev` group, so pre-commit's copy is the only
   one — the mirror image of sqlfluff. `extend-select` re-adds the 18 rules 0.16
   dropped, so a bump cannot silently stop checking star imports and `== None`.
-- **`combine-as-imports = true`**, or ruff splits `from x import a, run as b` and
-  shreds the imports in `orchestration/defs/`: the transform and publish layers
-  each export a `run()`, and every one is aliased.
+- **`combine-as-imports = true`** keeps `from x import a, b as c` one statement
+  wherever ruff sorts imports: rule `I`, which neither the defaults nor
+  `extend-select` turn on, or an editor's organize-imports. Unset, `--select I`
+  splits the multi-name aliased imports from `lake.lakehouse` and
+  `publish.build_report` in `orchestration/defs/`, and in `lake/lakehouse.py`
+  and `tests/test_fixtures.py`; a single-name `run as …` import is one
+  statement either way.
 - **`--fix` deletes a comment that starts `# noqa`, even when it is prose.** Put
   the rule after the explanation (`# TRY004 asks for TypeError, but …`) and keep
   the real directive, with its colon, on the code line.

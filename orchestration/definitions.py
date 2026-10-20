@@ -33,11 +33,10 @@ second npm-shaped or partitioned asset has to be excluded by hand, and
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import dagster as dg
 from dagster import in_process_executor
 
+from orchestration import defs as defs_package
 from orchestration.defs.ingest import raw_retail_asset
 from orchestration.defs.site import EVIDENCE_SITE
 from orchestration.resources import RESOURCES
@@ -100,16 +99,16 @@ daily_schedule = dg.ScheduleDefinition(
     default_status=dg.DefaultScheduleStatus.STOPPED,
 )
 
-defs = dg.Definitions.merge(
+defs = dg.Definitions(
     # Every asset and check defined at module level under `orchestration/defs/`,
     # found by import: there is no list here for a new one to be missing from.
-    dg.load_from_defs_folder(path_within_project=Path(__file__).parent),
-    dg.Definitions(
-        jobs=[load_retail_job, full_refresh_job, publish_site_job, publish_site_from_raw_job],
-        schedules=[daily_schedule],
-        resources=RESOURCES,
-        # DuckDB takes one writer. The default multiprocess executor would run steps
-        # side by side and lose the race for the lock; one process serialises them.
-        executor=in_process_executor,
-    ),
+    # The package loaders, not `dg.load_from_defs_folder`: ADR 0023.
+    assets=dg.load_assets_from_package_module(defs_package),
+    asset_checks=dg.load_asset_checks_from_package_module(defs_package),
+    jobs=[load_retail_job, full_refresh_job, publish_site_job, publish_site_from_raw_job],
+    schedules=[daily_schedule],
+    resources=RESOURCES,
+    # DuckDB takes one writer. The default multiprocess executor would run steps
+    # side by side and lose the race for the lock; one process serialises them.
+    executor=in_process_executor,
 )

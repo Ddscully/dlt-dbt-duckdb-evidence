@@ -128,10 +128,11 @@ extend-select = [
 ]
 
 [tool.ruff.lint.isort]
-# Keep `from x import a, run as b` on one statement. ruff's default splits the
-# alias onto its own line, which shreds the import blocks in orchestration/defs/ —
-# the transform and publish layers each export a `run()`, so every one is
-# aliased. See the linting-and-type-checking skill.
+# Keep `from x import a, b as c` on one statement whenever ruff sorts imports
+# (rule I, which the defaults leave off, or an editor's organize-imports); its
+# default splits the alias onto a line of its own. Measured with `--select I`, it
+# holds whole the aliased imports from lake.lakehouse and publish.build_report in
+# orchestration/defs/. See the linting-and-type-checking skill.
 combine-as-imports = true
 
 [tool.pytest.ini_options]
