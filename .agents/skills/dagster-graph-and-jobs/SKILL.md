@@ -1,6 +1,6 @@
 ---
 name: dagster-graph-and-jobs
-description: This repo's Dagster graph — why WDI and weather take their backfill years as run config rather than partitions (a partitioned job's Materialize button is a backfill), the one partitioned asset and the guards it needs to keep working unpartitioned, why there are four jobs and why load_retail runs first, the hand-maintained lists in definitions.py and the two traps in the test that guards them, which dg commands run here and why dg dev and dg check defs cannot, and the costed decisions against components and declarative automation. Use when adding or registering an asset or asset check, changing a job or selection, running a backfill, or before reaching for dg, components or AutomationCondition.
+description: This repo's Dagster graph — why WDI and weather take their backfill years as run config rather than partitions (a partitioned job's Materialize button is a backfill), the one partitioned asset and the guards it needs to keep working unpartitioned, why there are four jobs and why load_retail runs first, how assets and checks register by living in orchestration/defs/ and the import rule that keeps each registered once, which dg commands run here and why dg dev and dg check defs cannot, and the costed decisions against components and declarative automation. Use when adding or registering an asset or asset check, changing a job or selection, running a backfill, or before reaching for dg, components or AutomationCondition.
 ---
 
 # The Dagster graph (`orchestration/`)
@@ -219,28 +219,32 @@ which this one is not (`dg` below).
 
 ## Registration, and the four jobs
 
-- **Every asset and check is listed by hand in `definitions.py`, and nothing
-  tells you when one isn't.** `dg.Definitions` takes explicit lists, so an
-  omission is not an error — the asset is simply not in the graph,
-  `AssetSelection.all()` never sees it, and `just validate`
-  passes. That is how `raw/retail_invoice_lines`, `analytics/retail_rfm` and two
-  asset checks sat unregistered from the retail and currency commits until
-  `full_refresh` failed in CI with `Catalog Error: Table with name
-  retail_invoice_lines does not exist!` — one layer downstream, in dbt, naming
-  the symptom and not the cause. The two checks failed more quietly still: an
-  unregistered check just never runs. `tests/test_definitions.py` now compares
-  what `assets.py` defines against what the graph resolves, and CI runs it in the
-  `dbt parse` step (it needs the manifest, so it skips itself in `just test`).
-  - **Compare *executable* asset keys, not `get_all_asset_keys()`.** An
-    unregistered asset that something depends on still appears in the graph as an
-    external node, so the wider set reports `analytics/retail_rfm` present purely
-    because `pipeline_status` names it in `deps` — a test that passes while the
-    pipeline is broken. Same trap one level up: `full_refresh`'s job graph
-    contains `raw/retail_invoice_lines` as an unexecutable node.
-  - **`AssetChecksDefinition` is a subclass of `AssetsDefinition`.** An
-    `isinstance` chain that tests the parent first swallows every check into the
-    asset branch, where `.keys` is empty — the check half of the test then
-    measures nothing and is green forever.
+- **Every asset and check registers by living in `orchestration/defs/`**, one
+  module per layer (`ingest`, `models`, `analytics`, `site`, `checks`), which
+  `definitions.py` loads with `dg.load_from_defs_folder` and merges with the
+  jobs, schedule, resources and executor it still writes out
+  ([`0023`](../../../docs/decisions/0023-assets-register-by-living-in-orchestration-defs.md)).
+  The hand-written lists it replaced let `raw/retail_invoice_lines`,
+  `analytics/retail_rfm` and two checks sit unregistered until `full_refresh`
+  failed in CI one layer downstream, in dbt. Three rules come with the folder:
+  - **A definition outside it is silently absent**, as an unlisted one was:
+    `just validate` passes. Helpers that are not definitions belong outside it
+    (`orchestration/freshness.py`, `resources.py`), because everything at
+    module level in it that *is* one joins the graph.
+  - **Import another layer's module, not its definition**
+    (`from orchestration.defs import analytics`, then `analytics.co2_intensity`).
+    A definition imported by name is registered a second time — measured, nine
+    asset definitions became twelve. The graph collapses them while they are the
+    same object, so it is a listing that lies, not an error. Keys and constants
+    import by name.
+  - **The checks stay in one module**, because `tests/test_asset_checks.py`
+    patches their configuration on it (`repo-guards`).
+  - **Compare *executable* asset keys, not `get_all_asset_keys()`**, in anything
+    reading a job's or the graph's assets. An asset that something depends on but
+    nothing defines still appears as an external node, and `full_refresh`'s job
+    graph contains `raw/retail_invoice_lines` as an unexecutable node, so the
+    wider set passes exclusion tests while asserting nothing (`_job_keys` in
+    `tests/test_definitions.py`).
 - **A job takes its assets' partitions definition, which is why `load_retail` is
   a job of its own.** `define_asset_job` resolves a selection to a single `partitions_def`,
   and raises on two — `allow_different_partitions_defs` is hardcoded `False` for
@@ -348,20 +352,20 @@ which this one is not (`dg` below).
   dodges the lockfile — which is the argument that lost pyright to ty
   ("an unpinned global binary no lockfile here can see") and the reason
   `ty-lsp` runs `uv run ty server` rather than a bare `ty`.
-- **The `defs/` half is separable, and still not taken.** `create-dagster`
-  scaffolds a `defs/` tree that autoloads; `dg.load_from_defs_folder` ships in
-  `dagster` core, and a `defs/` folder merges with the hand-written
-  `Definitions` (`dg.Definitions.merge`, measured). What it would buy is deleting
-  `tests/test_definitions.py`, because an unregistered asset becomes impossible
-  rather than merely caught. That trade is close to a wash: the test costs ~1s and
-  *also* documents two traps that the framework would silently absorb
-  (`get_all_asset_keys()` is too wide; `AssetChecksDefinition` subclasses
-  `AssetsDefinition`, so an `isinstance` chain in the wrong order measures
-  nothing).
-- **Components would delete the explanation, which is the deliverable.** The
-  vendor skill's dbt page reserves the pythonic `@dbt_assets` path for "complex
-  customization" — `FolderGroupDbtTranslator` is exactly that, and its comment
-  is longer than its code on purpose.
+- **The `defs/` half is taken, and works here although `dg dev` does not.**
+  `dg.load_from_defs_folder` imports the defs module by name from `[tool.dg]`,
+  so the `src/` path guess that blocks `dg dev` and `dg check defs` never runs
+  (0022, 0023). A `defs.yaml` with `post_processing` also works on this layout
+  (measured: it tagged exactly the `analytics/*` assets), and nothing uses one
+  yet.
+- **Components cannot express this graph, measured, not just disliked**
+  ([`0023`](../../../docs/decisions/0023-assets-register-by-living-in-orchestration-defs.md)).
+  `DltLoadCollectionComponent` names every op `dlt_assets_<source>_<dataset>`,
+  so the three dlt blocks, one source and one dataset, collide (`Detected
+  conflicting node definitions with the same name`), and its generated body
+  takes no run config for `YearRange`. `DbtProjectComponent` keeps the manifest
+  as component state with a refresh of its own beside `just dbt-parse`, and
+  `FolderGroupDbtTranslator` would be a Python subclass of it either way.
 - **Declarative automation is the adjacent question, and the answer is no
   for reasons of shape, not of plumbing.** An `AutomationCondition` is
   evaluated by an automation sensor *in the daemon*, and the daemon runs only
@@ -387,7 +391,7 @@ which this one is not (`dg` below).
     here, not a half-finished adoption.
 - **The vendor skill's depth and this repo's content are close to
   disjoint**, which is the part worth knowing before reaching for it. Grepping
-  its 172 reference files for what `assets.py` actually calls:
+  its 172 reference files for what `orchestration/defs/` actually calls:
   `FreshnessPolicy` 1 (in a components file, dead here), `BackfillPolicy` 0,
   `asset_check` 1 (in passing), against `AutomationCondition` 10 — which this
   project uses nowhere. It is worth loading for **asset selection syntax** and

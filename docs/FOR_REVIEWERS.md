@@ -26,7 +26,7 @@ extraction: what each publisher turned out to need beyond a GET.
 | [`ingest/sources/worldbank.py`](../ingest/sources/worldbank.py) | `_fetch_wdi_indicator`: the World Bank sometimes serves an old edition of a series under a current URL, cached for a day at its origin and a day at each Cloudflare edge. The check spots it by the missing country codes and asks again on a URL neither cache has seen; a second stale copy fails the load, naming the edition |
 | [`ingest/sources/eurostat.py`](../ingest/sources/eurostat.py) | `check_one_category_per_filter`: the JSON-stat walk reads the first category of every dimension it does not walk, so a filter the API stopped applying would land the price excluding tax as the price including it, with no error. The load refuses the cube instead |
 | [`src/modern_data_stack/ratelimit.py`](../src/modern_data_stack/ratelimit.py) | a budget for an API that prices by volume rather than by call (one Open-Meteo request costs 600 units, the next 0.4), held across three windows at once, which refuses a wait rather than sleep for a day and look hung. [`ingest/sources/weather.py`](../ingest/sources/weather.py) is its caller |
-| [`orchestration/assets.py`](../orchestration/assets.py) | the whole pipeline as one asset graph, including why WDI and weather backfill by run config rather than partitions |
+| [`orchestration/defs/`](../orchestration/defs/) | the whole pipeline as one asset graph, a module per layer, including why WDI and weather backfill by run config rather than partitions |
 | [`AGENTS.md`](../AGENTS.md) | the gotchas every session needs, written down at the point they were learned — the rest are in the skills under `.agents/skills/` |
 
 Past those, the modelling's central join is
@@ -109,7 +109,7 @@ than a project.
 
 ## 2. What is the freshness SLA, and what happens when it is missed?
 
-Declared in code, not in a wiki. From [`orchestration/assets.py`](../orchestration/assets.py):
+Declared in code, not in a wiki. From [`orchestration/freshness.py`](../orchestration/freshness.py):
 
 | Layer | Policy | Meaning |
 |-------|--------|---------|

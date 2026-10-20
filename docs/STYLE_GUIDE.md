@@ -168,7 +168,7 @@ below are the ones it can't check.
 - **[convention]** The layers stay independently runnable. `orchestration/`
   imports `ingest`, `dbt` and `transform` — it never reimplements them. If you
   add logic to a Dagster asset that isn't wiring, it belongs in the layer.
-- **[convention]** `orchestration/assets.py` must not use
+- **[convention]** The modules in `orchestration/defs/` must not use
   `from __future__ import annotations`. See AGENTS.md for why.
 - **[convention]** Column and table names produced by Python match the SQL
   conventions above — `snake_case`, units in the name.
