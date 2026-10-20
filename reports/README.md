@@ -51,7 +51,7 @@ for you, which is why this only ever bites in CI.
 
 ## The site is a Dagster asset
 
-`reports/evidence_site` (in `orchestration/assets.py`) builds this folder, so the
+`reports/evidence_site` (in `orchestration/defs/site.py`) builds this folder, so the
 dashboard is the last node of the asset graph rather than something built beside
 it. `publish/build_report.py` is the implementation, the same one `just report`
 calls, so the recipe and the graph can't drift into running different builds.

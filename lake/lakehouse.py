@@ -337,7 +337,7 @@ def dlt_credentials(lakehouse_dir: str | Path = LAKEHOUSE_DIR):
     """
     from dlt.destinations.impl.ducklake.configuration import DuckLakeCredentials
 
-    # dlt will not create it. Importing `orchestration.assets` therefore leaves an
+    # dlt will not create it. Importing `orchestration.defs` therefore leaves an
     # empty `data/lakehouse/`, which `restore()` tolerates.
     lake = Path(lakehouse_dir)
     lake.mkdir(parents=True, exist_ok=True)

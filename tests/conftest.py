@@ -27,7 +27,7 @@ def _lakehouse_on_disk(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True, scope="module")
 def _release_the_dlt_pipeline():
-    """Importing `orchestration.assets` leaves a dlt pipeline *active* process-wide.
+    """Importing `orchestration.defs` leaves a dlt pipeline *active* process-wide.
 
     The `@dlt_assets` decorators call `build_pipeline()` at import time, and dlt
     records the result as the ambient pipeline. Any later test that calls a

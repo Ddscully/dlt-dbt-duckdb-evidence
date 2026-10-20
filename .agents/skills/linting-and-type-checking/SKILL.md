@@ -41,8 +41,8 @@ ruff is configured in `pyproject.toml` and run only through pre-commit
   one — the mirror image of sqlfluff. `extend-select` re-adds the 18 rules 0.16
   dropped, so a bump cannot silently stop checking star imports and `== None`.
 - **`combine-as-imports = true`**, or ruff splits `from x import a, run as b` and
-  shreds `orchestration/assets.py`'s imports: four layers each export a `run()`,
-  and it aliases every one.
+  shreds the imports in `orchestration/defs/`: the transform and publish layers
+  each export a `run()`, and every one is aliased.
 - **`--fix` deletes a comment that starts `# noqa`, even when it is prose.** Put
   the rule after the explanation (`# TRY004 asks for TypeError, but …`) and keep
   the real directive, with its colon, on the code line.

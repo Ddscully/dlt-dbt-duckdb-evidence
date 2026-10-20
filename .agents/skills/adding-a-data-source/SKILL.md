@@ -98,7 +98,7 @@ be read against the other half.
   passed explicitly, `None` included, is not looked up, and an argument with no
   default is never config. So `WEATHER_YEARS` in the environment reaches every
   bare `public_indicators()`: `ingest/pipeline.py`'s under `just ingest`, and the
-  ones `orchestration/assets.py` makes at import. A value that coerces to the
+  ones `orchestration/defs/ingest.py` makes at import. A value that coerces to the
   argument's type replaces the default with no warning (measured on an `int`).
   The year tuples here coerce from neither `"2017 2026"` nor `"[2017, 2026]"`,
   so for them it is `ConfigValueCannotBeCoercedException`, and every Dagster
@@ -153,7 +153,7 @@ Run `just lint` — the style rules are enforced, not advisory.
 
 ## 4. Dagster asset key — usually nothing to do, but verify
 
-`RawSchemaDltTranslator` in `orchestration/assets.py` keys every dlt resource as
+`RawSchemaDltTranslator` in `orchestration/defs/ingest.py` keys every dlt resource as
 `raw/<resource>`, which is exactly the key `dagster-dbt` derives from
 `_sources.yml`. That matching string is the *only* thing joining the EL half of
 the graph to the T half.

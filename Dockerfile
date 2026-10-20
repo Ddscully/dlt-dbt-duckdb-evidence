@@ -83,7 +83,7 @@ COPY . .
 # run container never downloads one mid-`dbt build`.
 RUN just extensions
 
-# The dbt manifest, at *build* time, because `orchestration/assets.py` reads
+# The dbt manifest, at *build* time, because `orchestration/defs/models.py` reads
 # `dbt/target/manifest.json` at import and every run container imports
 # `orchestration.definitions`. `dbt deps` runs with it, so `dbt_packages/` is
 # baked too.

@@ -24,7 +24,7 @@ Importing this package pulls in none of the submodules, so it costs no Polars or
 DuckDB import to a caller that only wants `paths`.
 
 Deliberately *not* here: `RawSchemaDltTranslator`, which stays in
-`orchestration/assets.py`. Keying dlt resources as `raw/<resource>` so they meet
+`orchestration/defs/ingest.py`. Keying dlt resources as `raw/<resource>` so they meet
 the keys dagster-dbt derives is the convention worth stealing from this repo, but
 the code for it is twenty lines wrapped around two of that module's constants,
 and moving it would put Dagster (an optional dependency group) behind a package
