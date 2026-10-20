@@ -41,7 +41,7 @@ section here. The mutation method these guards were written with is in the
   row and the pipeline page under-reports while looking complete — the exact
   symptom `adding-a-data-source` records from a *different* cause (the Arrow path's
   missing `_dlt_load_id`, "six sources for seven"). `RAW_DESCRIPTIONS`
-  (`orchestration/assets.py`) is read with `.get(name)`, so an unlisted
+  (`orchestration/defs/ingest.py`) is read with `.get(name)`, so an unlisted
   resource materialises with no description at all. Both are now held to
   `public_indicators()`, the same authority `load_groups`,
   `YEAR_RANGE_RESOURCES` and `PARTITIONED_RESOURCES` use.

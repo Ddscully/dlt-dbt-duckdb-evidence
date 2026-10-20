@@ -106,7 +106,7 @@ def dbt_target_path() -> str:
 
     `DBT_TARGET_PATH` is dbt's own variable for it; `just test-pipeline` sets it
     to keep a fixture build's artifacts out of the real tree.
-    `orchestration.assets.dbt_models` passes this directory to `dbt.cli(...)`,
+    `orchestration.defs.models.dbt_models` passes this directory to `dbt.cli(...)`,
     because dagster-dbt would otherwise write to a unique subdirectory that
     `run_results.json` readers cannot find.
     """

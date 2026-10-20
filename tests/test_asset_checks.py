@@ -1,6 +1,6 @@
 """The eight `@dg.asset_check` bodies, run without materializing anything.
 
-`tests/test_definitions.py` proves each check is *registered*; this proves each
+Living in `orchestration/defs/checks.py` registers each check; this proves each
 would *notice*. Otherwise the bodies run only in a full materialize, and
 `just test` cannot tell a working check from one whose logic has inverted.
 
@@ -33,7 +33,7 @@ from lake.lakehouse import ATTACH_ALIAS, catalog_path, data_path
 from modern_data_stack.ducklake import attach
 from orchestration.resources import dbt_project
 
-# Importing `orchestration.assets` needs the manifest, absent when ci.yml first
+# Importing `orchestration.defs` needs the manifest, absent when ci.yml first
 # runs pytest; CI re-runs this file after `dbt parse` (enforced by test_workflows.py).
 pytestmark = pytest.mark.skipif(
     not dbt_project.manifest_path.exists(),
@@ -46,9 +46,9 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture(scope="module")
-def assets():
-    """The orchestration module, imported lazily so the skipif above can fire."""
-    from orchestration import assets as module
+def checks():
+    """The checks module, imported lazily so the skipif above can fire."""
+    from orchestration.defs import checks as module
 
     return module
 
@@ -127,7 +127,7 @@ def _wdi(tmp_path: Path, rows: list[tuple]) -> str:
     )
 
 
-def test_wdi_check_passes_when_every_configured_indicator_landed(tmp_path, monkeypatch, assets):
+def test_wdi_check_passes_when_every_configured_indicator_landed(tmp_path, monkeypatch, checks):
     lakehouse = _wdi(
         tmp_path,
         [
@@ -136,26 +136,26 @@ def test_wdi_check_passes_when_every_configured_indicator_landed(tmp_path, monke
             ("SP.POP.TOTL", "JPN", 2020, 3.0),
         ],
     )
-    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", lakehouse)
-    monkeypatch.setattr(assets, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "SP.POP.TOTL"))
+    monkeypatch.setattr(checks, "LAKEHOUSE_DIR", lakehouse)
+    monkeypatch.setattr(checks, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "SP.POP.TOTL"))
 
-    result = assets.wdi_indicators_all_present()
+    result = checks.wdi_indicators_all_present()
 
     assert result.passed
     assert _meta(result, "indicators_loaded") == 2
 
 
-def test_wdi_check_names_the_indicator_the_world_bank_answered_empty(tmp_path, monkeypatch, assets):
+def test_wdi_check_names_the_indicator_the_world_bank_answered_empty(tmp_path, monkeypatch, checks):
     """A bad indicator code comes back 200 with an empty series, not an error.
 
     The table is non-empty and every other indicator is fine, so nothing in the
     load fails — the column just arrives all-null in `stg_wdi`.
     """
     lakehouse = _wdi(tmp_path, [("NY.GDP.MKTP.KD", "JPN", 2020, 1.0)])
-    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", lakehouse)
-    monkeypatch.setattr(assets, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "EN.ATM.CO2E.PC"))
+    monkeypatch.setattr(checks, "LAKEHOUSE_DIR", lakehouse)
+    monkeypatch.setattr(checks, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "EN.ATM.CO2E.PC"))
 
-    result = assets.wdi_indicators_all_present()
+    result = checks.wdi_indicators_all_present()
 
     assert not result.passed
     assert _meta(result, "missing_indicators") == ["EN.ATM.CO2E.PC"]
@@ -174,17 +174,17 @@ def test_wdi_check_names_the_indicator_the_world_bank_answered_empty(tmp_path, m
     ids=["no-iso3", "no-value", "future-year"],
 )
 def test_wdi_check_fails_an_indicator_whose_rows_stg_wdi_would_drop(
-    tmp_path, monkeypatch, assets, unusable
+    tmp_path, monkeypatch, checks, unusable
 ):
     """Rows landed, so a check on presence passes, and every one of them is
     dropped by `stg_wdi`, so the column is all-null anyway. The World Bank's
     CDN served exactly the first case for `NY.GDP.MKTP.KD`: 8,091 rows, every
     `countryiso3code` empty."""
     lakehouse = _wdi(tmp_path, [unusable, ("SP.POP.TOTL", "JPN", 2019, 3.0)])
-    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", lakehouse)
-    monkeypatch.setattr(assets, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "SP.POP.TOTL"))
+    monkeypatch.setattr(checks, "LAKEHOUSE_DIR", lakehouse)
+    monkeypatch.setattr(checks, "WB_WDI_INDICATORS", ("NY.GDP.MKTP.KD", "SP.POP.TOTL"))
 
-    result = assets.wdi_indicators_all_present()
+    result = checks.wdi_indicators_all_present()
 
     assert not result.passed
     assert _meta(result, "missing_indicators") == ["NY.GDP.MKTP.KD"]
@@ -214,12 +214,12 @@ def _mart(tmp_path: Path, rows: list[tuple]) -> str:
     )
 
 
-def test_mart_check_passes_when_every_source_is_current(tmp_path, monkeypatch, assets):
+def test_mart_check_passes_when_every_source_is_current(tmp_path, monkeypatch, checks):
     year = datetime.now(UTC).year
     path = _mart(tmp_path, [(year, 1.0, 2.0, 3.0, 0.25)])
-    monkeypatch.setattr(assets, "DUCKDB_PATH", path)
+    monkeypatch.setattr(checks, "DUCKDB_PATH", path)
 
-    result = assets.mart_covers_recent_years()
+    result = checks.mart_covers_recent_years()
 
     assert result.passed
     assert _meta(result, "years_behind") == dict.fromkeys(
@@ -227,7 +227,7 @@ def test_mart_check_passes_when_every_source_is_current(tmp_path, monkeypatch, a
     )
 
 
-def test_mart_check_fails_a_source_with_no_rows_at_all(tmp_path, monkeypatch, assets):
+def test_mart_check_fails_a_source_with_no_rows_at_all(tmp_path, monkeypatch, checks):
     """`max(year)` over an all-null column is null, and null is the worst case.
 
     The obvious spelling — `lag <= 2` on a null lag — is not merely wrong, it is
@@ -236,16 +236,16 @@ def test_mart_check_fails_a_source_with_no_rows_at_all(tmp_path, monkeypatch, as
     """
     year = datetime.now(UTC).year
     path = _mart(tmp_path, [(year, 1.0, 2.0, 3.0, None)])
-    monkeypatch.setattr(assets, "DUCKDB_PATH", path)
+    monkeypatch.setattr(checks, "DUCKDB_PATH", path)
 
-    result = assets.mart_covers_recent_years()
+    result = checks.mart_covers_recent_years()
 
     assert not result.passed
     assert _meta(result, "years_behind")["eu_elec_prices"] is None
     assert _meta(result, "max_year_by_source")["eu_elec_prices"] is None
 
 
-def test_mart_check_passes_a_source_exactly_two_years_behind(tmp_path, monkeypatch, assets):
+def test_mart_check_passes_a_source_exactly_two_years_behind(tmp_path, monkeypatch, checks):
     """The check promises "within two years", so `lag == 2` is the boundary
     neither test above reaches (`lag == 0` and `lag is None`). Mutating
     `lag <= 2` to `lag < 2` passes both of them and fails only this one.
@@ -258,15 +258,15 @@ def test_mart_check_passes_a_source_exactly_two_years_behind(tmp_path, monkeypat
             (year - 2, None, None, None, 0.25),
         ],
     )
-    monkeypatch.setattr(assets, "DUCKDB_PATH", path)
+    monkeypatch.setattr(checks, "DUCKDB_PATH", path)
 
-    result = assets.mart_covers_recent_years()
+    result = checks.mart_covers_recent_years()
 
     assert result.passed
     assert _meta(result, "years_behind")["eu_elec_prices"] == 2
 
 
-def test_mart_check_fails_a_source_three_years_behind(tmp_path, monkeypatch, assets):
+def test_mart_check_fails_a_source_three_years_behind(tmp_path, monkeypatch, checks):
     """One year past the boundary above, the same source must fail."""
     year = datetime.now(UTC).year
     path = _mart(
@@ -276,9 +276,9 @@ def test_mart_check_fails_a_source_three_years_behind(tmp_path, monkeypatch, ass
             (year - 3, None, None, None, 0.25),
         ],
     )
-    monkeypatch.setattr(assets, "DUCKDB_PATH", path)
+    monkeypatch.setattr(checks, "DUCKDB_PATH", path)
 
-    result = assets.mart_covers_recent_years()
+    result = checks.mart_covers_recent_years()
 
     assert not result.passed
     assert _meta(result, "years_behind")["eu_elec_prices"] == 3
@@ -298,37 +298,37 @@ def _fx(tmp_path: Path, newest) -> str:
     )
 
 
-def test_fx_check_passes_across_a_christmas_length_gap(tmp_path, monkeypatch, assets):
+def test_fx_check_passes_across_a_christmas_length_gap(tmp_path, monkeypatch, checks):
     """The ECB closes for up to five consecutive days; that is not a failure."""
     newest = datetime.now(UTC).date() - timedelta(days=5)
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _fx(tmp_path, newest))
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _fx(tmp_path, newest))
 
-    result = assets.fx_rates_reach_the_present()
+    result = checks.fx_rates_reach_the_present()
 
     assert result.passed
     assert _meta(result, "days_behind") == 5
 
 
-def test_fx_check_fails_once_the_carry_forward_window_has_lapsed(tmp_path, monkeypatch, assets):
+def test_fx_check_fails_once_the_carry_forward_window_has_lapsed(tmp_path, monkeypatch, checks):
     """Past the cap every dense row for today is null, not stale — a conversion
     stops producing numbers rather than producing wrong ones, which is why this
     is measured in days where `mart_covers_recent_years` is measured in years."""
-    newest = datetime.now(UTC).date() - timedelta(days=assets.FX_STALE_AFTER_DAYS + 1)
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _fx(tmp_path, newest))
+    newest = datetime.now(UTC).date() - timedelta(days=checks.FX_STALE_AFTER_DAYS + 1)
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _fx(tmp_path, newest))
 
-    result = assets.fx_rates_reach_the_present()
+    result = checks.fx_rates_reach_the_present()
 
     assert not result.passed
-    assert _meta(result, "days_behind") == assets.FX_STALE_AFTER_DAYS + 1
+    assert _meta(result, "days_behind") == checks.FX_STALE_AFTER_DAYS + 1
 
 
-def test_fx_check_warns_rather_than_blocks(tmp_path, monkeypatch, assets):
+def test_fx_check_warns_rather_than_blocks(tmp_path, monkeypatch, checks):
     import dagster as dg
 
     newest = datetime.now(UTC).date() - timedelta(days=90)
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _fx(tmp_path, newest))
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _fx(tmp_path, newest))
 
-    assert assets.fx_rates_reach_the_present().severity is dg.AssetCheckSeverity.WARN
+    assert checks.fx_rates_reach_the_present().severity is dg.AssetCheckSeverity.WARN
 
 
 # --------------------------------------------------------------------------- #
@@ -350,34 +350,34 @@ def _ranks(tmp_path: Path, ranks: list[int]) -> str:
     )
 
 
-def test_rank_check_passes_on_a_dense_cohort(tmp_path, monkeypatch, assets):
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _ranks(tmp_path, [1, 2, 3]))
-    assert assets.co2_intensity_rank_is_dense().passed
+def test_rank_check_passes_on_a_dense_cohort(tmp_path, monkeypatch, checks):
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _ranks(tmp_path, [1, 2, 3]))
+    assert checks.co2_intensity_rank_is_dense().passed
 
 
-def test_rank_check_fails_an_empty_table(tmp_path, monkeypatch, assets):
+def test_rank_check_fails_an_empty_table(tmp_path, monkeypatch, checks):
     """No cohort means no cohort out of order, so the rank terms alone pass an
     empty table — which is what the live Pages build wrote, and Evidence was the
     first thing to notice."""
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _ranks(tmp_path, []))
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _ranks(tmp_path, []))
 
-    result = assets.co2_intensity_rank_is_dense()
+    result = checks.co2_intensity_rank_is_dense()
 
     assert not result.passed
     assert _meta(result, "rows") == 0
 
 
-def test_rank_check_fails_on_a_gap(tmp_path, monkeypatch, assets):
+def test_rank_check_fails_on_a_gap(tmp_path, monkeypatch, checks):
     """`rank()` leaves holes after a tie where `dense_rank()` does not — 1, 2, 2, 4."""
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _ranks(tmp_path, [1, 2, 2, 4]))
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _ranks(tmp_path, [1, 2, 2, 4]))
 
-    result = assets.co2_intensity_rank_is_dense()
+    result = checks.co2_intensity_rank_is_dense()
 
     assert not result.passed
     assert _meta(result, "bad_cohorts") == 1
 
 
-def test_rank_check_fails_a_cohort_that_does_not_start_at_one(tmp_path, monkeypatch, assets):
+def test_rank_check_fails_a_cohort_that_does_not_start_at_one(tmp_path, monkeypatch, checks):
     """A cohort ranked 2, 3, 4 has no gaps at all and is still wrong.
 
     The check states this as two terms, and the first is unreachable: deleting
@@ -389,8 +389,8 @@ def test_rank_check_fails_a_cohort_that_does_not_start_at_one(tmp_path, monkeypa
     term. The clause stays because it states the intent; no fixture can
     separate it.
     """
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _ranks(tmp_path, [2, 3, 4]))
-    assert not assets.co2_intensity_rank_is_dense().passed
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _ranks(tmp_path, [2, 3, 4]))
+    assert not checks.co2_intensity_rank_is_dense().passed
 
 
 # --------------------------------------------------------------------------- #
@@ -423,12 +423,12 @@ _TIED_PAIR = [
 ]
 
 
-def test_rfm_check_passes_when_equal_values_score_equally(tmp_path, monkeypatch, assets):
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _rfm(tmp_path, _TIED_PAIR))
-    assert assets.rfm_scores_do_not_split_ties().passed
+def test_rfm_check_passes_when_equal_values_score_equally(tmp_path, monkeypatch, checks):
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _rfm(tmp_path, _TIED_PAIR))
+    assert checks.rfm_scores_do_not_split_ties().passed
 
 
-def test_rfm_check_fails_the_ntile_regression(tmp_path, monkeypatch, assets):
+def test_rfm_check_fails_the_ntile_regression(tmp_path, monkeypatch, checks):
     """`ntile(5)` fills equal-sized buckets, so it cuts through a run of equal
     values: two customers with the same frequency land in different quintiles.
 
@@ -436,32 +436,32 @@ def test_rfm_check_fails_the_ntile_regression(tmp_path, monkeypatch, assets):
     five tidy buckets and a plausible segment mix, so nothing else notices.
     """
     split = [_TIED_PAIR[0], (*_TIED_PAIR[1][:1], 2, *_TIED_PAIR[1][2:])]
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _rfm(tmp_path, split))
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _rfm(tmp_path, split))
 
-    result = assets.rfm_scores_do_not_split_ties()
+    result = checks.rfm_scores_do_not_split_ties()
 
     assert not result.passed
     assert _meta(result, "customers_scored_against_a_peer") == 2
 
 
-def test_rfm_check_fails_a_null_that_does_not_travel_with_its_money(tmp_path, monkeypatch, assets):
+def test_rfm_check_fails_a_null_that_does_not_travel_with_its_money(tmp_path, monkeypatch, checks):
     """Monetary is the one axis that legitimately goes null, and `rfm_cell` and
     `rfm_total` must go null exactly where it does. Asserting the equality is
     what stops this becoming a licence for nulls anywhere."""
     inconsistent = [(4, 3, 10, 5, None, 4, "534", 12, "Loyal")]
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _rfm(tmp_path, inconsistent))
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _rfm(tmp_path, inconsistent))
 
-    result = assets.rfm_scores_do_not_split_ties()
+    result = checks.rfm_scores_do_not_split_ties()
 
     assert not result.passed
     assert _meta(result, "scores_null_where_they_should_not_be") == 1
 
 
-def test_rfm_check_fails_an_unsegmented_customer(tmp_path, monkeypatch, assets):
+def test_rfm_check_fails_an_unsegmented_customer(tmp_path, monkeypatch, checks):
     unsegmented = [(*_TIED_PAIR[0][:8], None)]
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _rfm(tmp_path, unsegmented))
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _rfm(tmp_path, unsegmented))
 
-    result = assets.rfm_scores_do_not_split_ties()
+    result = checks.rfm_scores_do_not_split_ties()
 
     assert not result.passed
     assert _meta(result, "unsegmented") == 1
@@ -494,21 +494,21 @@ def _history(tmp_path: Path, *invocation_ids: str) -> str:
     )
 
 
-def test_run_history_check_passes_when_this_build_left_rows(tmp_path, monkeypatch, assets):
+def test_run_history_check_passes_when_this_build_left_rows(tmp_path, monkeypatch, checks):
     warehouse = _history(tmp_path, "abc-123", "abc-123", "older-run")
-    monkeypatch.setattr(assets, "DUCKDB_PATH", warehouse)
+    monkeypatch.setattr(checks, "DUCKDB_PATH", warehouse)
     monkeypatch.setattr(
-        assets, "dbt_run_results_path", lambda: str(_run_results(tmp_path, "abc-123"))
+        checks, "dbt_run_results_path", lambda: str(_run_results(tmp_path, "abc-123"))
     )
 
-    result = assets.run_history_records_this_build()
+    result = checks.run_history_records_this_build()
 
     assert result.passed
     assert _meta(result, "nodes_recorded") == 2
     assert _meta(result, "invocations_in_history") == 2
 
 
-def test_run_history_check_fails_when_the_build_appended_nowhere(tmp_path, monkeypatch, assets):
+def test_run_history_check_fails_when_the_build_appended_nowhere(tmp_path, monkeypatch, checks):
     """The build appended nothing, but the table is not empty.
 
     If dbt writes `run_results.json` somewhere `build_runs` does not read, it
@@ -517,21 +517,21 @@ def test_run_history_check_fails_when_the_build_appended_nowhere(tmp_path, monke
     them are this build's.
     """
     warehouse = _history(tmp_path, "an-earlier-run", "an-earlier-run")
-    monkeypatch.setattr(assets, "DUCKDB_PATH", warehouse)
+    monkeypatch.setattr(checks, "DUCKDB_PATH", warehouse)
     monkeypatch.setattr(
-        assets,
+        checks,
         "dbt_run_results_path",
         lambda: str(_run_results(tmp_path, "the-build-that-just-ran")),
     )
 
-    result = assets.run_history_records_this_build()
+    result = checks.run_history_records_this_build()
 
     assert not result.passed
     assert _meta(result, "nodes_recorded") == 0
     assert _meta(result, "invocations_in_history") == 1
 
 
-def test_run_history_check_fails_when_dbt_left_no_artifact_at_all(tmp_path, monkeypatch, assets):
+def test_run_history_check_fails_when_dbt_left_no_artifact_at_all(tmp_path, monkeypatch, checks):
     """A missing artifact is a failure, not a pass by absence.
 
     `build_runs` tolerates it — a fresh clone is a real state and the other
@@ -539,10 +539,10 @@ def test_run_history_check_fails_when_dbt_left_no_artifact_at_all(tmp_path, monk
     ends here: by the time `pipeline_status` materializes in the graph, a dbt
     build has run upstream of it and an absent artifact means the path moved.
     """
-    monkeypatch.setattr(assets, "DUCKDB_PATH", _history(tmp_path, "whatever"))
-    monkeypatch.setattr(assets, "dbt_run_results_path", lambda: str(tmp_path / "nowhere.json"))
+    monkeypatch.setattr(checks, "DUCKDB_PATH", _history(tmp_path, "whatever"))
+    monkeypatch.setattr(checks, "dbt_run_results_path", lambda: str(tmp_path / "nowhere.json"))
 
-    result = assets.run_history_records_this_build()
+    result = checks.run_history_records_this_build()
 
     assert not result.passed
     assert "run_results" in _meta(result, "reason")
@@ -581,7 +581,7 @@ def _weather_lakehouse(tmp_path: Path, loads: list[list[tuple]]) -> Path:
 DAY1 = [("DEU", "2021-12-20", 3.5), ("FRA", "2021-12-20", 7.1)]
 
 
-def test_weather_check_passes_when_nothing_was_restated(tmp_path, monkeypatch, assets):
+def test_weather_check_passes_when_nothing_was_restated(tmp_path, monkeypatch, checks):
     """The load that rewrites every `_dlt_id` and changes no weather.
 
     This is the routine case — every ingest re-merges 3,690 rows — and it is the
@@ -589,27 +589,27 @@ def test_weather_check_passes_when_nothing_was_restated(tmp_path, monkeypatch, a
     revised. Zero is the right answer and the check must see it as healthy.
     """
     lake_dir = _weather_lakehouse(tmp_path, [DAY1, DAY1])
-    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lake_dir))
+    monkeypatch.setattr(checks, "LAKEHOUSE_DIR", str(lake_dir))
 
-    result = assets.weather_revisions_are_derivable()
+    result = checks.weather_revisions_are_derivable()
 
     assert result.passed
     assert _meta(result, "rows_revised") == 0
 
 
-def test_weather_check_passes_a_genuine_restatement(tmp_path, monkeypatch, assets):
+def test_weather_check_passes_a_genuine_restatement(tmp_path, monkeypatch, checks):
     """One temperature moves. The diff must find exactly that row."""
     restated = [("DEU", "2021-12-20", -0.5), ("FRA", "2021-12-20", 7.1)]
     lake_dir = _weather_lakehouse(tmp_path, [DAY1, restated])
-    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lake_dir))
+    monkeypatch.setattr(checks, "LAKEHOUSE_DIR", str(lake_dir))
 
-    result = assets.weather_revisions_are_derivable()
+    result = checks.weather_revisions_are_derivable()
 
     assert result.passed
     assert _meta(result, "rows_revised") == 1
 
 
-def test_weather_check_fails_when_every_row_reads_as_revised(tmp_path, monkeypatch, assets):
+def test_weather_check_fails_when_every_row_reads_as_revised(tmp_path, monkeypatch, checks):
     """The failure the check exists for, and it is not an error anywhere else.
 
     Drop a provenance column from the ignore list and the diff stops being a
@@ -621,22 +621,22 @@ def test_weather_check_fails_when_every_row_reads_as_revised(tmp_path, monkeypat
     """
     all_moved = [("DEU", "2021-12-20", -9.9), ("FRA", "2021-12-20", -9.9)]
     lake_dir = _weather_lakehouse(tmp_path, [DAY1, all_moved])
-    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lake_dir))
+    monkeypatch.setattr(checks, "LAKEHOUSE_DIR", str(lake_dir))
 
-    result = assets.weather_revisions_are_derivable()
+    result = checks.weather_revisions_are_derivable()
 
     assert not result.passed
     assert _meta(result, "rows_revised") == _meta(result, "rows_total")
 
 
-def test_weather_check_is_green_on_a_first_load(tmp_path, monkeypatch, assets):
+def test_weather_check_is_green_on_a_first_load(tmp_path, monkeypatch, checks):
     """Every CI run is a first load, and a single-version catalog has nothing to
     diff. That is the honest state, not a broken build — the same shape as the
     restatements page rendering its "nothing revised yet" branch."""
     lake_dir = _weather_lakehouse(tmp_path, [DAY1])
-    monkeypatch.setattr(assets, "LAKEHOUSE_DIR", str(lake_dir))
+    monkeypatch.setattr(checks, "LAKEHOUSE_DIR", str(lake_dir))
 
-    result = assets.weather_revisions_are_derivable()
+    result = checks.weather_revisions_are_derivable()
 
     assert result.passed
     assert _meta(result, "versions") <= 1
@@ -659,51 +659,51 @@ def _routes(tmp_path: Path, sizes: dict[str, int | None]) -> dict[str, Path]:
     return routes
 
 
-def _site(tmp_path: Path, monkeypatch, assets, sizes: dict[str, int | None], dbt_docs: int | None):
+def _site(tmp_path: Path, monkeypatch, checks, sizes: dict[str, int | None], dbt_docs: int | None):
     """Point the check at a temp build: the pages from `sizes`, and the dbt docs,
     which it finds under `BUILD_DIR` rather than through `page_routes`."""
     routes = _routes(tmp_path, sizes)
-    _routes(tmp_path, {assets.DBT_DOCS_ROUTE: dbt_docs})
-    monkeypatch.setattr(assets, "page_routes", lambda: routes)
-    monkeypatch.setattr(assets, "BUILD_DIR", tmp_path)
+    _routes(tmp_path, {checks.DBT_DOCS_ROUTE: dbt_docs})
+    monkeypatch.setattr(checks, "page_routes", lambda: routes)
+    monkeypatch.setattr(checks, "BUILD_DIR", tmp_path)
 
 
-def test_site_check_passes_when_every_page_rendered(tmp_path, monkeypatch, assets):
-    _site(tmp_path, monkeypatch, assets, {"index": 19_000, "retail": 92_000}, 6_000_000)
+def test_site_check_passes_when_every_page_rendered(tmp_path, monkeypatch, checks):
+    _site(tmp_path, monkeypatch, checks, {"index": 19_000, "retail": 92_000}, 6_000_000)
 
-    result = assets.site_pages_all_rendered()
+    result = checks.site_pages_all_rendered()
 
     assert result.passed
     assert _meta(result, "pages_expected") == 3
 
 
-def test_site_check_fails_a_build_without_the_dbt_docs(tmp_path, monkeypatch, assets):
+def test_site_check_fails_a_build_without_the_dbt_docs(tmp_path, monkeypatch, checks):
     """The docs are written by `build_report` after Evidence, not by it, so every
     page can render while `/dbt/`, which Home links to, does not exist."""
-    _site(tmp_path, monkeypatch, assets, {"index": 19_000, "retail": 92_000}, None)
+    _site(tmp_path, monkeypatch, checks, {"index": 19_000, "retail": 92_000}, None)
 
-    result = assets.site_pages_all_rendered()
+    result = checks.site_pages_all_rendered()
 
     assert not result.passed
-    assert _meta(result, "missing") == [assets.DBT_DOCS_ROUTE]
+    assert _meta(result, "missing") == [checks.DBT_DOCS_ROUTE]
 
 
-def test_site_check_fails_a_page_that_never_rendered(tmp_path, monkeypatch, assets):
+def test_site_check_fails_a_page_that_never_rendered(tmp_path, monkeypatch, checks):
     """`evidence build` exits 0 for a site missing a page."""
-    _site(tmp_path, monkeypatch, assets, {"index": 19_000, "retail": None}, 6_000_000)
+    _site(tmp_path, monkeypatch, checks, {"index": 19_000, "retail": None}, 6_000_000)
 
-    result = assets.site_pages_all_rendered()
+    result = checks.site_pages_all_rendered()
 
     assert not result.passed
     assert _meta(result, "missing") == ["retail"]
 
 
-def test_site_check_fails_a_route_that_emitted_only_the_shell(tmp_path, monkeypatch, assets):
+def test_site_check_fails_a_route_that_emitted_only_the_shell(tmp_path, monkeypatch, checks):
     """Present and non-empty, and still not a page. This is the failure that
     looks most like success, which is why the check measures size at all."""
-    _site(tmp_path, monkeypatch, assets, {"index": 19_000, "retail": 900}, 6_000_000)
+    _site(tmp_path, monkeypatch, checks, {"index": 19_000, "retail": 900}, 6_000_000)
 
-    result = assets.site_pages_all_rendered()
+    result = checks.site_pages_all_rendered()
 
     assert not result.passed
     assert _meta(result, "suspiciously_small") == {"retail": 900}

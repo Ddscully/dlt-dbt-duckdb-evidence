@@ -12,7 +12,7 @@ last one back:
   forward so the snapshot accumulates a real revision log and the weather
   archive keeps deepening.
 
-They are not in `scripts/`, which would make `orchestration/assets.py` import
+They are not in `scripts/`, which would make `orchestration/defs/` import
 the top of its own dependency graph out of a directory named for one-off
 utilities. What is in `scripts/` is genuinely one-off: seed transcription,
 fixture re-recording, a disclosure measurement.

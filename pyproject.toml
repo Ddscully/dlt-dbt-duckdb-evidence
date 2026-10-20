@@ -129,9 +129,9 @@ extend-select = [
 
 [tool.ruff.lint.isort]
 # Keep `from x import a, run as b` on one statement. ruff's default splits the
-# alias onto its own line, which shreds orchestration/assets.py's import block —
-# four layers each export a `run()`, so it aliases every one. See the
-# linting-and-type-checking skill.
+# alias onto its own line, which shreds the import blocks in orchestration/defs/ —
+# the transform and publish layers each export a `run()`, so every one is
+# aliased. See the linting-and-type-checking skill.
 combine-as-imports = true
 
 [tool.pytest.ini_options]

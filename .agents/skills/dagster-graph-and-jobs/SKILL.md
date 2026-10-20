@@ -14,7 +14,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
 ## Standing rules of the graph
 
 `ingest`, `dbt` and `transform` stay independently runnable, and
-`orchestration/assets.py` imports them rather than duplicating logic
+`orchestration/defs/` imports them rather than duplicating logic
 (`build_pipeline()`, `dbt build`, `transform.co2_intensity.run()`).
 
 - **Asset keys are the join between the layers.** dlt resources are keyed
@@ -22,7 +22,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   derives from `_sources.yml`. Rename a dbt source table without renaming the dlt
   resource and the graph silently splits in two — both halves still run. Check
   with `just validate` and a look at the graph.
-- **`orchestration/assets.py` must not use `from __future__ import annotations`.**
+- **The modules in `orchestration/defs/` must not use `from __future__ import annotations`.**
   Dagster inspects the `context` parameter's annotation *object*; a stringified
   one fails with a confusing "Cannot annotate `context`".
 - **Everything runs in one process** (`in_process_executor`, and the five
@@ -75,7 +75,7 @@ order and hand registration — stay as one-liners in `AGENTS.md`'s
   cached. Every selection names what it leaves out, so a second npm-shaped or
   partitioned asset has to be excluded by hand too.
   How the site meets the graph is `building-evidence-reports`.
-- **Importing `orchestration.assets` leaves a dlt pipeline active process-wide.**
+- **Importing `orchestration.defs` leaves a dlt pipeline active process-wide.**
   The `@dlt_assets` decorators call `build_pipeline()` at import time, so a later
   test calling a resource directly reads the real `~/.dlt` state and fails on
   pagination it never got wrong — only in a full-suite run, only on a machine
@@ -172,7 +172,7 @@ which this one is not (`dg` below).
   entire 27-year series is one three-second request, so it takes no window at
   all. The blocks split on `YEAR_RANGE_RESOURCES` and `PARTITIONED_RESOURCES`
   (in `ingest/pipeline.py`), not on the disposition, and `UNWINDOWED_RESOURCES`
-  in `orchestration/assets.py` is derived as everything else. **Once there were
+  in `orchestration/defs/ingest.py` is derived as everything else. **Once there were
   two tuples and the WDI block was built from `INCREMENTAL_RESOURCES`
   directly** — adding a second merge resource to that constant would silently
   have given it yearly partitions. `load_groups` still owns the refresh/merge

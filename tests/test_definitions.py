@@ -1,12 +1,9 @@
-"""Every asset and check in `assets.py` is registered in `definitions.py`.
+"""What the graph `orchestration/definitions.py` builds must hold.
 
-`dg.Definitions` takes an explicit list, and nothing complains about an omission:
-the asset simply isn't in the graph, so `AssetSelection.all()` never sees it and
-`just validate` passes. An unlisted asset fails somewhere
-downstream; an unlisted check fails *silently*, because it just never runs.
-
-The explicit list stays (it is the one place that says what the graph is); this
-is what makes forgetting it loud.
+Registration is not tested here: every asset and check under
+`orchestration/defs/` is loaded by import, so there is no list for one to be
+missing from (docs/decisions/0023). What is still written by hand is the jobs'
+selections, and reachable through them is what runs.
 """
 
 from __future__ import annotations
@@ -17,7 +14,7 @@ import pytest
 from orchestration.resources import dbt_project
 
 # `just test` runs before `dbt deps && dbt parse` in ci.yml, and importing
-# orchestration.assets needs the manifest parse writes; CI re-runs this file after.
+# orchestration.defs needs the manifest parse writes; CI re-runs this file after.
 pytestmark = pytest.mark.skipif(
     not dbt_project.manifest_path.exists(),
     reason="needs dbt/target/manifest.json — run `just dbt-deps` and `dbt parse` first",
@@ -26,52 +23,6 @@ pytestmark = pytest.mark.skipif(
 # The dlt-pipeline-deactivation fixture this file needs (importing orchestration
 # leaves a dlt pipeline active process-wide) lives in conftest.py, shared with
 # test_asset_checks.py.
-
-
-def _defined_in_assets_module():
-    """(asset keys, check keys) declared at module level in `assets.py`."""
-    from orchestration import assets
-
-    asset_keys: set[dg.AssetKey] = set()
-    check_keys: set[dg.AssetCheckKey] = set()
-    for value in vars(assets).values():
-        # AssetChecksDefinition subclasses AssetsDefinition, so this order is
-        # load-bearing — reversed, every check falls into the first branch and
-        # the set comes out empty.
-        if isinstance(value, dg.AssetChecksDefinition):
-            check_keys.update(value.check_keys)
-        elif isinstance(value, dg.AssetsDefinition):
-            asset_keys.update(value.keys)
-    return asset_keys, check_keys
-
-
-def test_every_asset_defined_is_in_the_graph():
-    from orchestration.definitions import defs
-
-    defined, _ = _defined_in_assets_module()
-    # Executable, not get_all_asset_keys(): an unregistered dependency still
-    # shows up as an external node, so the wider set can report a key present
-    # purely because something names it in `deps`.
-    in_graph = defs.resolve_asset_graph().executable_asset_keys
-
-    missing = defined - in_graph
-    assert not missing, (
-        "assets defined in orchestration/assets.py but not listed in "
-        f"orchestration/definitions.py: {sorted(k.to_user_string() for k in missing)}"
-    )
-
-
-def test_every_asset_check_defined_is_in_the_graph():
-    from orchestration.definitions import defs
-
-    _, defined = _defined_in_assets_module()
-    in_graph = set(defs.resolve_asset_graph().asset_check_keys)
-
-    missing = defined - in_graph
-    assert not missing, (
-        "asset checks defined in orchestration/assets.py but not listed in "
-        f"orchestration/definitions.py: {sorted(k.to_user_string() for k in missing)}"
-    )
 
 
 def test_every_partition_mapping_resolves():
@@ -93,18 +44,18 @@ def test_every_raw_resource_has_an_asset_description():
     """`RAW_DESCRIPTIONS` re-enumerates the dlt resources, and cannot be derived:
     the prose is not computable from the source, so it is held to it instead.
 
-    `assets.py` reads it as `RAW_DESCRIPTIONS.get(name)`, which returns `None`
+    `orchestration/defs/ingest.py` reads it as `RAW_DESCRIPTIONS.get(name)`, which returns `None`
     for an unlisted resource. The asset then materialises with no description
     and nothing is red: the Dagster UI shows a blank where every sibling has a
     sentence.
 
     Lives here rather than in `tests/test_ingest.py` because reading the dict
-    means importing `orchestration.assets`, which needs dagster (an optional
+    means importing `orchestration.defs`, which needs dagster (an optional
     group) and the manifest; this module already carries that skip and is
     re-run by CI after `dbt parse`.
     """
     from ingest import pipeline
-    from orchestration.assets import RAW_DESCRIPTIONS
+    from orchestration.defs.ingest import RAW_DESCRIPTIONS
 
     resources = {r.name for r in pipeline.public_indicators().resources.values()}
 
@@ -112,7 +63,7 @@ def test_every_raw_resource_has_an_asset_description():
     # the message should say which.
     undescribed = resources - RAW_DESCRIPTIONS.keys()
     assert not undescribed, (
-        "dlt resources with no entry in orchestration/assets.py RAW_DESCRIPTIONS "
+        "dlt resources with no entry in orchestration/defs/ingest.py RAW_DESCRIPTIONS "
         f"(they materialise with no description): {sorted(undescribed)}"
     )
 
@@ -152,16 +103,17 @@ def test_the_jobs_between_them_cover_every_asset():
     `load_retail` rather than dropped. Anything in neither job is built by no
     workflow.
     """
-    from orchestration import assets
+    from orchestration.definitions import defs
+    from orchestration.defs.site import EVIDENCE_SITE
 
-    defined, _ = _defined_in_assets_module()
+    defined = set(defs.resolve_asset_graph().executable_asset_keys)
     covered = _job_keys("full_refresh") | _job_keys("load_retail")
 
-    assert defined - covered == {assets.EVIDENCE_SITE}, (
+    assert defined - covered == {EVIDENCE_SITE}, (
         "the Evidence site is the only asset no pure-Python job may build; "
         f"unreachable: {sorted(k.to_user_string() for k in defined - covered)}"
     )
-    assert assets.EVIDENCE_SITE in _job_keys("publish_site")
+    assert EVIDENCE_SITE in _job_keys("publish_site")
 
 
 def test_retail_ingest_is_the_only_thing_full_refresh_leaves_out():
@@ -171,9 +123,9 @@ def test_retail_ingest_is_the_only_thing_full_refresh_leaves_out():
     a source added to `PARTITIONED_RESOURCES` would join that block and be
     dropped from `full_refresh` silently.
     """
-    from orchestration import assets
+    from orchestration.defs.ingest import raw_retail_asset
 
-    retail_keys = set(assets.raw_retail_asset.keys)
+    retail_keys = set(raw_retail_asset.keys)
     assert retail_keys == {dg.AssetKey(["raw", "retail_invoice_lines"])}
     assert not retail_keys & _job_keys("full_refresh")
     assert retail_keys == _job_keys("load_retail")
@@ -193,7 +145,7 @@ def test_the_routine_jobs_are_not_partitioned():
             f"`{name}` is partitioned ({type(partitions).__name__}), so its Materialize "
             "button in the UI is a backfill of every partition. Keep the partitioned "
             "asset out of the selection, as `load_retail` does for retail, or give it "
-            "run config instead (`YearRange` in orchestration/assets.py)."
+            "run config instead (`YearRange` in orchestration/defs/ingest.py)."
         )
 
 
@@ -231,7 +183,7 @@ def test_the_backfill_recipes_address_the_op_that_takes_the_years():
     import re
 
     from modern_data_stack.paths import project_root
-    from orchestration.assets import raw_by_year_assets
+    from orchestration.defs.ingest import raw_by_year_assets
 
     justfile = (project_root() / "justfile").read_text()
     for recipe in ("backfill-wdi", "backfill-weather"):
@@ -259,7 +211,7 @@ def test_a_year_range_resolves_to_the_closed_range_it_names():
     `just materialize` never passes config, so CI never calls this method; only a
     backfill does, against WDI and weather, the two sources that still move.
     """
-    from orchestration.assets import WDI_FIRST_YEAR, YearRange
+    from orchestration.defs.ingest import WDI_FIRST_YEAR, YearRange
 
     this_year = _this_year()
     assert YearRange().years() is None
@@ -279,7 +231,7 @@ def test_a_year_range_refuses_what_would_load_nothing_or_projections():
     projections that `stg_wdi` then cuts, and `last_year` alone would silently
     fall back to the lookback.
     """
-    from orchestration.assets import WDI_FIRST_YEAR, YearRange
+    from orchestration.defs.ingest import WDI_FIRST_YEAR, YearRange
 
     this_year = _this_year()
     refused = {
@@ -297,7 +249,7 @@ def test_a_year_range_refuses_what_would_load_nothing_or_projections():
 def test_every_retail_month_has_a_partition_to_land_in():
     """The partitions cover the closed interval the retail constants describe."""
     from ingest.sources.retail import RETAIL_FIRST_MONTH, RETAIL_LAST_MONTH
-    from orchestration.assets import RETAIL_PARTITIONS
+    from orchestration.defs.ingest import RETAIL_PARTITIONS
 
     keys = RETAIL_PARTITIONS.get_partition_keys()
     assert keys[0] == RETAIL_FIRST_MONTH
@@ -325,7 +277,7 @@ def test_the_dbt_build_writes_its_run_results_where_the_reader_looks():
     from typing import Any
 
     from modern_data_stack.paths import dbt_run_results_path, dbt_target_path
-    from orchestration import assets
+    from orchestration.defs import models
 
     called_with: list[str] = []
     kwargs_seen: dict[str, Any] = {}
@@ -343,7 +295,7 @@ def test_the_dbt_build_writes_its_run_results_where_the_reader_looks():
     # `decorated_fn` is the undecorated generator, so this exercises the call
     # site with no execution harness — nothing materializes or yields, which is
     # the part under test. The annotation states that gap rather than a `ty: ignore`.
-    compute: Any = assets.dbt_models.op.compute_fn
+    compute: Any = models.dbt_models.op.compute_fn
     list(compute.decorated_fn(context=None, dbt=_Dbt()))
 
     assert called_with == ["build"]

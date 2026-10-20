@@ -1,6 +1,8 @@
 """Dagster entry point: `just dagster` (see `[tool.dg]` in pyproject.toml).
 
-Everything `just run` does, as one asset graph, plus the Evidence site. Four jobs:
+Everything `just run` does, as one asset graph, plus the Evidence site. The
+assets and checks are `orchestration/defs/`, loaded whole; what is written out
+here is what has no layer of its own. Four jobs:
 
 * `load_retail` — the month-partitioned retail load. A job takes its
   partitions definition from its assets, so with retail inside it `full_refresh`
@@ -31,14 +33,17 @@ second npm-shaped or partitioned asset has to be excluded by hand, and
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import dagster as dg
 from dagster import in_process_executor
 
-from orchestration import assets
+from orchestration.defs.ingest import raw_retail_asset
+from orchestration.defs.site import EVIDENCE_SITE
 from orchestration.resources import RESOURCES
 
-site = dg.AssetSelection.assets(assets.EVIDENCE_SITE)
-retail_ingest = dg.AssetSelection.assets(*assets.raw_retail_asset.keys)
+site = dg.AssetSelection.assets(EVIDENCE_SITE)
+retail_ingest = dg.AssetSelection.assets(*raw_retail_asset.keys)
 # By prefix, not by block: a new `@dlt_assets` block lands under `raw/` and is
 # excluded without anyone remembering to. The checks on these assets go with
 # them, because they judge what an ingest landed, and a job that lands nothing
@@ -95,36 +100,16 @@ daily_schedule = dg.ScheduleDefinition(
     default_status=dg.DefaultScheduleStatus.STOPPED,
 )
 
-defs = dg.Definitions(
-    # Listed explicitly: an asset defined in `assets.py` but missing here is not
-    # in the graph at all, and `AssetSelection.all()` won't tell you.
-    assets=[
-        assets.raw_assets,
-        # WDI and weather, which take a year range as run config; then retail,
-        # partitioned by month.
-        assets.raw_by_year_assets,
-        assets.raw_retail_asset,
-        assets.snapshot_expiry,
-        assets.dbt_models,
-        assets.co2_intensity,
-        assets.retail_rfm,
-        assets.pipeline_status,
-        assets.evidence_site,
-    ],
-    asset_checks=[
-        assets.wdi_indicators_all_present,
-        assets.mart_covers_recent_years,
-        assets.fx_rates_reach_the_present,
-        assets.co2_intensity_rank_is_dense,
-        assets.rfm_scores_do_not_split_ties,
-        assets.run_history_records_this_build,
-        assets.weather_revisions_are_derivable,
-        assets.site_pages_all_rendered,
-    ],
-    jobs=[load_retail_job, full_refresh_job, publish_site_job, publish_site_from_raw_job],
-    schedules=[daily_schedule],
-    resources=RESOURCES,
-    # DuckDB takes one writer. The default multiprocess executor would run steps
-    # side by side and lose the race for the lock; one process serialises them.
-    executor=in_process_executor,
+defs = dg.Definitions.merge(
+    # Every asset and check defined at module level under `orchestration/defs/`,
+    # found by import: there is no list here for a new one to be missing from.
+    dg.load_from_defs_folder(path_within_project=Path(__file__).parent),
+    dg.Definitions(
+        jobs=[load_retail_job, full_refresh_job, publish_site_job, publish_site_from_raw_job],
+        schedules=[daily_schedule],
+        resources=RESOURCES,
+        # DuckDB takes one writer. The default multiprocess executor would run steps
+        # side by side and lose the race for the lock; one process serialises them.
+        executor=in_process_executor,
+    ),
 )
