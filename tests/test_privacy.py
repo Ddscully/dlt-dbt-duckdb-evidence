@@ -25,6 +25,7 @@ import pytest
 import yaml
 
 from modern_data_stack import privacy
+from modern_data_stack.db import scalar
 from modern_data_stack.paths import project_root
 from publish.export_warehouse import (
     EXTRA_CLASSIFICATIONS,
@@ -185,9 +186,9 @@ def test_the_uploadable_copy_holds_no_clear_id_and_links_to_nothing(tmp_path, mo
         pseudonymised_copy(dest, source=source, lakehouse_dir=lake)
         con = duckdb.connect(str(dest), read_only=True)
         for relation in ("staging.stg_lines", "marts.dim_customer"):
-            clear = con.execute(
-                f"select count(*) from {relation} where customer_id in ('12345', '67890')"
-            ).fetchone()[0]
+            clear = scalar(
+                con, f"select count(*) from {relation} where customer_id in ('12345', '67890')"
+            )
             assert clear == 0, f"{relation} kept {clear} clear ids in run {run}"
         copies.append(con.execute(by_revenue).fetchall())
         con.close()

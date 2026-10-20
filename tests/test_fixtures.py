@@ -24,6 +24,7 @@ from ingest.sources.retail import (
 )
 from ingest.sources.worldbank import wdi_url
 from modern_data_stack import fixtures as _fixtures, workbook
+from modern_data_stack.db import row
 
 
 @pytest.mark.parametrize("url", ALL_URLS)
@@ -94,7 +95,8 @@ def test_retail_fixture_holds_each_invoice_of_the_sheet_overlap_once():
         book = workbook.extract_member(fixtures.path_for(RETAIL_ARCHIVE), tmp, ".xlsx")
         con = workbook.connect()
         con.execute(f"create or replace view sheets as {workbook.sheets_sql(book)}")
-        invoices, doubled = con.sql(
+        invoices, doubled = row(
+            con,
             f"""with line_groups as (
                     select * exclude (line_number), count(*) as n
                     from ({retail_sql()})
@@ -104,8 +106,8 @@ def test_retail_fixture_holds_each_invoice_of_the_sheet_overlap_once():
                 )
                 select count(distinct invoice), count(*) filter (where paired)
                 from (select invoice, bool_and(n % 2 = 0) as paired
-                      from line_groups group by invoice)"""
-        ).fetchone()
+                      from line_groups group by invoice)""",
+        )
     assert invoices > 0, "the slice must reach the overlap for this to test anything"
     assert doubled == 0, f"{doubled} overlap invoice(s) hold every line twice: re-record"
 
