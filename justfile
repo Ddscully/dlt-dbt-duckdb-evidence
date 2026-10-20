@@ -130,8 +130,8 @@ dbt-build: where dbt-deps
     cd dbt && uv run dbt build
 
 # `@dbt_assets` reads dbt/target/manifest.json at import time and dbt/target/ is
-# gitignored, so every headless `dagster` recipe depends on this. `just dagster`
-# does not: `prepare_if_dev()` parses under the dev CLI.
+# gitignored, so every recipe that loads the Dagster graph depends on this,
+# `just dagster` included: nothing parses for you (orchestration/resources.py).
 # Write dbt/target/manifest.json — the Dagster graph won't load without it
 [group('pipeline')]
 dbt-parse: dbt-deps
@@ -343,28 +343,30 @@ restore-history from: where
 record-fixtures:
     uv run python -m scripts.record_fixtures
 
-# Its SupersessionWarning is expected: the dagster-graph-and-jobs skill says why.
+# `dagster dev`, not `dg dev`, which cannot build its workspace on this layout, so
+# its SupersessionWarning is expected (docs/decisions/0022). A model edited while
+# it runs reaches the graph after `just dbt-parse` and a reload.
 # Dagster UI on :3000 — asset graph, run history, freshness, checks
 [group('dagster')]
-dagster:
+dagster port="3000": dbt-parse
     mkdir -p "$DAGSTER_HOME"
-    uv run --group orchestration dagster dev
+    uv run --group orchestration dagster dev -p {{ port }}
 
 # Two jobs, `load_retail` first because dbt reads its table (dagster-graph-and-jobs).
 # Full pipeline ordered by the asset graph, minus the Evidence site
 [group('dagster')]
 materialize: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
-    uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
-    uv run --group orchestration dagster job execute -m orchestration.definitions -j full_refresh
+    uv run --group orchestration dg launch --job load_retail
+    uv run --group orchestration dg launch --job full_refresh
 
 # What .github/workflows/pages.yml runs.
 # The same graph with the Evidence site on the end of it (needs Node)
 [group('dagster')]
 materialize-site: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
-    uv run --group orchestration dagster job execute -m orchestration.definitions -j load_retail
-    uv run --group orchestration dagster job execute -m orchestration.definitions -j publish_site
+    uv run --group orchestration dg launch --job load_retail
+    uv run --group orchestration dg launch --job publish_site
 
 # What pages.yml runs for a push that cannot change `raw`, over the landing zone
 # live.yml cached. No `load_retail`: nothing here calls a publisher.
@@ -372,19 +374,35 @@ materialize-site: where dbt-parse
 [group('dagster')]
 materialize-site-from-raw: where dbt-parse
     mkdir -p "$DAGSTER_HOME"
-    uv run --group orchestration dagster job execute -m orchestration.definitions -j publish_site_from_raw
+    uv run --group orchestration dg launch --job publish_site_from_raw
 
 # A bare prefix is not a glob: `marts/*` means "downstream of the key `marts/`",
-# matches nothing and exits 0. Write `key:"marts/*"`; `group:`, `kind:`,
-# `sinks(...)` and `roots(...)` also work. Check with `just materialize-preview`.
+# which does not exist. Write `key:"marts/*"`; `group:`, `kind:`, `sinks(...)`
+# and `roots(...)` also work. A selection matching no assets launches *every*
+# asset, live ingest included: `execute_job` reads an empty selection as none
+# (dagster/_core/execution/api.py). So this resolves it first, with the
+# preview's command, and refuses an empty one. That command skips a key that does
+# not exist where `dg launch` fails on it and runs nothing, so a typo or a bare
+# prefix is refused here too; only a well-formed selection matching nothing
+# (`key:"x/*"`, `group:nope`) would have run everything. Its `-m` names the
+# module `[tool.dg]` targets, because `dagster asset list` requires one.
 # Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi*'` (* = all downstream, + = one layer)
 [group('dagster')]
 materialize-select selection: where dbt-parse
+    #!/usr/bin/env bash
+    set -euo pipefail
     mkdir -p "$DAGSTER_HOME"
-    uv run --group orchestration dagster asset materialize \
-        -m orchestration.definitions --select '{{ selection }}'
+    selection={{ quote(selection) }}
+    selected=$(uv run --group orchestration dagster asset list \
+        -m orchestration.definitions --select "$selection")
+    if [ -z "$selected" ]; then
+      echo "$selection matches no assets; refusing, since an empty selection launches every asset" >&2
+      exit 1
+    fi
+    uv run --group orchestration dg launch --assets "$selection"
 
-# A selection matching no assets is not an error to `materialize`, so look first.
+# Prints nothing for a selection matching no assets, which `materialize-select`
+# refuses.
 # Print the assets a selection resolves to, without materializing any of them
 [group('dagster')]
 materialize-preview selection: dbt-parse
@@ -393,12 +411,17 @@ materialize-preview selection: dbt-parse
 
 # `dbt-parse` first, or the location fails to load instead of reporting what is
 # unregistered — which also makes this no check on a *running* service
-# (RUNNING_AS_A_SERVICE.md, "Standing it up"). No `-m` ("Invariants that fail
-# silently in a service").
+# (RUNNING_AS_A_SERVICE.md, "Standing it up"). `dg list defs`, not
+# `dg check defs`, which cannot run on this layout (docs/decisions/0022): it
+# exits 1 on an import or a definition error, and the listing is discarded
+# because it is the whole graph. It does not check partition mappings, which
+# `definitions validate` did, so the second line does.
 # Check the code location loads and every definition is registered
 [group('dagster')]
 validate: dbt-parse
-    uv run --group orchestration dagster definitions validate
+    uv run --group orchestration dg list defs --json > /dev/null
+    uv run --group orchestration python -c 'from orchestration.definitions import defs; defs.resolve_asset_graph().validate_partitions()'
+    @echo "definitions load"
 
 # `just backfill-wdi 1995` or `just backfill-wdi 1990 1995`; merges, then follow
 # with `just dbt-build`. The years are run config, not partitions
@@ -412,8 +435,8 @@ backfill-wdi start end='': where dbt-parse
     end="{{ end }}"
     config=$(printf '{"ops": {"ingest_by_year": {"config": {"first_year": %d, "last_year": %d}}}}' \
         "{{ start }}" "${end:-{{ start }}}")
-    uv run --group orchestration dagster asset materialize \
-        -m orchestration.definitions --select 'raw/wb_wdi' --config-json "$config"
+    uv run --group orchestration dg launch \
+        --assets 'raw/wb_wdi' --config-json "$config"
 
 # Back to 1960, paced to Open-Meteo's budget: six years is an hour's with a
 # retried year to spare, the most one run takes, and a longer range is refused
@@ -428,8 +451,8 @@ backfill-weather start end='': where dbt-parse
     end="{{ end }}"
     config=$(printf '{"ops": {"ingest_by_year": {"config": {"first_year": %d, "last_year": %d}}}}' \
         "{{ start }}" "${end:-{{ start }}}")
-    uv run --group orchestration dagster asset materialize \
-        -m orchestration.definitions --select 'raw/om_weather_daily' --config-json "$config"
+    uv run --group orchestration dg launch \
+        --assets 'raw/om_weather_daily' --config-json "$config"
 
 # Either mode blocks a build while open (querying-the-warehouse). It attaches the
 # lakehouse, which the staging views read, and any S3 secret via `getenv`, keeping
@@ -504,10 +527,10 @@ report-clean: dbt-deps
 # docs/PUBLISH_AND_SWAP.md designs a symlink swap instead.
 export SITE_ROOT := env("SITE_ROOT", justfile_directory() / "reports/build")
 
-# Every choice here — no `dagster dev`, `dbt-parse`, the bind addresses, `wait -n`,
-# killing recorded PIDs — is docs/RUNNING_AS_A_SERVICE.md, "`just serve`, and
-# the container built on it". The `daily_refresh` schedule ships STOPPED
-# ("Standing it up").
+# Every choice here — no `dagster dev`, `dbt-parse`, the bind addresses, the
+# instance and the definitions loaded first, `wait -n`, killing recorded PIDs — is
+# docs/RUNNING_AS_A_SERVICE.md, "`just serve`, and the container built on it".
+# The `daily_refresh` schedule ships STOPPED ("Standing it up").
 # Run the graph and the dashboard as one always-on service (blocks; ctrl-c to stop)
 [group('service')]
 serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
@@ -515,6 +538,15 @@ serve dagster_port="3000" site_port="8081" host="127.0.0.1": where dbt-parse
     set -euo pipefail
     mkdir -p "$DAGSTER_HOME"
     test -d "$SITE_ROOT" || { echo "no site at $SITE_ROOT — run: just report" >&2; exit 1; }
+    # Started together on an empty DAGSTER_HOME, the webserver and the daemon both
+    # create the storage tables and one dies on `table … already exists`.
+    uv run --group orchestration python -c 'import dagster as dg; dg.DagsterInstance.get()'
+    # And each starts a code server that imports the definitions, which create
+    # dlt's pipeline folder: with no dlt state yet, one loses on `FileExistsError`
+    # and the webserver shows the location as broken. Not fatal, so definitions
+    # that do not load still reach the UI as an error instead of a restart loop.
+    uv run --group orchestration python -c 'import orchestration.definitions' \
+        || echo "serve: the definitions do not load; starting anyway" >&2
 
     pids=()
     stop() {
