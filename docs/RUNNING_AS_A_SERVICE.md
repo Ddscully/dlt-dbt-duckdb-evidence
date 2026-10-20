@@ -131,8 +131,9 @@ port reports a healthy site through the whole outage. The recipe refuses to
 start if the directory is not there at all, naming `just report`, rather than
 serving 404s that look like a broken build.
 
-Cold start on a warm venv is **17 s** from `just serve` to both ports answering,
-`dbt deps` and `dbt parse` included — the dependency below is most of it.
+Cold start on a warm venv is **14 s** from `just serve` to both ports answering:
+`dbt-parse`, the dependency below, is 5.5 s of it, and importing the definitions
+2.6 s.
 
 **The first start creates the instance before it starts anything.** On an empty
 `DAGSTER_HOME` the webserver and the daemon would each create the SQLite storage
@@ -157,8 +158,8 @@ on an idle machine failed, and 3 of 10 with other work running. With it, 0 of 14
 The mechanism is the stronger evidence: once the import has run, importing the
 definitions again takes dlt's attach path three times and its create path never.
 A failed import does not stop the recipe, so definitions that do not load still
-reach the UI as an error rather than a restart loop; it costs about four seconds
-a start.
+reach the UI as an error rather than a restart loop; it costs 2.6 s a start on
+the host.
 
 Four things in that block are load-bearing:
 

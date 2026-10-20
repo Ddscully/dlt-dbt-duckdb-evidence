@@ -67,7 +67,10 @@ the latest release:
   `definitions validate`. (Two partitions definitions in one job fail both,
   because resolving the job fails the load.) And it loads inside
   `disable_dagster_warnings()`, so a deprecated Dagster API in `orchestration/`
-  prints nothing there.
+  prints nothing there. Nor does it build the repository snapshot the webserver
+  serves, which `definitions validate` did, but no case is known where that
+  matters: nine definitions written to load and fail the snapshot either failed
+  the load or snapshotted and serialised cleanly.
 - **`dagster-dg-cli` adds 16 packages to a tree of 164**, removing none, at the
   locked version of `dagster`.
 
@@ -75,9 +78,9 @@ the latest release:
 
 - `just materialize`, `materialize-site`, `materialize-site-from-raw`,
   `materialize-select` and both `backfill-*` recipes run `dg launch`.
-- `just validate` runs `dg list defs`, discarding the listing, and
-  `tests/test_definitions.py` calls `validate_partitions()` on the graph, the
-  check `dg list defs` leaves out.
+- `just validate` runs `dg list defs`, discarding the listing, then calls
+  `validate_partitions()` on the graph, the check `dg list defs` leaves out;
+  `tests/test_definitions.py` calls it too.
 - `just dagster` stays on `dagster dev`, the code `dg dev` would run, and prints
   its `SupersessionWarning`. It depends on `dbt-parse`.
 - `orchestration/resources.py` has no `prepare_if_dev()`.
@@ -130,9 +133,15 @@ Only `just dagster` prints a `SupersessionWarning`, and nothing in CI runs it.
   `dagster-graph-and-jobs` skill point here.
 - **A model edited while `just dagster` runs reaches the graph after
   `just dbt-parse` and a reload of the code location**, not on the reload alone.
-- **`just validate` is no longer the whole check.** It catches what fails to
-  load; partition mappings are caught by `just test`, and a Dagster deprecation
-  raised by `orchestration/` no longer prints in CI's validate step.
+- **`just validate` takes two Python start-ups instead of one**, the second for
+  the partition mappings, and a Dagster deprecation raised by `orchestration/`
+  no longer prints in CI's validate step.
+- **`just dagster` no longer starts offline**, like every other Dagster recipe.
+  It depends on `dbt-parse`, whose `dbt deps` reads hub.getdbt.com's index on
+  every run, installed packages or not, so with no network it exits 2 before
+  the UI. `prepare_if_dev()` ran the same commands inside the code location,
+  where a failure left the UI up showing the location's error. A build holding
+  the warehouse does not stop it: `dbt parse` opens no connection.
 - **`dg launch` needs `DAGSTER_HOME`.** Without it the run uses a throwaway
   instance, records nowhere and applies none of `dagster.yaml`. Every recipe
   exports it.

@@ -75,7 +75,7 @@ def test_every_asset_check_defined_is_in_the_graph():
 
 
 def test_every_partition_mapping_resolves():
-    """The check `just validate` lost when it moved to `dg list defs`.
+    """The check `dg list defs` leaves out, which `just validate` runs as a second line.
 
     `dagster definitions validate` called `validate_partitions()` after loading;
     `dg list defs` loads and stops (docs/decisions/0022). Measured by mutation:
@@ -241,9 +241,9 @@ def test_the_backfill_recipes_address_the_op_that_takes_the_years():
         addressed = re.findall(r'"ops": \{"([\w-]+)"', body[1])
         assert addressed == [raw_by_year_assets.op.name], (
             f"`just {recipe}` addresses its year config to {addressed}, but the op "
-            f"that reads it is `{raw_by_year_assets.op.name}`. `dagster asset "
-            "materialize` ignores config for an op it does not know, so the recipe "
-            "would load the incremental lookback and report success."
+            f"that reads it is `{raw_by_year_assets.op.name}`. `dg launch` ignores "
+            "config for an op it does not know, so the recipe would load the "
+            "incremental lookback and report success."
         )
 
 

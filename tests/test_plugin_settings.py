@@ -67,8 +67,12 @@ def test_no_plugin_is_declared_and_switched_off():
     )
 
 
-def test_the_two_measured_removals_stay_removed():
-    """`dagster-expert@dagster` and `polars@polars`, retired.
+def test_the_measured_removals_stay_removed():
+    """`dagster-expert@dagster` and `polars@polars`, retired, and `dagster@dagster`.
+
+    The exact-set and no-`false` tests above already fail on any of them; this
+    one is for the message, which says why each went and what bringing it back
+    takes.
 
     Retired on a measured zero `Skill` invocations across the window in which
     both layers were being edited; docs/decisions/0004 has the measurement and

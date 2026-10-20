@@ -306,7 +306,7 @@ which this one is not (`dg` below).
   | `dagster dev` | itself: `dg dev` writes a workspace file and runs `dagster dev`'s code, and cannot write one here | `just dagster` |
   | `dagster job execute` | `dg launch --job` | `just materialize`, `materialize-site`, `materialize-site-from-raw` |
   | `dagster asset materialize` | `dg launch --assets` | `just materialize-select`, `backfill-wdi`, `backfill-weather` |
-  | `dagster definitions validate` | `dg list defs`, which exits 1 on an import or a definition error, and `validate_partitions()` in `tests/test_definitions.py`, which `dg list defs` skips | `just validate`, `just test` |
+  | `dagster definitions validate` | `dg list defs`, which exits 1 on an import or a definition error, then `validate_partitions()`, which `dg list defs` skips; `tests/test_definitions.py` runs it too | `just validate`, `just test` |
 
   `dagster asset list` (`just materialize-preview`), `dagster job launch` (the
   compose recipe), `dagster-webserver`, `dagster-daemon` and `dagster api` are

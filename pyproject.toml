@@ -172,11 +172,12 @@ skip_covered = false
 python = "./.venv"
 
 # The one place the code location is named. Without it every `dg` command refuses
-# to run, and `dagster dev`, `dagster-webserver`, `dagster-daemon` and the rest of
-# the `dagster` CLI fall back to it with no `-m`, which names the location
-# `modern_data_stack`; `-m` names it after the module instead (the
-# dagster-graph-and-jobs skill). The target is `root_module`'s `definitions`, the
-# default. It is not enough for `dg dev` or `dg check defs`: they look for
+# to run, and `dagster dev`, `dagster-webserver`, `dagster-daemon` and the other
+# `dagster` commands that take a workspace fall back to it with no `-m`, which
+# names the location `modern_data_stack`; `-m` names it after the module instead.
+# `dagster asset list` takes no workspace and requires `-m` (the
+# dagster-graph-and-jobs skill has the table). The target is `root_module`'s
+# `definitions`, the default. It is not enough for `dg dev` or `dg check defs`: they look for
 # `orchestration/` under `src/` because `src/` exists, and `src/` holds only the
 # domain-neutral package (docs/decisions/0022).
 [tool.dg]

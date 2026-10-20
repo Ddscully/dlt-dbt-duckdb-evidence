@@ -381,7 +381,11 @@ materialize-site-from-raw: where dbt-parse
 # and `roots(...)` also work. A selection matching no assets launches *every*
 # asset, live ingest included: `execute_job` reads an empty selection as none
 # (dagster/_core/execution/api.py). So this resolves it first, with the
-# preview's command, which resolves it as `dg launch` does, and refuses an empty one.
+# preview's command, and refuses an empty one. That command skips a key that does
+# not exist where `dg launch` fails on it and runs nothing, so a typo or a bare
+# prefix is refused here too; only a well-formed selection matching nothing
+# (`key:"x/*"`, `group:nope`) would have run everything. Its `-m` names the
+# module `[tool.dg]` targets, because `dagster asset list` requires one.
 # Materialize a selection, e.g. `just materialize-select 'raw/wb_wdi*'` (* = all downstream, + = one layer)
 [group('dagster')]
 materialize-select selection: where dbt-parse
@@ -392,7 +396,7 @@ materialize-select selection: where dbt-parse
     selected=$(uv run --group orchestration dagster asset list \
         -m orchestration.definitions --select "$selection")
     if [ -z "$selected" ]; then
-      echo "$selection matches no assets, and dg launch would run them all" >&2
+      echo "$selection matches no assets; refusing, since an empty selection launches every asset" >&2
       exit 1
     fi
     uv run --group orchestration dg launch --assets "$selection"
@@ -411,11 +415,12 @@ materialize-preview selection: dbt-parse
 # `dg check defs`, which cannot run on this layout (docs/decisions/0022): it
 # exits 1 on an import or a definition error, and the listing is discarded
 # because it is the whole graph. It does not check partition mappings, which
-# `definitions validate` did; tests/test_definitions.py does.
+# `definitions validate` did, so the second line does.
 # Check the code location loads and every definition is registered
 [group('dagster')]
 validate: dbt-parse
     uv run --group orchestration dg list defs --json > /dev/null
+    uv run --group orchestration python -c 'from orchestration.definitions import defs; defs.resolve_asset_graph().validate_partitions()'
     @echo "definitions load"
 
 # `just backfill-wdi 1995` or `just backfill-wdi 1990 1995`; merges, then follow
