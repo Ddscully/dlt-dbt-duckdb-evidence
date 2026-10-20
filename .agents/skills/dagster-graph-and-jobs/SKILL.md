@@ -229,10 +229,14 @@ which this one is not (`dg` below).
   The hand-written lists it replaced let `raw/retail_invoice_lines`,
   `analytics/retail_rfm` and two checks sit unregistered until `full_refresh`
   failed in CI one layer downstream, in dbt. Two rules come with the folder:
-  - **A definition outside it is silently absent**, as an unlisted one was:
-    `just validate` passes. Helpers that are not definitions belong outside it
-    (`orchestration/freshness.py`, `resources.py`), because everything at
-    module level in it that *is* one joins the graph.
+  - **Only assets, asset specs (`include_specs=True`) and checks load from it,
+    and only by name.** The loaders read each module's names, so an asset no
+    module there holds is silently absent, as an unlisted one was (`just
+    validate` passes), and one imported into a module from anywhere is
+    registered. A sensor, schedule, job or `dg.Definitions` placed there is
+    ignored without an error, so those stay in `definitions.py`. Helpers that are
+    not definitions belong outside it (`orchestration/freshness.py`,
+    `resources.py`).
   - **The checks stay in one module**, because `tests/test_asset_checks.py`
     patches their configuration on it (`repo-guards`).
 - **Compare *executable* asset keys, not `get_all_asset_keys()`**, in anything
@@ -355,16 +359,18 @@ which this one is not (`dg` below).
   all cost and no use while nothing here is a component.
   - **A module-level `dg.Definitions` in a defs module replaces the module.** The
     loader returns that object and skips every asset and check beside it, with
-    no error; the package loaders ignore it.
-  - **Importing the definitions needs `pyproject.toml`'s `[tool.dg]`**, which
-    before only the CLI read.
+    no error. The package loaders load the assets beside it and ignore the
+    object itself, which is the narrower silent case above.
+  - **It would make importing the definitions need `pyproject.toml`'s
+    `[tool.dg]`**, which only the `dg` CLI reads now.
   - **Every load scans every installed Dagster integration's entry points** and
     attaches about 95 KB of `plugin_component_types_json` to the repository
     metadata, which each code server ships; the import took 2.77 s against 2.60.
   - **It loads each file as a component of its own**, so a definition imported
     by name into a second module is registered twice (nine asset definitions
     became twelve). The package loaders collect by object identity and count it
-    once.
+    once, so switching back means first making every defs module import another
+    layer's *module* rather than its definitions.
 - **Components cannot express this graph, measured, not just disliked**
   ([`0023`](../../../docs/decisions/0023-assets-register-by-living-in-orchestration-defs.md)).
   `DltLoadCollectionComponent` names every op `dlt_assets_<source>_<dataset>`,

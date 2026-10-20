@@ -100,10 +100,13 @@ daily_schedule = dg.ScheduleDefinition(
 )
 
 defs = dg.Definitions(
-    # Every asset and check defined at module level under `orchestration/defs/`,
-    # found by import: there is no list here for a new one to be missing from.
-    # The package loaders, not `dg.load_from_defs_folder`: ADR 0023.
-    assets=dg.load_assets_from_package_module(defs_package),
+    # Every asset, asset spec and check a module under `orchestration/defs/` holds
+    # at module level, found by import: there is no list here for a new one to be
+    # missing from. Nothing else loads from there, so the jobs, schedule and
+    # resources are written out here. The package loaders, not
+    # `dg.load_from_defs_folder`, and two stable walks rather than the `@preview`
+    # `load_definitions_from_package_module`: ADR 0023.
+    assets=dg.load_assets_from_package_module(defs_package, include_specs=True),
     asset_checks=dg.load_asset_checks_from_package_module(defs_package),
     jobs=[load_retail_job, full_refresh_job, publish_site_job, publish_site_from_raw_job],
     schedules=[daily_schedule],

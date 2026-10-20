@@ -43,8 +43,17 @@ Measured on dagster 1.13.26:
   `dg.load_asset_checks_from_package_module`, public and undeprecated, return
   the same nine assets and eight checks from the package, with no list of
   modules. They collect by object identity across modules, so an imported
-  definition counts once, and they ignore a module-level `Definitions` (both
-  measured in a scratch package). They read no config and attach no metadata.
+  definition counts once (measured in a scratch package). They read no config
+  and attach no metadata. Their boundary is narrower, and silent too: they
+  collect only assets and asset checks (asset specs with `include_specs=True`)
+  from each module's names. A sensor, schedule or job placed in the package is
+  ignored, as are the resources and sensors of a `Definitions` object there,
+  while the assets beside it still load; and an asset imported into a module
+  from outside the package registers. The last, and a module-level `AssetSpec`
+  loading only with `include_specs=True`, measured in a scratch package.
+- **`dg.load_definitions_from_package_module`** does assets, checks, schedules,
+  sensors and jobs in one walk, where the two loaders above walk the package
+  twice, but it is `@preview`.
 - **A per-folder `defs.yaml` works here too**: a `post_processing` block tagged
   and set owners on exactly the three `analytics/*` assets.
 - **The integration components cannot express this graph.**
@@ -65,9 +74,10 @@ Measured on dagster 1.13.26:
   expiry), `models.py` (dbt), `analytics.py` (Polars), `site.py` (Evidence) and
   `checks.py`. `definitions.py` loads the package with
   `dg.load_assets_from_package_module` and
-  `dg.load_asset_checks_from_package_module`, beside what has no layer of its
-  own: the four jobs, the schedule, the resources and the executor, still
-  written out.
+  `dg.load_asset_checks_from_package_module`, with `include_specs=True`,
+  beside what has no layer of its own: the four jobs, the schedule, the
+  resources and the executor, still written out. Two stable walks are preferred
+  to the one-walk `@preview` loader.
 - What is not a definition stays outside the folder: the freshness policies in
   `orchestration/freshness.py`, the resources in `orchestration/resources.py`.
 - The checks stay in one module, `checks.py`.
@@ -92,8 +102,10 @@ Measured on dagster 1.13.26:
   system: YAML component instances, `defs.yaml` per folder, and `dg dev` and
   `dg check defs` understanding the tree. None of that is in use, the two
   commands still fail here (0022), and the components cannot express this
-  graph (above), so all that would remain are its four costs. Switching is
-  one line in `definitions.py`, because the folder is already its shape.
+  graph (above), so all that would remain are its four costs. The folder is
+  already its shape, so switching is one line in `definitions.py` once no defs
+  module imports another's definitions by name, which the package loaders allow
+  and it would register twice.
 - **One check beside each asset**, the usual layout. `tests/test_asset_checks.py`
   points the checks at throwaway files by patching their module's globals
   (`DUCKDB_PATH`, `LAKEHOUSE_DIR` and four more). Spread over four modules, a
@@ -114,10 +126,13 @@ Measured on dagster 1.13.26:
 
 ## Consequences
 
-- **An asset defined outside `orchestration/defs/` is silently absent**, the old
-  failure narrowed to one rule a reader can see. `AGENTS.md` states it.
-- **Anything at module level in `defs/` that is a definition joins the graph**,
-  including one half-written. `full_refresh` and `publish_site_from_raw` select
+- **An asset no module in `orchestration/defs/` holds is silently absent**, the
+  old failure narrowed to one rule a reader can see. `AGENTS.md` states it.
+- **Only assets, asset specs and checks load from the folder.** A sensor,
+  schedule, job or `Definitions` object placed there is ignored without an
+  error, so those stay in `definitions.py`; `AGENTS.md` states this too.
+- **Every asset, spec and check a `defs/` module holds joins the graph**,
+  including one half-written, and one imported into it from elsewhere. `full_refresh` and `publish_site_from_raw` select
   by exclusion already, so a new asset joining unannounced is how they work.
 - **Paths moved**: `orchestration/assets.py` is cited by name in the docs, the
   skills and the code comments, and moves with them; `tests/test_course.py`
@@ -129,4 +144,5 @@ Measured on dagster 1.13.26:
 module into a folder that wants a `defs.yaml` for shared tags or owners, `dg dev`
 working on this layout, or the integration components accepting several loads
 of one source and run config, which is what would make the dlt half expressible
-in YAML. Each of those is a reason to move to `dg.load_from_defs_folder`.
+in YAML. Each of those is a reason to move to `dg.load_from_defs_folder`,
+after replacing any by-name import of a definition between defs modules.

@@ -141,5 +141,5 @@ run in its own container — so a host must not borrow it
 [decision 0011](decisions/0011-deploy-is-the-containers-instance.md)). The two
 files are held in step by `tests/test_dagster_instance.py`. [AGENTS.md](../AGENTS.md#orchestration-orchestration)
 covers the traps: asset-key matching between dlt and dbt, `load_retail` running
-first, and the fact that an asset defined outside
-`orchestration/defs/` is silently absent rather than an error.
+first, and the fact that an asset no module in
+`orchestration/defs/` holds is silently absent rather than an error.

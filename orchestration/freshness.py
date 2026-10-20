@@ -1,7 +1,8 @@
 """The freshness policies the assets in `orchestration/defs/` share.
 
-Outside `defs/` because they are not definitions: everything a module in there
-holds at module level is registered, and a helper is safest where nothing loads.
+Outside `defs/` because they are not definitions: every asset, spec and check a
+module in there holds at module level is registered, and a helper is safest
+where nothing loads.
 A schedule that quietly stopped firing shows as a stale asset, not an absent run.
 """
 
