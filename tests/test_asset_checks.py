@@ -33,7 +33,7 @@ from lake.lakehouse import ATTACH_ALIAS, catalog_path, data_path
 from modern_data_stack.ducklake import attach
 from orchestration.resources import dbt_project
 
-# Importing `orchestration.defs` needs the manifest, absent when ci.yml first
+# Importing `orchestration.defs.models` needs the manifest, absent when ci.yml first
 # runs pytest; CI re-runs this file after `dbt parse` (enforced by test_workflows.py).
 pytestmark = pytest.mark.skipif(
     not dbt_project.manifest_path.exists(),

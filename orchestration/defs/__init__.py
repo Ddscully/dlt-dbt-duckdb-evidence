@@ -8,9 +8,12 @@
 `ingest.py` is the dlt layer, `models.py` the dbt one, `analytics.py` the Polars
 assets, `site.py` the Evidence site, and `checks.py` the asset checks dbt
 cannot express. `orchestration/definitions.py` loads this package with
-`dg.load_assets_from_package_module` and its checks counterpart, so every asset
-and check defined at module level in here is registered, once even when another
-module imports it, and nothing outside it is.
+`dg.load_assets_from_package_module` and its checks counterpart, so every asset,
+asset spec and check a module in here holds at module level is registered, once
+even when another module imports it, and wherever it was defined: the loaders
+read each module's names, not where an object came from. One that no module in
+here holds is silently absent. Nothing else loads from here: a sensor, schedule,
+job or `dg.Definitions` placed in this package is ignored without an error.
 
 The layers are wired by *asset key*, not by ordering:
 
