@@ -68,3 +68,4 @@ Status: accepted YYYY-MM-DD (#PR) | superseded by NNNN
 | [0020](0020-the-site-builds-from-the-cached-landing-zone.md) | The site builds from the landing zone `live.yml` caches, unless a push can change what lands in `raw` | accepted 2026-10-14 |
 | [0021](0021-a-build-is-diffed-from-the-commit-that-built-its-cache.md) | A site build is diffed from the commit that built its cache | accepted 2026-10-14 |
 | [0022](0022-dg-runs-where-it-can-dagster-dev-stays-where-dg-dev-cannot.md) | `dg` runs where it can; `dagster dev` stays where `dg dev` cannot | accepted 2026-10-19 |
+| [0023](0023-assets-register-by-living-in-orchestration-defs.md) | Assets and checks register by living in `orchestration/defs/`, not by a list | proposed |

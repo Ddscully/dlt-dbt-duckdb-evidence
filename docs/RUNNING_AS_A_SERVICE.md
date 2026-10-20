@@ -51,7 +51,7 @@ Dagster sensor replaces it.
 | `release-data.yml` | **stays, and the service deliberately does not do it.** GitHub is the distribution channel; the service is not. Publishing is a monthly, outward-facing act with its own obligations (attribution, pseudonymisation, a storage-format ceiling), and none of them get easier by moving to a host that is also serving traffic. See [publish-and-swap](PUBLISH_AND_SWAP.md) for what the service borrows from it and what it leaves behind. |
 
 **The gain is not parity, it is that the SLA starts being enforced.** The
-freshness policies in [`orchestration/assets.py`](../orchestration/assets.py)
+freshness policies in [`orchestration/freshness.py`](../orchestration/freshness.py)
 (warn at two days without a load for `raw/*`, fail at seven; the modelled layers
 rebuilt by 08:00 UTC) are declared in code and **evaluated by nothing** unless a
 daemon is running. A schedule that quietly stopped firing is supposed to show as

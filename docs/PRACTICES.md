@@ -268,13 +268,15 @@ the sources and the README),
 [`tests/test_workflows.py`](../tests/test_workflows.py) (workflow trigger paths
 and the shared environment action)
 
-**Registration by hand needs a test, because an omission is not an error.**
+**Register by location, not by list, because an omission is not an error.**
 Dagster takes explicit lists, so a forgotten asset is simply not in the graph and
 `just validate` passes. Three assets and two checks sat
 unregistered until a downstream job failed in CI naming the symptom and not the
-cause; the checks failed more quietly still, by never running.
+cause; the checks failed more quietly still, by never running. A test caught it
+after that; now every definition in one folder is loaded by import, so there is
+no list to forget.
 → [`orchestration/definitions.py`](../orchestration/definitions.py),
-[`tests/test_definitions.py`](../tests/test_definitions.py)
+[decision 0023](decisions/0023-assets-register-by-living-in-orchestration-defs.md)
 
 **Numbers written into prose are untested assertions, so most are not written.**
 One test count moved in two files and nowhere else, leaving fourteen sites stale
@@ -294,7 +296,7 @@ finds something, the cheapest way to stop a guard going quiet.
 resources are keyed to match the keys dagster-dbt derives from dbt's own
 `_sources.yml`. Rename a dbt source without renaming the dlt resource and the
 graph splits in two: both halves still run, just unconnected.
-→ [`orchestration/assets.py`](../orchestration/assets.py)
+→ [`orchestration/defs/ingest.py`](../orchestration/defs/ingest.py)
 
 **Partition only where materializing every partition is a routine-sized run.** A
 partitioned asset turns Dagster's Materialize button into a backfill, with no

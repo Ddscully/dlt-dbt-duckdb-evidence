@@ -91,7 +91,7 @@ keep the split a split:
   hand-rolled a copy — and both omitted the `unregister`. Its `schema` parameter
   has **no default**: every caller writes `analytics`, which is exactly what
   would make a default invisible to the caller that means something else.
-- **`RawSchemaDltTranslator` stays in `orchestration/assets.py`**: moving it would
+- **`RawSchemaDltTranslator` stays in `orchestration/defs/ingest.py`**: moving it would
   put Dagster, an optional dependency group, behind a package import.
 
 ### Config-only — copy the file, change the constants at the top
@@ -128,19 +128,21 @@ keep the split a split:
 
 - `publish/build_report.py` — `TABLE_TO_DBT_MODEL` and `TABLE_TO_ASSET_KEY`, the
   two maps that give the Evidence site one dependency per table it reads. **Empty
-  the first before anything else loads**: `orchestration/assets.py` resolves each
+  the first before anything else loads**: `orchestration/defs/site.py` resolves each
   mapped model at import time, so a stale entry stops the whole graph with
   `RuntimeError: generator raised StopIteration`, naming no model. The four
   `pipeline_*` entries in the second are generic.
 - `scripts/record_fixtures.py` — 330 lines, almost all per-source trimming; one
   untrimmed CSV needs about thirty.
-- `orchestration/assets.py` — **more than half of it is the example**: on the
-  dry run it went from 801 lines (at `c054e53`) to 352. What carries over is
-  `RawSchemaDltTranslator` (§2 says why it matters; it stays here rather than in
-  the package because it's twenty lines wrapped around two of that module's
-  constants), `FolderGroupDbtTranslator`, the freshness policies, the unwindowed
-  `raw_assets`, `dbt_models`, `pipeline_status`, `evidence_site`, and the two wiring
-  checks `run_history_records_this_build` and `site_pages_all_rendered`.
+- `orchestration/defs/` — **more than half of it is the example**: on the
+  dry run the single module it was split from went from 801 lines (at
+  `c054e53`) to 352. What carries over is `RawSchemaDltTranslator` (§2 says why
+  it matters; it stays in `ingest.py` rather than in the package because it's
+  twenty lines wrapped around that module's `RAW_DESCRIPTIONS` and a freshness
+  policy), `FolderGroupDbtTranslator`, `orchestration/freshness.py`, the
+  unwindowed `raw_assets`, `dbt_models`, `pipeline_status`, `evidence_site`, and
+  the two wiring checks `run_history_records_this_build` and
+  `site_pages_all_rendered`.
   - **Every other asset check is yours**, and so are the year-range block (with
     its `YearRange` config), the month-partitioned block and
     `RAW_DESCRIPTIONS`' entries.
@@ -152,7 +154,8 @@ keep the split a split:
   does `publish_site_from_raw`, the site from the landing zone as it stands.
   `load_retail` and its selection exist only because retail is month-partitioned
   and a job holding it would be too; `just materialize` / `just materialize-site`
-  run it by name. The `assets=` and `asset_checks=` lists name every example asset.
+  run it by name. There is no asset list to edit: deleting an example from
+  `orchestration/defs/` takes it out of the graph.
 - `publish/export_warehouse.py` — not only constants. `PUBLISHED_SCHEMAS` and
   `ATTRIBUTION` are config. **`release_notes()` is the example's release body
   written inside the function**: its grain exceptions, retail, FX and CBAM
@@ -206,7 +209,7 @@ Keep `ingest/http.py`, and keep `ingest/pipeline.py` as coordination:
   `PIPELINE_DATASET` (which `publish/restore_history.py` reads).
 - **Keep, emptied:** the `FULL_REFRESH_RESOURCES`, `INCREMENTAL_RESOURCES`,
   `YEAR_RANGE_RESOURCES` and `PARTITIONED_RESOURCES` tuples, which
-  `orchestration/assets.py` imports.
+  `orchestration/defs/ingest.py` imports.
 - **Keep, with its resource list emptied:** the `@dlt.source` function and
   `main()`, which `python -m ingest.pipeline` needs.
 
@@ -357,8 +360,8 @@ project. These are the ones that recur in anything built this way:
   the check's floor is 8 kB, which catches a route that emitted nothing but the framework shell.
 - **A column named `tests` or `rows` silently draws no bars** in an Evidence chart.
   No error, no warning, and the same column is fine in a table three lines below.
-- **Assets must be listed explicitly in `Definitions`.** `just validate`
-  passes happily while a new asset is absent from the graph entirely.
+- **Assets must live in `orchestration/defs/`.** One defined anywhere else is
+  absent from the graph entirely, and `just validate` passes happily.
 
 ## 5. Renaming the project
 
