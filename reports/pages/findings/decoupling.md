@@ -106,3 +106,9 @@ the sign of a country's apparent progress. The sample is the countries emitting
 more than 100 Mt in 2005, large enough for a percentage change to mean something.
 
 </Details>
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://github.com/owid/energy-data">OWID Energy</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

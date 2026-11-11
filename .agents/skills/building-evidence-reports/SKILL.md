@@ -50,9 +50,12 @@ dropped column (`reports/.evidence/template/static/data/…/*.schema.json`). Cle
 ## A source query ships every column it selects
 
 **A `select *` source query ships every column to every visitor**, and grepping
-the queries for `customer_id` cannot find one that names no columns. The site's
-retail queries select only what their charts draw, which is the site's half of
-the personal-data policy; the release's half is `publishing-a-release`.
+the queries for `customer_id` cannot find one that names no columns. Every
+source query names the columns its pages read, which is the site's half of the
+personal-data policy (the release's half is `publishing-a-release`) and also
+what the site weighs: naming them took the extracted Parquet from 4.8 MB to
+2.8 MB. A page that needs another column adds it to the source query first, then
+`just report-clean`.
 
 ## A source query must return rows
 

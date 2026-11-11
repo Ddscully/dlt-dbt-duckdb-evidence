@@ -97,3 +97,9 @@ with neither of them wrong.
     <Column id=cumulative_share title="Share of stock" fmt='0.0"%"'/>
     <Column id=current_share title="Share of flow" fmt='0.0"%"'/>
 </DataTable>
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://github.com/owid/energy-data">OWID Energy</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

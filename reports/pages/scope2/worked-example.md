@@ -136,3 +136,9 @@ order by scope2_t_co2e desc
     <Column id=scope2_t_co2e title="tCO₂e" fmt="#,##0"/>
     <Column id=share_of_group_pct title="Share of total" fmt='0.0"%"'/>
 </DataTable>
+
+---
+
+<small>Source: <a href="https://github.com/owid/energy-data">OWID Energy</a>
+(<code>carbon_intensity_elec</code>, from Ember's lifecycle estimates), modelled as
+<code>marts.dim_grid_emission_factors</code>. Nothing here is advice on how to file.</small>

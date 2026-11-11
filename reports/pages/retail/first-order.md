@@ -174,3 +174,8 @@ from £200 to £500 buys you the difference in lifetime value. The customers her
 are shops, and a shop's opening order is mostly a statement about the shop.
 
 </Alert>
+
+---
+
+<small>Source: <a href="https://archive.ics.uci.edu/dataset/502/online+retail+ii">UCI Machine Learning Repository, Online Retail II</a>
+(Chen, D., 2012), CC BY 4.0.</small>

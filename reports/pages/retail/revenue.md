@@ -110,3 +110,8 @@ Both lines track the same trading, so the distance between them is sterling's
 exchange rate and nothing the business did. The [electricity price](/currency)
 makes the same point at country grain; here it applies to amounts somebody has
 to book.
+
+---
+
+<small>Source: <a href="https://archive.ics.uci.edu/dataset/502/online+retail+ii">UCI Machine Learning Repository, Online Retail II</a>
+(Chen, D., 2012), CC BY 4.0.</small>

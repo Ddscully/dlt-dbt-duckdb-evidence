@@ -118,3 +118,10 @@ What is left is tax, network cost and gas exposure — which is where the
 movement turns out to be the euro rather than the electricity.
 
 </Alert>
+
+---
+
+<small>Weather data by <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY
+4.0), derived from the ERA5-Land and ERA5 reanalyses produced by
+<a href="https://www.ecmwf.int/">ECMWF</a> for the
+<a href="https://climate.copernicus.eu/">Copernicus Climate Change Service</a>.</small>

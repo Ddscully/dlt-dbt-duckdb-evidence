@@ -72,3 +72,8 @@ from warehouse.retail_headline
 Every per-customer number in this section, including retention, RFM and average order value, covers only part of the business. <Value data={anonymous} column=revenue_gbp_anonymous fmt='"£"#,##0'/> of revenue comes from orders with no customer id, and none of it can be attributed to anyone.
 
 The two shares differ: anonymous rows are <Value data={anonymous} column=pct_lines fmt='0.0"%"'/> of lines but <Value data={anonymous} column=pct_revenue fmt='0.0"%"'/> of revenue, because orders placed without signing in are smaller ones. Lines are the easier figure to reach for, and using that share in place of the revenue share overstates the gap by nine points.
+
+---
+
+<small>Source: <a href="https://archive.ics.uci.edu/dataset/502/online+retail+ii">UCI Machine Learning Repository, Online Retail II</a>
+(Chen, D., 2012), CC BY 4.0.</small>

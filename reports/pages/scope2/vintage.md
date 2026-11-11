@@ -11,20 +11,11 @@ countries, and a published year can be revised afterwards. A filing has to be
 able to say which version it used.**
 
 ```sql vintage
-with by_year as (
-    select latest_available_year, count(*) as n_countries
-    from warehouse.grid_emission_factors
-    where is_latest_available
-    group by latest_available_year
-)
-
-select
-    cast(cast(latest_available_year as integer) as varchar) as vintage_year,
-    n_countries                                             as countries,
-    100.0 * sum(n_countries) over (order by latest_available_year desc)
-        / sum(n_countries) over ()                          as coverage
-from by_year
-order by latest_available_year
+-- One row per vintage, with the share of countries a cut-off at that year
+-- keeps: sources/warehouse/grid_factor_vintage.sql.
+select vintage_year, countries, coverage
+from warehouse.grid_factor_vintage
+order by factor_year
 ```
 
 <BarChart
@@ -40,13 +31,32 @@ order by latest_available_year
     xAxisTitle="Vintage"
     yAxisTitle="Countries"
     y2AxisTitle="Covered by this cut-off"
+    title="Countries by the year of their latest factor"
 />
 
+```sql vintage_facts
+-- The two cut-offs the paragraph below quotes, read from the same rows as the
+-- chart so neither names a year by hand. `coverage` is cumulative from the
+-- newest year down, so the largest value at or above a year is that cut-off's.
+with vintages as (
+    select *, max(factor_year) over () as newest_year
+    from warehouse.grid_factor_vintage
+)
+
+select
+    cast(cast(max(newest_year) as integer) as varchar)     as newest_label,
+    cast(cast(max(newest_year) - 1 as integer) as varchar) as previous_label,
+    max(coverage) filter (where factor_year = newest_year)      as newest_coverage,
+    max(coverage) filter (where factor_year >= newest_year - 1) as previous_coverage
+from vintages
+```
+
 The bars are the distribution; the line is what a reporter has to decide.
-Insisting on a 2025 factor covers **43%** of countries. Accepting 2024 or later
-covers **94%**, and the two years below that add the last six points. Filtering
-the table to a single latest year would silently drop more than half the world,
-and tightening the cut-off by one year costs fifty points of coverage.
+
+Insisting on a <Value data={vintage_facts} column=newest_label/> factor covers <Value data={vintage_facts} column=newest_coverage fmt='0"%"'/> of countries, and accepting <Value data={vintage_facts} column=previous_label/> or later covers <Value data={vintage_facts} column=previous_coverage fmt='0"%"'/> of them.
+
+Filtering the table to a single latest year silently drops every country behind
+it, and the line shows what each further year of tolerance buys back.
 
 ## The countries furthest behind
 
@@ -129,3 +139,9 @@ instead of recomputing it. The [Restatements page](/restatements) does the same
 for OWID's CO₂ estimates.
 
 {/if}
+
+---
+
+<small>Source: <a href="https://github.com/owid/energy-data">OWID Energy</a>
+(<code>carbon_intensity_elec</code>, from Ember's lifecycle estimates), modelled as
+<code>marts.dim_grid_emission_factors</code>. Nothing here is advice on how to file.</small>

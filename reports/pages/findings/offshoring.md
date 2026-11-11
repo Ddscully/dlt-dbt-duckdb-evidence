@@ -143,3 +143,9 @@ The net-import column is the change since 2005 in the carbon each country import
 </DataTable>
 
 The consumption series covers about 120 countries and runs one year behind the territorial one, to <Value data={latest_years} column=consumption_year_label/> at the latest.
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://github.com/owid/energy-data">OWID Energy</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

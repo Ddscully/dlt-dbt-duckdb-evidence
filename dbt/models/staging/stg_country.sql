@@ -23,7 +23,7 @@ world_bank as (
         try_cast(latitude as double) as latitude,
         false as is_manual_entry
     from source
-    where region__value <> 'Aggregates'   -- keep only real countries
+    where region__value <> 'Aggregates'   -- drop the World Bank's aggregates
 ),
 
 manual as (

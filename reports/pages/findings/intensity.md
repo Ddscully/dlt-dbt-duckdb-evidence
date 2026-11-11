@@ -13,22 +13,11 @@ select * from warehouse.latest_years
 ```
 
 ```sql intensity_trend
-with base as (
-    select country_iso3, co2_per_gdp_const_usd as base_intensity
-    from warehouse.co2_intensity
-    where year = 2005
-      and country_iso3 in ('CHN', 'IND', 'USA', 'DEU', 'GBR', 'JPN')
-)
-
-select
-    i.country_name,
-    i.year,
-    100 * i.co2_per_gdp_const_usd / b.base_intensity as intensity_index
-from warehouse.co2_intensity i
-inner join base b on i.country_iso3 = b.country_iso3
-where i.year >= 2005
-  and i.co2_per_gdp_const_usd is not null
-order by i.country_name, i.year
+-- Six large economies, CO₂ per constant dollar of GDP, 2005 = 100:
+-- sources/warehouse/co2_intensity_index.sql.
+select country_name, year, intensity_index
+from warehouse.co2_intensity_index
+order by country_name, year
 ```
 
 <LineChart
@@ -160,3 +149,9 @@ hitting the KPI and missing the outcome, in public, for a decade.
     <Column id=intensity_change_pct title="Carbon intensity change" fmt='0.0"%"' contentType=delta downIsGood=true/>
     <Column id=renewables_change_pp title="Renewables share change (pp)" fmt='0.0" pp"' contentType=delta/>
 </DataTable>
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://github.com/owid/energy-data">OWID Energy</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

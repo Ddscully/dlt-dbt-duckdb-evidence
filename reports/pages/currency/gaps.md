@@ -131,3 +131,7 @@ days between the 2008 banking collapse and February 2018, and the Argentine peso
 none for 34 days after the January 2002 breaking of the dollar peg.
 
 Those <Value data={coverage} column=n_stale fmt='#,##0'/> rows exist with a null rate and a flag saying so, giving an absence you can count instead of nine years of a rate that had stopped being real.
+
+---
+
+<small>Source: <a href="https://frankfurter.dev">ECB reference rates via Frankfurter</a>; electricity prices from <a href="https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204">Eurostat</a>.</small>

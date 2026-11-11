@@ -97,22 +97,14 @@ against 39 distinct values across the other 76. They are still the values an imp
 without supplier data must use; they are not evidence about how that country makes the good.
 
 ```sql fallback_penalty
-with fb as (
-    select good_key, certificates_2026_t_co2e_per_t as fallback_t
-    from warehouse.cbam_exposure
-    where is_fallback_table
-),
-listed as (
-    select good_key, median(certificates_2026_t_co2e_per_t) as median_t
-    from warehouse.cbam_exposure
-    where is_country_specific and not is_fallback_table
-    group by 1
-)
-select
-    count(*)                                                    as n_goods,
-    median(fb.fallback_t / nullif(listed.median_t, 0))           as median_ratio,
-    count(*) filter (where fb.fallback_t > listed.median_t)      as n_worse
-from fb inner join listed on fb.good_key = listed.good_key
+-- How much worse the fallback row is than the median listed country, computed
+-- once in sources/warehouse/cbam_fallback_penalty.sql.
+select n_goods, median_ratio, n_worse
+from warehouse.cbam_fallback_penalty
 ```
 
 For <Value data={fallback_penalty} column=n_worse/> of the <Value data={fallback_penalty} column=n_goods/> goods, the fallback value is worse than the median listed country; at the median it is <Value data={fallback_penalty} column=median_ratio fmt='0.00'/> times that country's value. That is the mechanism working as designed, since the defaults exist to make collecting real supplier data pay for itself.
+
+---
+
+<small>Source: <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621">Implementing Regulation (EU) 2025/2621</a>, Annex I, as corrected by <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740">Implementing Regulation (EU) 2026/1740</a>. Modelled as <code>marts.fct_cbam_exposure</code>.</small>
