@@ -54,6 +54,7 @@ order by 1
     color="#2a78d6"
     xAxisTitle="Share of customers, richest first (%)"
     yAxisTitle="Share of revenue (%)"
+    title="Cumulative revenue, customers ranked by spend"
 >
     <ReferenceLine x=0 y=0 x2=100 y2=100 label="If every customer spent the same" lineType=dashed/>
 </LineChart>

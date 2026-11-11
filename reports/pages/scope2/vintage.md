@@ -40,13 +40,40 @@ order by latest_available_year
     xAxisTitle="Vintage"
     yAxisTitle="Countries"
     y2AxisTitle="Covered by this cut-off"
+    title="Countries by the year of their latest factor"
 />
 
+```sql vintage_facts
+-- The two cut-offs the paragraph below quotes, read from the same rows as the
+-- chart so neither names a year by hand.
+with by_year as (
+    select latest_available_year, count(*) as n_countries
+    from warehouse.grid_emission_factors
+    where is_latest_available
+    group by latest_available_year
+),
+
+ranked as (
+    select *, max(latest_available_year) over () as newest_year
+    from by_year
+)
+
+select
+    cast(cast(max(newest_year) as integer) as varchar)     as newest_label,
+    cast(cast(max(newest_year) - 1 as integer) as varchar) as previous_label,
+    100.0 * sum(n_countries) filter (where latest_available_year = newest_year)
+        / sum(n_countries) as newest_coverage,
+    100.0 * sum(n_countries) filter (where latest_available_year >= newest_year - 1)
+        / sum(n_countries) as previous_coverage
+from ranked
+```
+
 The bars are the distribution; the line is what a reporter has to decide.
-Insisting on a 2025 factor covers **43%** of countries. Accepting 2024 or later
-covers **94%**, and the two years below that add the last six points. Filtering
-the table to a single latest year would silently drop more than half the world,
-and tightening the cut-off by one year costs fifty points of coverage.
+
+Insisting on a <Value data={vintage_facts} column=newest_label/> factor covers <Value data={vintage_facts} column=newest_coverage fmt='0"%"'/> of countries, and accepting <Value data={vintage_facts} column=previous_label/> or later covers <Value data={vintage_facts} column=previous_coverage fmt='0"%"'/> of them.
+
+Filtering the table to a single latest year silently drops every country behind
+it, and the line shows what each further year of tolerance buys back.
 
 ## The countries furthest behind
 

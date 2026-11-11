@@ -128,6 +128,8 @@ where year = ${inputs.year.value}
     xAxisTitle="Low-carbon share of electricity (%)"
     yAxisTitle="Life expectancy (years)"
     tooltipTitle=country_name
+    title="Low-carbon electricity and life expectancy"
+    subtitle="One bubble per country, sized by population"
 />
 
 Bubbles are sized by population. Read the spread, not a trend: a high low-carbon
@@ -173,6 +175,7 @@ where year = ${inputs.year.value}
     xAxisTitle="Low-carbon share of electricity (%)"
     yAxisTitle="Household price, € per kWh"
     tooltipTitle=country_name
+    title="Household electricity price against low-carbon share"
 />
 
 Household prices with all taxes, against the low-carbon share. Cleaner power does

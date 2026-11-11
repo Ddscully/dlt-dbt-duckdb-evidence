@@ -35,6 +35,7 @@ order by year
         'Low income': ['#008300', '#008300']
     }}
     yAxisTitle="kg CO₂ per $ GDP"
+    title="CO₂ per dollar of GDP, by income group"
 />
 
 How much CO₂ a dollar of each income group's output carries: the group's
