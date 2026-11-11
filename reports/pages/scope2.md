@@ -88,7 +88,7 @@ at the site root; a bare name resolves against the page and 404s. -->
     :global(.leaflet-container) { background: transparent !important; }
 </style>
 
-<small>Names and groupings follow the World Bank. Outlines are from <a href="https://www.naturalearthdata.com/">Natural Earth</a>, simplified; they are illustrative and imply no position on the status of any territory or boundary.</small>
+<p style="font-size: 0.8em; margin-bottom: 1.25em;">Names and groupings follow the World Bank. Outlines are from <a href="https://www.naturalearthdata.com/">Natural Earth</a>, simplified; they are illustrative and imply no position on the status of any territory or boundary.</p>
 
 Among grids over 10 TWh the factor runs from <Value data={spread} column=cleanest_country/> at <Value data={spread} column=cleanest fmt="0.0"/> g per kWh to <Value data={spread} column=dirtiest_country/> at <Value data={spread} column=dirtiest fmt="#,##0"/> g. Under CSRD that figure is audited, and companies buy the generation-only version of this table from consultancies and the IEA. **[The reference table →](/scope2/factors)**
 

@@ -237,7 +237,6 @@ and no GDP for that year.
 -- publishes nothing for from the ones it lists without a GDP figure.
 select
     country_name,
-    region,
     co2_mt,
     population,
     case
@@ -253,7 +252,6 @@ order by co2_mt desc
 
 <DataTable data={owid_no_wb} rows=all>
     <Column id=country_name title="Country / territory"/>
-    <Column id=region title="Region"/>
     <Column id=co2_mt title="CO₂ (Mt)" fmt="#,##0.0"/>
     <Column id=population title="Population" fmt="#,##0"/>
     <Column id=world_bank_reports title="World Bank reports"/>

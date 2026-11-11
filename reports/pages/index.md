@@ -54,7 +54,7 @@ for Evidence's default basemap, which is CARTO's tile server. -->
     :global(.leaflet-container) { background: transparent !important; }
 </style>
 
-<small>Names and groupings follow the World Bank. Outlines are from <a href="https://www.naturalearthdata.com/">Natural Earth</a>, simplified; they are illustrative and imply no position on the status of any territory or boundary.</small>
+<p style="font-size: 0.8em; margin-bottom: 1.25em;">Names and groupings follow the World Bank. Outlines are from <a href="https://www.naturalearthdata.com/">Natural Earth</a>, simplified; they are illustrative and imply no position on the status of any territory or boundary.</p>
 
 <Grid cols=2>
 

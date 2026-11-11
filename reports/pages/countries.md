@@ -90,7 +90,7 @@ at the site root; a bare name resolves against the page and 404s. -->
     :global(.leaflet-container) { background: transparent !important; }
 </style>
 
-<small>Names and groupings follow the World Bank. Outlines are from <a href="https://www.naturalearthdata.com/">Natural Earth</a>, simplified; they are illustrative and imply no position on the status of any territory or boundary.</small>
+<p style="font-size: 0.8em; margin-bottom: 1.25em;">Names and groupings follow the World Bank. Outlines are from <a href="https://www.naturalearthdata.com/">Natural Earth</a>, simplified; they are illustrative and imply no position on the status of any territory or boundary.</p>
 
 Coal-heavy grids sit near 800 g, nuclear and hydro grids under 50. Gas ranges from
 about 400 with modern plant to 700 with old plant or oil, which is why grids with
