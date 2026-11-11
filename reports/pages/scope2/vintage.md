@@ -129,3 +129,9 @@ instead of recomputing it. The [Restatements page](/restatements) does the same
 for OWID's CO₂ estimates.
 
 {/if}
+
+---
+
+<small>Source: <a href="https://github.com/owid/energy-data">OWID Energy</a>
+(<code>carbon_intensity_elec</code>, from Ember's lifecycle estimates), modelled as
+<code>marts.dim_grid_emission_factors</code>. Nothing here is advice on how to file.</small>

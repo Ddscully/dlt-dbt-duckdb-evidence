@@ -119,7 +119,7 @@ its publishers and is redistributed here under their licences.
 | Household electricity prices | [Eurostat](https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204/) | [Eurostat reuse policy](https://ec.europa.eu/eurostat/help/copyright-notice) |
 | CBAM default values (Annex I) | [Implementing Regulation (EU) 2025/2621](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621), as corrected by [(EU) 2026/1740](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740) | [Commission reuse decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj) |
 | Euro foreign-exchange reference rates | [European Central Bank](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html), via [Frankfurter](https://frankfurter.dev) | [ECB reuse policy](https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html) |
-| Online Retail II transactions | [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/502/online+retail+ii) (Chen, D., 2019) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Online Retail II transactions | [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/502/online+retail+ii) (Chen, D., 2012) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | Daily capital-city weather (ERA5-Land temperatures; ERA5 precipitation, wind and radiation) | [Open-Meteo](https://open-meteo.com/), generated using Copernicus Climate Change Service information (ECMWF ERA5-Land and ERA5) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 
 Annexes II and III of that regulation — the country electricity emission factors
@@ -127,6 +127,10 @@ Annexes II and III of that regulation — the country electricity emission facto
 carrying them would put a non-commercial and share-alike restriction on
 everything here. `marts.dim_grid_emission_factors` is the OWID-derived analogue
 and is not the same measurement; see `reports/pages/cbam/method.md`.
+
+Country names, regions and income groups are the World Bank's; an entry it does
+not list keeps the name Our World in Data publishes. They label rows of data and
+imply no position on the status of any territory.
 
 Attribute the publishers, not this repository, when you use the numbers. Neither
 the publishers nor this project warrant the data; the transformations are the

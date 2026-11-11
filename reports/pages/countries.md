@@ -90,6 +90,8 @@ at the site root; a bare name resolves against the page and 404s. -->
     :global(.leaflet-container) { background: transparent !important; }
 </style>
 
+<small>Names and groupings follow the World Bank. Outlines are from <a href="https://www.naturalearthdata.com/">Natural Earth</a>, simplified; they are illustrative and imply no position on the status of any territory or boundary.</small>
+
 Coal-heavy grids sit near 800 g, nuclear and hydro grids under 50. Gas ranges from
 about 400 with modern plant to 700 with old plant or oil, which is why grids with
 no coal can still be dark. The figure is a lifecycle one in CO₂e, counting the

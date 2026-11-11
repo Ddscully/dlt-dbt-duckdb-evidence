@@ -160,3 +160,9 @@ hitting the KPI and missing the outcome, in public, for a decade.
     <Column id=intensity_change_pct title="Carbon intensity change" fmt='0.0"%"' contentType=delta downIsGood=true/>
     <Column id=renewables_change_pp title="Renewables share change (pp)" fmt='0.0" pp"' contentType=delta/>
 </DataTable>
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://github.com/owid/energy-data">OWID Energy</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

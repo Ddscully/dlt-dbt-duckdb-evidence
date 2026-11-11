@@ -131,12 +131,13 @@ carries it forward is `publishing-a-release`.
 - **World Bank JSON is snake_cased by dlt**: API `iso2Code`/`capitalCity`/
   `incomeLevel.value` land as `iso2_code`/`capital_city`/`income_level__value`.
   Verify column names against `information_schema.columns` before writing SQL.
-- **The World Bank doesn't list every ISO3 OWID emits for.** Taiwan (~286 Mt CO2,
+- **The World Bank doesn't list every ISO3 OWID emits for.** Taiwan (~262 Mt CO2,
   bigger than the Netherlands) and ten small territories arrive with a null
   `region`, so any `where region is not null` silently drops them from regional
   rollups. `dbt/seeds/country_overrides.csv` fills them in and `stg_country`
-  unions it in. Antarctica is deliberately left out — a null `region` should mean
-  "not a country". Coordinates use `try_cast`: the API sends `''` for territories.
+  unions it in, each under the name OWID publishes. Antarctica is deliberately
+  left out, so nothing in the dimension has a null `region`. Coordinates use
+  `try_cast`: the API sends `''` for territories.
 - **World Bank region names are padded** — `'Sub-Saharan Africa '` and
   `'Latin America & Caribbean '` come back with a trailing space. `stg_country`
   trims them, so join and group on the trimmed values.

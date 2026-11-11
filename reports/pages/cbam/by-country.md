@@ -116,3 +116,7 @@ from fb inner join listed on fb.good_key = listed.good_key
 ```
 
 For <Value data={fallback_penalty} column=n_worse/> of the <Value data={fallback_penalty} column=n_goods/> goods, the fallback value is worse than the median listed country; at the median it is <Value data={fallback_penalty} column=median_ratio fmt='0.00'/> times that country's value. That is the mechanism working as designed, since the defaults exist to make collecting real supplier data pay for itself.
+
+---
+
+<small>Source: <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621">Implementing Regulation (EU) 2025/2621</a>, Annex I, as corrected by <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740">Implementing Regulation (EU) 2026/1740</a>. Modelled as <code>marts.fct_cbam_exposure</code>.</small>

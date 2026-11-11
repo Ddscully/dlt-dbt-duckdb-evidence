@@ -220,7 +220,7 @@ be worth about ten times the bottom fifth. **[The first order →](/retail/first
 ---
 
 **Sources.** [UCI Machine Learning Repository, Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
-(Chen, D., 2019), CC BY 4.0. Exchange rates from the ECB via
+(Chen, D., 2012), CC BY 4.0. Exchange rates from the ECB via
 [Frankfurter](https://frankfurter.dev). The transaction data is real and
 unmodified; the modelling decisions are documented in
 `dbt/models/staging/stg_retail_lines.sql` and the retail mart models built on it.

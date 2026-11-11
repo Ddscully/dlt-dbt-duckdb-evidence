@@ -171,3 +171,8 @@ the tidier method would still produce five neat buckets and a believable segment
 mix. (It is why this step is Polars' `bin_quantiles` rather than SQL's `ntile`.)
 
 </Alert>
+
+---
+
+<small>Source: <a href="https://archive.ics.uci.edu/dataset/502/online+retail+ii">UCI Machine Learning Repository, Online Retail II</a>
+(Chen, D., 2012), CC BY 4.0.</small>

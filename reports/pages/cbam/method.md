@@ -99,3 +99,7 @@ the `cbam_default_values` and `cbam_goods` seeds, with the phase-in rates in
 [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest)
 both as Parquet and inside the DuckDB file; the seeds are in the DuckDB file's
 `main` schema only.
+
+---
+
+<small>Source: <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621">Implementing Regulation (EU) 2025/2621</a>, Annex I, as corrected by <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740">Implementing Regulation (EU) 2026/1740</a>. Modelled as <code>marts.fct_cbam_exposure</code>.</small>

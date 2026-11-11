@@ -127,3 +127,9 @@ decarbonisation roadmap that assumes convergence. **Cost of getting it wrong:**
 building a twenty-year plan on the expectation that the gap closes on its own.
 
 </Alert>
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://github.com/owid/energy-data">OWID Energy</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

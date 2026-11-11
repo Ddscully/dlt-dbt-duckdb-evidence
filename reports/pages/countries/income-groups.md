@@ -111,3 +111,8 @@ they hold today and then averaged each group country by country, so China counte
 as one economy in fifty-odd, in a group it would not reach for another twenty
 years. Every other income-group rollup on this site cuts to a single recent year,
 where today's classification is the right one; over a trend it is not.
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

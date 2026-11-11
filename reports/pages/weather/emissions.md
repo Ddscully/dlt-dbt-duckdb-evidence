@@ -194,3 +194,10 @@ release carries the archive forward rather than refetching it, so this section
 fills in as the archive deepens.
 
 {/if}
+
+---
+
+<small>Weather data by <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY
+4.0), derived from the ERA5-Land and ERA5 reanalyses produced by
+<a href="https://www.ecmwf.int/">ECMWF</a> for the
+<a href="https://climate.copernicus.eu/">Copernicus Climate Change Service</a>.</small>
