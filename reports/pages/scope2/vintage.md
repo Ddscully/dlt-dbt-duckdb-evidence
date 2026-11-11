@@ -11,20 +11,11 @@ countries, and a published year can be revised afterwards. A filing has to be
 able to say which version it used.**
 
 ```sql vintage
-with by_year as (
-    select latest_available_year, count(*) as n_countries
-    from warehouse.grid_emission_factors
-    where is_latest_available
-    group by latest_available_year
-)
-
-select
-    cast(cast(latest_available_year as integer) as varchar) as vintage_year,
-    n_countries                                             as countries,
-    100.0 * sum(n_countries) over (order by latest_available_year desc)
-        / sum(n_countries) over ()                          as coverage
-from by_year
-order by latest_available_year
+-- One row per vintage, with the share of countries a cut-off at that year
+-- keeps: sources/warehouse/grid_factor_vintage.sql.
+select vintage_year, countries, coverage
+from warehouse.grid_factor_vintage
+order by factor_year
 ```
 
 <BarChart
@@ -45,27 +36,19 @@ order by latest_available_year
 
 ```sql vintage_facts
 -- The two cut-offs the paragraph below quotes, read from the same rows as the
--- chart so neither names a year by hand.
-with by_year as (
-    select latest_available_year, count(*) as n_countries
-    from warehouse.grid_emission_factors
-    where is_latest_available
-    group by latest_available_year
-),
-
-ranked as (
-    select *, max(latest_available_year) over () as newest_year
-    from by_year
+-- chart so neither names a year by hand. `coverage` is cumulative from the
+-- newest year down, so the largest value at or above a year is that cut-off's.
+with vintages as (
+    select *, max(factor_year) over () as newest_year
+    from warehouse.grid_factor_vintage
 )
 
 select
     cast(cast(max(newest_year) as integer) as varchar)     as newest_label,
     cast(cast(max(newest_year) - 1 as integer) as varchar) as previous_label,
-    100.0 * sum(n_countries) filter (where latest_available_year = newest_year)
-        / sum(n_countries) as newest_coverage,
-    100.0 * sum(n_countries) filter (where latest_available_year >= newest_year - 1)
-        / sum(n_countries) as previous_coverage
-from ranked
+    max(coverage) filter (where factor_year = newest_year)      as newest_coverage,
+    max(coverage) filter (where factor_year >= newest_year - 1) as previous_coverage
+from vintages
 ```
 
 The bars are the distribution; the line is what a reporter has to decide.

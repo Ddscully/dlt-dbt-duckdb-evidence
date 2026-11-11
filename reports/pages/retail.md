@@ -91,33 +91,10 @@ January. **[Retention →](/retail/retention)**
 ## A fifth of the customers bring three-quarters of the revenue
 
 ```sql concentration_curve
--- Customers ranked by spend, then cumulative share of revenue at each percentile
--- of the base. `ceil` rather than `round` so bucket X means "the top X%" exactly.
-with ranked as (
-    select
-        monetary_gbp,
-        row_number() over (order by monetary_gbp desc)  as rn,
-        count(*) over ()                                as n_customers,
-        sum(monetary_gbp) over (
-            order by monetary_gbp desc rows unbounded preceding
-        )                                               as cumulative_gbp,
-        sum(monetary_gbp) over ()                       as total_gbp
-    from warehouse.retail_rfm
-    where monetary_gbp > 0
-),
-
-curve as (
-    select
-        ceil(100.0 * rn / n_customers)                  as pct_of_customers,
-        max(100.0 * cumulative_gbp / total_gbp)         as pct_of_revenue
-    from ranked
-    group by 1
-)
-
-select 0 as pct_of_customers, 0.0 as pct_of_revenue
-union all
-select * from curve
-order by 1
+-- Computed once, in sources/warehouse/retail_concentration_curve.sql.
+select pct_of_customers, pct_of_revenue
+from warehouse.retail_concentration_curve
+order by pct_of_customers
 ```
 
 ```sql concentration_stats

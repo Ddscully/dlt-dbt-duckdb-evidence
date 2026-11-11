@@ -95,23 +95,11 @@ Among grids over 10 TWh the factor runs from <Value data={spread} column=cleanes
 ## "The latest factor" is not one year
 
 ```sql vintage
--- Double cast again: the category axis takes a string, and the string has to be
--- made from an integer or it reads '2024.0'. Cumulative *descending*, because
--- "cut at year X" means "accept a factor from X or later".
-with by_year as (
-    select latest_available_year, count(*) as n_countries
-    from warehouse.grid_emission_factors
-    where is_latest_available
-    group by latest_available_year
-)
-
-select
-    cast(cast(latest_available_year as integer) as varchar) as vintage_year,
-    n_countries                                             as countries,
-    100.0 * sum(n_countries) over (order by latest_available_year desc)
-        / sum(n_countries) over ()                          as coverage
-from by_year
-order by latest_available_year
+-- One row per vintage, with the share of countries a cut-off at that year
+-- keeps: sources/warehouse/grid_factor_vintage.sql.
+select vintage_year, countries, coverage
+from warehouse.grid_factor_vintage
+order by factor_year
 ```
 
 <BarChart
