@@ -2,7 +2,7 @@
 
 `dg.Definitions` takes an explicit list, and nothing complains about an omission:
 the asset simply isn't in the graph, so `AssetSelection.all()` never sees it and
-`dagster definitions validate` passes. An unlisted asset fails somewhere
+`just validate` passes. An unlisted asset fails somewhere
 downstream; an unlisted check fails *silently*, because it just never runs.
 
 The explicit list stays (it is the one place that says what the graph is); this
@@ -72,6 +72,21 @@ def test_every_asset_check_defined_is_in_the_graph():
         "asset checks defined in orchestration/assets.py but not listed in "
         f"orchestration/definitions.py: {sorted(k.to_user_string() for k in missing)}"
     )
+
+
+def test_every_partition_mapping_resolves():
+    """The check `dg list defs` leaves out, which `just validate` runs as a second line.
+
+    `dagster definitions validate` called `validate_partitions()` after loading;
+    `dg list defs` loads and stops (docs/decisions/0022). Measured by mutation:
+    an unpartitioned asset reading the monthly retail asset through a
+    `StaticPartitionMapping` exits 0 under `dg list defs` and fails here and
+    under `definitions validate`. Two partitions definitions in one job do not
+    need this test: resolving the job fails the load first.
+    """
+    from orchestration.definitions import defs
+
+    defs.resolve_asset_graph().validate_partitions()
 
 
 def test_every_raw_resource_has_an_asset_description():
@@ -226,9 +241,9 @@ def test_the_backfill_recipes_address_the_op_that_takes_the_years():
         addressed = re.findall(r'"ops": \{"([\w-]+)"', body[1])
         assert addressed == [raw_by_year_assets.op.name], (
             f"`just {recipe}` addresses its year config to {addressed}, but the op "
-            f"that reads it is `{raw_by_year_assets.op.name}`. `dagster asset "
-            "materialize` ignores config for an op it does not know, so the recipe "
-            "would load the incremental lookback and report success."
+            f"that reads it is `{raw_by_year_assets.op.name}`. `dg launch` ignores "
+            "config for an op it does not know, so the recipe would load the "
+            "incremental lookback and report success."
         )
 
 

@@ -83,9 +83,10 @@ straight off the asset graph. Three things the UI won't tell you:
   weather range over a day of Open-Meteo's budget is refused before any request.
   `load_retail`'s button does ask for months, and all of them together are one
   run over the one cached workbook.
-- **It is the easiest cold start**, because `dbt_project.prepare_if_dev()` fires
-  only under `dagster dev`: the UI runs `dbt deps` and `dbt parse` for you, where
-  the headless recipes need the manifest to exist already.
+- **It reads the manifest as it was when it started.** `just dagster` runs
+  `dbt deps` and `dbt parse` first, like every recipe that loads the graph, and
+  nothing re-parses after that: a model edited while the UI runs reaches the
+  graph after `just dbt-parse` and a reload of the code location.
 
 DuckDB takes one writer at a time, so don't leave `just sql write` open beside a
 run. Runs themselves go one at a time: `.dagster/dagster.yaml` sets
