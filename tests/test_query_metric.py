@@ -73,6 +73,47 @@ def test_figures_by_year_and_the_all_row(layer):
     assert table.overcounted == ("customers",)
 
 
+EVERY_METRIC = [
+    "net_revenue_gbp",
+    "gross_revenue_gbp",
+    "returns_gbp",
+    "return_rate_pct",
+    "orders",
+    "customers",
+    "units_sold",
+    "average_order_value_gbp",
+    "average_selling_price_gbp",
+]
+
+
+def test_each_column_holds_the_metric_it_is_named_for(layer):
+    # MetricFlow returns the metrics in its own order, which differs from this
+    # one, so every figure is worked by hand: 2021 sells 12 units for 12.5 and
+    # takes 1.0 back over 2 invoices; 2022 sells 6 units for 5.0 over 2.
+    table = _query(layer, LINES, EVERY_METRIC, ["year"])
+    assert table.metrics == tuple(EVERY_METRIC)
+    assert table.rows == (
+        (("2021",), (11.5, 12.5, -1.0, 8.0, 2, 2, 12, 5.75, pytest.approx(12.5 / 12))),
+        (("2022",), (5.0, 5.0, 0.0, 0.0, 2, 1, 6, 2.5, pytest.approx(5 / 6))),
+    )
+    assert table.total == (
+        *(16.5, 17.5, -1.0, pytest.approx(100 / 17.5)),
+        *(4, 2, 18, 4.125, pytest.approx(17.5 / 18)),
+    )
+    assert table.overcounted == ("customers",)
+
+
+def test_a_place_may_be_named_before_the_time_grain(layer):
+    # MetricFlow puts the time grain first whatever the request says.
+    table = _query(layer, LINES, ["net_revenue_gbp"], ["country", "year"])
+    assert table.rows == (
+        (("France", "2021"), (2.5,)),
+        (("United Kingdom", "2021"), (9.0,)),
+        (("United Kingdom", "2022"), (0.5,)),
+        (("United States", "2022"), (4.5,)),
+    )
+
+
 def test_the_all_row_says_which_rows_overcount(layer):
     from agent.metrics import render
 
