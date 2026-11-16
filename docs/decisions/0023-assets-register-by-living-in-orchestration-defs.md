@@ -1,6 +1,6 @@
 # 0023. Assets and checks register by living in `orchestration/defs/`, not by a list
 
-Status: proposed; becomes `accepted YYYY-MM-DD (#PR)` when it merges
+Status: accepted 2026-11-16 (#166)
 
 ## Context
 
