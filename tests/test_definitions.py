@@ -25,6 +25,32 @@ pytestmark = pytest.mark.skipif(
 # process-wide) lives in conftest.py.
 
 
+@pytest.mark.parametrize(
+    "stray",
+    [
+        dg.ScheduleDefinition(name="s", cron_schedule="0 1 * * *", target=dg.AssetSelection.all()),
+        dg.define_asset_job("j", selection=dg.AssetSelection.all()),
+        dg.Definitions(),
+    ],
+    ids=["schedule", "job", "definitions"],
+)
+def test_a_defs_module_holding_what_the_loaders_skip_fails_the_load(stray):
+    """The package loaders take assets, specs and checks, and skip the rest silently.
+
+    A schedule written in `orchestration/defs/` would never fire with `just
+    validate` green, so `definitions.py` raises on one. The real package passing
+    is every other test here; this is the half that has to raise.
+    """
+    from types import ModuleType
+
+    from orchestration.definitions import refuse_what_the_loaders_skip
+
+    module = ModuleType("orchestration.defs.example")
+    module.fine, module.stray = dg.AssetSpec("a"), stray
+    with pytest.raises(dg.DagsterInvalidDefinitionError, match=r"example\.stray: only assets"):
+        refuse_what_the_loaders_skip([module])
+
+
 def test_every_partition_mapping_resolves():
     """The check `dg list defs` leaves out, which `just validate` runs as a second line.
 

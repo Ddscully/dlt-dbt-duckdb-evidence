@@ -128,9 +128,11 @@ Measured on dagster 1.13.26:
 
 - **An asset no module in `orchestration/defs/` holds is silently absent**, the
   old failure narrowed to one rule a reader can see. `AGENTS.md` states it.
-- **Only assets, asset specs and checks load from the folder.** A sensor,
-  schedule, job or `Definitions` object placed there is ignored without an
-  error, so those stay in `definitions.py`; `AGENTS.md` states this too.
+- **Only assets, asset specs and checks load from the folder.** The loaders
+  skip a sensor, schedule, job or `Definitions` object placed there without an
+  error, so `definitions.py` checks the same modules at import and raises on
+  one, naming it. A schedule that would never fire is a failed `just validate`,
+  not a rule to remember; `AGENTS.md` states where those belong.
 - **Every asset, spec and check a `defs/` module holds joins the graph**,
   including one half-written, and one imported into it from elsewhere. `full_refresh` and `publish_site_from_raw` select
   by exclusion already, so a new asset joining unannounced is how they work.

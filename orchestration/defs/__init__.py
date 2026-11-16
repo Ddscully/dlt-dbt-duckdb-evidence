@@ -12,8 +12,9 @@ cannot express. `orchestration/definitions.py` loads this package with
 asset spec and check a module in here holds at module level is registered, once
 even when another module imports it, and wherever it was defined: the loaders
 read each module's names, not where an object came from. One that no module in
-here holds is silently absent. Nothing else loads from here: a sensor, schedule,
-job or `dg.Definitions` placed in this package is ignored without an error.
+here holds is silently absent. Nothing else loads from here: the loaders skip a
+sensor, schedule, job or `dg.Definitions` placed in this package, so
+`definitions.py` fails the import on one.
 
 The layers are wired by *asset key*, not by ordering:
 

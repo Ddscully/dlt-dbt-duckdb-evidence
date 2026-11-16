@@ -33,6 +33,11 @@ second npm-shaped or partitioned asset has to be excluded by hand, and
 
 from __future__ import annotations
 
+import importlib
+import pkgutil
+from collections.abc import Iterable
+from types import ModuleType
+
 import dagster as dg
 from dagster import in_process_executor
 
@@ -99,11 +104,47 @@ daily_schedule = dg.ScheduleDefinition(
     default_status=dg.DefaultScheduleStatus.STOPPED,
 )
 
+# What the package loaders walk past. By class name over the MRO, because two of
+# the five (what `define_asset_job` and `build_schedule_from_partitioned_job`
+# return) are not public names.
+NOT_LOADED_FROM_DEFS = ("SensorDefinition", "ScheduleDefinition", "JobDefinition", "Definitions")
+
+
+def refuse_what_the_loaders_skip(modules: Iterable[ModuleType]) -> None:
+    """Fail the import on a sensor, schedule, job or `Definitions` in a defs module.
+
+    The loaders below take assets, specs and checks and say nothing about the
+    rest, so a schedule written in `orchestration/defs/` would never fire and
+    `just validate` would pass. Here it stops the load and names the object.
+    """
+    skipped = [
+        f"{module.__name__}.{name}"
+        for module in modules
+        for name, value in vars(module).items()
+        if any(
+            cls.__module__.startswith("dagster.") and cls.__name__.endswith(NOT_LOADED_FROM_DEFS)
+            for cls in type(value).__mro__
+        )
+    ]
+    if skipped:
+        raise dg.DagsterInvalidDefinitionError(
+            f"{', '.join(sorted(skipped))}: only assets, asset specs and asset checks load "
+            "from orchestration/defs/. Define a sensor, schedule or job in "
+            "orchestration/definitions.py and pass it to `Definitions` there."
+        )
+
+
+refuse_what_the_loaders_skip(
+    importlib.import_module(found.name)
+    for found in pkgutil.walk_packages(defs_package.__path__, f"{defs_package.__name__}.")
+)
+
 defs = dg.Definitions(
     # Every asset, asset spec and check a module under `orchestration/defs/` holds
     # at module level, found by import: there is no list here for a new one to be
-    # missing from. Nothing else loads from there, so the jobs, schedule and
-    # resources are written out here. The package loaders, not
+    # missing from. Nothing else loads from there, and the check above refuses
+    # what would be skipped, so the jobs, schedule and resources are written out
+    # here. The package loaders, not
     # `dg.load_from_defs_folder`, and two stable walks rather than the `@preview`
     # `load_definitions_from_package_module`: ADR 0023.
     assets=dg.load_assets_from_package_module(defs_package, include_specs=True),
