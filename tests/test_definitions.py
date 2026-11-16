@@ -46,7 +46,7 @@ def test_a_defs_module_holding_what_the_loaders_skip_fails_the_load(stray):
     from orchestration.definitions import refuse_what_the_loaders_skip
 
     module = ModuleType("orchestration.defs.example")
-    module.fine, module.stray = dg.AssetSpec("a"), stray
+    vars(module).update(fine=dg.AssetSpec("a"), stray=stray)
     with pytest.raises(dg.DagsterInvalidDefinitionError, match=r"example\.stray: only assets"):
         refuse_what_the_loaders_skip([module])
 
