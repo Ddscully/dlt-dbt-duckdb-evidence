@@ -41,7 +41,7 @@ section here. The mutation method these guards were written with is in the
   row and the pipeline page under-reports while looking complete — the exact
   symptom `adding-a-data-source` records from a *different* cause (the Arrow path's
   missing `_dlt_load_id`, "six sources for seven"). `RAW_DESCRIPTIONS`
-  (`orchestration/assets.py`) is read with `.get(name)`, so an unlisted
+  (`orchestration/defs/ingest.py`) is read with `.get(name)`, so an unlisted
   resource materialises with no description at all. Both are now held to
   `public_indicators()`, the same authority `load_groups`,
   `YEAR_RANGE_RESOURCES` and `PARTITIONED_RESOURCES` use.
@@ -161,15 +161,18 @@ section here. The mutation method these guards were written with is in the
   renames off ([`0021`](../../../docs/decisions/0021-a-build-is-diffed-from-the-commit-that-built-its-cache.md)).
 - **The eight `@dg.asset_check` bodies are unit tested in
   `tests/test_asset_checks.py`.**
-  `tests/test_definitions.py` proved each check was *registered* — that it would
-  run at all. Nothing proved any of them would *notice*: the bodies were only
+  Living in `orchestration/defs/` registers each check, so it runs at all.
+  Nothing proved any of them would *notice*: the bodies were only
   ever executed by a full materialize, so `just test` could not tell a working
   check from one whose logic had inverted, and the answer arrived minutes later
   in `just test-pipeline` instead of in the `just test` loop.
   `AssetChecksDefinition` is callable and none of the eight take a `context`, so
   no execution harness is needed — point the module's `DUCKDB_PATH` (or
   `LAKEHOUSE_DIR`, or `page_routes`) at a throwaway, call the check, read the
-  `AssetCheckResult`. **Anything under `tests/` importing the orchestration layer
+  `AssetCheckResult`. That patch is why the checks stay in one module,
+  `orchestration/defs/checks.py`: one global imported into another module by
+  name keeps the real value there, and its check reads the real warehouse with
+  the test green. **Anything under `tests/` importing the orchestration layer
   needs the dlt teardown fixture**, and `test_asset_checks.py` shipped an
   identical copy of it alongside `test_definitions.py`'s rather than sharing
   one — a code review caught the duplication and it now lives once, in

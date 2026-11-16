@@ -135,7 +135,7 @@ jobs:
           uv run --group orchestration python - <<'PY'
           import sys
 
-          from orchestration.assets import mart_covers_recent_years
+          from orchestration.defs.checks import mart_covers_recent_years
 
           result = mart_covers_recent_years()
           behind = result.metadata["years_behind"].value

@@ -609,7 +609,7 @@ def test_the_windowed_resources_are_incremental_and_do_not_overlap():
     """The orchestration split is by how a run can *narrow* a load, not by
     disposition — `ecb_fx_rates` merges and takes no window at all.
 
-    `orchestration/assets.py` derives its unwindowed block as everything minus
+    `orchestration/defs/ingest.py` derives its unwindowed block as everything minus
     these two tuples, so a name in either that isn't a real resource would
     quietly remove nothing and leave its own block short.
     """
