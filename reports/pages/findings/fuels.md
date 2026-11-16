@@ -175,3 +175,9 @@ to replace nuclear.
 </DataTable>
 
 The panel is the <Value data={fuel_change} column=n_countries/> high-income economies that publish every fuel line in every year since 1990, which between them are almost all of the group's emissions.
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://github.com/owid/energy-data">OWID Energy</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

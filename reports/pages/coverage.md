@@ -59,23 +59,47 @@ order by series, year
     title="Countries reporting each series, by year"
 />
 
-Renewables share stops at 79 countries where the electricity mix covers about
-210, primary energy drops by two thirds in its latest year, and the series end in
-different years. Each has bitten a query here, and each is why a chart filters for
-exactly the columns it needs.
+```sql coverage_facts
+-- The counts the paragraph below quotes, so it moves with the chart above it.
+with by_year as (
+    select
+        year,
+        count(renewables_share_pct)        as renewables,
+        count(carbon_intensity_elec_g_kwh) as electricity,
+        count(primary_energy_twh)          as primary_energy
+    from warehouse.emissions_energy
+    where year >= 1990
+    group by year
+),
+
+latest as (
+    select max(year) as latest_year from by_year where primary_energy > 0
+)
+
+select
+    (select max(renewables) from by_year)  as renewables_countries,
+    (select max(electricity) from by_year) as electricity_countries,
+    (select primary_energy from by_year, latest where year = latest_year)     as primary_latest,
+    (select primary_energy from by_year, latest where year = latest_year - 1) as primary_before
+```
+
+The renewables share stops at <Value data={coverage_facts} column=renewables_countries fmt="0"/> countries where the electricity mix reaches <Value data={coverage_facts} column=electricity_countries fmt="0"/> of them, primary energy falls from <Value data={coverage_facts} column=primary_before fmt="0"/> countries to <Value data={coverage_facts} column=primary_latest fmt="0"/> in its latest year, and the series end in different years.
+
+Each has bitten a query here, and each is why a chart filters for exactly the
+columns it needs.
 
 <Details title="The three features in detail">
 
-1. **The renewables ceiling.** `renewables_share_pct` flatlines at 79 countries
-   in every year since 1990. OWID's broad-coverage series is the *electricity*
-   mix, not the primary-energy mix, which is why the findings page and the country explorer
-   use `carbon_intensity_elec_g_kwh` and `low_carbon_share_elec_pct` (about 210
-   countries) wherever coverage matters.
+1. **The renewables ceiling.** `renewables_share_pct` holds the same count of
+   countries in every year since 1990. OWID's broad-coverage series is the
+   *electricity* mix, not the primary-energy mix, which is why the findings page
+   and the country explorer use `carbon_intensity_elec_g_kwh` and
+   `low_carbon_share_elec_pct` wherever coverage matters.
 2. **The last-year cliff.** `primary_energy_twh` falls off a cliff in the most
-   recent year, from ~210 countries to 79. Anything cut to "the latest year"
-   without checking loses two thirds of its sample; the findings page reads a
-   per-metric latest year from `sources/warehouse/latest_years.sql` for exactly
-   this reason.
+   recent year, down to the countries the renewables share covers. Anything cut
+   to "the latest year" without checking loses most of its sample; the findings
+   page reads a per-metric latest year from
+   `sources/warehouse/latest_years.sql` for exactly this reason.
 3. **The sources end at different times.** Read the `To` column below rather
    than the chart, which is capped for legibility. GDP and Eurostat's electricity prices
    already run a year beyond the emissions series, with the grid series partly
@@ -127,7 +151,7 @@ select
 ```
 
 <Grid cols=4>
-    <BigValue data={spine_summary} value=countries title="Countries in the dimension"/>
+    <BigValue data={spine_summary} value=countries title="Countries and territories"/>
     <BigValue data={spine_summary} value=spine_rows fmt="#,##0" title="Possible country-years"/>
     <BigValue data={spine_summary} value=fact_rows fmt="#,##0" title="At least one source reports"/>
     <BigValue data={spine_summary} value=unreported fmt="#,##0" title="No source reports"/>
@@ -203,11 +227,22 @@ order by population desc
 </DataTable>
 
 **OWID emissions, no World Bank GDP:** absent from every intensity and
-decoupling measure on this site. Taiwan, not a World Bank member, emits more than
-the Netherlands.
+decoupling measure on this site, for one of two reasons the last column
+separates. Either the World Bank publishes no series at all for the code, which
+is the case for the largest emitter in the table, or it publishes a population
+and no GDP for that year.
 
 ```sql owid_no_wb
-select country_name, region, co2_mt, population
+-- `population` is the World Bank's, so a null one separates the codes it
+-- publishes nothing for from the ones it lists without a GDP figure.
+select
+    country_name,
+    co2_mt,
+    population,
+    case
+        when population is null then 'Nothing'
+        else 'Population, no GDP'
+    end as world_bank_reports
 from warehouse.emissions_energy
 where year = (select co2_year from ${latest_years})
   and co2_mt is not null
@@ -215,26 +250,30 @@ where year = (select co2_year from ${latest_years})
 order by co2_mt desc
 ```
 
-<DataTable data={owid_no_wb} rows=8>
+<DataTable data={owid_no_wb} rows=all>
     <Column id=country_name title="Country / territory"/>
-    <Column id=region title="Region"/>
     <Column id=co2_mt title="CO₂ (Mt)" fmt="#,##0.0"/>
     <Column id=population title="Population" fmt="#,##0"/>
+    <Column id=world_bank_reports title="World Bank reports"/>
 </DataTable>
 
 <Details title="What is deliberately not here">
 
-The dimension is authoritative for *what counts as a country*, so two things are
+The dimension decides which codes are rows on this site, so two things are
 missing on purpose:
 
 - **World Bank aggregates**: `WLD`, `EUU`, `OED` and the rest. WDI returns them
-  in the same series as real countries; the dimension doesn't carry them, so the
-  inner join to the spine keeps them out of every rollup on this site.
-- **Antarctica.** OWID reports about 0.2 Mt of emissions for it. A null `region`
-  should mean "not a country", and Antarctica is where that reading holds.
-  Taiwan and ten small territories are the opposite case: they *are* countries
-  the World Bank simply doesn't list, and `dbt/seeds/country_overrides.csv` puts
-  them back.
+  in the same series as individual economies; the dimension doesn't carry them,
+  so the inner join to the spine keeps them out of every rollup on this site.
+- **Antarctica.** OWID carries an emissions series for it, and it belongs to no
+  region, so it is left out rather than given one.
+
+Eleven other codes OWID reports for are not in the World Bank's country list
+either. `dbt/seeds/country_overrides.csv` adds them with a region, so a regional
+total does not drop them.
+
+Names, regions and income groups are the World Bank's throughout. An entry it
+does not list keeps the name OWID publishes.
 
 </Details>
 

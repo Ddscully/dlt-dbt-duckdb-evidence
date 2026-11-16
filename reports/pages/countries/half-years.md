@@ -36,6 +36,7 @@ order by period_start_date
     yAxisTitle="€ / kWh (household, all taxes)"
     xAxisTitle="Half-year"
     yFmt="0.00"
+    title="Household electricity price, half-year by half-year"
 />
 
 Eurostat publishes household prices **twice a year**, and the price charts in the explorer use

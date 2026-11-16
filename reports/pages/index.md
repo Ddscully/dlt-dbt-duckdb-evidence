@@ -54,6 +54,8 @@ for Evidence's default basemap, which is CARTO's tile server. -->
     :global(.leaflet-container) { background: transparent !important; }
 </style>
 
+<p style="font-size: 0.8em; margin-bottom: 1.25em;">Names and groupings follow the World Bank. Outlines are from <a href="https://www.naturalearthdata.com/">Natural Earth</a>, simplified; they are illustrative and imply no position on the status of any territory or boundary.</p>
+
 <Grid cols=2>
 
 <Group>
@@ -308,7 +310,8 @@ Parquet.
 <a href="https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204">Eurostat electricity prices</a>,
 <a href="https://frankfurter.dev">ECB reference rates via Frankfurter</a>,
 <a href="https://open-meteo.com/">Open-Meteo</a> (ERA5-Land and ERA5, Copernicus/ECMWF),
-<a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621">Implementing Regulation (EU) 2025/2621</a>,
+<a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ%3AL_202502621">Implementing Regulation (EU) 2025/2621</a>
+as corrected by <a href="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32026R1740">(EU) 2026/1740</a>,
 <a href="https://archive.ics.uci.edu/dataset/502/online+retail+ii">UCI Online Retail II</a>.
 Country outlines from <a href="https://www.naturalearthdata.com/">Natural Earth</a>.
 Built with dlt, dbt, DuckDB, Polars, Dagster &amp; Evidence &mdash; every model,

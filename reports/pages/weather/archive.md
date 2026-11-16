@@ -161,3 +161,10 @@ filter today. The models apply it anyway, because the current year becomes
 partial the moment the archive is refreshed.
 
 {/if}
+
+---
+
+<small>Weather data by <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY
+4.0), derived from the ERA5-Land and ERA5 reanalyses produced by
+<a href="https://www.ecmwf.int/">ECMWF</a> for the
+<a href="https://climate.copernicus.eu/">Copernicus Climate Change Service</a>.</small>

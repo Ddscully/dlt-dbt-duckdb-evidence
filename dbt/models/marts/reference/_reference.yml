@@ -50,9 +50,9 @@ models:
       - name: region
         description: >
           Trimmed World Bank region — the API pads two of them. Never null: the
-          `country_overrides` seed fills it for every territory it adds,
-          precisely so that a null region would mean "not a country" rather than
-          "not in the World Bank's list", and Antarctica is deliberately absent.
+          `country_overrides` seed fills it for every entry it adds, so that a
+          regional rollup drops none of them, and Antarctica is deliberately
+          absent.
         data_type: VARCHAR
         data_tests:
           - not_null
@@ -95,7 +95,7 @@ models:
         description: >
           True for the 11 rows the `country_overrides` seed supplies because the
           World Bank `/country` endpoint omits them — Taiwan is the material one
-          at ~286 Mt CO2. Carried rather than inferred: it is the answer to "why
+          at ~262 Mt CO2. Carried rather than inferred: it is the answer to "why
           is `income_group` null here", and it is not the same question, because
           the seed fills Taiwan's.
         data_type: BOOLEAN

@@ -193,7 +193,7 @@ Code is [MIT](./LICENSE). The data belongs to its publishers:
 | Eurostat | its own [reuse policy](https://ec.europa.eu/eurostat/help/copyright-notice) |
 | CBAM default values | EU law, reusable under [Decision 2011/833/EU](https://eur-lex.europa.eu/eli/dec/2011/833/oj) |
 | ECB euro reference rates | the ECB's [reuse policy](https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html) |
-| [UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii) (Chen, D., 2019) | CC BY 4.0 |
+| [UCI's Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii) (Chen, D., 2012) | CC BY 4.0 |
 | Daily capital-city weather from [Open-Meteo](https://open-meteo.com/) | CC BY 4.0, generated using Copernicus Climate Change Service information (ECMWF ERA5-Land and ERA5) |
 
 Each permits redistribution with attribution, and every data release ships an

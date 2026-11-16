@@ -103,3 +103,9 @@ order by t_per_person desc
     <Column id=population_m title="Population (m)" fmt="#,##0"/>
     <Column id=t_per_person title="t CO₂ / person" fmt="0.00"/>
 </DataTable>
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://github.com/owid/energy-data">OWID Energy</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

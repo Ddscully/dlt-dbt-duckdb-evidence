@@ -152,3 +152,10 @@ and date). Both ship in the
 [data release](https://github.com/Ddscully/dlt-dbt-duckdb-evidence/releases/latest),
 along with the raw landing table, which is the one table in this warehouse a
 rebuild cannot reproduce inside the source's daily budget.
+
+---
+
+<small>Weather data by <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY
+4.0), derived from the ERA5-Land and ERA5 reanalyses produced by
+<a href="https://www.ecmwf.int/">ECMWF</a> for the
+<a href="https://climate.copernicus.eu/">Copernicus Climate Change Service</a>.</small>

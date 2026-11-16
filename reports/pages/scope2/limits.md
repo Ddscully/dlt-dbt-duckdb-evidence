@@ -63,8 +63,8 @@ importing coal power looks cleaner.
 
 One more, from the warehouse rather than the standard: five territories in OWID's
 energy data (Guadeloupe, Martinique, Réunion, French Guiana and the Falklands) are
-not countries in this warehouse's country list, so they carry no factor here. That
-list is what counts as a country throughout, and it is also what keeps World Bank
+not entries in this warehouse's country list, so they carry no factor here. That
+list decides which codes every page counts, and it is also what keeps World Bank
 groupings like "World" and "European Union" out of every total. The
 [coverage page](/coverage) is where absences are rows.
 
@@ -73,3 +73,9 @@ The factor is OWID's `carbon_intensity_elec`, which OWID takes from
 and titles "Lifecycle carbon intensity of electricity generation", modelled as
 `marts.dim_grid_emission_factors` and snapshotted as
 `history.snap_grid_emission_factors` (SCD2, `check` strategy, 2015 onwards).
+
+---
+
+<small>Source: <a href="https://github.com/owid/energy-data">OWID Energy</a>
+(<code>carbon_intensity_elec</code>, from Ember's lifecycle estimates), modelled as
+<code>marts.dim_grid_emission_factors</code>. Nothing here is advice on how to file.</small>

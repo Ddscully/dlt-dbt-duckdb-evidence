@@ -342,10 +342,10 @@ unit_tests:
   - name: stg_co2_keeps_kosovo_and_drops_the_aggregates
     model: stg_co2
     description: >
-      Kosovo is the one real country OWID ships without a code: 25 years of CO2
-      from 2000, 8.05 Mt in 2024. It lands as `XKX`, the code the World Bank,
-      Eurostat and the weather archive use. The uncoded aggregates still drop
-      out.
+      Kosovo is the one entry of the country dimension OWID ships without a
+      code: 25 years of CO2 from 2000, 8.05 Mt in 2024. It lands as `XKX`, the
+      code the World Bank, Eurostat and the weather archive use. The uncoded
+      aggregates still drop out.
     given:
       - input: source('raw', 'owid_co2')
         rows:

@@ -152,3 +152,9 @@ peaked. Poland peaked in 1987 as a lower-middle-income economy, and the
 classification itself only starts that year.
 
 </Details>
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://github.com/owid/energy-data">OWID Energy</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

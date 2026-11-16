@@ -138,3 +138,9 @@ the plant. A filed Scope 2 factor counts generation only, so it would read lower
 than the figures here ([what the factor is not](/scope2/limits)).
 
 </Details>
+
+---
+
+<small>Sources: <a href="https://github.com/owid/co2-data">OWID CO₂</a>,
+<a href="https://github.com/owid/energy-data">OWID Energy</a>,
+<a href="https://databank.worldbank.org/source/world-development-indicators">World Bank WDI</a>.</small>

@@ -176,3 +176,7 @@ the yen lost 42% of its dollar value, so Japan's GDP counted in dollars fell 28%
 It is a column now, not a paragraph.
 
 </Alert>
+
+---
+
+<small>Source: <a href="https://frankfurter.dev">ECB reference rates via Frankfurter</a>; electricity prices from <a href="https://ec.europa.eu/eurostat/databrowser/view/nrg_pc_204">Eurostat</a>.</small>

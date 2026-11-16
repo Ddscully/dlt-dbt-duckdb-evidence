@@ -138,3 +138,8 @@ also left-censored, since December 2009 is the extract's opening month and its
 chart on this page leaves that cohort out.
 
 </Alert>
+
+---
+
+<small>Source: <a href="https://archive.ics.uci.edu/dataset/502/online+retail+ii">UCI Machine Learning Repository, Online Retail II</a>
+(Chen, D., 2012), CC BY 4.0.</small>
