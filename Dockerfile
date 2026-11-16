@@ -11,10 +11,10 @@
 # is why `.github/dependabot.yml` gained it alongside `docker-compose`, and
 # `tests/test_dagster_instance.py` refuses a `latest` or a bare name.
 
-FROM node:24.21.0-bookworm-slim AS node
-FROM ghcr.io/astral-sh/uv:0.13.1 AS uv
+FROM node:24.22.2-bookworm-slim AS node
+FROM ghcr.io/astral-sh/uv:0.13.6 AS uv
 
-FROM python:3.13.16-slim-bookworm
+FROM python:3.13.18-slim-bookworm
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 
