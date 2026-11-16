@@ -155,6 +155,24 @@ def _compile(
         raise ValueError(f"MetricFlow cannot answer that request. {exc}") from None
 
 
+def _run(
+    con: duckdb.DuckDBPyConnection,
+    layer: SemanticLayer,
+    metrics: Sequence[str],
+    group_by: Sequence[str],
+    where: list[str],
+) -> list[tuple]:
+    """The request's rows, as the caller ordered them: the groups, then the metrics.
+
+    MetricFlow orders the columns itself — the time grain first, and the metrics
+    by how it plans them, not as they were asked for — so each is read by name.
+    """
+    result = con.execute(_compile(layer, metrics, group_by, where))
+    position = {column[0]: i for i, column in enumerate(result.description)}
+    order = [position[name] for name in (*(GROUP_BY[g] for g in group_by), *metrics)]
+    return [tuple(record[i] for i in order) for record in result.fetchall()]
+
+
 def _quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -266,8 +284,7 @@ def query_metric(
             raise ValueError(f"no sales with {dimension} {value!r}; the values are {choices}")
         constraints.append(f"{{{{ Dimension('{FILTERS[dimension]}') }}}} = {_quote(value)}")
 
-    result = con.execute(_compile(layer, metrics, group_by, constraints))
-    records = result.fetchall()
+    records = _run(con, layer, metrics, group_by, constraints)
     if len(records) > MAX_ROWS:
         raise ValueError(
             f"{len(records)} rows is too many to read; narrow it with years or a filter"
@@ -290,7 +307,7 @@ def query_metric(
 
     total, overcounted = None, ()
     if group_by:
-        total = con.execute(_compile(layer, metrics, (), constraints)).fetchone()
+        total = next(iter(_run(con, layer, metrics, (), constraints)), None)
         overcounted = tuple(
             metric
             for i, metric in enumerate(metrics)
