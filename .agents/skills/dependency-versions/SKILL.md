@@ -298,7 +298,9 @@ linter, formatter and type checker those pins serve behave is
   `uv lock --upgrade-package dagster-dbt --upgrade-package dagster
   --upgrade-package dbt-core` moved all seven dagster packages and dbt with them.
   **Read the `Updated` lines, never
-  the exit code.**
+  the exit code.** `dagster-dg-cli` has since joined the family: it pins
+  `dagster==` exactly too, and `dagster-dg-core`, `dagster-cloud-cli` and
+  `dagster-rest-resources` (at 0.29, dagster-dbt's numbering) with it.
 - **dbt-core 1.12's "parser" is dbt v2, 174 MB of it, and a default run never
   calls it.** `dbt-core-experimental-parser` is an unconditional dependency whose
   one executable in `.venv/bin/` answers `--version` with `dbt-oss 2.0.1`, the
@@ -353,7 +355,10 @@ linter, formatter and type checker those pins serve behave is
   replaces harlequin (`just sql`, read-only by default), and marimo cost 122 MB
   plus jedi/loro/pyzmq to render one `select *`. What was left *was* the stack
   — polars 206 MB, pyarrow 137 MB, duckdb 58 MB, dagster 62 MB — until dbt
-  1.12's parser binary (above).
+  1.12's parser binary (above). `dagster-dg-cli` then added 16 packages to a
+  164-package tree, removing none, among them `dagster-cloud-cli` and `httpx`
+  for a project with no Dagster Plus deployment
+  (`docs/decisions/0022-dg-runs-where-it-can-dagster-dev-stays-where-dg-dev-cannot.md`).
   - **The venv is not where this repo's disk goes**, which is worth knowing
     before optimising it again. `reports/node_modules` alone is 931 MB and the
     regenerable build output under `data/`, `dbt/target` and `reports/` is

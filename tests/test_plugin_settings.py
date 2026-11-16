@@ -67,8 +67,12 @@ def test_no_plugin_is_declared_and_switched_off():
     )
 
 
-def test_the_two_measured_removals_stay_removed():
-    """`dagster-expert@dagster` and `polars@polars`, retired.
+def test_the_measured_removals_stay_removed():
+    """`dagster-expert@dagster` and `polars@polars`, retired, and `dagster@dagster`.
+
+    The exact-set and no-`false` tests above already fail on any of them; this
+    one is for the message, which says why each went and what bringing it back
+    takes.
 
     Retired on a measured zero `Skill` invocations across the window in which
     both layers were being edited; docs/decisions/0004 has the measurement and
@@ -78,6 +82,10 @@ def test_the_two_measured_removals_stay_removed():
     Both marketplaces stay registered: removing a github marketplace
     *uninstalls* its plugins, and a re-register needs a clone, which a
     non-interactive session will not do.
+
+    `dagster@dagster` is the same skill under its new plugin: Dagster moved it
+    there and left `dagster-expert` as a stub saying so, so a guard on the old
+    name alone would wave the retired skill back in.
     """
     for retired in ("dagster-expert@dagster", "polars@polars"):
         assert retired not in declarations(), (
@@ -85,6 +93,12 @@ def test_the_two_measured_removals_stay_removed():
             f"transcripts covering 9 commits of the work it covers. If that has "
             f"changed, say so here and update CLAUDE.md's plugin table"
         )
+    assert "dagster@dagster" not in declarations(), (
+        "dagster@dagster is back: it carries the dagster-expert skill retired "
+        "above, measured under that plugin's old id and never under this one. If "
+        "it should return, measure it, then say so here and update CLAUDE.md's "
+        "plugin table"
+    )
 
 
 def test_astral_is_not_enabled_so_one_server_claims_py():

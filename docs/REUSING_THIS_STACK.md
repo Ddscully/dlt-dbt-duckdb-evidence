@@ -255,7 +255,7 @@ or stale.
 **The asset key is the only join between EL and T.** `raw/<resource>` from the dlt
 side, `raw/<source table>` from the dbt side. Get it wrong and both halves still
 materialize, side by side, unconnected, with no error anywhere, and
-`dagster definitions validate` passes too. Only the graph shows it, so look at
+`just validate` passes too. Only the graph shows it, so look at
 the graph every time you add or rename a resource.
 
 **Two names become catalog names in stored SQL.** dbt writes views with
@@ -339,8 +339,8 @@ project. These are the ones that recur in anything built this way:
   warehouses and no error. Every layer here gets the answer from
   `modern_data_stack.paths` so they can't disagree.
 - **`dbt deps` before `dbt build`, `dbt parse` *or* `sqlfluff`.** `dbt_packages/`
-  and `target/` are gitignored, and `prepare_if_dev()` only fires under
-  `dagster dev`. Every workflow has to run it explicitly.
+  and `target/` are gitignored, and nothing in the graph prepares the dbt
+  project. Every workflow has to run it explicitly.
 - **dlt state is keyed on the pipeline *name*, not the destination.** A fixture run
   hands its watermarks to the next real run unless the name differs.
 - **A recorded fixture can be ignored by git and pass everywhere but CI.**
@@ -357,7 +357,7 @@ project. These are the ones that recur in anything built this way:
   the check's floor is 8 kB, which catches a route that emitted nothing but the framework shell.
 - **A column named `tests` or `rows` silently draws no bars** in an Evidence chart.
   No error, no warning, and the same column is fine in a table three lines below.
-- **Assets must be listed explicitly in `Definitions`.** `definitions validate`
+- **Assets must be listed explicitly in `Definitions`.** `just validate`
   passes happily while a new asset is absent from the graph entirely.
 
 ## 5. Renaming the project
@@ -378,7 +378,7 @@ moves and 51 edits.
   not before**. A coupling that only fails years later in someone else's fork is
   why `tests/test_packaging.py` holds the key rather than trusting it.
 - **Renaming the project** (keeping the package) touches:
-  - `pyproject.toml`: `[project] name` and `[tool.dagster] code_location_name`;
+  - `pyproject.toml`: `[project] name` and `[tool.dg.project] code_location_name`;
   - `uv.lock`, rewritten by `uv sync`;
   - `dbt/dbt_project.yml`: `name:`, `profile:` and the `models:`, `seeds:` and
     `snapshots:` keys, all five of them the project name;
@@ -411,9 +411,8 @@ Each step leaves the repo runnable, so a failure has one plausible cause.
    fixtures and the observability of §7 and leaving out its snapshots and
    publishing. `just setup` succeeding says only that the dependencies resolve:
    it imports nothing from the project, and it passed on the dry run while seven of
-   CI's eight steps failed. The useful gate is `just dbt-parse && dagster
-   definitions validate -m orchestration.definitions`. **An empty skeleton
-   cannot pass the test suite**: with no resource dlt never creates the
+   CI's eight steps failed. The useful gate is `just validate`. **An empty
+   skeleton cannot pass the test suite**: with no resource dlt never creates the
    catalog, and `transform.pipeline_status` fails to open it. So take step 1
    straight into step 2.
 2. **One source, end to end.** One dlt resource → `raw` → one staging model → a
