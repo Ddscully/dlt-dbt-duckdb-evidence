@@ -1354,6 +1354,18 @@ def test_a_reused_file_that_passes_its_check_is_not_fetched_again(monkeypatch, t
     assert http.get_file(retail.RETAIL_ARCHIVE, dest, check=retail.whole_zip, reuse=True) == dest
 
 
+def test_get_file_refuses_reuse_under_fixtures(monkeypatch, tmp_path):
+    """A recorded file left at a live cache path passes the same check, so a later
+    live run with `reuse=True` would load fixture rows as live ones, all green.
+    Refused before the cache or the fixture is read."""
+    monkeypatch.setenv(fixtures.ENV_VAR, "1")
+    dest = tmp_path / "online_retail_ii.zip"
+    dest.write_bytes(_zip_bytes(tmp_path))
+    monkeypatch.setattr(fixtures, "path_for", lambda url: pytest.fail("read the fixture"))
+    with pytest.raises(ValueError, match="reuse=True"):
+        http.get_file(retail.RETAIL_ARCHIVE, dest, check=retail.whole_zip, reuse=True)
+
+
 def test_get_file_under_fixtures_un_gzips_and_checks_like_a_live_fetch(monkeypatch, tmp_path):
     """Offline must refuse what live would: a recorded file is checked, and a
     gzipped one is handed on as the URL serves it, as `get_bytes` does."""

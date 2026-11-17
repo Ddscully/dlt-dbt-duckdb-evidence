@@ -189,11 +189,20 @@ def get_file(
     `reuse` keeps a file already at `dest` if it passes `check`, and fetches it
     again if it does not. A cache serves whatever reached it by any route,
     including before the check existed, so that is where the check has to run.
+    It is refused under fixtures: a recorded file left in the cache passes the
+    same check, and a later live run would load it as live data, with nothing
+    red. A fixture-aware caller reads `fixtures.path_for(url)` instead, as
+    `ingest.sources.retail.retail_workbook` does.
 
     Under fixtures the recorded file is copied, un-gzipped as `get_bytes` does,
     and checked the same way, so an offline run refuses what a live one would.
     """
     dest = Path(dest)
+    if reuse and fixtures.enabled():
+        raise ValueError(
+            f"get_file({url!r}, reuse=True) under {fixtures.ENV_VAR}: a recorded file "
+            "cached at the live path would be served to the next live run as live data"
+        )
     if reuse and dest.exists():
         try:
             if check is not None:

@@ -233,8 +233,8 @@ which this one is not (`dg` below).
     and only by name.** The loaders read each module's names, so an asset no
     module there holds is silently absent, as an unlisted one was (`just
     validate` passes), and one imported into a module from anywhere is
-    registered. The loaders skip a sensor, schedule, job or `dg.Definitions`
-    placed there without an error, so `definitions.py` refuses one at import,
+    registered. The loaders skip a sensor, schedule, job, graph, resource, IO
+    manager or `dg.Definitions` placed there without an error, so `definitions.py` refuses one at import,
     by name (`refuse_what_the_loaders_skip`), and `just validate` exits 1;
     those stay in `definitions.py`. Helpers that are not definitions belong
     outside it (`orchestration/freshness.py`, `resources.py`).

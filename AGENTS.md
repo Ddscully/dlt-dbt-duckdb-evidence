@@ -407,7 +407,7 @@ jobs and the rest are `dagster-graph-and-jobs`. What bites outside it:
   `full_refresh` alone against a fresh warehouse fails in dbt.
 - **Every asset and check lives in `orchestration/defs/`**, and one that no module
   there holds is silently absent — `just validate` passes. Only assets, specs and
-  checks load from it: a sensor, schedule or job placed there fails the load.
+  checks load from it: a sensor, schedule, job or resource there fails the load.
 - **The modules in `orchestration/defs/` must not use `from __future__ import
   annotations`**: Dagster inspects the `context` parameter's annotation object.
 
