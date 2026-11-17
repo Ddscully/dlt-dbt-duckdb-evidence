@@ -64,6 +64,10 @@ def extract_member(archive_path: Path | str, dest_dir: Path | str, suffix: str) 
     a publisher that starts shipping two workbooks has changed the contract, and
     quietly reading the first one alphabetically is how half a source goes
     missing without an error.
+
+    Written under a `.part` name and renamed when whole, because a caller that
+    caches the extract serves whatever is at the final name: an interrupted
+    unzip left there would be read as the workbook on every later run.
     """
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -72,8 +76,10 @@ def extract_member(archive_path: Path | str, dest_dir: Path | str, suffix: str) 
         if len(members) != 1:
             raise ValueError(f"expected exactly one {suffix} in {archive_path}, found {members}")
         target = dest_dir / Path(members[0]).name
-        with archive.open(members[0]) as src, target.open("wb") as out:
+        partial = target.with_name(target.name + ".part")
+        with archive.open(members[0]) as src, partial.open("wb") as out:
             shutil.copyfileobj(src, out)
+    partial.replace(target)
     return target
 
 

@@ -131,3 +131,24 @@ def test_extract_member_returns_the_single_member(tmp_path):
     out = workbook.extract_member(archive, tmp_path / "dest", ".xlsx")
     assert out.name == "book.xlsx"
     assert out.read_bytes() == b"payload"
+    assert [p.name for p in out.parent.iterdir()] == ["book.xlsx"]
+
+
+def test_an_interrupted_extract_leaves_nothing_at_the_workbooks_name(tmp_path, monkeypatch):
+    """`ingest.sources.retail` serves any file at that name from its cache, so a
+    half-written workbook there would be loaded, or fail, on every later run."""
+    import shutil
+    import zipfile
+
+    archive = tmp_path / "one.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("book.xlsx", "payload")
+
+    def interrupted(src, out):
+        out.write(src.read(3))
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(shutil, "copyfileobj", interrupted)
+    with pytest.raises(OSError, match="No space"):
+        workbook.extract_member(archive, tmp_path / "dest", ".xlsx")
+    assert not (tmp_path / "dest" / "book.xlsx").exists()
