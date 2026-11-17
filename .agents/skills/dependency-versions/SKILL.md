@@ -88,6 +88,13 @@ linter, formatter and type checker those pins serve behave is
     A major is a migration PR:
     change the mount, then dump and restore against a copy of a populated
     `mds_postgres`. Patches within the major still arrive.
+  - **A DuckDB major is ignored in the `uv` entry** (`duckdb` and `duckdb-cli`):
+    dlt caps `duckdb<2`, so resolving duckdb 2 holds dlt back to a release that
+    fails at load time on it, and the grouped PR then holds every other Python
+    update red behind it. A major also changes the storage format and the
+    DuckLake spec. Minors and patches within 1.x still arrive. The rule comes
+    out when a dlt release's `duckdb` extra admits 2.x; the upgrade is then a
+    migration PR of its own.
   - **A Python minor and a Node major are ignored in the `docker` entry**,
     because each base image has a partner pin Dependabot's `docker` updater
     cannot see. `python:` must match `.python-version`'s minor: the image sets
