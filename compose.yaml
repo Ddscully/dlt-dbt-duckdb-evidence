@@ -93,7 +93,7 @@ services:
   # S3-compatible storage for the lakehouse Parquet (LAKEHOUSE_DATA_PATH).
   # `mini` is SeaweedFS's all-in-one: master, volume, filer and S3 gateway.
   seaweedfs:
-    image: chrislusf/seaweedfs:4.50
+    image: chrislusf/seaweedfs:4.53
     restart: unless-stopped
     command: mini -dir=/data
     environment:
