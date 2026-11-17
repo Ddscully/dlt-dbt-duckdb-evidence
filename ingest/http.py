@@ -63,9 +63,12 @@ def retryable(exc: Exception) -> bool:
 
     A 5xx, 408, 429, timeout, reset or unparseable body could: 408 and 429 are
     the 4xx that report the server's state, not the request's. Any other 4xx could
-    not, as in `ingest.sources.weather.get_weather_json`: the request itself is
-    wrong, and a minute of retries would get the same answer. Nor could a
-    malformed URL or a redirect loop (`PERMANENT_ERRORS`).
+    not: the request itself is wrong, and a minute of retries would get the same
+    answer. Nor could a malformed URL or a redirect loop (`PERMANENT_ERRORS`).
+
+    `ingest.sources.weather.get_weather_json` keeps a stricter rule of its own,
+    giving up on every 4xx but 429, a 408 included: Open-Meteo charges every
+    attempt to the budget, refused or not.
     """
     if isinstance(exc, PERMANENT_ERRORS):
         return False
@@ -192,7 +195,9 @@ def get_file(
     It is refused under fixtures: a recorded file left in the cache passes the
     same check, and a later live run would load it as live data, with nothing
     red. A fixture-aware caller reads `fixtures.path_for(url)` instead, as
-    `ingest.sources.retail.retail_workbook` does.
+    `ingest.sources.retail.retail_workbook` does. The refusal is on `reuse`
+    alone: without it the recording is still copied to `dest`, so under fixtures
+    `dest` must not be a path a live run later reuses.
 
     Under fixtures the recorded file is copied, un-gzipped as `get_bytes` does,
     and checked the same way, so an offline run refuses what a live one would.

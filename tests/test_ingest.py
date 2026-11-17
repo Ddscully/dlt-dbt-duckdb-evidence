@@ -1140,8 +1140,9 @@ def test_retail_fixture_and_live_caches_never_share_a_path(monkeypatch, tmp_path
     fixture_path = retail.retail_workbook()
     monkeypatch.setenv(fixtures.ENV_VAR, "0")
     live_dir = Path(retail.cache_dir()) / "live"
-    assert fixture_path.parent != live_dir
-    assert not (live_dir / retail.RETAIL_WORKBOOK_NAME).exists()
+    assert live_dir not in fixture_path.parents
+    # At any depth: extracts sit under a digest directory, `live/<digest>/…`.
+    assert not list(live_dir.rglob(retail.RETAIL_WORKBOOK_NAME))
 
 
 def test_retail_cache_notices_a_re_recorded_archive(monkeypatch, tmp_path):

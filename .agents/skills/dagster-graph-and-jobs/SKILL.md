@@ -234,7 +234,8 @@ which this one is not (`dg` below).
     module there holds is silently absent, as an unlisted one was (`just
     validate` passes), and one imported into a module from anywhere is
     registered. The loaders skip a sensor, schedule, job, graph, resource, IO
-    manager or `dg.Definitions` placed there without an error, so `definitions.py` refuses one at import,
+    manager, logger, executor or `dg.Definitions` placed there without an error,
+    so `definitions.py` refuses one at import,
     by name (`refuse_what_the_loaders_skip`), and `just validate` exits 1;
     those stay in `definitions.py`. Helpers that are not definitions belong
     outside it (`orchestration/freshness.py`, `resources.py`).

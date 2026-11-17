@@ -45,6 +45,15 @@ def _io_manager(_):
     return dg.InMemoryIOManager()
 
 
+class _Resource(dg.ConfigurableResource):
+    pass
+
+
+@dg.logger
+def _logger(_):
+    pass
+
+
 @pytest.mark.parametrize(
     "stray",
     [
@@ -55,6 +64,9 @@ def _io_manager(_):
         _io_manager,
         dg.FilesystemIOManager(),
         dg.ResourceDefinition.hardcoded_resource(1),
+        _Resource.configure_at_launch(),
+        _logger,
+        dg.in_process_executor,
         dg.Definitions(),
     ],
     ids=[
@@ -65,6 +77,9 @@ def _io_manager(_):
         "io_manager",
         "io_manager_class_based",
         "resource",
+        "resource_configured_at_launch",
+        "logger",
+        "executor",
         "definitions",
     ],
 )

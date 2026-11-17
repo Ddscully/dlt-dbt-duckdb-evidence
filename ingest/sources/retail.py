@@ -133,9 +133,10 @@ def _whole_extract(path: Path) -> bool:
     """Whether `path` holds a workbook that was written to the end.
 
     An .xlsx is a zip, whose directory is its last bytes, so a short or empty
-    file fails `is_zipfile`. That is the cheap half of `whole_zip`: the extract
-    came from an archive whose every member was checked, so only truncation
-    afterwards is left to find.
+    file fails `is_zipfile`. That is the cheap half of `whole_zip`: `zipfile`
+    checks a member's CRC as `extract_member` reads it to the end, and refuses a
+    mismatch before the extract is renamed into place, on the fixture branch as
+    on the live one. So only truncation afterwards is left to find.
     """
     return path.exists() and zipfile.is_zipfile(path)
 

@@ -92,8 +92,11 @@ keep the split a split:
   hand-rolled a copy — and both omitted the `unregister`. Its `schema` parameter
   has **no default**: every caller writes `analytics`, which is exactly what
   would make a default invisible to the caller that means something else.
-- **`RawSchemaDltTranslator` stays in `orchestration/defs/ingest.py`**: moving it would
-  put Dagster, an optional dependency group, behind a package import.
+- **`RawSchemaDltTranslator` stays in `orchestration/defs/ingest.py`**: it is
+  twenty lines wrapped around this project's `RAW_DESCRIPTIONS` and freshness
+  policy, with nothing left to share once those are parameters. Dagster is not
+  the bar: `docker_launcher` needs the `orchestration` group too, and no
+  submodule is imported with the package.
 
 ### Config-only — copy the file, change the constants at the top
 
