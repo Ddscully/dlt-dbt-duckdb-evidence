@@ -31,12 +31,25 @@ updates:
   # `lockfile-only` because the bounds in pyproject.toml are minimum-supported
   # versions, not pins (`duckdb>=1.1` sits far below what resolves). The default
   # strategy raises the lower bound on every upstream release instead.
+  #
+  # **Except a DuckDB major, which is a migration and not a bump**: dlt caps
+  # `duckdb<2`, so a resolver that takes duckdb 2 holds dlt back to an older
+  # release that fails at load time on it, and since the group is one PR at
+  # `open-pull-requests-limit: 1`, that red PR holds every other update behind
+  # it. A major also changes the storage format and the DuckLake spec. `duckdb`
+  # and `duckdb-cli` move together. Minors and patches within 1.x still arrive.
+  # **Remove the rule when a dlt release's `duckdb` extra admits 2.x.**
   - package-ecosystem: uv
     directory: /
     versioning-strategy: lockfile-only
     schedule:
       interval: monthly
     open-pull-requests-limit: 1
+    ignore:
+      - dependency-name: duckdb
+        update-types: ["version-update:semver-major"]
+      - dependency-name: duckdb-cli
+        update-types: ["version-update:semver-major"]
     groups:
       python:
         patterns: ["*"]
