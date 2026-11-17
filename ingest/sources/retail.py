@@ -8,34 +8,54 @@ yields Arrow batches straight out of DuckDB.
 from __future__ import annotations
 
 import hashlib
+import zipfile
 from pathlib import Path
 
 import dlt
 import requests
 from dlt.common.schema.typing import TColumnSchema
 
-from ingest import fixtures
+from ingest import fixtures, http
 from modern_data_stack import env, workbook
 from modern_data_stack.paths import cache_dir
 from modern_data_stack.workbook import excel_serial_to_timestamp, extract_member
 
 
-def _download(url: str, dest: Path, *, timeout: int = 300, chunk: int = 1 << 20) -> Path:
-    """Stream a large file to disk, writing to a temporary name first.
+def _download(
+    url: str, dest: Path, *, timeout: int = 300, chunk: int = 1 << 20, retries: int = http.RETRIES
+) -> Path:
+    """Stream a zip to disk under a temporary name, and rename it only once it
+    is a whole zip.
 
-    The rename is the point: an interrupted download that left a short file under
-    the real name would be indistinguishable from a complete one on the next run,
-    and the cache would serve a truncated workbook forever. A partial write
-    leaves a `.part` behind instead, which is retried and overwritten.
+    The rename is the point: the cache serves whatever sits at `dest`, forever.
+    An interrupted download, or a 200 whose body is an error page, would
+    otherwise be served on every later run, failing the extract each time. Both
+    leave a `.part` behind instead, which the next attempt overwrites.
+
+    Retried on the schedule `ingest.http` uses for every other source, and on
+    the same errors; a body that is not a zip counts as one, like unparseable
+    JSON there. Not `http.get_bytes`: the archive is streamed, never held in
+    memory, and it is never fetched under fixtures (`retail_workbook`).
     """
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with requests.get(url, stream=True, timeout=timeout) as resp:
-        resp.raise_for_status()
-        with tmp.open("wb") as out:
-            for block in resp.iter_content(chunk_size=chunk):
-                out.write(block)
-    tmp.replace(dest)
-    return dest
+    for attempt in range(retries):
+        try:
+            with requests.get(url, stream=True, timeout=timeout) as resp:
+                resp.raise_for_status()
+                with tmp.open("wb") as out:
+                    for block in resp.iter_content(chunk_size=chunk):
+                        out.write(block)
+            if not zipfile.is_zipfile(tmp):
+                with tmp.open("rb") as head:
+                    raise ValueError(f"the body is not a zip; it starts {head.read(80)!r}")
+            tmp.replace(dest)
+            return dest
+        except (requests.RequestException, ValueError) as exc:
+            if not http.retryable(exc) or attempt == retries - 1:
+                tmp.unlink(missing_ok=True)
+                raise RuntimeError(f"failed to download {url}: {exc}") from exc
+            http.backoff(url, attempt, retries, exc)
+    raise AssertionError("unreachable: the last attempt returns or raises")
 
 
 # UCI Online Retail II, CC BY 4.0: one static zip of one workbook, hence the

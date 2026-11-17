@@ -1104,6 +1104,83 @@ def test_retail_cache_notices_a_re_recorded_archive(monkeypatch, tmp_path):
     assert second.read_bytes() == b"a re-recorded slice"
 
 
+class _StreamedResponse:
+    """`requests.get(..., stream=True)` as `_download` uses it."""
+
+    def __init__(self, body: bytes, status: int = 200):
+        self._body = body
+        self.status_code = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} error", response=self)
+
+    def iter_content(self, chunk_size):
+        yield from (self._body[i : i + chunk_size] for i in range(0, len(self._body), chunk_size))
+
+
+def _serve_downloads(monkeypatch, responses: list) -> list[str]:
+    seen: list[str] = []
+    queue = list(responses)
+
+    def fake_get(url, stream=False, timeout=None):
+        seen.append(url)
+        result = queue.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    return seen
+
+
+def _zip_bytes(tmp_path: Path) -> bytes:
+    archive = tmp_path / "built.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr(retail.RETAIL_WORKBOOK_NAME, b"a workbook")
+    return archive.read_bytes()
+
+
+def test_retail_download_refuses_a_body_that_is_not_a_zip(monkeypatch, tmp_path):
+    """The poisoning at the network end: an error page served with a 200, renamed
+    into the cache, would be the "archive" on every later run, failing the
+    extract each time until someone found and deleted it."""
+    page = _StreamedResponse(b"<html>Service temporarily unavailable</html>")
+    seen = _serve_downloads(monkeypatch, [page] * http.RETRIES)
+    dest = tmp_path / "online_retail_ii.zip"
+
+    with pytest.raises(RuntimeError, match="not a zip; it starts b'<html>"):
+        retail._download(retail.RETAIL_ARCHIVE, dest)
+    assert len(seen) == http.RETRIES
+    assert not dest.exists()
+    assert not dest.with_suffix(".zip.part").exists()
+
+
+def test_retail_download_retries_a_dropped_connection(monkeypatch, tmp_path):
+    body = _zip_bytes(tmp_path)
+    seen = _serve_downloads(
+        monkeypatch, [requests.ConnectionError("reset"), _StreamedResponse(body)]
+    )
+    dest = tmp_path / "online_retail_ii.zip"
+
+    assert retail._download(retail.RETAIL_ARCHIVE, dest) == dest
+    assert dest.read_bytes() == body
+    assert len(seen) == 2
+
+
+def test_retail_download_raises_a_client_error_at_once(monkeypatch, tmp_path):
+    seen = _serve_downloads(monkeypatch, [_StreamedResponse(b"", status=404)])
+    with pytest.raises(RuntimeError, match="404"):
+        retail._download(retail.RETAIL_ARCHIVE, tmp_path / "online_retail_ii.zip")
+    assert len(seen) == 1
+
+
 def test_retail_yields_every_row_the_workbook_holds(retail_con):
     """`DuckDBPyRelation.arrow()` returns a streaming reader whose default batch
     is 1,000,000 rows; treated as a table it lands the first batch and no
