@@ -288,9 +288,10 @@ carries it forward is `publishing-a-release`.
   *except* `EL`=Greece (GR) and `UK`=UK (GB);
   `stg_eu_electricity_prices_semiannual.sql` remaps those and joins `stg_country`
   for ISO3. It prices 41 countries, so the mart column is null for the rest of
-  the world. (The `length(geo) = 2` filter there drops `EU27_2020` and friends
-  from the rows but *not* `EA` — two letters. That falls out at the inner join,
-  which no ISO2 matches.)
+  the world. The filter there drops `EU27_2020` and friends by length and `EA`
+  (the euro area, two letters) by name, and the join to `stg_country` is a
+  *left* join, so a code Eurostat starts publishing that no country carries
+  fails `country_iso3`'s `not_null` instead of vanishing, as retail's join does.
 - **The 41 are not the EU, and a mean over them is not the EU's average.** They
   are the 27 members (`is_eu_member`, today's membership at every half-year),
   Iceland, Liechtenstein, Norway, the United Kingdom and ten candidates and

@@ -2326,7 +2326,11 @@ def _eurostat_price_countries() -> set[str]:
     manifest either.
     """
     cube = json.loads(fixtures.path_for(eurostat.EU_ELEC_PRICES_API).read_text())
-    geos = {geo for geo in cube["dimension"]["geo"]["category"]["index"] if len(geo) == 2}
+    # The staging model's filter: two letters, and not `EA`, the euro area.
+    geos = {
+        geo for geo in cube["dimension"]["geo"]["category"]["index"]
+        if len(geo) == 2 and geo != "EA"
+    }  # fmt: skip
     iso2 = {EUROSTAT_GEO_TO_ISO2.get(geo, geo) for geo in geos}
 
     payload = json.loads(fixtures.path_for(worldbank.WB_COUNTRY_API).read_text())
@@ -2335,9 +2339,9 @@ def _eurostat_price_countries() -> set[str]:
         for row in payload[1]
         if (row.get("region") or {}).get("value") != "Aggregates"
     }
-    # The inner join drops `EA`; `len(geo) == 2` alone would keep it, since no
-    # country carries that ISO2. Matches the staging model's behavior.
-    return {by_iso2[code] for code in iso2 if code in by_iso2}
+    # Every code left must map, as the model's left join and `not_null` require:
+    # a KeyError here is a code Eurostat added that no country carries.
+    return {by_iso2[code] for code in iso2}
 
 
 def test_weather_countries_are_exactly_the_ones_eurostat_prices():
