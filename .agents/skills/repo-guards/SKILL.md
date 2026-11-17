@@ -283,7 +283,8 @@ section here. The mutation method these guards were written with is in the
 - **Fixtures filter rows, never columns.** Column-trimming would let a renamed
   upstream field pass CI against a fixture that matches a `stg_` model no longer
   matching reality. The OWID fixtures are gzipped CSV, not Parquet, so they still
-  go through `pl.read_csv(..., infer_schema_length=None)`.
+  go through `pl.read_csv(..., infer_schema_length=None)`; `http.get_bytes`
+  un-gzips them, so the reader sees what the URL serves.
 - **Three fixtures aren't trimmed at all**, each for a different reason:
   `wb_country` because it *is* the dimension the overrides seed is diffed
   against, `eu_elec_prices` because a JSON-stat grid can't be subset without
@@ -291,7 +292,7 @@ section here. The mutation method these guards were written with is in the
   *when each currency starts and stops* — cutting the date range would take the
   euro changeovers, the rouble and Iceland's nine-year gap out of CI, which are
   the four shapes the FX models exist to handle. It is gzipped (4.1 MB → 836 kB),
-  and it is why `_get_json` has a `.gz` branch.
+  and it is why `http.get_json` has a `.gz` branch.
 - **`fixtures.path_for()` raises on an unmapped URL** rather than falling back to
   the network — otherwise "offline CI" quietly becomes "CI that's online
   sometimes". `tests/test_fixtures.py` asserts every URL the pipeline can build

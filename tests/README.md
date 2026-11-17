@@ -9,7 +9,7 @@ warehouse. These five pin the pipeline's own logic, where it has actually broken
 
 | File | What it pins down |
 |---|---|
-| `test_ingest.py` | `http.get_json`'s retry-then-raise, WDI pagination and the 200-with-an-error-body guard, the WDI incremental window (per-indicator watermarks, the full-reload escape hatch) and the replace/merge load split, the Eurostat JSON-stat stride arithmetic |
+| `test_ingest.py` | `http.get_json`'s and `get_bytes`'s retry-then-raise and its log lines, the retail download refusing a body that is not a zip, WDI pagination and the 200-with-an-error-body guard, the WDI incremental window (per-indicator watermarks, the full-reload escape hatch) and the replace/merge load split, the Eurostat JSON-stat stride arithmetic |
 | `test_transform.py` | the Polars intensity metric — Mt→kg conversion, the constant-USD denominator, dropped rows, dense per-cohort ranking |
 | `test_lakehouse.py` | the DuckLake landing zone: that two snapshots diff to the revisions dlt's merge hides, that `revisions()` refuses to answer rather than compare nothing, and that three hand-maintained lists still match dlt — the provenance columns, the weather table's name and the ATTACH alias dbt declares |
 | `test_fixtures.py` | that every URL the pipeline can build resolves to a fixture that exists |
