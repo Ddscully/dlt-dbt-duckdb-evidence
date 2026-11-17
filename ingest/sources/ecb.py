@@ -22,7 +22,8 @@ FRANKFURTER_API = "https://api.frankfurter.dev/v1"
 # `stg_fx_rates`, not a second request.
 FX_BASE_CURRENCY = "EUR"
 
-# The first reference-rate day. Earlier dates return an empty `rates` object.
+# The first reference-rate day. A window entirely before it answers 404, which
+# `http.get_json` raises at once, so `fx_start_date` never asks for one.
 FX_FIRST_DATE = "1999-01-04"
 
 # Short, because the ECB all but never restates, so it only closes a failed
@@ -98,10 +99,16 @@ def ecb_fx_rates():
     the merge key makes that harmless.
     """
     state = dlt.current.resource_state()
-    payload = http.get_json_object(fx_url(fx_start_date(state.get(FX_WATERMARK_KEY))))
-    rates: dict[str, dict[str, float]] = payload.get("rates") or {}
+    url = fx_url(fx_start_date(state.get(FX_WATERMARK_KEY)))
+    payload = http.get_json_object(url)
+    # An error object served with a 200 has no `rates`; read as an empty window,
+    # it would land nothing and pass.
+    if "rates" not in payload:
+        raise RuntimeError(f"expected `rates` from {url}, got {payload!r:.300}")
+    rates: dict[str, dict[str, float]] = payload["rates"]
 
-    # ISO dates sort as text. Skipped on a weekend-only window, which is empty.
+    # ISO dates sort as text. Never seen empty (a weekend-only window answers with
+    # the previous fixing), but an empty object must not move the watermark.
     if rates:
         state[FX_WATERMARK_KEY] = max(rates)
 

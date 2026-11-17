@@ -960,7 +960,7 @@ def test_fx_start_date_looks_back_from_the_watermark():
 
 def test_fx_start_date_cannot_ask_for_dates_before_the_euro():
     """A watermark near the start of the series would otherwise produce a range
-    the API answers with an empty `rates` object."""
+    the API answers with a 404, which `get_json` raises at once."""
     assert ecb.fx_start_date("1999-01-05") == ecb.FX_FIRST_DATE
 
 
@@ -1014,14 +1014,25 @@ def test_ecb_fx_rates_advances_the_watermark_to_the_newest_date(monkeypatch):
 
 
 def test_ecb_fx_rates_leaves_the_watermark_alone_on_an_empty_response(monkeypatch):
-    """A window falling entirely on a weekend legitimately returns no rates.
-    Advancing on that would advance to a date that was never loaded.
+    """An empty `rates` object must not move the watermark: advancing on it
+    would advance to a date that was never loaded. Frankfurter has not been seen
+    to send one (a weekend-only window answers with the previous fixing), but
+    the guard costs nothing.
     """
     state = _state(monkeypatch, {ecb.FX_WATERMARK_KEY: "2024-01-10"})
     _serve_fx(monkeypatch, _fx_payload({}))
 
     assert list(ecb.ecb_fx_rates()) == []
     assert state[ecb.FX_WATERMARK_KEY] == "2024-01-10"
+
+
+def test_ecb_fx_rates_refuses_an_error_object_served_with_a_200(monkeypatch):
+    """Read as an empty window, an error body would land nothing and pass."""
+    _state(monkeypatch, {})
+    _serve_fx(monkeypatch, {"message": "upstream unavailable"})
+
+    with pytest.raises(ResourceExtractionError, match="expected `rates`.*upstream unavailable"):
+        list(ecb.ecb_fx_rates())
 
 
 def test_ecb_fx_rates_asks_for_the_lookback_window_when_it_has_a_watermark(monkeypatch):
