@@ -198,9 +198,9 @@ it cost to learn:
     `MIN_READER_VERSION`'s DuckDB (Python 3.12, no imports from the repo) in
     `release-data.yml`'s step after "Verify the artifact", and `just
     check-reader-floor` runs the same against `data/export/`.
-  - **There is no SQL that answers it.** `duckdb_databases()` returns an empty
-    `options` map, there is no pragma, and the only surface DuckDB exposes is
-    `ATTACH … (STORAGE_VERSION …)` on the write side.
+  - **No SQL reports the format number.** `duckdb_databases()` returns an empty
+    `options` map and there is no pragma; the nearest is the coarser `tags`
+    entry `storage_tag` reads (below).
     `modern_data_stack.export.storage_version` reads the header instead — 8-byte
     checksum, `DUCK` magic, little-endian uint64 — which is the right shape for
     a release gate anyway: it describes the artifact, not the process. The
@@ -212,7 +212,7 @@ it cost to learn:
     caps `duckdb>=1.1`, and `lockfile-only` means the bump arrives as one line
     of a grouped monthly Dependabot PR. Every *artifact* check would pass it —
     they read a file the same binary just wrote. So
-    `test_the_installed_duckdb_still_writes_the_format_the_release_promises`
+    `test_the_installed_duckdb_can_still_write_the_format_the_release_promises`
     checks the **toolchain** (a file created asking for
     `PUBLISHED_STORAGE_COMPATIBILITY`) and is the only one that fires on the
     bump, on the PR, before it merges: it fires when a DuckDB release drops the

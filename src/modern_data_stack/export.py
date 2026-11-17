@@ -49,8 +49,8 @@ def sha256(path: Path) -> str:
 def storage_version(path: Path) -> int:
     """The storage format version recorded in a DuckDB file's header.
 
-    Read off the bytes because no SQL, pragma or connection property reports it;
-    DuckDB exposes it only on the write side (`ATTACH … (STORAGE_VERSION …)`).
+    Read off the bytes because no SQL, pragma or connection property reports the
+    number; `storage_tag` is the coarser string DuckDB does report.
 
     The header is an 8-byte checksum, the 4-byte magic `DUCK`, then the version as
     a little-endian uint64. Measured against files written with an explicit
