@@ -143,14 +143,14 @@ def describe_relations(con: duckdb.DuckDBPyConnection, schemas: tuple[str, ...])
             "union all "
             "select comment from duckdb_views() where schema_name = $s and view_name = $t",
             {"s": schema, "t": table},
-        ).fetchone()
+        ).fetchall()
         columns = con.execute(
             "select column_name, data_type, comment from duckdb_columns() "
             "where schema_name = $s and table_name = $t order by column_index",
             {"s": schema, "t": table},
         ).fetchall()
         out[f"{schema}.{table}"] = {
-            "description": ((relation[0] if relation else None) or "").strip() or None,
+            "description": ((relation[0][0] if relation else None) or "").strip() or None,
             "columns": {
                 name: {"type": data_type, "description": (comment or "").strip() or None}
                 for name, data_type, comment in columns
@@ -173,12 +173,12 @@ def loaded_at(
     timestamp.
     """
     try:
-        row = con.execute(
-            f"select max(inserted_at) from {qualify(raw_database, raw_schema, '_dlt_loads')}"
-        ).fetchone()
+        landed = row(
+            con, f"select max(inserted_at) from {qualify(raw_database, raw_schema, '_dlt_loads')}"
+        )
     except duckdb.Error:
         return None
-    return row[0].astimezone(UTC).isoformat() if row and row[0] else None
+    return landed[0].astimezone(UTC).isoformat() if landed[0] else None
 
 
 def snapshot_warehouse(duckdb_path: Path, dest: Path) -> None:

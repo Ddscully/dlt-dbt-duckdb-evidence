@@ -24,6 +24,7 @@ from dlt.extract.exceptions import ResourceExtractionError
 from ingest import fixtures, http, pipeline
 from ingest.sources import ecb, eurostat, retail, weather, worldbank
 from modern_data_stack import workbook
+from modern_data_stack.db import row, scalar
 from transform import pipeline_status
 
 
@@ -1058,7 +1059,7 @@ def test_retail_yields_every_row_the_workbook_holds(retail_con):
     against the fixture workbook's own count, which holds each invoice from one
     sheet and so nothing to drop, so a batch-size change cannot bring it back.
     """
-    expected = retail_con.sql("select count(*) from sheets").fetchone()[0]
+    expected = scalar(retail_con, "select count(*) from sheets")
     batches = list(retail.retail_invoice_lines())
     assert len(batches) >= 1
     assert sum(b.num_rows for b in batches) == expected
@@ -1085,16 +1086,16 @@ def test_retail_line_number_is_stable_across_reads(retail_con):
 
 def test_retail_month_filter_is_the_partition(retail_con):
     """A partition loads its window and nothing else, and the windows tile."""
-    all_rows = retail_con.sql(f"select count(*) from ({retail.retail_sql()})").fetchone()[0]
+    all_rows = scalar(retail_con, f"select count(*) from ({retail.retail_sql()})")
     window = retail.retail_sql(("2010-01", "2010-03"))
     months = retail_con.sql(f"select distinct invoice_month from ({window}) order by 1").fetchall()
     assert [m[0] for m in months] == ["2010-01", "2010-02", "2010-03"]
 
     per_month = sum(
-        retail_con.sql(f"select count(*) from ({retail.retail_sql((m, m))})").fetchone()[0]
+        scalar(retail_con, f"select count(*) from ({retail.retail_sql((m, m))})")
         for m in ("2010-01", "2010-02", "2010-03")
     )
-    windowed = retail_con.sql(f"select count(*) from ({window})").fetchone()[0]
+    windowed = scalar(retail_con, f"select count(*) from ({window})")
     assert per_month == windowed
     assert windowed < all_rows
 
@@ -1103,11 +1104,12 @@ def test_retail_month_filter_never_splits_an_invoice(retail_con):
     """Line numbers are assigned per invoice, so a filter that cut one in half
     would renumber the surviving lines and change the merge key. Invoices don't
     straddle month boundaries — this is what says so."""
-    straddling = retail_con.sql(
+    straddling = scalar(
+        retail_con,
         f"""select count(*) from (
                 select invoice from ({retail.retail_sql()})
-                group by 1 having count(distinct invoice_month) > 1)"""
-    ).fetchone()[0]
+                group by 1 having count(distinct invoice_month) > 1)""",
+    )
     assert straddling == 0
 
 
@@ -1116,9 +1118,9 @@ def test_retail_partition_bounds_match_the_data(retail_con):
     are therefore hardcoded — they have to be known before anything is loaded. A
     re-recorded fixture that widened the window would otherwise leave months with
     no partition to land in."""
-    lo, hi = retail_con.sql(
-        f"select min(invoice_month), max(invoice_month) from ({retail.retail_sql()})"
-    ).fetchone()
+    lo, hi = row(
+        retail_con, f"select min(invoice_month), max(invoice_month) from ({retail.retail_sql()})"
+    )
     assert lo >= retail.RETAIL_FIRST_MONTH
     assert hi <= retail.RETAIL_LAST_MONTH
 
@@ -1129,7 +1131,8 @@ def test_retail_lands_the_source_verbatim(retail_con):
     Every one of these would be tempting to "fix" in a cast — and each one is a
     distinction a downstream model needs to see.
     """
-    row = retail_con.sql(
+    counts = row(
+        retail_con,
         f"""select
                 sum(starts_with(invoice, 'C')::int) as cancellations,
                 sum(starts_with(invoice, 'A')::int) as adjustments,
@@ -1138,9 +1141,9 @@ def test_retail_lands_the_source_verbatim(retail_con):
                 sum((customer_id is null or customer_id = '')::int) as no_customer,
                 count(distinct case when upper(stock_code) <> stock_code then stock_code end)
                     as lowercase_codes
-            from ({retail.retail_sql()})"""
-    ).fetchone()
-    cancellations, adjustments, negative_qty, negative_price, no_customer, lowercase = row
+            from ({retail.retail_sql()})""",
+    )
+    cancellations, adjustments, negative_qty, negative_price, no_customer, lowercase = counts
     assert cancellations > 0
     assert adjustments == 6, "all six bad-debt adjustments must survive the fixture trim"
     assert negative_qty > cancellations, "write-offs are negative too, and are not cancellations"

@@ -244,7 +244,7 @@ jobs:
               "warehouse.analytics.co2_intensity",
               "'marts__fct_emissions_energy.parquet'",
           ):
-              (rows,) = con.execute(f"select count(*) from {relation}").fetchone()
+              (rows,) = con.execute(f"select count(*) from {relation}").fetchall()[0]
               assert rows > 0, f"{relation} is empty"
               print(f"{relation}: {rows:,} rows")
 
