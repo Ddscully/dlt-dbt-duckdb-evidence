@@ -87,7 +87,7 @@ CODE_ALIASES = {"LM*": "LM"}
 def parse_history(xlsx_path: Path) -> list[dict]:
     """One row per (economy, data year) the workbook classifies."""
     try:
-        import openpyxl  # ty: ignore[unresolved-import]  # optional; see below
+        import openpyxl  # ty: ignore[import-not-found]  # optional; see below
     except ModuleNotFoundError:
         # A once-a-year transcription dependency, in no dependency group — as
         # for `scripts/build_cbam_seeds.py`.
