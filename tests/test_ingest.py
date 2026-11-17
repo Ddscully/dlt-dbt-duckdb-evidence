@@ -182,6 +182,19 @@ def test_get_bytes_reads_the_fixture_offline(monkeypatch):
     assert http.get_bytes(owid.OWID_CO2).startswith(b"country,")
 
 
+def test_owid_survives_a_dropped_connection(monkeypatch):
+    """OWID handed Polars the URL, which tries once: the one source a reset
+    connection failed outright."""
+    seen = _mock_get(
+        monkeypatch,
+        [requests.ConnectionError("reset"), FakeResponse(body="country,year,co2\nChad,2020,1.5\n")],
+    )
+    table = next(iter(owid.owid_co2()))
+    assert table.column_names == ["country", "year", "co2"]
+    assert table.column("co2").to_pylist() == [1.5]
+    assert seen == [owid.OWID_CO2, owid.OWID_CO2]
+
+
 # --------------------------------------------------------------------------- #
 # wb_wdi
 # --------------------------------------------------------------------------- #

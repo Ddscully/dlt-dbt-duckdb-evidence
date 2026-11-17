@@ -6,12 +6,13 @@ land with `write_disposition="replace"`.
 
 from __future__ import annotations
 
+import io
 from typing import TYPE_CHECKING
 
 import dlt
 import polars as pl
 
-from ingest import fixtures
+from ingest import http
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -20,13 +21,11 @@ OWID_CO2 = "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data
 OWID_ENERGY = "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv"
 
 
-def _csv_source(url: str) -> str:
-    """The CSV to hand Polars: the live URL, or a fixture path when offline."""
-    return str(fixtures.path_for(url)) if fixtures.enabled() else url
-
-
 def _read_csv(url: str) -> pa.Table:
     """The whole file as one Arrow table, typed by Polars.
+
+    Fetched through `http.get_bytes`, with the retries every other source has,
+    rather than by handing Polars the URL, which tries once.
 
     `infer_schema_length=None` scans every row, so a sparse numeric column (empty
     for its first rows) is typed as a number, not a string. Arrow rather than
@@ -38,7 +37,7 @@ def _read_csv(url: str) -> pa.Table:
     one column an Arrow load lacks is dlt's `_dlt_id`, which nothing reads;
     `_dlt_load_id` is added by `ingest.pipeline.build_pipeline`.
     """
-    return pl.read_csv(_csv_source(url), infer_schema_length=None).to_arrow()
+    return pl.read_csv(io.BytesIO(http.get_bytes(url)), infer_schema_length=None).to_arrow()
 
 
 @dlt.resource(name="owid_co2", write_disposition="replace")
