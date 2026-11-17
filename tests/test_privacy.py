@@ -25,6 +25,7 @@ import pytest
 import yaml
 
 from modern_data_stack import privacy
+from modern_data_stack.db import row, scalar
 from modern_data_stack.paths import project_root
 from publish.export_warehouse import (
     EXTRA_CLASSIFICATIONS,
@@ -100,7 +101,7 @@ def test_a_null_identifier_stays_null_because_the_expression_uses_pipes(warehous
         f"{privacy.pseudonym_expr('customer_id')} "
         "from raw.lines where customer_id is null",
         {"salt": "s"},
-    ).fetchone()
+    ).fetchall()[0]
     assert naive is not None, "if this ever becomes None, the trap is gone and so is this test"
     assert correct is None
 
@@ -133,7 +134,7 @@ def test_the_same_identifier_gets_the_same_pseudonym_and_a_new_salt_changes_it(t
         con.execute(SETUP)
         privacy.apply_pseudonymisation(con, DECLARED, salt=salt)
         rows = con.execute("select customer_id from marts.dim_customer order by 1").fetchall()
-        distinct = con.execute("select count(distinct customer_id) from raw.lines").fetchone()
+        distinct = row(con, "select count(distinct customer_id) from raw.lines")
         con.close()
         assert distinct == (2,), "two customers in, two pseudonyms out"
         return rows
@@ -185,9 +186,9 @@ def test_the_uploadable_copy_holds_no_clear_id_and_links_to_nothing(tmp_path, mo
         pseudonymised_copy(dest, source=source, lakehouse_dir=lake)
         con = duckdb.connect(str(dest), read_only=True)
         for relation in ("staging.stg_lines", "marts.dim_customer"):
-            clear = con.execute(
-                f"select count(*) from {relation} where customer_id in ('12345', '67890')"
-            ).fetchone()[0]
+            clear = scalar(
+                con, f"select count(*) from {relation} where customer_id in ('12345', '67890')"
+            )
             assert clear == 0, f"{relation} kept {clear} clear ids in run {run}"
         copies.append(con.execute(by_revenue).fetchall())
         con.close()
@@ -208,9 +209,10 @@ def test_a_view_and_the_mart_below_it_still_agree_after_the_rewrite(warehouse):
     with matching row counts and no error anywhere.
     """
     privacy.apply_pseudonymisation(warehouse, DECLARED, salt="s")
-    (matched,) = warehouse.execute(
-        "select count(*) from staging.stg_lines s join marts.dim_customer d using (customer_id)"
-    ).fetchone()
+    matched = scalar(
+        warehouse,
+        "select count(*) from staging.stg_lines s join marts.dim_customer d using (customer_id)",
+    )
     assert matched == 3, "every identified line still finds its customer"
 
 

@@ -60,6 +60,7 @@ from fractions import Fraction
 
 import duckdb
 
+from modern_data_stack.db import row
 from modern_data_stack.paths import warehouse_path
 
 # The fact's money columns, one per reporting currency. Interpolated into the
@@ -227,10 +228,10 @@ def explain_change(
     if year_a == year_b:
         # Not an empty bridge: every bar would read zero, under a note about alignment.
         raise ValueError(f"year_a and year_b are both {year_a}; name two different years")
-    bounds = con.execute(
-        "select min(invoice_date), max(invoice_date) from marts.fct_retail_order_line"
-    ).fetchone()
-    if bounds is None or bounds[0] is None:
+    bounds = row(
+        con, "select min(invoice_date), max(invoice_date) from marts.fct_retail_order_line"
+    )
+    if bounds[0] is None:
         raise ValueError("marts.fct_retail_order_line has no lines")
     coverage = (bounds[0], bounds[1])
     window = common_window(year_a, year_b, coverage)

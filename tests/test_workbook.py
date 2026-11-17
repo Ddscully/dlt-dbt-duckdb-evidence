@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from modern_data_stack import workbook
+from modern_data_stack.db import scalar
 
 
 def _write_sheet(con, path, sheet: str, select: str) -> None:
@@ -106,7 +107,7 @@ def test_excel_serial_converts_through_the_1900_leap_year_bug(con):
     the first timestamp in the retail workbook and is 2009-12-01 07:45.
     """
     sql = workbook.excel_serial_to_timestamp("'40148.3229166666'")
-    assert str(con.sql(f"select {sql}").fetchone()[0]) == "2009-12-01 07:45:00"
+    assert str(scalar(con, f"select {sql}")) == "2009-12-01 07:45:00"
 
 
 def test_extract_member_refuses_an_archive_with_two_candidates(tmp_path):

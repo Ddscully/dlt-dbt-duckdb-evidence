@@ -397,7 +397,7 @@ def is_catalog(lakehouse_dir: str | Path = LAKEHOUSE_DIR) -> bool:
         return bool(
             con.execute(
                 "select 1 from duckdb_tables() where table_name = 'ducklake_metadata'"
-            ).fetchone()
+            ).fetchall()
         )
     except duckdb.Error:
         return False
@@ -435,7 +435,7 @@ def _postgres_holds_catalog() -> bool:
                 where table_schema = $schema and table_name = 'ducklake_metadata'
                 """,
                 {"schema": metadata_schema()},
-            ).fetchone()
+            ).fetchall()
         )
     finally:
         con.close()
@@ -729,7 +729,7 @@ def _has_table(lakehouse_dir: str | Path, table: str) -> bool:
                 where table_catalog = $catalog and table_schema = $schema and table_name = $table
                 """,
                 {"catalog": ATTACH_ALIAS, "schema": schema, "table": name},
-            ).fetchone()
+            ).fetchall()
         )
     finally:
         con.close()

@@ -44,6 +44,7 @@ from pathlib import Path
 import duckdb
 
 from modern_data_stack import privacy
+from modern_data_stack.db import row
 from modern_data_stack.ducklake import catalog_metadata
 from modern_data_stack.export import (
     default_tag,
@@ -429,13 +430,13 @@ def _comments(
         "union all "
         "select comment from duckdb_tables() where schema_name = $s and table_name = $n",
         {"s": schema, "n": name},
-    ).fetchone()
+    ).fetchall()
     columns = con.execute(
         "select column_name, comment from duckdb_columns() "
         "where schema_name = $s and table_name = $n and coalesce(comment, '') <> ''",
         {"s": schema, "n": name},
     ).fetchall()
-    return (relation[0] if relation else None), dict(columns)
+    return (relation[0][0] if relation else None), dict(columns)
 
 
 def _restore_comments(
@@ -565,7 +566,8 @@ def _history(con: duckdb.DuckDBPyConnection) -> dict | None:
     seen a revision, which reports zero.
     """
     try:
-        row = con.execute(
+        counts = row(
+            con,
             """
             select
                 count(*) as country_years,
@@ -573,13 +575,13 @@ def _history(con: duckdb.DuckDBPyConnection) -> dict | None:
                 sum(version_count) as versions,
                 min(first_loaded_at) as watching_since
             from marts.fct_co2_estimate_versions
-            """
-        ).fetchone()
+            """,
+        )
     except duckdb.Error:
         return None
-    if not row or not row[0]:
+    if not counts[0]:
         return None
-    country_years, revised, versions, since = row
+    country_years, revised, versions, since = counts
     return {
         "country_years": country_years,
         "revised": revised,

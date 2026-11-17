@@ -4,7 +4,8 @@
 aggregate that returns exactly one row. `row` and `scalar` state that invariant
 once, so the type checker stops flagging every call site, and raise naming the
 query when it fails — where `.fetchone()[0]` would raise an anonymous
-`TypeError`.
+`TypeError`. They read with `fetchall()`, because on DuckDB 2.0 a result with a
+row still unread holds the connection and the next `con.sql()` raises.
 
 `qualify` names a relation across attached catalogs. `write_frames` (replace)
 and `append_frame` (accumulate) are the two write shapes the project repeats.
@@ -42,10 +43,12 @@ def row(
     and only the caller knows whether that is an error.
     """
     result = con.execute(sql, params) if params is not None else con.execute(sql)
-    fetched = result.fetchone()
-    if fetched is None:
+    # `fetchall`, not `fetchone`: DuckDB 2.0 streams, and a result with a row
+    # still unread owns the connection, so the next `con.sql()` raises.
+    fetched = result.fetchall()
+    if not fetched:
         raise ValueError(f"query returned no rows: {sql.strip()}")
-    return fetched
+    return fetched[0]
 
 
 def scalar(

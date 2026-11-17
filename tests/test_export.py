@@ -26,7 +26,7 @@ import pytest
 from pipeline_urls import ALL_URLS
 
 from modern_data_stack import export as _export
-from modern_data_stack.db import scalar
+from modern_data_stack.db import row, scalar
 from modern_data_stack.ducklake import catalog_metadata, meta_alias, spec_version, version_key
 from modern_data_stack.export import storage_version
 from publish import export_warehouse as _release
@@ -201,15 +201,13 @@ def test_the_copied_warehouse_keeps_its_views_working(export: dict):
     """
     con = duckdb.connect()
     con.execute(f"attach '{export['out'] / 'warehouse.duckdb'}' as warehouse (read_only)")
-    assert con.execute("select count(*) from warehouse.staging.stg_co2").fetchone() == (2,)
+    assert row(con, "select count(*) from warehouse.staging.stg_co2") == (2,)
     # A view over a view: `intermediate` sits on `staging`. This fixture's in-file
     # `raw` makes both hops resolve regardless — the version that can fail is below.
-    assert con.execute(
-        "select count(*) from warehouse.intermediate.int_country_year_observed"
-    ).fetchone() == (2,)
+    assert row(con, "select count(*) from warehouse.intermediate.int_country_year_observed") == (2,)
     # This fixture's in-file `raw` survives the copy; a real warehouse has none
     # — its `raw` lives in the lakehouse.
-    assert con.execute("select count(*) from warehouse.raw.owid_co2").fetchone() == (2,)
+    assert row(con, "select count(*) from warehouse.raw.owid_co2") == (2,)
 
 
 def test_the_manifest_carries_what_each_column_means(export: dict):

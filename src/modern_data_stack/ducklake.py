@@ -191,7 +191,17 @@ def table_versions(
     inlined = con.execute(
         f"select table_name from {meta}.ducklake_inlined_data_tables where table_id in ({id_list})"
     ).fetchall()
-    sources += [f"select begin_snapshot from {meta}.{sql_identifier(row[0])}" for row in inlined]
+    # Spec 1.1 prefixes an inlined table's bookkeeping columns with `_ducklake_`;
+    # a 1.0 catalog keeps the bare names, and DuckDB 2.0 writes both kinds.
+    for (inlined_table,) in inlined:
+        relation = f"{meta}.{sql_identifier(inlined_table)}"
+        names = {
+            column[0] for column in con.execute(f"select * from {relation} limit 0").description
+        }
+        begin = (
+            "_ducklake_begin_snapshot" if "_ducklake_begin_snapshot" in names else "begin_snapshot"
+        )
+        sources.append(f"select {begin} as begin_snapshot from {relation}")
 
     # A live file can begin at an expired snapshot; the change is readable from
     # the next surviving one. Dropping the id would end the list a change early.
@@ -469,5 +479,5 @@ def _exists(con: duckdb.DuckDBPyConnection, alias: str, schema: str, name: str) 
             where table_catalog = $catalog and table_schema = $schema and table_name = $table
             """,
             {"catalog": alias, "schema": schema, "table": name},
-        ).fetchone()
+        ).fetchall()
     )

@@ -182,7 +182,7 @@ holds the warehouse's writer lock, because it never opens the warehouse:
 uv run python -c "
 from lake.lakehouse import read_only_connection
 con = read_only_connection()
-print(con.execute('select sum(co2) from lakehouse.raw.owid_co2 where year = 2020').fetchone())
+print(con.execute('select sum(co2) from lakehouse.raw.owid_co2 where year = 2020').fetchall())
 "
 ```
 

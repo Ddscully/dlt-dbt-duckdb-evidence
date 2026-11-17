@@ -56,7 +56,7 @@ def _has_column(
               and column_name = $column{clause}
             """,
             params,
-        ).fetchone()
+        ).fetchall()
     )
 
 

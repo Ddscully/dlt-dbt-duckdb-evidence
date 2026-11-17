@@ -54,6 +54,7 @@ from metricflow_semantics.model.dbt_manifest_parser import (
 )
 from metricflow_semantics.model.semantic_manifest_lookup import SemanticManifestLookup
 
+from modern_data_stack.db import row as read_row
 from modern_data_stack.paths import dbt_semantic_manifest_path, warehouse_path
 
 # The names a model groups by, and what MetricFlow calls them. A joined
@@ -199,12 +200,13 @@ def _coverage(
         column = next(
             d.get("expr") or d["name"] for d in model["dimensions"] if d["name"] == time_dimension
         )
-        row = con.execute(
-            f"select min({column}), max({column}) from {relation['schema_name']}.{relation['alias']}"
-        ).fetchone()
-        if row is None or row[0] is None:
+        span = read_row(
+            con,
+            f"select min({column}), max({column}) from {relation['schema_name']}.{relation['alias']}",
+        )
+        if span[0] is None:
             raise ValueError(f"{relation['schema_name']}.{relation['alias']} has no rows")
-        bounds.append(row)
+        bounds.append(span)
     return max(b[0] for b in bounds), min(b[1] for b in bounds)
 
 
