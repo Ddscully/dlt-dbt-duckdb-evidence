@@ -23,18 +23,21 @@ from urllib.parse import urlparse
 
 import duckdb
 import pytest
+import yaml
 from pipeline_urls import ALL_URLS
 
 from modern_data_stack import export as _export
 from modern_data_stack.db import row, scalar
 from modern_data_stack.ducklake import catalog_metadata, meta_alias, spec_version, version_key
-from modern_data_stack.export import storage_version
+from modern_data_stack.export import storage_tag, storage_version
 from publish import export_warehouse as _release
 from publish.export_warehouse import (
     ATTRIBUTION,
     MAX_PUBLISHED_LAKE_VERSION,
     MAX_PUBLISHED_STORAGE_VERSION,
     MIN_READER_VERSION,
+    PUBLISHED_STORAGE_COMPATIBILITY,
+    PUBLISHED_STORAGE_TAG,
     default_tag,
     release_notes,
     run,
@@ -290,39 +293,58 @@ def test_tags_are_dated():
 
 # --- the storage format of the published file -------------------------------
 #
-# Nothing caps `duckdb>=1.1`, so a release can silently raise the default
-# storage format. The toolchain test below catches the bump on its PR; the
-# artifact tests catch a file that should not have been uploaded.
+# The format is asked for where each file is created, so the default moving
+# does not move the release. The toolchain test below catches a DuckDB that can
+# no longer write the promised format, on the PR that bumps it; the artifact
+# tests catch a file that should not have been uploaded.
 
 
-def test_the_installed_duckdb_still_writes_the_format_the_release_promises(tmp_path: Path):
+def test_the_installed_duckdb_can_still_write_the_format_the_release_promises(tmp_path: Path):
     """The tripwire, and the only one of these that fires on a dependency bump.
 
-    A plain `duckdb.connect()` — no `STORAGE_VERSION` — is what the exporter
-    does, so what it writes by default *is* the published format. The other
-    tests read files this same binary wrote, so none of them can see the
-    default move.
+    A file created with `PUBLISHED_STORAGE_COMPATIBILITY`, which is what every
+    creation point asks for, must come out at or below the ceiling and carry
+    the tag the release promises. It fires when a DuckDB release drops the old
+    format, not when its default moves. The other tests read files this same
+    binary wrote, so none of them can see that.
 
     `<=` rather than `==` because a lower number is the more compatible file;
-    only an increase strands a reader.
+    only an increase strands a reader. The three constants (ceiling, tag, asked
+    format) are tied together here.
     """
-    path = tmp_path / "default.duckdb"
-    con = duckdb.connect(str(path))
+    path = tmp_path / "asked.duckdb"
+    con = duckdb.connect(
+        str(path), config={"storage_compatibility_version": PUBLISHED_STORAGE_COMPATIBILITY}
+    )
     con.execute("create table t as select 1 as a")
     con.close()
 
     written = storage_version(path)
     assert written <= MAX_PUBLISHED_STORAGE_VERSION, (
-        f"DuckDB {duckdb.__version__} now writes storage version {written} by default, "
-        f"above the {MAX_PUBLISHED_STORAGE_VERSION} the release notes promise "
-        f"(readable by DuckDB {MIN_READER_VERSION}+). Raising the ceiling strands "
-        f"every client older than the new format — decide it, don't merge it."
+        f"DuckDB {duckdb.__version__} writes storage version {written} even when asked for "
+        f"{PUBLISHED_STORAGE_COMPATIBILITY}, above the {MAX_PUBLISHED_STORAGE_VERSION} the release "
+        f"notes promise (readable by DuckDB {MIN_READER_VERSION}+). Raising the ceiling "
+        f"strands every client older than the new format — decide it, don't merge it."
     )
+    assert storage_tag(path) == PUBLISHED_STORAGE_TAG
+
+
+def test_dbt_asks_for_the_same_storage_format_as_the_release():
+    """`dbt/profiles.yml` creates the working file, so it repeats the constant.
+
+    Under `config_options`, which reaches `duckdb.connect()`. The same key under
+    `settings:` is accepted and does nothing, because it is applied after the
+    file exists, so its absence there is part of the guard.
+    """
+    profile = yaml.safe_load((REPO_ROOT / "dbt/profiles.yml").read_text())
+    dev = profile["modern_data_stack"]["outputs"]["dev"]
+    assert dev["config_options"]["storage_compatibility_version"] == PUBLISHED_STORAGE_COMPATIBILITY
+    assert "storage_compatibility_version" not in (dev.get("settings") or {})
 
 
 def test_the_manifest_records_the_format_and_not_only_the_writer(export: dict):
     """`duckdb_version` answers "who wrote this"; a consumer is asking "can I
-    open it", which has a different answer — 1.5.5 writes the format 0.10.0
+    open it", which has a different answer — 1.5.5 writes the format 0.10.3
     reads. Both ship, and the format is read off the uploaded bytes rather than
     the connection that made them.
     """

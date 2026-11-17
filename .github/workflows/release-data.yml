@@ -192,8 +192,9 @@ jobs:
       # alias the release notes give (dbt's SQL is qualified with that name).
       #
       # This runner opens any format it wrote, so the storage version is checked
-      # as a number against the promised ceiling, and against the manifest that
-      # describes the file.
+      # twice here: as a number against the promised ceiling and against the
+      # manifest that describes the file, and as the tag DuckDB reports for it.
+      # The next step is the one that opens it with an old client.
       - name: Verify the artifact
         working-directory: data/export
         env:
@@ -212,11 +213,12 @@ jobs:
 
           import duckdb
 
-          from modern_data_stack.export import storage_version
+          from modern_data_stack.export import storage_tag, storage_version
           from modern_data_stack.history import carried_rows
           from publish.export_warehouse import (
               MAX_PUBLISHED_STORAGE_VERSION,
               MIN_READER_VERSION,
+              PUBLISHED_STORAGE_TAG,
           )
           from publish.restore_history import CARRIED
 
@@ -230,6 +232,11 @@ jobs:
               f"storage version {on_disk} is above the published ceiling "
               f"{MAX_PUBLISHED_STORAGE_VERSION}; the notes promise DuckDB "
               f"{MIN_READER_VERSION}+ can open this file"
+          )
+          tag = storage_tag(Path("warehouse.duckdb"))
+          assert tag == PUBLISHED_STORAGE_TAG, (
+              f"DuckDB reports storage version {tag!r}, not the "
+              f"{PUBLISHED_STORAGE_TAG!r} the notes promise"
           )
           print(
               f"warehouse.duckdb: storage version {on_disk}, written by DuckDB "
@@ -276,6 +283,17 @@ jobs:
           )
           print(f"carried forward: {rows:,} rows total ({restored:,} restored)")
           PY
+
+      # The runner's own DuckDB opens anything it wrote, so the floor the notes
+      # state is tested with that client. Python 3.12: the floor has no 3.13 wheel.
+      - name: Open the artifact with the oldest DuckDB the notes promise
+        working-directory: data/export
+        run: |
+          floor=$(PYTHONPATH="$GITHUB_WORKSPACE" uv run --project "$GITHUB_WORKSPACE" \
+            python -c "from publish.export_warehouse import MIN_READER_VERSION; print(MIN_READER_VERSION)")
+          uv run --no-project --python 3.12 --with "duckdb==$floor" \
+            python "$GITHUB_WORKSPACE/publish/check_reader_floor.py" warehouse.duckdb \
+            marts.fct_emissions_energy staging.stg_co2 intermediate.int_country_year_observed
 
       # Every gate above reads this build alone, so a model edit that drops a
       # third of the countries passes them all: the smaller table is still unique,

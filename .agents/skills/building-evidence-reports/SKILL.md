@@ -115,6 +115,10 @@ A file at `sources/warehouse/emissions_energy.sql` is referenced in pages as
 `warehouse.emissions_energy`. Adding a new source query means adding a `.sql`
 file there, then `npm run sources`.
 
+The site's DuckDB reader needs the old storage format, so `dbt/profiles.yml`
+asks for it (`config_options`), and the release does the same
+(`publishing-a-release`).
+
 ### Pointing a build at a different warehouse
 
 `connection.yaml`'s `filename` is not the last word: Evidence merges

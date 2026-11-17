@@ -315,6 +315,17 @@ export-data:
     PII_SALT="${PII_SALT:-$(uv run python -c 'import secrets; print(secrets.token_hex(32))')}" \
         uv run python -m publish.export_warehouse
 
+# The runner that wrote a release opens any format it wrote, so the floor the
+# release notes state (`MIN_READER_VERSION`) is only tested by a client that old.
+# Run `just export-data` first. Python 3.12: the floor has no 3.13 wheel, and the
+# script imports nothing from this repo. `release-data.yml` runs the same two commands.
+[group('publish')]
+check-reader-floor:
+    floor=$(uv run python -c "from publish.export_warehouse import MIN_READER_VERSION; print(MIN_READER_VERSION)") && \
+        uv run --no-project --python 3.12 --with "duckdb==$floor" \
+        python publish/check_reader_floor.py data/export/warehouse.duckdb \
+        marts.fct_emissions_energy staging.stg_co2 intermediate.int_country_year_observed
+
 # Reads dbt/target/manifest.json (`just dbt-parse`), never the warehouse: grains
 # come from the uniqueness tests, columns from the enforced contracts.
 # Which conformed dimensions does each fact carry? -> docs/WAREHOUSE.md

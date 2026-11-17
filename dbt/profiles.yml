@@ -27,6 +27,14 @@ modern_data_stack:
       type: duckdb
       path: "{{ env_var('WAREHOUSE_PATH', '../data/warehouse.duckdb') }}"
       threads: 4
+      # The file's storage format, asked for rather than inherited: the default
+      # follows the installed DuckDB, and the release and Evidence's reader both
+      # need the old one. `config_options` reaches `duckdb.connect()`, so it acts
+      # when dbt creates the file. The same key under `settings:` is accepted
+      # and does nothing, because it is applied after the file exists.
+      # `publish/export_warehouse.py` holds the same value.
+      config_options:
+        storage_compatibility_version: v1.0.0
       extensions:
         - httpfs
         - parquet

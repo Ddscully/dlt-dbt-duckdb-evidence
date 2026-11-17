@@ -188,10 +188,16 @@ it cost to learn:
   manifest carries both.** `duckdb_version` answers "who wrote this";
   `storage_version` answers "can I open it", which is the only question a
   consumer has. They differ: DuckDB 1.x writes format **64** by default — the
-  one every DuckDB from `v0.10.0` (February 2024) on reads — so a file written
+  one every DuckDB from `v0.10.3` (May 2024) on reads — so a file written
   by 1.5.5 opens on a client more than two years older. The release notes said "Written by DuckDB 1.5.5.
   Older clients may not read the storage format" for the whole life of the
   release, which was unmeasured and, it turns out, *pessimistic*.
+  - **The floor is a measurement with a real client, and the header number is
+    the ceiling check, not the floor.** 0.10.0 to 0.10.2 fail on a format-64
+    file; 0.10.3 opens it. `publish/check_reader_floor.py` runs under
+    `MIN_READER_VERSION`'s DuckDB (Python 3.12, no imports from the repo) in
+    `release-data.yml`'s step after "Verify the artifact", and `just
+    check-reader-floor` runs the same against `data/export/`.
   - **There is no SQL that answers it.** `duckdb_databases()` returns an empty
     `options` map, there is no pragma, and the only surface DuckDB exposes is
     `ATTACH … (STORAGE_VERSION …)` on the write side.
@@ -207,12 +213,29 @@ it cost to learn:
     of a grouped monthly Dependabot PR. Every *artifact* check would pass it —
     they read a file the same binary just wrote. So
     `test_the_installed_duckdb_still_writes_the_format_the_release_promises`
-    checks the **toolchain** (a bare `duckdb.connect()`, no `STORAGE_VERSION`)
-    and is the only one that fires on the bump, on the PR, before it merges. The
+    checks the **toolchain** (a file created asking for
+    `PUBLISHED_STORAGE_COMPATIBILITY`) and is the only one that fires on the
+    bump, on the PR, before it merges: it fires when a DuckDB release drops the
+    old format. The
     artifact checks — `export()`'s ceiling and `release-data.yml`'s verify step
     — catch a file that should not be uploaded. This is "green CI proves nothing
     about versions" one turn further round: what moves is the *format of the
     artifact* rather than the code.
+  - **The format is asked for, in three places, because the option acts only
+    when a file is created.** The default follows the installed DuckDB (2.0 writes
+    a format no 1.x client opens), so `PUBLISHED_STORAGE_COMPATIBILITY` is passed
+    wherever a warehouse-format file can be created: dbt (`config_options` in
+    `dbt/profiles.yml`), `history.restore` (the workflows restore into an empty
+    file before dbt runs) and `export.snapshot_warehouse`. Pass it only when
+    creating: opening a file another connection holds without the option is a
+    "different configuration" error. The same key under `settings:` in the
+    profile is accepted and does nothing, because it is applied after the file
+    exists; `test_dbt_asks_for_the_same_storage_format_as_the_release` holds the
+    profile to the constant.
+  - **The tag sits beside the header.** `storage_tag` reads what DuckDB itself
+    reports (`v1.0.0+` for format 64); a DuckLake catalog written by DuckDB 2.0
+    keeps its old header number while the tag moves, so `export()` and the
+    verify step check both. `manifest.json` gains no key for it.
   - **`max_storage_version` has no default in the package**, matching `schema`
     on `db.write_frames`. A ceiling is a compatibility promise to consumers the
     package knows nothing about, and it is only meaningful beside the minimum

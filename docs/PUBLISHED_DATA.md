@@ -16,7 +16,7 @@
 - **`customer_id` is pseudonymised and the release is still not anonymous**:
   treat the retail tables as personal data
   ([What to know before building on it](#what-to-know-before-building-on-it)).
-- **The file opens on any DuckDB from `v0.10.0`**, and the export refuses to
+- **The file opens on any DuckDB from `v0.10.3`**, and the export refuses to
   publish a newer storage format
   ([What to know before building on it](#what-to-know-before-building-on-it)).
 
@@ -127,8 +127,9 @@ classification, the measurement and the decisions.
 it.** `manifest.json` records both, because they answer different questions:
 `duckdb_version` is the writer, `storage_version` is what a reader has to
 support. Every DuckDB from 1.x writes format **64** by default, which every
-DuckDB from `v0.10.0` on reads, so a file written by 1.5.5 opens on a client
-from early 2024, and the release notes say so rather than hedging.
+DuckDB from `v0.10.3` on reads, so a file written by 1.5.5 opens on a client
+from early 2024, and the release notes say so rather than hedging. Each release
+is opened with that stated minimum client before it is published.
 
 The export refuses to publish a format above that ceiling, and
 `tests/test_export.py` fails if the installed DuckDB stops writing it. That
