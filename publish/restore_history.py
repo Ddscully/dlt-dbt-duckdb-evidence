@@ -38,6 +38,7 @@ from modern_data_stack.history import (
     restore,
 )
 from modern_data_stack.paths import warehouse_path
+from publish.export_warehouse import PUBLISHED_STORAGE_COMPATIBILITY
 
 DUCKDB_PATH = warehouse_path()
 
@@ -102,7 +103,13 @@ def run(
 
         lakehouse.preflight(lakehouse.LAKEHOUSE_DIR if lakehouse_dir is None else lakehouse_dir)
 
-    summary = restore(src, duckdb_path, carry=CARRIED, force=force)
+    summary = restore(
+        src,
+        duckdb_path,
+        carry=CARRIED,
+        force=force,
+        storage_compatibility=PUBLISHED_STORAGE_COMPATIBILITY,
+    )
     summary["lakehouse"] = _restore_lakehouse(src, lakehouse_dir)
     return summary
 

@@ -12,7 +12,7 @@ not exist` while the tables work. Consumers hit the same trap, which is why the
 release notes say which alias to `ATTACH` as.
 
 **The file's storage format is not the writer's version.** DuckDB 1.x writes
-storage version 64 by default, readable by every DuckDB since v0.10.0, so the
+storage version 64 by default, readable by every DuckDB since v0.10.3, so the
 manifest records `storage_version` beside `duckdb_version`, and `export()` takes
 a ceiling it refuses to exceed — a DuckDB bump that changed the format would
 pass every test, since they write and read with one binary.
@@ -49,8 +49,8 @@ def sha256(path: Path) -> str:
 def storage_version(path: Path) -> int:
     """The storage format version recorded in a DuckDB file's header.
 
-    Read off the bytes because no SQL, pragma or connection property reports it;
-    DuckDB exposes it only on the write side (`ATTACH … (STORAGE_VERSION …)`).
+    Read off the bytes because no SQL, pragma or connection property reports the
+    number; `storage_tag` is the coarser string DuckDB does report.
 
     The header is an 8-byte checksum, the 4-byte magic `DUCK`, then the version as
     a little-endian uint64. Measured against files written with an explicit
@@ -68,6 +68,23 @@ def storage_version(path: Path) -> int:
     if len(head) < 20 or head[8:12] != b"DUCK":
         raise ValueError(f"not a DuckDB database file: {path}")
     return int.from_bytes(head[12:20], "little")
+
+
+def storage_tag(path: Path) -> str:
+    """The storage version DuckDB itself reports for a file (`v1.0.0+`).
+
+    Beside `storage_version`, which reads the header: a DuckLake catalog that
+    DuckDB 2.0 has written keeps its old header number while this tag moves,
+    so the header alone is not proof.
+    """
+    con = duckdb.connect(str(path), read_only=True)
+    try:
+        return scalar(
+            con,
+            "select tags['storage_version'] from duckdb_databases() where database_name = current_database()",
+        )
+    finally:
+        con.close()
 
 
 def git_sha() -> str | None:
@@ -181,8 +198,14 @@ def loaded_at(
     return landed[0].astimezone(UTC).isoformat() if landed[0] else None
 
 
-def snapshot_warehouse(duckdb_path: Path, dest: Path) -> None:
+def snapshot_warehouse(
+    duckdb_path: Path, dest: Path, storage_compatibility: str | None = None
+) -> None:
     """Write a compacted, WAL-free copy of the warehouse to `dest`.
+
+    `storage_compatibility` is the storage format `dest` is created at. `dest` is
+    unlinked first, so this call always creates it, and the option acts only at
+    creation; without it the format follows the installed DuckDB's default.
 
     `COPY FROM DATABASE` rather than a file copy so the result is consistent
     however the source was left (a crashed run can leave a `.wal` beside it), and
@@ -190,7 +213,10 @@ def snapshot_warehouse(duckdb_path: Path, dest: Path) -> None:
     stem has to match the source's — see the module docstring.
     """
     dest.unlink(missing_ok=True)
-    con = duckdb.connect(str(dest))
+    config: dict[str, str | int | float | list[str]] = (
+        {"storage_compatibility_version": storage_compatibility} if storage_compatibility else {}
+    )
+    con = duckdb.connect(str(dest), config=config)
     try:
         con.execute(f"attach '{duckdb_path}' as source_wh (read_only)")
         con.execute(f"copy from database source_wh to {dest.stem}")
@@ -248,6 +274,8 @@ def export(
     read_loaded_at: Callable[[duckdb.DuckDBPyConnection], str | None] | None = None,
     period_column: str = "year",
     max_storage_version: int | None = None,
+    storage_tag_expected: str | None = None,
+    storage_compatibility: str | None = None,
 ) -> dict:
     """Build `out_dir` from `duckdb_path`. Returns the manifest.
 
@@ -269,7 +297,13 @@ def export(
     `max_storage_version` is the format ceiling (see `storage_version`). No
     default: it is a promise to the project's consumers, meaningful only beside
     the minimum reader version the project states. `None` records the format and
-    refuses nothing.
+    refuses nothing. `storage_tag_expected` is the same promise read the other
+    way: the tag DuckDB reports for the file (`storage_tag`), refused when it
+    differs.
+
+    `storage_compatibility` is the storage format the copies are created at, and
+    has no default for the same reason: the default follows the installed DuckDB,
+    and the ceiling above would only refuse the result.
     """
     src = Path(duckdb_path)
     if not src.exists():
@@ -284,7 +318,7 @@ def export(
     warehouse_copy = dest_dir / src.name
     if warehouse_copy.resolve() == src.resolve():
         raise ValueError(f"--out {dest_dir} would overwrite the source warehouse {src}")
-    snapshot_warehouse(src, warehouse_copy)
+    snapshot_warehouse(src, warehouse_copy, storage_compatibility)
 
     prepared: dict = {}
     if prepare_copy is not None:
@@ -299,7 +333,7 @@ def export(
         staging_dir.mkdir(exist_ok=True)
         compacted = staging_dir / warehouse_copy.name
         try:
-            snapshot_warehouse(warehouse_copy, compacted)
+            snapshot_warehouse(warehouse_copy, compacted, storage_compatibility)
             compacted.replace(warehouse_copy)
         finally:
             shutil.rmtree(staging_dir, ignore_errors=True)
@@ -315,6 +349,13 @@ def export(
             "version is not the constraint — the format is, and every client "
             "older than it can no longer open the release. Raising the ceiling "
             "is a decision about which readers to strand, not a lockfile edit."
+        )
+    published_tag = storage_tag(warehouse_copy)
+    if storage_tag_expected is not None and published_tag != storage_tag_expected:
+        raise ValueError(
+            f"refusing to publish {warehouse_copy.name}: DuckDB reports its "
+            f"storage version as {published_tag!r}, not the {storage_tag_expected!r} "
+            f"this project promises. DuckDB {duckdb.__version__} wrote it."
         )
 
     # Read from the copy, so the manifest describes what shipped.

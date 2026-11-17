@@ -72,6 +72,8 @@ __all__ = [
     "MAX_PUBLISHED_STORAGE_VERSION",
     "MIN_READER_VERSION",
     "PUBLISHED_SCHEMAS",
+    "PUBLISHED_STORAGE_COMPATIBILITY",
+    "PUBLISHED_STORAGE_TAG",
     "SALT_ENV",
     "additivity",
     "default_tag",
@@ -98,8 +100,21 @@ PUBLISHED_SCHEMAS = ("staging", "marts", "analytics")
 # The storage format ceiling, and so the oldest DuckDB that can open the file. A
 # tripwire for a DuckDB bump, which every test passes by reading with the binary
 # that wrote; raising it strands older readers, so it is a decision.
+# The reader floor is measured by opening a release with that client: the format
+# number alone put it three patch releases too low (0.10.0 to 0.10.2 fail on a
+# format-64 file, 0.10.3 opens it).
 MAX_PUBLISHED_STORAGE_VERSION = 64
-MIN_READER_VERSION = "0.10.0"
+MIN_READER_VERSION = "0.10.3"
+
+# What DuckDB reports for format 64 (`storage_tag`); the test beside the
+# ceiling's ties this, the version above and the constant below together.
+PUBLISHED_STORAGE_TAG = "v1.0.0+"
+
+# What every file a release is built from is created at. Asked for, because
+# the default follows the installed DuckDB and the ceiling above would only
+# refuse the result. dbt creates the working file, so `dbt/profiles.yml`
+# repeats this value and a test holds the two together.
+PUBLISHED_STORAGE_COMPATIBILITY = "v1.0.0"
 
 # The same for the DuckLake spec, which moves without a PR: the extension is
 # fetched unpinned, so the next CI run is what notices.
@@ -500,7 +515,7 @@ def pseudonymised_copy(
     """
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    snapshot_warehouse(Path(source), dest)
+    snapshot_warehouse(Path(source), dest, PUBLISHED_STORAGE_COMPATIBILITY)
     con = duckdb.connect(str(dest))
     try:
         return prepare_published_copy(con, lakehouse_dir, salt=secrets.token_hex(32))
@@ -920,6 +935,8 @@ def run(
         prepare_copy=lambda con: prepare_published_copy(con, lakehouse_dir),
         extra_artifacts=lambda dest: publish_lakehouse(dest, lakehouse_dir),
         max_storage_version=MAX_PUBLISHED_STORAGE_VERSION,
+        storage_tag_expected=PUBLISHED_STORAGE_TAG,
+        storage_compatibility=PUBLISHED_STORAGE_COMPATIBILITY,
     )
 
 

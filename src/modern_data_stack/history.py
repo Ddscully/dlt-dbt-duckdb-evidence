@@ -96,12 +96,16 @@ def restore(
     duckdb_path: str | Path,
     carry: tuple[Carry, ...],
     force: bool = False,
+    storage_compatibility: str | None = None,
 ) -> dict:
     """Copy the relations `carry` names out of `source` into `duckdb_path`.
 
     `carry` has no default: what a project cannot reproduce is its own fact.
     Restoring nothing is normal (the first release has no predecessor); only a
     destination that already holds the relations is an error.
+
+    `storage_compatibility` is the storage format `duckdb_path` is created at,
+    applied only when this call creates it.
     """
     src = Path(source)
     if not src.exists():
@@ -112,7 +116,15 @@ def restore(
         raise ValueError(f"source and destination are the same file: {dest}")
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    con = duckdb.connect(str(dest))
+    # Only when this call creates the file: the option cannot change an
+    # existing one, and a file another connection holds without it refuses.
+    creating = not dest.exists()
+    config: dict[str, str | int | float | list[str]] = (
+        {"storage_compatibility_version": storage_compatibility}
+        if storage_compatibility and creating
+        else {}
+    )
+    con = duckdb.connect(str(dest), config=config)
     try:
         # ATTACH takes a literal, not a bind parameter (`attach $path` is a
         # parser error), so the path is interpolated.
