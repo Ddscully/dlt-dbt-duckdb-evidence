@@ -28,8 +28,10 @@ does the casting.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -65,9 +67,11 @@ def extract_member(archive_path: Path | str, dest_dir: Path | str, suffix: str) 
     quietly reading the first one alphabetically is how half a source goes
     missing without an error.
 
-    Written under a `.part` name and renamed when whole, because a caller that
-    caches the extract serves whatever is at the final name: an interrupted
-    unzip left there would be read as the workbook on every later run.
+    Written to a uniquely named `.part` file beside the target and renamed
+    when whole, because a caller that caches the extract serves whatever is at
+    the final name: an interrupted unzip left there would be read as the
+    workbook on every later run. Unique, so two extracts at once cannot write
+    into one file; removed on failure, so a full disk is not kept full.
     """
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -76,10 +80,15 @@ def extract_member(archive_path: Path | str, dest_dir: Path | str, suffix: str) 
         if len(members) != 1:
             raise ValueError(f"expected exactly one {suffix} in {archive_path}, found {members}")
         target = dest_dir / Path(members[0]).name
-        partial = target.with_name(target.name + ".part")
-        with archive.open(members[0]) as src, partial.open("wb") as out:
-            shutil.copyfileobj(src, out)
-    partial.replace(target)
+        fd, name = tempfile.mkstemp(dir=dest_dir, prefix=f"{target.name}.", suffix=".part")
+        partial = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as out, archive.open(members[0]) as src:
+                shutil.copyfileobj(src, out)
+            partial.replace(target)
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
     return target
 
 

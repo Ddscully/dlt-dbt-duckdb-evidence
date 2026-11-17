@@ -151,4 +151,6 @@ def test_an_interrupted_extract_leaves_nothing_at_the_workbooks_name(tmp_path, m
     monkeypatch.setattr(shutil, "copyfileobj", interrupted)
     with pytest.raises(OSError, match="No space"):
         workbook.extract_member(archive, tmp_path / "dest", ".xlsx")
-    assert not (tmp_path / "dest" / "book.xlsx").exists()
+    # Neither the workbook nor the partial file: on a full disk, a leftover
+    # would keep it full for the next attempt.
+    assert list((tmp_path / "dest").iterdir()) == []
