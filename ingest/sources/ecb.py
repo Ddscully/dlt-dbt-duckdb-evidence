@@ -101,11 +101,13 @@ def ecb_fx_rates():
     state = dlt.current.resource_state()
     url = fx_url(fx_start_date(state.get(FX_WATERMARK_KEY)))
     payload = http.get_json_object(url)
-    # An error object served with a 200 has no `rates`; read as an empty window,
-    # it would land nothing and pass.
-    if "rates" not in payload:
-        raise RuntimeError(f"expected `rates` from {url}, got {payload!r:.300}")
-    rates: dict[str, dict[str, float]] = payload["rates"]
+    # An error object served with a 200 has no `rates`, or a null one; read as an
+    # empty window, it would land nothing and pass.
+    rates = payload.get("rates")
+    if not isinstance(rates, dict):
+        # RuntimeError, not the TypeError TRY004 asks for: no argument was wrong,
+        # the server sent the wrong shape, as in `http.get_json_object`.
+        raise RuntimeError(f"expected `rates` from {url}, got {payload!r:.300}")  # noqa: TRY004
 
     # ISO dates sort as text. Never seen empty (a weekend-only window answers with
     # the previous fixing), but an empty object must not move the watermark.

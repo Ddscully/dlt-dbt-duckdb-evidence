@@ -1055,10 +1055,15 @@ def test_ecb_fx_rates_leaves_the_watermark_alone_on_an_empty_response(monkeypatc
     assert state[ecb.FX_WATERMARK_KEY] == "2024-01-10"
 
 
-def test_ecb_fx_rates_refuses_an_error_object_served_with_a_200(monkeypatch):
+@pytest.mark.parametrize(
+    "payload",
+    [{"message": "upstream unavailable"}, {"message": "upstream unavailable", "rates": None}],
+    ids=["no rates", "null rates"],
+)
+def test_ecb_fx_rates_refuses_an_error_object_served_with_a_200(monkeypatch, payload):
     """Read as an empty window, an error body would land nothing and pass."""
     _state(monkeypatch, {})
-    _serve_fx(monkeypatch, {"message": "upstream unavailable"})
+    _serve_fx(monkeypatch, payload)
 
     with pytest.raises(ResourceExtractionError, match="expected `rates`.*upstream unavailable"):
         list(ecb.ecb_fx_rates())
