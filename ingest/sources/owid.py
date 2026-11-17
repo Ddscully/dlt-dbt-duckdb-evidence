@@ -6,7 +6,6 @@ land with `write_disposition="replace"`.
 
 from __future__ import annotations
 
-import io
 from typing import TYPE_CHECKING
 
 import dlt
@@ -37,7 +36,7 @@ def _read_csv(url: str) -> pa.Table:
     one column an Arrow load lacks is dlt's `_dlt_id`, which nothing reads;
     `_dlt_load_id` is added by `ingest.pipeline.build_pipeline`.
     """
-    return pl.read_csv(io.BytesIO(http.get_bytes(url)), infer_schema_length=None).to_arrow()
+    return pl.read_csv(http.get_bytes(url), infer_schema_length=None).to_arrow()
 
 
 @dlt.resource(name="owid_co2", write_disposition="replace")
