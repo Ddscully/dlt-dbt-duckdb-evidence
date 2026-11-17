@@ -12,10 +12,10 @@
 # watches both directories, so one grouped PR moves both. Python is not here:
 # uv reads `.python-version` and fetches CPython itself, as on a host.
 
-FROM node:24.22.2-bookworm-slim AS node
-FROM ghcr.io/astral-sh/uv:0.13.6 AS uv
+FROM node:24.22.3-bookworm-slim AS node
+FROM ghcr.io/astral-sh/uv:0.13.8 AS uv
 
-FROM mcr.microsoft.com/devcontainers/base:2.2.5-bookworm
+FROM mcr.microsoft.com/devcontainers/base:2.2.6-bookworm
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 
