@@ -8,11 +8,11 @@ yields Arrow batches straight out of DuckDB.
 from __future__ import annotations
 
 import hashlib
+import logging
 import zipfile
 from pathlib import Path
 
 import dlt
-import requests
 from dlt.common.schema.typing import TColumnSchema
 
 from ingest import fixtures, http
@@ -20,42 +20,45 @@ from modern_data_stack import env, workbook
 from modern_data_stack.paths import cache_dir
 from modern_data_stack.workbook import excel_serial_to_timestamp, extract_member
 
+# Logged, not printed: Dagster captures a step's stdout (`ingest.sources.weather`).
+log = logging.getLogger(__name__)
 
-def _download(
-    url: str, dest: Path, *, timeout: int = 300, chunk: int = 1 << 20, retries: int = http.RETRIES
-) -> Path:
-    """Stream a zip to disk under a temporary name, and rename it only once it
-    is a whole zip.
 
-    The rename is the point: the cache serves whatever sits at `dest`, forever.
-    An interrupted download, or a 200 whose body is an error page, would
-    otherwise be served on every later run, failing the extract each time. Both
-    leave a `.part` behind instead, which the next attempt overwrites.
+def whole_zip(path: Path) -> None:
+    """Raise `ValueError` unless `path` is a zip whose every member reads back
+    with the checksum it was stored with.
 
-    Retried on the schedule `ingest.http` uses for every other source, and on
-    the same errors; a body that is not a zip counts as one, like unparseable
-    JSON there. Not `http.get_bytes`: the archive is streamed, never held in
-    memory, and it is never fetched under fixtures (`retail_workbook`).
+    `zipfile.is_zipfile` alone finds only the directory at the end of the file,
+    so a body whose member data was damaged in transit would pass it; `testzip`
+    reads every member. A `ValueError`, so `http.get_file` retries it.
     """
-    tmp = dest.with_suffix(dest.suffix + ".part")
-    for attempt in range(retries):
-        try:
-            with requests.get(url, stream=True, timeout=timeout) as resp:
-                resp.raise_for_status()
-                with tmp.open("wb") as out:
-                    for block in resp.iter_content(chunk_size=chunk):
-                        out.write(block)
-            if not zipfile.is_zipfile(tmp):
-                with tmp.open("rb") as head:
-                    raise ValueError(f"the body is not a zip; it starts {head.read(80)!r}")
-            tmp.replace(dest)
-            return dest
-        except (requests.RequestException, ValueError) as exc:
-            if not http.retryable(exc) or attempt == retries - 1:
-                tmp.unlink(missing_ok=True)
-                raise RuntimeError(f"failed to download {url}: {exc}") from exc
-            http.backoff(url, attempt, retries, exc)
-    raise AssertionError("unreachable: the last attempt returns or raises")
+    if not zipfile.is_zipfile(path):
+        with path.open("rb") as head:
+            raise ValueError(f"{path.name} is not a zip; it starts {head.read(80)!r}")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            damaged = archive.testzip()
+    except (zipfile.BadZipFile, EOFError) as exc:
+        raise ValueError(f"{path.name} is not a whole zip: {exc}") from exc
+    if damaged is not None:
+        raise ValueError(f"{path.name} holds a damaged member, {damaged}")
+
+
+def _cached_archive_is_whole(path: Path) -> bool:
+    """Whether the cached archive can be used as it is.
+
+    Checked on every read, not only at download: a file that reached the cache
+    before the download checked it, or by any other route, would otherwise fail
+    the extract on every run until someone deleted it.
+    """
+    if not path.exists():
+        return False
+    try:
+        whole_zip(path)
+    except ValueError as exc:
+        log.warning("retail: the cached archive is unusable (%s); downloading it again", exc)
+        return False
+    return True
 
 
 # UCI Online Retail II, CC BY 4.0: one static zip of one workbook, hence the
@@ -123,8 +126,8 @@ def retail_workbook() -> Path:
         archive = fixtures.path_for(RETAIL_ARCHIVE)
     else:
         archive = cache / "online_retail_ii.zip"
-        if not archive.exists():
-            _download(RETAIL_ARCHIVE, archive)
+        if not _cached_archive_is_whole(archive):
+            http.get_file(RETAIL_ARCHIVE, archive, check=whole_zip)
 
     extracted = cache / _content_digest(archive) / RETAIL_WORKBOOK_NAME
     if extracted.exists():

@@ -1,8 +1,9 @@
 """Shared HTTP fetching for the ingest layer.
 
-Three functions, all fixture-aware: `INGEST_FIXTURES=1` routes them through
+Four fetchers, all fixture-aware: `INGEST_FIXTURES=1` routes them through
 `ingest.fixtures` instead of the network, which is what makes CI offline. They
-share one retry loop, which logs every failed attempt and wait.
+share one retry loop, `_fetch`, which logs every failed attempt and wait.
+(`ingest.sources.weather` keeps its own, paced by the Open-Meteo budget.)
 
 **Call these as `http.get_json(...)`, never `from ingest.http import get_json`.**
 `tests/test_ingest.py` patches `setattr(http, "get_json", ...)`; a name bound
@@ -15,8 +16,12 @@ from __future__ import annotations
 import gzip
 import json
 import logging
+import os
+import shutil
+import tempfile
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import requests
 
@@ -31,13 +36,28 @@ RETRIES = 5
 BACKOFF_SECONDS = 4.0
 
 
+# Errors in the request itself, which a later identical request repeats: the
+# same rule as a 4xx. `InvalidURL` and `MissingSchema` are also `ValueError`s,
+# so they are named before the `ValueError` that means an unparseable body.
+PERMANENT_ERRORS = (
+    requests.exceptions.InvalidURL,
+    requests.exceptions.InvalidSchema,
+    requests.exceptions.MissingSchema,
+    requests.exceptions.URLRequired,
+    requests.exceptions.TooManyRedirects,
+)
+
+
 def retryable(exc: Exception) -> bool:
     """Whether a later identical request could succeed.
 
     A 5xx, 429, timeout, reset or unparseable body could. Any other 4xx could
     not, as in `ingest.sources.weather.get_weather_json`: the request itself is
-    wrong, and a minute of retries would get the same answer.
+    wrong, and a minute of retries would get the same answer. Nor could a
+    malformed URL or a redirect loop (`PERMANENT_ERRORS`).
     """
+    if isinstance(exc, PERMANENT_ERRORS):
+        return False
     if isinstance(exc, requests.HTTPError):
         status = exc.response.status_code if exc.response is not None else 0
         return not (400 <= status < 500 and status != 429)
@@ -55,18 +75,30 @@ def backoff(url: str, attempt: int, retries: int, exc: Exception) -> None:
 
 
 def _fetch[T](
-    url: str, *, what: str, timeout: int, retries: int, read: Callable[[requests.Response], T]
+    url: str,
+    *,
+    what: str,
+    timeout: int,
+    retries: int,
+    read: Callable[[requests.Response], T],
+    stream: bool = False,
 ) -> T:
     """GET with retries, `read` turning the response into the result, and
     `what` naming the result in the error raised when every attempt failed.
 
     `raise_for_status()` comes first: without it an HTML or JSON error body
     would read fine and be handed on as if it were data. A `ValueError` from
-    `read` (an unparseable body) is retried like a 5xx.
+    `read` (an unparseable body, a file that is not what was asked for) is
+    retried like a 5xx. `stream` leaves the body unread for `read` to consume,
+    and closes the response afterwards.
     """
     last: Exception | None = None
     for attempt in range(retries):
         try:
+            if stream:
+                with requests.get(url, timeout=timeout, stream=True) as resp:
+                    resp.raise_for_status()
+                    return read(resp)
             resp = requests.get(url, timeout=timeout)
             resp.raise_for_status()
             return read(resp)
@@ -125,3 +157,45 @@ def get_json_object(url: str, *, timeout: int = 120, retries: int = RETRIES) -> 
             f"expected a JSON object from {url}, got {payload!r:.300}"
         )
     return payload
+
+
+def get_file(
+    url: str,
+    dest: str | Path,
+    *,
+    check: Callable[[Path], None] | None = None,
+    timeout: int = 300,
+    retries: int = RETRIES,
+    chunk: int = 1 << 20,
+) -> Path:
+    """Stream a large file to `dest`, never holding it in memory, and put it
+    there only once it is whole.
+
+    Written to a temporary file beside `dest`, named uniquely so two loads on
+    a cold cache cannot write into one, and renamed into place after `check`
+    passes. A caller that caches the file serves whatever is at `dest` forever,
+    so nothing partial may reach it: an interrupted transfer, or a 200 whose
+    body is an error page. `check` raises `ValueError` for a body that is not
+    what was asked for, which is retried; a failed attempt removes its file.
+    """
+    dest = Path(dest)
+    if fixtures.enabled():
+        shutil.copyfile(fixtures.path_for(url), dest)
+        return dest
+
+    def write(resp: requests.Response) -> Path:
+        fd, name = tempfile.mkstemp(dir=dest.parent, prefix=f"{dest.name}.", suffix=".part")
+        tmp = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                for block in resp.iter_content(chunk_size=chunk):
+                    out.write(block)
+            if check is not None:
+                check(tmp)
+            tmp.replace(dest)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        return dest
+
+    return _fetch(url, what="the file", timeout=timeout, retries=retries, read=write, stream=True)

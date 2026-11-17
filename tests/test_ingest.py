@@ -161,6 +161,23 @@ def test_every_failed_attempt_is_logged_with_its_wait(monkeypatch, caplog):
     ]
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        requests.exceptions.MissingSchema("no scheme"),
+        requests.exceptions.InvalidURL("bad host"),
+        requests.exceptions.TooManyRedirects("loop"),
+    ],
+)
+def test_a_request_that_can_never_succeed_is_not_retried(monkeypatch, error):
+    """A malformed URL or a redirect loop is the 4xx rule's case: the request is
+    wrong, and a minute of retries would end in the same error."""
+    seen = _mock_get(monkeypatch, [error])
+    with pytest.raises(type(error)):
+        http.get_bytes("https://example.test/x.csv")
+    assert len(seen) == 1
+
+
 def test_get_bytes_retries_like_get_json(monkeypatch):
     seen = _mock_get(
         monkeypatch, [requests.ConnectionError("reset"), FakeResponse(body="a,b\n1,2\n")]
@@ -1128,16 +1145,18 @@ def test_retail_cache_notices_a_re_recorded_archive(monkeypatch, tmp_path):
 
 
 class _StreamedResponse:
-    """`requests.get(..., stream=True)` as `_download` uses it."""
+    """`requests.get(..., stream=True)` as `http.get_file` uses it."""
 
     def __init__(self, body: bytes, status: int = 200):
         self._body = body
         self.status_code = status
+        self.closed = False
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
+        self.closed = True
         return False
 
     def raise_for_status(self):
@@ -1152,7 +1171,8 @@ def _serve_downloads(monkeypatch, responses: list) -> list[str]:
     seen: list[str] = []
     queue = list(responses)
 
-    def fake_get(url, stream=False, timeout=None):
+    def fake_get(url, timeout=None, stream=False):
+        assert stream, "a download is streamed, never read into memory"
         seen.append(url)
         result = queue.pop(0)
         if isinstance(result, Exception):
@@ -1163,14 +1183,14 @@ def _serve_downloads(monkeypatch, responses: list) -> list[str]:
     return seen
 
 
-def _zip_bytes(tmp_path: Path) -> bytes:
+def _zip_bytes(tmp_path: Path, member: bytes = b"a workbook") -> bytes:
     archive = tmp_path / "built.zip"
-    with zipfile.ZipFile(archive, "w") as zf:
-        zf.writestr(retail.RETAIL_WORKBOOK_NAME, b"a workbook")
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as zf:
+        zf.writestr(retail.RETAIL_WORKBOOK_NAME, member)
     return archive.read_bytes()
 
 
-def test_retail_download_refuses_a_body_that_is_not_a_zip(monkeypatch, tmp_path):
+def test_a_download_that_is_not_a_zip_never_reaches_the_cache(monkeypatch, tmp_path):
     """The poisoning at the network end: an error page served with a 200, renamed
     into the cache, would be the "archive" on every later run, failing the
     extract each time until someone found and deleted it."""
@@ -1179,29 +1199,55 @@ def test_retail_download_refuses_a_body_that_is_not_a_zip(monkeypatch, tmp_path)
     dest = tmp_path / "online_retail_ii.zip"
 
     with pytest.raises(RuntimeError, match="not a zip; it starts b'<html>"):
-        retail._download(retail.RETAIL_ARCHIVE, dest)
+        http.get_file(retail.RETAIL_ARCHIVE, dest, check=retail.whole_zip)
     assert len(seen) == http.RETRIES
-    assert not dest.exists()
-    assert not dest.with_suffix(".zip.part").exists()
+    assert list(tmp_path.iterdir()) == []  # neither the file nor a temporary one
 
 
-def test_retail_download_retries_a_dropped_connection(monkeypatch, tmp_path):
+def test_a_zip_with_a_damaged_member_is_refused(tmp_path):
+    """`is_zipfile` reads only the directory at the end, so damage in the middle
+    passes it; the member's checksum does not."""
+    body = _zip_bytes(tmp_path, b"A" * 1000).replace(b"A" * 1000, b"A" * 500 + b"B" * 500)
+    damaged = tmp_path / "damaged.zip"
+    damaged.write_bytes(body)
+    assert zipfile.is_zipfile(damaged)
+    with pytest.raises(ValueError, match="damaged member"):
+        retail.whole_zip(damaged)
+
+
+def test_a_download_is_retried_after_a_dropped_connection(monkeypatch, tmp_path):
     body = _zip_bytes(tmp_path)
-    seen = _serve_downloads(
-        monkeypatch, [requests.ConnectionError("reset"), _StreamedResponse(body)]
-    )
-    dest = tmp_path / "online_retail_ii.zip"
+    first, second = requests.ConnectionError("reset"), _StreamedResponse(body)
+    seen = _serve_downloads(monkeypatch, [first, second])
+    dest = tmp_path / "cache" / "online_retail_ii.zip"
+    dest.parent.mkdir()
 
-    assert retail._download(retail.RETAIL_ARCHIVE, dest) == dest
+    assert http.get_file(retail.RETAIL_ARCHIVE, dest, check=retail.whole_zip) == dest
     assert dest.read_bytes() == body
     assert len(seen) == 2
+    assert second.closed
+    assert list(dest.parent.iterdir()) == [dest]
 
 
-def test_retail_download_raises_a_client_error_at_once(monkeypatch, tmp_path):
+def test_a_download_raises_a_client_error_at_once(monkeypatch, tmp_path):
     seen = _serve_downloads(monkeypatch, [_StreamedResponse(b"", status=404)])
-    with pytest.raises(RuntimeError, match="404"):
-        retail._download(retail.RETAIL_ARCHIVE, tmp_path / "online_retail_ii.zip")
+    with pytest.raises(requests.HTTPError, match="404"):
+        http.get_file(retail.RETAIL_ARCHIVE, tmp_path / "online_retail_ii.zip")
     assert len(seen) == 1
+
+
+def test_a_cached_archive_that_is_not_a_zip_is_downloaded_again(monkeypatch, tmp_path):
+    """The poisoning a check at download time cannot reach: a file already in
+    the cache, from before the check or any other route, is checked on read."""
+    monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path / "cache"))
+    live = tmp_path / "cache" / "live"
+    live.mkdir(parents=True)
+    (live / "online_retail_ii.zip").write_bytes(b"<html>cached error page</html>")
+    seen = _serve_downloads(monkeypatch, [_StreamedResponse(_zip_bytes(tmp_path))])
+
+    workbook_path = retail.retail_workbook()
+    assert workbook_path.read_bytes() == b"a workbook"
+    assert seen == [retail.RETAIL_ARCHIVE]
 
 
 def test_retail_yields_every_row_the_workbook_holds(retail_con):
