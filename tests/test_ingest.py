@@ -22,7 +22,7 @@ import requests
 from dlt.extract.exceptions import ResourceExtractionError
 
 from ingest import fixtures, http, pipeline
-from ingest.sources import ecb, eurostat, retail, weather, worldbank
+from ingest.sources import ecb, eurostat, owid, retail, weather, worldbank
 from modern_data_stack import workbook
 from modern_data_stack.db import row, scalar
 from transform import pipeline_status
@@ -35,6 +35,7 @@ class FakeResponse:
         self._payload = payload
         self._body = body
         self.status_code = status
+        self.content = (body or "").encode()
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -141,6 +142,44 @@ def test_get_json_retries_a_rate_limit(monkeypatch):
     seen = _mock_get(monkeypatch, [FakeResponse(status=429), FakeResponse({"ok": True})])
     assert http.get_json("https://example.test/x") == {"ok": True}
     assert len(seen) == 2
+
+
+def test_every_failed_attempt_is_logged_with_its_wait(monkeypatch, caplog):
+    """A minute of silent retries reads as a hang in a run's log; each one says
+    which URL failed, how, and how long the wait is."""
+    caplog.set_level("INFO", logger=http.log.name)
+    _mock_get(
+        monkeypatch,
+        [FakeResponse(status=503), requests.ConnectionError("reset"), FakeResponse({})],
+    )
+
+    http.get_json("https://example.test/x")
+    lines = [r.getMessage() for r in caplog.records if r.name == http.log.name]
+    assert lines == [
+        "https://example.test/x: attempt 1 of 5 failed (503 error); retrying in 4 s",
+        "https://example.test/x: attempt 2 of 5 failed (reset); retrying in 8 s",
+    ]
+
+
+def test_get_bytes_retries_like_get_json(monkeypatch):
+    seen = _mock_get(
+        monkeypatch, [requests.ConnectionError("reset"), FakeResponse(body="a,b\n1,2\n")]
+    )
+    assert http.get_bytes("https://example.test/x.csv") == b"a,b\n1,2\n"
+    assert len(seen) == 2
+
+
+def test_get_bytes_raises_after_the_last_attempt(monkeypatch):
+    _mock_get(monkeypatch, [FakeResponse(status=502)] * http.RETRIES)
+    with pytest.raises(RuntimeError, match="failed to fetch the file"):
+        http.get_bytes("https://example.test/x.csv")
+
+
+def test_get_bytes_reads_the_fixture_offline(monkeypatch):
+    monkeypatch.setenv(fixtures.ENV_VAR, "1")
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("went to the network"))
+    # The fixture is stored gzipped; the body is the CSV the URL serves.
+    assert http.get_bytes(owid.OWID_CO2).startswith(b"country,")
 
 
 # --------------------------------------------------------------------------- #
