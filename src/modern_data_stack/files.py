@@ -6,7 +6,7 @@ every later run. So the bytes go to a temporary file beside the destination and
 are renamed onto it only once they are whole. A rename within one directory is
 atomic, which is why the temporary file is a sibling and not in `/tmp`.
 
-Three properties, each the answer to a way it went wrong:
+Four properties, each the answer to a way it went wrong:
 
 * **The temporary name is unique per write**, so two loads filling a cold cache
   at once cannot interleave their bytes in one file.
@@ -17,11 +17,17 @@ Three properties, each the answer to a way it went wrong:
 * **A failed write removes its file, and a write first sweeps any left by a
   process that was killed outright** (where no cleanup runs), so a full disk is
   not kept full and the leftovers do not accumulate.
+* **The bytes reach the disk before the rename does.** A filesystem with
+  delayed allocation (ext4, xfs) can commit a rename ahead of the data it
+  names, so a crash just after it leaves an empty file under the real name.
+  The temporary file is synced first. The directory is not: losing the rename
+  leaves the old file or none, either of which the next run replaces.
 """
 
 from __future__ import annotations
 
 import glob
+import os
 import time
 import uuid
 from collections.abc import Callable, Generator
@@ -53,6 +59,8 @@ def replaced_when_whole(
     try:
         with tmp.open("xb") as out:
             yield out
+            out.flush()
+            os.fsync(out.fileno())
         if check is not None:
             check(tmp)
         tmp.replace(dest)

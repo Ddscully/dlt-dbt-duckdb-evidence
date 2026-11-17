@@ -14,7 +14,11 @@ out of them:
 * `privacy`       — pseudonymising an identifier at the publication boundary
 * `ratelimit`     — a sliding-window budget for an API that charges by volume
 * `workbook`      — reading a spreadsheet source without loading it whole
+* `files`         — writing a file whole or not at all, so a cache never serves a partial one
 * `db`            — single-row and scalar reads, without the Optional
+* `env`           — on/off switches from the environment, one set of spellings for all
+* `bus_matrix`    — the bus matrix, derived from the manifest's uniqueness tests
+* `docker_launcher` — a Dagster run launcher that starts runs from an image ID, not a tag
 
 Each takes its configuration as arguments; the project modules that call them
 hold the constants and stay the entry points, so `python -m lake.lakehouse` and

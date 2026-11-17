@@ -38,9 +38,13 @@ BACKOFF_SECONDS = 4.0
 # Errors in the request itself, which a later identical request repeats: the
 # same rule as a 4xx. Most are also `ValueError`s, so they are named before the
 # `ValueError` that means an unparseable body.
+#
+# `InvalidJSONError` is deliberately absent. It means a request body that would
+# not serialise, which nothing here sends, but `resp.json()` raises its subclass
+# `requests.exceptions.JSONDecodeError` for an error page served with a 200: the
+# transient case `get_json` exists to retry.
 PERMANENT_ERRORS = (
     requests.exceptions.InvalidHeader,
-    requests.exceptions.InvalidJSONError,
     requests.exceptions.InvalidURL,
     requests.exceptions.InvalidSchema,
     requests.exceptions.MissingSchema,
@@ -49,10 +53,16 @@ PERMANENT_ERRORS = (
 )
 
 
+# Request Timeout and Too Many Requests: the server ran out of time or patience,
+# and the same request later can pass.
+TRANSIENT_CLIENT_ERRORS = (408, 429)
+
+
 def retryable(exc: Exception) -> bool:
     """Whether a later identical request could succeed.
 
-    A 5xx, 429, timeout, reset or unparseable body could. Any other 4xx could
+    A 5xx, 408, 429, timeout, reset or unparseable body could: 408 and 429 are
+    the 4xx that report the server's state, not the request's. Any other 4xx could
     not, as in `ingest.sources.weather.get_weather_json`: the request itself is
     wrong, and a minute of retries would get the same answer. Nor could a
     malformed URL or a redirect loop (`PERMANENT_ERRORS`).
@@ -61,7 +71,7 @@ def retryable(exc: Exception) -> bool:
         return False
     if isinstance(exc, requests.HTTPError):
         status = exc.response.status_code if exc.response is not None else 0
-        return not (400 <= status < 500 and status != 429)
+        return not (400 <= status < 500 and status not in TRANSIENT_CLIENT_ERRORS)
     return isinstance(exc, (requests.RequestException, ValueError))  # ValueError = bad JSON
 
 

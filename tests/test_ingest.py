@@ -9,6 +9,7 @@ call to exercise. The end-to-end path lives in `just test-pipeline`.
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import re
 import struct
@@ -45,7 +46,13 @@ class FakeResponse:
 
     def json(self):
         if self._body is not None:
-            return json.loads(self._body)  # raises ValueError on a non-JSON body
+            # requests' own type, as `Response.json` raises: it subclasses
+            # `InvalidJSONError` as well as `ValueError`, so a retry rule that
+            # names the one can catch it before the other.
+            try:
+                return json.loads(self._body)
+            except json.JSONDecodeError as exc:
+                raise requests.exceptions.JSONDecodeError(exc.msg, exc.doc, exc.pos) from exc
         return self._payload
 
 
@@ -115,6 +122,22 @@ def test_get_json_raises_on_non_json_body(monkeypatch):
         http.get_json("https://example.test/x")
 
 
+def test_a_real_non_json_response_is_retried(monkeypatch):
+    """A maintenance page served with a 200, through requests' own `Response`.
+
+    `Response.json` raises `requests.exceptions.JSONDecodeError`, which is an
+    `InvalidJSONError` too. Naming that among the permanent errors once made
+    this fail on its first attempt, while a fake raising Python's own
+    `json.JSONDecodeError` kept the test above green.
+    """
+    page = requests.Response()
+    page.status_code = 200
+    page._content = b"<html>maintenance</html>"
+    seen = _mock_get(monkeypatch, [page, FakeResponse({"ok": True})])
+    assert http.get_json("https://example.test/x") == {"ok": True}
+    assert len(seen) == 2
+
+
 def test_get_json_waits_out_a_minute_long_outage(monkeypatch):
     """The waits double, so the retries span a minute."""
     sleeps: list[float] = []
@@ -138,9 +161,10 @@ def test_get_json_raises_a_client_error_at_once(monkeypatch):
     assert len(seen) == 1
 
 
-def test_get_json_retries_a_rate_limit(monkeypatch):
-    """429 is the one 4xx that a later identical request can pass."""
-    seen = _mock_get(monkeypatch, [FakeResponse(status=429), FakeResponse({"ok": True})])
+@pytest.mark.parametrize("status", [408, 429])
+def test_get_json_retries_a_timeout_or_a_rate_limit(monkeypatch, status):
+    """408 and 429 are the 4xx that a later identical request can pass."""
+    seen = _mock_get(monkeypatch, [FakeResponse(status=status), FakeResponse({"ok": True})])
     assert http.get_json("https://example.test/x") == {"ok": True}
     assert len(seen) == 2
 
@@ -1137,18 +1161,18 @@ def test_retail_cache_notices_a_re_recorded_archive(monkeypatch, tmp_path):
 
     def record(payload: bytes) -> None:
         with zipfile.ZipFile(archive, "w") as zf:
-            zf.writestr(retail.RETAIL_WORKBOOK_NAME, payload)
+            zf.writestr(retail.RETAIL_WORKBOOK_NAME, _workbook(payload))
 
     record(b"the first recording")
     first = retail.retail_workbook()
-    assert first.read_bytes() == b"the first recording"
+    assert first.read_bytes() == _workbook(b"the first recording")
     # Cached: same archive, same path, no second extraction.
     assert retail.retail_workbook() == first
 
     record(b"a re-recorded slice")
     second = retail.retail_workbook()
     assert second != first
-    assert second.read_bytes() == b"a re-recorded slice"
+    assert second.read_bytes() == _workbook(b"a re-recorded slice")
 
 
 class _StreamedResponse:
@@ -1190,7 +1214,17 @@ def _serve_downloads(monkeypatch, responses: list) -> list[str]:
     return seen
 
 
-def _zip_bytes(tmp_path: Path, member: bytes = b"a workbook") -> bytes:
+def _workbook(text: bytes = b"a workbook") -> bytes:
+    """A stand-in .xlsx: a zip, as the extract check requires, and the same
+    bytes for the same text, so a test can compare what it reads back."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(zipfile.ZipInfo("xl/workbook.xml", date_time=(2010, 12, 1, 0, 0, 0)), text)
+    return buf.getvalue()
+
+
+def _zip_bytes(tmp_path: Path, member: bytes | None = None) -> bytes:
+    member = _workbook() if member is None else member
     archive = tmp_path / "built.zip"
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as zf:
         zf.writestr(retail.RETAIL_WORKBOOK_NAME, member)
@@ -1271,7 +1305,7 @@ def test_a_cached_archive_that_is_not_a_zip_is_downloaded_again(monkeypatch, tmp
     seen = _serve_downloads(monkeypatch, [_StreamedResponse(_zip_bytes(tmp_path))])
 
     workbook_path = retail.retail_workbook()
-    assert workbook_path.read_bytes() == b"a workbook"
+    assert workbook_path.read_bytes() == _workbook()
     assert seen == [retail.RETAIL_ARCHIVE]
 
 
@@ -1287,7 +1321,30 @@ def test_an_archive_already_extracted_is_not_checked_again(monkeypatch, tmp_path
 
     monkeypatch.setattr(retail, "whole_zip", lambda path: pytest.fail("checked on the warm path"))
     monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("went to the network"))
+    hashed = []
+    digest = retail._content_digest
+    monkeypatch.setattr(retail, "_content_digest", lambda path: hashed.append(path) or digest(path))
     assert retail.retail_workbook() == first
+    assert hashed == [archive], "the warm path reads the archive once, to key the extract"
+
+
+@pytest.mark.parametrize("left", [b"", b"PK\x03\x04 an unzip cut short"])
+def test_a_cached_extract_cut_short_is_extracted_again(monkeypatch, tmp_path, left):
+    """An unzip killed partway, before extracts were written whole, or a crash
+    that committed the rename before the data, left a short workbook under the
+    real name. The warm path served it on every load, because only the archive
+    was ever checked."""
+    monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path / "cache"))
+    live = tmp_path / "cache" / "live"
+    live.mkdir(parents=True)
+    archive = live / "online_retail_ii.zip"
+    archive.write_bytes(_zip_bytes(tmp_path))
+    first = retail.retail_workbook()
+    first.write_bytes(left)
+
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("went to the network"))
+    assert retail.retail_workbook() == first
+    assert first.read_bytes() == _workbook()
 
 
 def test_a_reused_file_that_passes_its_check_is_not_fetched_again(monkeypatch, tmp_path):

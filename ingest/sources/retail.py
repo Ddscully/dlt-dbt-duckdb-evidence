@@ -100,6 +100,10 @@ def retail_workbook() -> Path:
     real run without error. The extract is keyed on the archive's content digest,
     so a re-recorded fixture is a cache miss rather than the previous slice.
     Stale digest directories are left for `just clean`.
+
+    The extract is checked on every read, as the archive is: a cache serves
+    whatever reached it, and an unzip interrupted before extracts were written
+    whole left a short workbook under the real name.
     """
     cache = Path(cache_dir()) / ("fixtures" if fixtures.enabled() else "live")
     cache.mkdir(parents=True, exist_ok=True)
@@ -109,16 +113,31 @@ def retail_workbook() -> Path:
         archive = fixtures.path_for(RETAIL_ARCHIVE)
     else:
         archive = cache / "online_retail_ii.zip"
-        # An archive that has been extracted was whole, so the warm path skips
-        # the check. Any other is checked, and fetched again if it fails: one
-        # can reach the cache by a route that never checked it.
-        if not (archive.exists() and _extract_path(cache, archive).exists()):
-            http.get_file(RETAIL_ARCHIVE, archive, check=whole_zip, reuse=True)
+        # A whole extract proves its archive was whole, so the warm path, which
+        # every load takes, skips reading 45 MB to check it. Any other archive is
+        # checked, and fetched again if it fails: one can reach the cache by a
+        # route that never checked it.
+        if archive.exists():
+            extracted = _extract_path(cache, archive)
+            if _whole_extract(extracted):
+                return extracted
+        http.get_file(RETAIL_ARCHIVE, archive, check=whole_zip, reuse=True)
 
     extracted = _extract_path(cache, archive)
-    if extracted.exists():
+    if _whole_extract(extracted):
         return extracted
     return extract_member(archive, extracted.parent, ".xlsx")
+
+
+def _whole_extract(path: Path) -> bool:
+    """Whether `path` holds a workbook that was written to the end.
+
+    An .xlsx is a zip, whose directory is its last bytes, so a short or empty
+    file fails `is_zipfile`. That is the cheap half of `whole_zip`: the extract
+    came from an archive whose every member was checked, so only truncation
+    afterwards is left to find.
+    """
+    return path.exists() and zipfile.is_zipfile(path)
 
 
 def _extract_path(cache: Path, archive: Path) -> Path:
