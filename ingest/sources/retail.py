@@ -8,8 +8,8 @@ yields Arrow batches straight out of DuckDB.
 from __future__ import annotations
 
 import hashlib
-import logging
 import zipfile
+import zlib
 from pathlib import Path
 
 import dlt
@@ -20,9 +20,6 @@ from modern_data_stack import env, workbook
 from modern_data_stack.paths import cache_dir
 from modern_data_stack.workbook import excel_serial_to_timestamp, extract_member
 
-# Logged, not printed: Dagster captures a step's stdout (`ingest.sources.weather`).
-log = logging.getLogger(__name__)
-
 
 def whole_zip(path: Path) -> None:
     """Raise `ValueError` unless `path` is a zip whose every member reads back
@@ -30,35 +27,21 @@ def whole_zip(path: Path) -> None:
 
     `zipfile.is_zipfile` alone finds only the directory at the end of the file,
     so a body whose member data was damaged in transit would pass it; `testzip`
-    reads every member. A `ValueError`, so `http.get_file` retries it.
+    reads every member. Reading a damaged *compressed* member can fail before
+    the checksum is compared, in zlib, so those errors count as damage too. A
+    `ValueError`, so `http.get_file` retries it. The message names no file: the
+    one checked may be a temporary one, gone by the time anyone reads it.
     """
     if not zipfile.is_zipfile(path):
         with path.open("rb") as head:
-            raise ValueError(f"{path.name} is not a zip; it starts {head.read(80)!r}")
+            raise ValueError(f"not a zip; it starts {head.read(80)!r}")
     try:
         with zipfile.ZipFile(path) as archive:
             damaged = archive.testzip()
-    except (zipfile.BadZipFile, EOFError) as exc:
-        raise ValueError(f"{path.name} is not a whole zip: {exc}") from exc
+    except (zipfile.BadZipFile, EOFError, zlib.error, NotImplementedError, RuntimeError) as exc:
+        raise ValueError(f"not a whole zip: {exc}") from exc
     if damaged is not None:
-        raise ValueError(f"{path.name} holds a damaged member, {damaged}")
-
-
-def _cached_archive_is_whole(path: Path) -> bool:
-    """Whether the cached archive can be used as it is.
-
-    Checked on every read, not only at download: a file that reached the cache
-    before the download checked it, or by any other route, would otherwise fail
-    the extract on every run until someone deleted it.
-    """
-    if not path.exists():
-        return False
-    try:
-        whole_zip(path)
-    except ValueError as exc:
-        log.warning("retail: the cached archive is unusable (%s); downloading it again", exc)
-        return False
-    return True
+        raise ValueError(f"a damaged member, {damaged}")
 
 
 # UCI Online Retail II, CC BY 4.0: one static zip of one workbook, hence the
@@ -126,13 +109,21 @@ def retail_workbook() -> Path:
         archive = fixtures.path_for(RETAIL_ARCHIVE)
     else:
         archive = cache / "online_retail_ii.zip"
-        if not _cached_archive_is_whole(archive):
-            http.get_file(RETAIL_ARCHIVE, archive, check=whole_zip)
+        # An archive that has been extracted was whole, so the warm path skips
+        # the check. Any other is checked, and fetched again if it fails: one
+        # can reach the cache by a route that never checked it.
+        if not (archive.exists() and _extract_path(cache, archive).exists()):
+            http.get_file(RETAIL_ARCHIVE, archive, check=whole_zip, reuse=True)
 
-    extracted = cache / _content_digest(archive) / RETAIL_WORKBOOK_NAME
+    extracted = _extract_path(cache, archive)
     if extracted.exists():
         return extracted
     return extract_member(archive, extracted.parent, ".xlsx")
+
+
+def _extract_path(cache: Path, archive: Path) -> Path:
+    """Where the workbook extracted from `archive` lives: keyed on its digest."""
+    return cache / _content_digest(archive) / RETAIL_WORKBOOK_NAME
 
 
 def _typed_cte() -> str:

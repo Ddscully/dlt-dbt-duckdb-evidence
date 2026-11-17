@@ -16,9 +16,7 @@ from __future__ import annotations
 import gzip
 import json
 import logging
-import os
 import shutil
-import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -26,6 +24,7 @@ from pathlib import Path
 import requests
 
 from ingest import fixtures
+from modern_data_stack import files
 
 # Logged, not printed: Dagster captures a step's stdout (`ingest.sources.weather`).
 log = logging.getLogger(__name__)
@@ -37,9 +36,11 @@ BACKOFF_SECONDS = 4.0
 
 
 # Errors in the request itself, which a later identical request repeats: the
-# same rule as a 4xx. `InvalidURL` and `MissingSchema` are also `ValueError`s,
-# so they are named before the `ValueError` that means an unparseable body.
+# same rule as a 4xx. Most are also `ValueError`s, so they are named before the
+# `ValueError` that means an unparseable body.
 PERMANENT_ERRORS = (
+    requests.exceptions.InvalidHeader,
+    requests.exceptions.InvalidJSONError,
     requests.exceptions.InvalidURL,
     requests.exceptions.InvalidSchema,
     requests.exceptions.MissingSchema,
@@ -164,38 +165,48 @@ def get_file(
     dest: str | Path,
     *,
     check: Callable[[Path], None] | None = None,
+    reuse: bool = False,
     timeout: int = 300,
     retries: int = RETRIES,
     chunk: int = 1 << 20,
 ) -> Path:
     """Stream a large file to `dest`, never holding it in memory, and put it
-    there only once it is whole.
+    there only once it is whole (`modern_data_stack.files.replaced_when_whole`).
 
-    Written to a temporary file beside `dest`, named uniquely so two loads on
-    a cold cache cannot write into one, and renamed into place after `check`
-    passes. A caller that caches the file serves whatever is at `dest` forever,
-    so nothing partial may reach it: an interrupted transfer, or a 200 whose
-    body is an error page. `check` raises `ValueError` for a body that is not
-    what was asked for, which is retried; a failed attempt removes its file.
+    `check` raises `ValueError` for a body that is not what was asked for: an
+    error page served with a 200, a damaged archive. It is retried like a 5xx.
+
+    `reuse` keeps a file already at `dest` if it passes `check`, and fetches it
+    again if it does not. A cache serves whatever reached it by any route,
+    including before the check existed, so that is where the check has to run.
+
+    Under fixtures the recorded file is copied, un-gzipped as `get_bytes` does,
+    and checked the same way, so an offline run refuses what a live one would.
     """
     dest = Path(dest)
+    if reuse and dest.exists():
+        try:
+            if check is not None:
+                check(dest)
+            return dest
+        except ValueError as exc:
+            log.warning("%s: the copy at %s is unusable (%s); fetching it again", url, dest, exc)
+
     if fixtures.enabled():
-        shutil.copyfile(fixtures.path_for(url), dest)
+        path = fixtures.path_for(url)
+        with files.replaced_when_whole(dest, check=check) as out:
+            if path.suffix == ".gz":
+                with gzip.open(path, "rb") as src:
+                    shutil.copyfileobj(src, out)
+            else:
+                with path.open("rb") as src:
+                    shutil.copyfileobj(src, out)
         return dest
 
     def write(resp: requests.Response) -> Path:
-        fd, name = tempfile.mkstemp(dir=dest.parent, prefix=f"{dest.name}.", suffix=".part")
-        tmp = Path(name)
-        try:
-            with os.fdopen(fd, "wb") as out:
-                for block in resp.iter_content(chunk_size=chunk):
-                    out.write(block)
-            if check is not None:
-                check(tmp)
-            tmp.replace(dest)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
+        with files.replaced_when_whole(dest, check=check) as out:
+            for block in resp.iter_content(chunk_size=chunk):
+                out.write(block)
         return dest
 
     return _fetch(url, what="the file", timeout=timeout, retries=retries, read=write, stream=True)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import gzip
 import json
 import re
+import struct
 import time
 import zipfile
 from datetime import UTC, date, datetime, timedelta
@@ -167,6 +168,7 @@ def test_every_failed_attempt_is_logged_with_its_wait(monkeypatch, caplog):
         requests.exceptions.MissingSchema("no scheme"),
         requests.exceptions.InvalidURL("bad host"),
         requests.exceptions.TooManyRedirects("loop"),
+        requests.exceptions.InvalidHeader("newline in a header"),
     ],
 )
 def test_a_request_that_can_never_succeed_is_not_retried(monkeypatch, error):
@@ -1209,7 +1211,7 @@ def test_a_download_that_is_not_a_zip_never_reaches_the_cache(monkeypatch, tmp_p
     assert list(tmp_path.iterdir()) == []  # neither the file nor a temporary one
 
 
-def test_a_zip_with_a_damaged_member_is_refused(tmp_path):
+def test_a_zip_with_a_damaged_stored_member_is_refused(tmp_path):
     """`is_zipfile` reads only the directory at the end, so damage in the middle
     passes it; the member's checksum does not."""
     body = _zip_bytes(tmp_path, b"A" * 1000).replace(b"A" * 1000, b"A" * 500 + b"B" * 500)
@@ -1218,6 +1220,24 @@ def test_a_zip_with_a_damaged_member_is_refused(tmp_path):
     assert zipfile.is_zipfile(damaged)
     with pytest.raises(ValueError, match="damaged member"):
         retail.whole_zip(damaged)
+
+
+def test_a_zip_with_a_damaged_compressed_member_is_refused(tmp_path):
+    """The real archive is deflated, and damage there can stop zlib before any
+    checksum is compared: `testzip` then raises `zlib.error`, which neither the
+    download's retry nor the cache check would catch unless `whole_zip` turns it
+    into a `ValueError`. Byte 0xFF opens a deflate block of the reserved type 3,
+    which zlib refuses outright."""
+    archive = tmp_path / "deflated.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(retail.RETAIL_WORKBOOK_NAME, b"a workbook " * 100)
+    body = bytearray(archive.read_bytes())
+    name_len, extra_len = struct.unpack("<HH", body[26:30])  # the local file header
+    body[30 + name_len + extra_len] = 0xFF
+    archive.write_bytes(bytes(body))
+
+    with pytest.raises(ValueError, match="not a whole zip"):
+        retail.whole_zip(archive)
 
 
 def test_a_download_is_retried_after_a_dropped_connection(monkeypatch, tmp_path):
@@ -1253,6 +1273,48 @@ def test_a_cached_archive_that_is_not_a_zip_is_downloaded_again(monkeypatch, tmp
     workbook_path = retail.retail_workbook()
     assert workbook_path.read_bytes() == b"a workbook"
     assert seen == [retail.RETAIL_ARCHIVE]
+
+
+def test_an_archive_already_extracted_is_not_checked_again(monkeypatch, tmp_path):
+    """Its extract is the proof it was whole, so the warm path, which every
+    retail load takes, skips reading 45 MB to check it."""
+    monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path / "cache"))
+    live = tmp_path / "cache" / "live"
+    live.mkdir(parents=True)
+    archive = live / "online_retail_ii.zip"
+    archive.write_bytes(_zip_bytes(tmp_path))
+    first = retail.retail_workbook()
+
+    monkeypatch.setattr(retail, "whole_zip", lambda path: pytest.fail("checked on the warm path"))
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("went to the network"))
+    assert retail.retail_workbook() == first
+
+
+def test_a_reused_file_that_passes_its_check_is_not_fetched_again(monkeypatch, tmp_path):
+    dest = tmp_path / "online_retail_ii.zip"
+    dest.write_bytes(_zip_bytes(tmp_path))
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("went to the network"))
+    assert http.get_file(retail.RETAIL_ARCHIVE, dest, check=retail.whole_zip, reuse=True) == dest
+
+
+def test_get_file_under_fixtures_un_gzips_and_checks_like_a_live_fetch(monkeypatch, tmp_path):
+    """Offline must refuse what live would: a recorded file is checked, and a
+    gzipped one is handed on as the URL serves it, as `get_bytes` does."""
+    monkeypatch.setenv(fixtures.ENV_VAR, "1")
+    recorded = tmp_path / "recorded.csv.gz"
+    recorded.write_bytes(gzip.compress(b"a,b\n1,2\n"))
+    monkeypatch.setattr(fixtures, "path_for", lambda url: recorded)
+
+    dest = tmp_path / "out.csv"
+    assert http.get_file("https://example.test/x.csv", dest).read_bytes() == b"a,b\n1,2\n"
+
+    def refuse(path):
+        raise ValueError("not what was asked for")
+
+    refused = tmp_path / "refused.csv"
+    with pytest.raises(ValueError, match="not what was asked for"):
+        http.get_file("https://example.test/x.csv", refused, check=refuse)
+    assert not refused.exists()
 
 
 def test_retail_yields_every_row_the_workbook_holds(retail_con):

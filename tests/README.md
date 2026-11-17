@@ -22,7 +22,7 @@ The rest group by what they protect:
 | hand-maintained lists against the tree | `test_definitions`, `test_asset_checks`, `test_workflows`, `test_documented_counts`, `test_course`, `test_agent_instructions`, `test_plugin_settings`, `test_packaging` |
 | the model metadata | `test_additivity`, `test_bus_matrix` |
 | the publication boundary | `test_export`, `test_privacy`, `test_restore_history`, `test_compare_releases` |
-| the package's mechanisms | `test_paths`, `test_db`, `test_workbook`, `test_ratelimit`, `test_pipeline_status`, `test_report` |
+| the package's mechanisms | `test_paths`, `test_db`, `test_workbook`, `test_files`, `test_ratelimit`, `test_pipeline_status`, `test_report` |
 | the service | `test_dagster_instance`, `test_docker_launcher` |
 
 Which list each guard holds, and the traps in writing one, are the `repo-guards`

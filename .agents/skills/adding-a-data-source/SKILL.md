@@ -47,7 +47,8 @@ be read against the other half.
   casually — step 4 explains what breaks.
 - Fetch through `http.get_json()` (`from ingest import http`),
   `http.get_bytes()` for a whole file such as a CSV, or `http.get_file()` to
-  stream a large one to disk with a `check`, so you inherit the retries,
+  stream a large one to disk with a `check` (and `reuse=True` to keep a cached
+  copy that still passes it), so you inherit the retries,
   their log lines, `raise_for_status` and fixture awareness. Don't hand-roll a
   `requests.get`, and don't hand a URL to a reader that fetches it itself
   (`pl.read_csv(url)` tries once). **Reach through the module, never `from ingest.http import
