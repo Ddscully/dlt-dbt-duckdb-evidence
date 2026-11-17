@@ -920,6 +920,18 @@ def test_eu_elec_prices_refuses_one_category_that_is_not_the_one_requested(monke
         list(eurostat.eu_elec_prices())
 
 
+def test_eu_elec_prices_refuses_a_cube_with_more_dimensions_than_sizes(monkeypatch):
+    """`zip` stops at the shorter list: without `strict`, a dimension with no
+    size would skip the filter check and shift every stride, and the walk would
+    label the wrong cells, green."""
+    cube = _jsonstat({"0": 0.25})
+    cube["id"].append("nrg_cons")
+    cube["dimension"]["nrg_cons"] = {"category": {"index": {"KWH2500-4999": 0}}}
+    monkeypatch.setattr(http, "get_json", lambda url, **kw: cube)
+    with pytest.raises(ResourceExtractionError, match="shorter than argument 1"):
+        list(eurostat.eu_elec_prices())
+
+
 def test_the_recorded_eurostat_payload_passes_its_own_filter_check():
     """The check reads `category.index` as a mapping, and the synthetic cubes above
     assume that shape; the recorded response is the API's own answer to it."""
