@@ -69,3 +69,4 @@ Status: accepted YYYY-MM-DD (#PR) | superseded by NNNN
 | [0021](0021-a-build-is-diffed-from-the-commit-that-built-its-cache.md) | A site build is diffed from the commit that built its cache | accepted 2026-10-14 |
 | [0022](0022-dg-runs-where-it-can-dagster-dev-stays-where-dg-dev-cannot.md) | `dg` runs where it can; `dagster dev` stays where `dg dev` cannot | accepted 2026-10-19 |
 | [0023](0023-assets-register-by-living-in-orchestration-defs.md) | Assets and checks register by living in `orchestration/defs/`, not by a list | accepted 2026-11-16 |
+| [0024](0024-query-metric-takes-its-choices-from-the-yml.md) | `query_metric` takes its groupings, filter values and coverage from the semantic layer, and a null is filled only where the column cannot be null | accepted 2026-11-18 |

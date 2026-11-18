@@ -178,8 +178,9 @@ describe-model model:
     uv run python -m agent.catalog {{model}}
 
 # The metrics are dbt's semantic layer (dbt/models/marts/retail/_retail_metrics.yml),
-# compiled by MetricFlow and run read-only. `--by year|quarter|month|country|region`,
-# `--years 2010 2011`, `--where "region=Europe & Central Asia"`; the arguments are
+# compiled by MetricFlow and run read-only. `--by` a time grain or a grouping the
+# yml offers (year, country, region, …), `--top 5`, `--years 2010 2011`,
+# `--where "region=Europe & Central Asia"`; the arguments are
 # passed as typed, so a quoted value keeps its spaces.
 # Totals and breakdowns of the retail metrics, with an "all" row (read-only)
 [group('inspect')]

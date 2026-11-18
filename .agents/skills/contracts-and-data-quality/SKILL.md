@@ -111,17 +111,32 @@ account of the same ground is `docs/DATA_QUALITY.md`.
   (`dbt/models/marts/retail/_retail_metrics.yml`), compiled by MetricFlow's
   Python engine in `agent/metrics.py` (`just metric`), and MetricFlow never
   reads `meta`: it sums whatever a measure names. `tests/test_semantic_layer.py`
-  holds the yml to the labels instead, so a new metric follows three rules:
+  holds the yml to the labels and the `not_null` tests instead, so a new metric
+  follows these rules:
   - **A measure is a bare column** (no `expr`, or one naming a column), and a
     subset is chosen with the *metric's* `filter:` — a `case when` in the
     measure hides the column from the label lookup.
-  - **`agg: sum` only over an `additive` column**; `count_distinct` over
+  - **`agg: sum` only over an `additive` column**, or a `semi_additive` one with
+    a `non_additive_dimension` on the time dimension (population: summed across
+    countries, the last year's taken across years); `count_distinct` over
     anything, which the tool's `all` row handles, since MetricFlow does not roll
     distinct counts up.
+  - **`fill_nulls_with` only over a column a `not_null` test holds.** There a
+    null can only mean "no rows", which for a sale is zero, and without it a
+    region with no returns had no return rate rather than 0%. Over a nullable
+    column a null is unreported: on a country-year table, 2025 read 0.0 Mt of
+    CO2. Give a periodic table's metrics no `fill_nulls_with` at all.
+  - **An input of a ratio or derived metric over a nullable column carries a
+    filter**, so both sides count the same rows: unmatched, CO2 per person
+    counted Taiwan's 267 Mt and none of its population. The test sees that a
+    filter is there, not that it is the right one.
   - **No entity or dimension reads a `direct_identifier` column**:
     `customer_id` is counted, never grouped by.
-  - Give each simple metric `fill_nulls_with: 0`, or a group with no rows for
-    it reads as unknown: a region with no returns had no return rate, not 0%.
+  - **`query_metric` offers a dimension only with `config: meta: {offered_as:
+    <name>}`**, one dimension per name; the time grains offered are those no
+    finer than the table's own. Metrics from two tables are refused in one
+    request, because MetricFlow joins them on the date alone
+    ([0024](../../../docs/decisions/0024-query-metric-takes-its-choices-from-the-yml.md)).
   - A joined dimension is `<entity>__<dimension>` — `country__region`, not
     `order_line__country__region` — and the compiled SQL names
     `"warehouse"."marts".…`, so an in-memory test database must be attached as
