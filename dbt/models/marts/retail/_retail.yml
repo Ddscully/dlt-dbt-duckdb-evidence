@@ -182,6 +182,7 @@ models:
           additivity: additive
         description: >
           Units, signed: negative on cancellations and on stock write-offs.
+        data_tests: [not_null]
       - name: unit_price
         data_type: DOUBLE
         meta:
