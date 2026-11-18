@@ -51,7 +51,7 @@ project modules that call it hold the constants.
 
 ### The package — `src/modern_data_stack/`
 
-Twelve modules, no mention of emissions in any of them. Copy the directory, or
+No module in it mentions emissions. Copy the directory, or
 depend on it and write only the layers below.
 
 | Module | What it does | Configured by |
@@ -65,6 +65,7 @@ depend on it and write only the layers below.
 | `privacy` | pseudonymise an identifier at the publication boundary | the classified columns and a salt |
 | `ratelimit` | a sliding-window budget for an API that charges by volume | `(seconds, units)` limits |
 | `workbook` | read a spreadsheet source without loading it whole | a URL and a batch size |
+| `files` | write a file whole or not at all, so a cache never serves a partial one | an optional check on the written file |
 | `db` | single-row and scalar reads, without the `Optional` | nothing |
 | `env` | read an on/off switch from the environment, with one set of spellings for every switch | the variable's name |
 | `bus_matrix` | derive the bus matrix from the manifest's uniqueness tests | a schema and the `dim_`/`fct_` prefixes |
@@ -91,8 +92,11 @@ keep the split a split:
   hand-rolled a copy — and both omitted the `unregister`. Its `schema` parameter
   has **no default**: every caller writes `analytics`, which is exactly what
   would make a default invisible to the caller that means something else.
-- **`RawSchemaDltTranslator` stays in `orchestration/defs/ingest.py`**: moving it would
-  put Dagster, an optional dependency group, behind a package import.
+- **`RawSchemaDltTranslator` stays in `orchestration/defs/ingest.py`**: it is
+  twenty lines wrapped around this project's `RAW_DESCRIPTIONS` and freshness
+  policy, with nothing left to share once those are parameters. Dagster is not
+  the bar: `docker_launcher` needs the `orchestration` group too, and no
+  submodule is imported with the package.
 
 ### Config-only — copy the file, change the constants at the top
 

@@ -45,19 +45,26 @@ be read against the other half.
 - The `name=` you pick becomes the raw table name **and** the second element of
   the Dagster asset key (`raw/<resource>`). Choose it once and don't rename it
   casually — step 4 explains what breaks.
-- Fetch through `http.get_json()` (`from ingest import http`) so you inherit its
-  retry + `raise_for_status` behaviour, and its fixture awareness. Don't hand-roll
-  a `requests.get`. **Reach through the module, never `from ingest.http import
+- Fetch through `http.get_json()` (`from ingest import http`),
+  `http.get_bytes()` for a whole file such as a CSV, or `http.get_file()` to
+  stream a large one to disk with a `check` (and `reuse=True` to keep a cached
+  copy that still passes it: under fixtures, read `fixtures.path_for(url)`
+  instead, as `retail_workbook` does, because `get_file` refuses `reuse` there),
+  so you inherit the retries,
+  their log lines, `raise_for_status` and fixture awareness. Don't hand-roll a
+  `requests.get`, and don't hand a URL to a reader that fetches it itself
+  (`pl.read_csv(url)` tries once). **Reach through the module, never `from ingest.http import
   get_json`** — binding the name makes
   `monkeypatch.setattr(http, "get_json", …)` patch something nothing looks up,
-  and `tests/test_ingest.py` does that in ten places. There is no re-export
+  and `tests/test_ingest.py` does that throughout. There is no re-export
   facade either, so a stale patch raises `AttributeError` rather than passing
   green against the live fetch path.
 - **A source may import another, and should say so.** `weather_locations` reads
   capital coordinates from the World Bank, so `ingest/sources/weather.py`
   imports `worldbank` — the one real dependency the per-publisher split made
   visible.
-- **CSV sources:** `pl.read_csv(..., infer_schema_length=None)`. The default
+- **CSV sources:** `pl.read_csv(http.get_bytes(url), infer_schema_length=None)`,
+  as `ingest/sources/owid.py` does. The default
   100-row inference sees OWID's empty early rows and lands numerics as VARCHAR.
 - **Leave `REFRESH = "drop_resources"` alone.** dlt persists its schema and only
   *widens* types, so a column that lands wrong is not fixed by re-running. It's

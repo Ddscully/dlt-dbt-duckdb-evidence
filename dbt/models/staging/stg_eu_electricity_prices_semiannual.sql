@@ -26,10 +26,11 @@ mapped as (
         substr(period, 6, 2) as half,
         price_eur_kwh
     from source
-    -- Drops the long aggregate codes (EU27_2020, EA19). Note that this does
-    -- *not* drop 'EA' (euro area) — two letters, so it survives here and falls
-    -- out at the inner join below, which no ISO2 code matches.
-    where length(geo) = 2
+    -- Drops the aggregates: the long codes (EU27_2020, EA19) by length, and
+    -- 'EA' (the euro area), the one two-letter aggregate, by name. Every code
+    -- left is meant to be a country, so one the join below cannot map arrives
+    -- with a null `country_iso3` and fails its `not_null` test.
+    where length(geo) = 2 and geo <> 'EA'
 ),
 
 -- The one aggregate kept, as a column beside each country's price and not as a
@@ -62,5 +63,7 @@ select
     m.is_eu_member,
     e.eu27_price_eur_kwh
 from mapped as m
-inner join country as c on m.country_iso2 = c.country_iso2
+-- Left, not inner: an inner join would drop a code Eurostat starts publishing
+-- that no country matches, silently, before the test that exists to catch it.
+left join country as c on m.country_iso2 = c.country_iso2
 left join eu27 as e on m.period = e.period

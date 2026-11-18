@@ -163,6 +163,7 @@ jobs:
             src/modern_data_stack/db.py
             src/modern_data_stack/ducklake.py
             src/modern_data_stack/env.py
+            src/modern_data_stack/files.py
             src/modern_data_stack/fixtures.py
             src/modern_data_stack/paths.py
             src/modern_data_stack/ratelimit.py

@@ -787,8 +787,9 @@ models:
           `ingest/sources/retail.py` for why a timezone here would make the
           warehouse depend on which machine built it. `invoice_date` below is
           cast from this column and `invoice_month` is computed from it one
-          layer up, at ingest — `stg_retail_lines_dates_a_line_by_the_till_time_it_carries`
-          is what holds the two derivations to each other.
+          layer up, at ingest. Nothing compares the two on the real rows;
+          `stg_retail_lines_dates_a_line_by_the_till_time_it_carries` states
+          the relation once, on fixture rows at a day and a year boundary.
         meta:
           pii: quasi_identifier
         data_tests: [not_null]

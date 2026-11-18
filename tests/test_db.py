@@ -57,5 +57,12 @@ def test_no_row_raises_and_names_the_query(con):
     """The bare idiom raises `TypeError: 'NoneType' object is not subscriptable`
     from the subscript, which names neither the query nor the connection."""
     con.execute("delete from t")
-    with pytest.raises(ValueError, match=r"no rows: select a from t limit 1"):
+    with pytest.raises(ValueError, match=r"no rows, not one: select a from t limit 1"):
         scalar(con, "select a from t limit 1")
+
+
+def test_several_rows_raise_rather_than_return_the_first(con):
+    """A `group by` passed by mistake returns one row per group; the first is
+    one group's number, and it would flow on as the total."""
+    with pytest.raises(ValueError, match=r"2 rows, not one: select count\(\*\) from t group by a"):
+        scalar(con, "select count(*) from t group by a")

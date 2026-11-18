@@ -44,7 +44,7 @@ def eu_elec_prices():
     # Row-major strides: stride of the last dimension is 1, working leftwards.
     strides: dict[str, int] = {}
     acc = 1
-    for name, size in zip(reversed(dim_ids), reversed(sizes)):
+    for name, size in zip(reversed(dim_ids), reversed(sizes), strict=True):
         strides[name] = acc
         acc *= size
 
@@ -74,8 +74,12 @@ def check_one_category_per_filter(cube: dict) -> None:
     label: the price excluding tax as the price including it, with no error and
     a plausible number. Measured on a two-category `tax` cube before this check:
     0.10 came back where 0.25 was the answer.
+
+    `strict=True`, because JSON-stat promises `id` and `size` are the same
+    length, and a cube that broke it would otherwise have its last dimensions
+    dropped from this check and the strides read from the wrong sizes.
     """
-    for name, size in zip(cube["id"], cube["size"]):
+    for name, size in zip(cube["id"], cube["size"], strict=True):
         if name in WALKED_DIMENSIONS:
             continue
         categories = list(cube["dimension"][name]["category"]["index"])

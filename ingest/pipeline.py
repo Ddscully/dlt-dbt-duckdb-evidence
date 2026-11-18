@@ -162,8 +162,9 @@ def build_pipeline() -> dlt.Pipeline:
     `$XDG_DATA_HOME/dlt/pipelines/<name>/`; both can exist with only the first
     live, which is why `just dlt-state` asks dlt rather than listing a directory.
     """
-    # dlt leaves `_dlt_load_id` off Arrow data by default, and retail's freshness
-    # and load times are read from it.
+    # dlt leaves `_dlt_load_id` off Arrow data by default, which is what OWID and
+    # retail yield, and every raw table's load time is read from it: dbt's source
+    # freshness (`loaded_at_field`) and the pipeline page's `loaded_at`.
     os.environ.setdefault("NORMALIZE__PARQUET_NORMALIZER__ADD_DLT_LOAD_ID", "true")
 
     # Into the DuckLake catalog, the only copy of the landing tables.

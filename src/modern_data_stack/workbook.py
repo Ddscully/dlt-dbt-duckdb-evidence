@@ -35,6 +35,8 @@ from pathlib import Path
 
 import duckdb
 
+from modern_data_stack import files
+
 # Excel's effective day 0 (see the module docstring). Serials carry the time of
 # day as a fraction, so the conversion is in seconds.
 EXCEL_EPOCH = "1899-12-30"
@@ -64,6 +66,11 @@ def extract_member(archive_path: Path | str, dest_dir: Path | str, suffix: str) 
     a publisher that starts shipping two workbooks has changed the contract, and
     quietly reading the first one alphabetically is how half a source goes
     missing without an error.
+
+    Written through `modern_data_stack.files.replaced_when_whole`, because a
+    caller that caches the extract serves whatever is at the final name: an
+    interrupted unzip left there would be read as the workbook on every later
+    run.
     """
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +79,7 @@ def extract_member(archive_path: Path | str, dest_dir: Path | str, suffix: str) 
         if len(members) != 1:
             raise ValueError(f"expected exactly one {suffix} in {archive_path}, found {members}")
         target = dest_dir / Path(members[0]).name
-        with archive.open(members[0]) as src, target.open("wb") as out:
+        with archive.open(members[0]) as src, files.replaced_when_whole(target) as out:
             shutil.copyfileobj(src, out)
     return target
 

@@ -8,34 +8,40 @@ yields Arrow batches straight out of DuckDB.
 from __future__ import annotations
 
 import hashlib
+import zipfile
+import zlib
 from pathlib import Path
 
 import dlt
-import requests
 from dlt.common.schema.typing import TColumnSchema
 
-from ingest import fixtures
+from ingest import fixtures, http
 from modern_data_stack import env, workbook
 from modern_data_stack.paths import cache_dir
 from modern_data_stack.workbook import excel_serial_to_timestamp, extract_member
 
 
-def _download(url: str, dest: Path, *, timeout: int = 300, chunk: int = 1 << 20) -> Path:
-    """Stream a large file to disk, writing to a temporary name first.
+def whole_zip(path: Path) -> None:
+    """Raise `ValueError` unless `path` is a zip whose every member reads back
+    with the checksum it was stored with.
 
-    The rename is the point: an interrupted download that left a short file under
-    the real name would be indistinguishable from a complete one on the next run,
-    and the cache would serve a truncated workbook forever. A partial write
-    leaves a `.part` behind instead, which is retried and overwritten.
+    `zipfile.is_zipfile` alone finds only the directory at the end of the file,
+    so a body whose member data was damaged in transit would pass it; `testzip`
+    reads every member. Reading a damaged *compressed* member can fail before
+    the checksum is compared, in zlib, so those errors count as damage too. A
+    `ValueError`, so `http.get_file` retries it. The message names no file: the
+    one checked may be a temporary one, gone by the time anyone reads it.
     """
-    tmp = dest.with_suffix(dest.suffix + ".part")
-    with requests.get(url, stream=True, timeout=timeout) as resp:
-        resp.raise_for_status()
-        with tmp.open("wb") as out:
-            for block in resp.iter_content(chunk_size=chunk):
-                out.write(block)
-    tmp.replace(dest)
-    return dest
+    if not zipfile.is_zipfile(path):
+        with path.open("rb") as head:
+            raise ValueError(f"not a zip; it starts {head.read(80)!r}")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            damaged = archive.testzip()
+    except (zipfile.BadZipFile, EOFError, zlib.error, NotImplementedError, RuntimeError) as exc:
+        raise ValueError(f"not a whole zip: {exc}") from exc
+    if damaged is not None:
+        raise ValueError(f"a damaged member, {damaged}")
 
 
 # UCI Online Retail II, CC BY 4.0: one static zip of one workbook, hence the
@@ -94,6 +100,10 @@ def retail_workbook() -> Path:
     real run without error. The extract is keyed on the archive's content digest,
     so a re-recorded fixture is a cache miss rather than the previous slice.
     Stale digest directories are left for `just clean`.
+
+    The extract is checked on every read, as the archive is: a cache serves
+    whatever reached it, and an unzip interrupted before extracts were written
+    whole left a short workbook under the real name.
     """
     cache = Path(cache_dir()) / ("fixtures" if fixtures.enabled() else "live")
     cache.mkdir(parents=True, exist_ok=True)
@@ -103,13 +113,37 @@ def retail_workbook() -> Path:
         archive = fixtures.path_for(RETAIL_ARCHIVE)
     else:
         archive = cache / "online_retail_ii.zip"
-        if not archive.exists():
-            _download(RETAIL_ARCHIVE, archive)
+        # A whole extract proves its archive was whole, so the warm path, which
+        # every load takes, skips reading 45 MB to check it. Any other archive is
+        # checked, and fetched again if it fails: one can reach the cache by a
+        # route that never checked it.
+        if archive.exists():
+            extracted = _extract_path(cache, archive)
+            if _whole_extract(extracted):
+                return extracted
+        http.get_file(RETAIL_ARCHIVE, archive, check=whole_zip, reuse=True)
 
-    extracted = cache / _content_digest(archive) / RETAIL_WORKBOOK_NAME
-    if extracted.exists():
+    extracted = _extract_path(cache, archive)
+    if _whole_extract(extracted):
         return extracted
     return extract_member(archive, extracted.parent, ".xlsx")
+
+
+def _whole_extract(path: Path) -> bool:
+    """Whether `path` holds a workbook that was written to the end.
+
+    An .xlsx is a zip, whose directory is its last bytes, so a short or empty
+    file fails `is_zipfile`. That is the cheap half of `whole_zip`: `zipfile`
+    checks a member's CRC as `extract_member` reads it to the end, and refuses a
+    mismatch before the extract is renamed into place, on the fixture branch as
+    on the live one. So only truncation afterwards is left to find.
+    """
+    return path.exists() and zipfile.is_zipfile(path)
+
+
+def _extract_path(cache: Path, archive: Path) -> Path:
+    """Where the workbook extracted from `archive` lives: keyed on its digest."""
+    return cache / _content_digest(archive) / RETAIL_WORKBOOK_NAME
 
 
 def _typed_cte() -> str:

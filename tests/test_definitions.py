@@ -25,14 +25,63 @@ pytestmark = pytest.mark.skipif(
 # process-wide) lives in conftest.py.
 
 
+@dg.op
+def _op():
+    pass
+
+
+@dg.graph
+def _graph():
+    _op()
+
+
+@dg.repository
+def _repository():
+    return []
+
+
+@dg.io_manager
+def _io_manager(_):
+    return dg.InMemoryIOManager()
+
+
+class _Resource(dg.ConfigurableResource):
+    pass
+
+
+@dg.logger
+def _logger(_):
+    pass
+
+
 @pytest.mark.parametrize(
     "stray",
     [
         dg.ScheduleDefinition(name="s", cron_schedule="0 1 * * *", target=dg.AssetSelection.all()),
         dg.define_asset_job("j", selection=dg.AssetSelection.all()),
+        _graph,
+        _repository,
+        _io_manager,
+        dg.FilesystemIOManager(),
+        dg.ResourceDefinition.hardcoded_resource(1),
+        _Resource.configure_at_launch(),
+        _logger,
+        dg.in_process_executor,
         dg.Definitions(),
     ],
-    ids=["schedule", "job", "definitions"],
+    ids=[
+        "schedule",
+        "job",
+        "graph",
+        "repository",
+        "io_manager",
+        "io_manager_class_based",
+        "resource",
+        "resource_configured_at_launch",
+        "logger",
+        "executor",
+        "definitions",
+    ],
 )
 def test_a_defs_module_holding_what_the_loaders_skip_fails_the_load(stray):
     """The package loaders take assets, specs and checks, and skip the rest silently.

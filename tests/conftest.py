@@ -51,4 +51,4 @@ def _release_the_dlt_pipeline():
         # protocol, which does not declare `deactivate` — but the object is a
         # `Pipeline`, which does. A stub gap, not a missing method: the teardown
         # this whole fixture exists for is what proves it at runtime.
-        ctx.pipeline().deactivate()  # ty: ignore[unresolved-attribute]
+        ctx.pipeline().deactivate()  # ty: ignore[missing-attribute]

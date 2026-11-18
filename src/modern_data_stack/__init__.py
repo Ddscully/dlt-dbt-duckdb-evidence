@@ -14,7 +14,11 @@ out of them:
 * `privacy`       — pseudonymising an identifier at the publication boundary
 * `ratelimit`     — a sliding-window budget for an API that charges by volume
 * `workbook`      — reading a spreadsheet source without loading it whole
+* `files`         — writing a file whole or not at all, so a cache never serves a partial one
 * `db`            — single-row and scalar reads, without the Optional
+* `env`           — on/off switches from the environment, one set of spellings for all
+* `bus_matrix`    — the bus matrix, derived from the manifest's uniqueness tests
+* `docker_launcher` — a Dagster run launcher that starts runs from an image ID, not a tag
 
 Each takes its configuration as arguments; the project modules that call them
 hold the constants and stay the entry points, so `python -m lake.lakehouse` and
@@ -26,10 +30,11 @@ DuckDB import to a caller that only wants `paths`.
 Deliberately *not* here: `RawSchemaDltTranslator`, which stays in
 `orchestration/defs/ingest.py`. Keying dlt resources as `raw/<resource>` so they meet
 the keys dagster-dbt derives is the convention worth stealing from this repo, but
-the code for it is twenty lines wrapped around `RAW_DESCRIPTIONS` and a freshness
-policy,
-and moving it would put Dagster (an optional dependency group) behind a package
-import.
+the code for it is twenty lines wrapped around this project's `RAW_DESCRIPTIONS`
+and freshness policy, with nothing left to share once those are parameters.
+Dagster is not the reason: `docker_launcher` needs the `orchestration` group as
+well, and costs a caller without it nothing, because no submodule is imported
+with the package.
 
 The `mds` console script is a thin convenience wrapper; the canonical entry
 points are the `just` recipes and the module runners under ingest/ and transform/.

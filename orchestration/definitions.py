@@ -104,14 +104,32 @@ daily_schedule = dg.ScheduleDefinition(
     default_status=dg.DefaultScheduleStatus.STOPPED,
 )
 
-# What the package loaders walk past. By class name over the MRO, because two of
-# the five (what `define_asset_job` and `build_schedule_from_partitioned_job`
-# return) are not public names.
-NOT_LOADED_FROM_DEFS = ("SensorDefinition", "ScheduleDefinition", "JobDefinition", "Definitions")
+# What the package loaders walk past. By class name over the MRO, because some
+# (what `define_asset_job` and `build_schedule_from_partitioned_job` return) are
+# not public names. `ResourceDefinition` covers `@io_manager` and `@resource`, and
+# `ConfigurableResourceFactory` their class-based forms: an IO manager left here
+# is the silent one, its key falling back to Dagster's default. `PartialResource`
+# is what `configure_at_launch()` returns, a pydantic model with neither of those
+# among its bases, and covers `PartialIOManager`. A resource *class* imported for
+# an annotation is a metaclass instance and passes.
+NOT_LOADED_FROM_DEFS = (
+    "SensorDefinition",
+    "ScheduleDefinition",
+    "JobDefinition",
+    "GraphDefinition",
+    "RepositoryDefinition",
+    "ResourceDefinition",
+    "ConfigurableResourceFactory",
+    "PartialResource",
+    "LoggerDefinition",
+    "ExecutorDefinition",
+    "Definitions",
+)
 
 
 def refuse_what_the_loaders_skip(modules: Iterable[ModuleType]) -> None:
-    """Fail the import on a sensor, schedule, job or `Definitions` in a defs module.
+    """Fail the import on a sensor, schedule, job, graph, resource, IO manager,
+    logger, executor, repository or `Definitions` in a defs module.
 
     The loaders below take assets, specs and checks and say nothing about the
     rest, so a schedule written in `orchestration/defs/` would never fire and
@@ -129,8 +147,10 @@ def refuse_what_the_loaders_skip(modules: Iterable[ModuleType]) -> None:
     if skipped:
         raise dg.DagsterInvalidDefinitionError(
             f"{', '.join(sorted(skipped))}: only assets, asset specs and asset checks load "
-            "from orchestration/defs/. Define a sensor, schedule or job in "
-            "orchestration/definitions.py and pass it to `Definitions` there."
+            "from orchestration/defs/. Define a sensor, schedule, job, resource, IO "
+            "manager, logger or executor in orchestration/definitions.py and pass it to "
+            "`Definitions` there: a graph as a job, through `.to_job()`, and a "
+            "repository not at all, since that `Definitions` replaces it."
         )
 
 

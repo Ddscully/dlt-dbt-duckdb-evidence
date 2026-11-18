@@ -9,8 +9,10 @@ call to exercise. The end-to-end path lives in `just test-pipeline`.
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import re
+import struct
 import time
 import zipfile
 from datetime import UTC, date, datetime, timedelta
@@ -22,7 +24,7 @@ import requests
 from dlt.extract.exceptions import ResourceExtractionError
 
 from ingest import fixtures, http, pipeline
-from ingest.sources import ecb, eurostat, retail, weather, worldbank
+from ingest.sources import ecb, eurostat, owid, retail, weather, worldbank
 from modern_data_stack import workbook
 from modern_data_stack.db import row, scalar
 from transform import pipeline_status
@@ -35,6 +37,7 @@ class FakeResponse:
         self._payload = payload
         self._body = body
         self.status_code = status
+        self.content = (body or "").encode()
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -43,7 +46,13 @@ class FakeResponse:
 
     def json(self):
         if self._body is not None:
-            return json.loads(self._body)  # raises ValueError on a non-JSON body
+            # requests' own type, as `Response.json` raises: it subclasses
+            # `InvalidJSONError` as well as `ValueError`, so a retry rule that
+            # names the one can catch it before the other.
+            try:
+                return json.loads(self._body)
+            except json.JSONDecodeError as exc:
+                raise requests.exceptions.JSONDecodeError(exc.msg, exc.doc, exc.pos) from exc
         return self._payload
 
 
@@ -113,6 +122,22 @@ def test_get_json_raises_on_non_json_body(monkeypatch):
         http.get_json("https://example.test/x")
 
 
+def test_a_real_non_json_response_is_retried(monkeypatch):
+    """A maintenance page served with a 200, through requests' own `Response`.
+
+    `Response.json` raises `requests.exceptions.JSONDecodeError`, which is an
+    `InvalidJSONError` too. Naming that among the permanent errors once made
+    this fail on its first attempt, while a fake raising Python's own
+    `json.JSONDecodeError` kept the test above green.
+    """
+    page = requests.Response()
+    page.status_code = 200
+    page._content = b"<html>maintenance</html>"
+    seen = _mock_get(monkeypatch, [page, FakeResponse({"ok": True})])
+    assert http.get_json("https://example.test/x") == {"ok": True}
+    assert len(seen) == 2
+
+
 def test_get_json_waits_out_a_minute_long_outage(monkeypatch):
     """The waits double, so the retries span a minute."""
     sleeps: list[float] = []
@@ -136,11 +161,81 @@ def test_get_json_raises_a_client_error_at_once(monkeypatch):
     assert len(seen) == 1
 
 
-def test_get_json_retries_a_rate_limit(monkeypatch):
-    """429 is the one 4xx that a later identical request can pass."""
-    seen = _mock_get(monkeypatch, [FakeResponse(status=429), FakeResponse({"ok": True})])
+@pytest.mark.parametrize("status", [408, 429])
+def test_get_json_retries_a_timeout_or_a_rate_limit(monkeypatch, status):
+    """408 and 429 are the 4xx that a later identical request can pass."""
+    seen = _mock_get(monkeypatch, [FakeResponse(status=status), FakeResponse({"ok": True})])
     assert http.get_json("https://example.test/x") == {"ok": True}
     assert len(seen) == 2
+
+
+def test_every_failed_attempt_is_logged_with_its_wait(monkeypatch, caplog):
+    """A minute of silent retries reads as a hang in a run's log; each one says
+    which URL failed, how, and how long the wait is."""
+    caplog.set_level("INFO", logger=http.log.name)
+    _mock_get(
+        monkeypatch,
+        [FakeResponse(status=503), requests.ConnectionError("reset"), FakeResponse({})],
+    )
+
+    http.get_json("https://example.test/x")
+    lines = [r.getMessage() for r in caplog.records if r.name == http.log.name]
+    assert lines == [
+        "https://example.test/x: attempt 1 of 5 failed (503 error); retrying in 4 s",
+        "https://example.test/x: attempt 2 of 5 failed (reset); retrying in 8 s",
+    ]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        requests.exceptions.MissingSchema("no scheme"),
+        requests.exceptions.InvalidURL("bad host"),
+        requests.exceptions.TooManyRedirects("loop"),
+        requests.exceptions.InvalidHeader("newline in a header"),
+    ],
+)
+def test_a_request_that_can_never_succeed_is_not_retried(monkeypatch, error):
+    """A malformed URL or a redirect loop is the 4xx rule's case: the request is
+    wrong, and a minute of retries would end in the same error."""
+    seen = _mock_get(monkeypatch, [error])
+    with pytest.raises(type(error)):
+        http.get_bytes("https://example.test/x.csv")
+    assert len(seen) == 1
+
+
+def test_get_bytes_retries_like_get_json(monkeypatch):
+    seen = _mock_get(
+        monkeypatch, [requests.ConnectionError("reset"), FakeResponse(body="a,b\n1,2\n")]
+    )
+    assert http.get_bytes("https://example.test/x.csv") == b"a,b\n1,2\n"
+    assert len(seen) == 2
+
+
+def test_get_bytes_raises_after_the_last_attempt(monkeypatch):
+    _mock_get(monkeypatch, [FakeResponse(status=502)] * http.RETRIES)
+    with pytest.raises(RuntimeError, match="failed to fetch the file"):
+        http.get_bytes("https://example.test/x.csv")
+
+
+def test_get_bytes_reads_the_fixture_offline(monkeypatch):
+    monkeypatch.setenv(fixtures.ENV_VAR, "1")
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("went to the network"))
+    # The fixture is stored gzipped; the body is the CSV the URL serves.
+    assert http.get_bytes(owid.OWID_CO2).startswith(b"country,")
+
+
+def test_owid_survives_a_dropped_connection(monkeypatch):
+    """OWID handed Polars the URL, which tries once: the one source a reset
+    connection failed outright."""
+    seen = _mock_get(
+        monkeypatch,
+        [requests.ConnectionError("reset"), FakeResponse(body="country,year,co2\nChad,2020,1.5\n")],
+    )
+    table = next(iter(owid.owid_co2()))
+    assert table.column_names == ["country", "year", "co2"]
+    assert table.column("co2").to_pylist() == [1.5]
+    assert seen == [owid.OWID_CO2, owid.OWID_CO2]
 
 
 # --------------------------------------------------------------------------- #
@@ -868,6 +963,18 @@ def test_eu_elec_prices_refuses_one_category_that_is_not_the_one_requested(monke
         list(eurostat.eu_elec_prices())
 
 
+def test_eu_elec_prices_refuses_a_cube_with_more_dimensions_than_sizes(monkeypatch):
+    """`zip` stops at the shorter list: without `strict`, a dimension with no
+    size would skip the filter check and shift every stride, and the walk would
+    label the wrong cells, green."""
+    cube = _jsonstat({"0": 0.25})
+    cube["id"].append("nrg_cons")
+    cube["dimension"]["nrg_cons"] = {"category": {"index": {"KWH2500-4999": 0}}}
+    monkeypatch.setattr(http, "get_json", lambda url, **kw: cube)
+    with pytest.raises(ResourceExtractionError, match="shorter than argument 1"):
+        list(eurostat.eu_elec_prices())
+
+
 def test_the_recorded_eurostat_payload_passes_its_own_filter_check():
     """The check reads `category.index` as a mapping, and the synthetic cubes above
     assume that shape; the recorded response is the API's own answer to it."""
@@ -908,7 +1015,7 @@ def test_fx_start_date_looks_back_from_the_watermark():
 
 def test_fx_start_date_cannot_ask_for_dates_before_the_euro():
     """A watermark near the start of the series would otherwise produce a range
-    the API answers with an empty `rates` object."""
+    the API answers with a 404, which `get_json` raises at once."""
     assert ecb.fx_start_date("1999-01-05") == ecb.FX_FIRST_DATE
 
 
@@ -962,14 +1069,30 @@ def test_ecb_fx_rates_advances_the_watermark_to_the_newest_date(monkeypatch):
 
 
 def test_ecb_fx_rates_leaves_the_watermark_alone_on_an_empty_response(monkeypatch):
-    """A window falling entirely on a weekend legitimately returns no rates.
-    Advancing on that would advance to a date that was never loaded.
+    """An empty `rates` object must not move the watermark: advancing on it
+    would advance to a date that was never loaded. Frankfurter has not been seen
+    to send one (a weekend-only window answers with the previous fixing), but
+    the guard costs nothing.
     """
     state = _state(monkeypatch, {ecb.FX_WATERMARK_KEY: "2024-01-10"})
     _serve_fx(monkeypatch, _fx_payload({}))
 
     assert list(ecb.ecb_fx_rates()) == []
     assert state[ecb.FX_WATERMARK_KEY] == "2024-01-10"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{"message": "upstream unavailable"}, {"message": "upstream unavailable", "rates": None}],
+    ids=["no rates", "null rates"],
+)
+def test_ecb_fx_rates_refuses_an_error_object_served_with_a_200(monkeypatch, payload):
+    """Read as an empty window, an error body would land nothing and pass."""
+    _state(monkeypatch, {})
+    _serve_fx(monkeypatch, payload)
+
+    with pytest.raises(ResourceExtractionError, match="expected `rates`.*upstream unavailable"):
+        list(ecb.ecb_fx_rates())
 
 
 def test_ecb_fx_rates_asks_for_the_lookback_window_when_it_has_a_watermark(monkeypatch):
@@ -1017,8 +1140,9 @@ def test_retail_fixture_and_live_caches_never_share_a_path(monkeypatch, tmp_path
     fixture_path = retail.retail_workbook()
     monkeypatch.setenv(fixtures.ENV_VAR, "0")
     live_dir = Path(retail.cache_dir()) / "live"
-    assert fixture_path.parent != live_dir
-    assert not (live_dir / retail.RETAIL_WORKBOOK_NAME).exists()
+    assert live_dir not in fixture_path.parents
+    # At any depth: extracts sit under a digest directory, `live/<digest>/…`.
+    assert not list(live_dir.rglob(retail.RETAIL_WORKBOOK_NAME))
 
 
 def test_retail_cache_notices_a_re_recorded_archive(monkeypatch, tmp_path):
@@ -1038,18 +1162,229 @@ def test_retail_cache_notices_a_re_recorded_archive(monkeypatch, tmp_path):
 
     def record(payload: bytes) -> None:
         with zipfile.ZipFile(archive, "w") as zf:
-            zf.writestr(retail.RETAIL_WORKBOOK_NAME, payload)
+            zf.writestr(retail.RETAIL_WORKBOOK_NAME, _workbook(payload))
 
     record(b"the first recording")
     first = retail.retail_workbook()
-    assert first.read_bytes() == b"the first recording"
+    assert first.read_bytes() == _workbook(b"the first recording")
     # Cached: same archive, same path, no second extraction.
     assert retail.retail_workbook() == first
 
     record(b"a re-recorded slice")
     second = retail.retail_workbook()
     assert second != first
-    assert second.read_bytes() == b"a re-recorded slice"
+    assert second.read_bytes() == _workbook(b"a re-recorded slice")
+
+
+class _StreamedResponse:
+    """`requests.get(..., stream=True)` as `http.get_file` uses it."""
+
+    def __init__(self, body: bytes, status: int = 200):
+        self._body = body
+        self.status_code = status
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.closed = True
+        return False
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} error", response=self)
+
+    def iter_content(self, chunk_size):
+        yield from (self._body[i : i + chunk_size] for i in range(0, len(self._body), chunk_size))
+
+
+def _serve_downloads(monkeypatch, responses: list) -> list[str]:
+    seen: list[str] = []
+    queue = list(responses)
+
+    def fake_get(url, timeout=None, stream=False):
+        assert stream, "a download is streamed, never read into memory"
+        seen.append(url)
+        result = queue.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    return seen
+
+
+def _workbook(text: bytes = b"a workbook") -> bytes:
+    """A stand-in .xlsx: a zip, as the extract check requires, and the same
+    bytes for the same text, so a test can compare what it reads back."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(zipfile.ZipInfo("xl/workbook.xml", date_time=(2010, 12, 1, 0, 0, 0)), text)
+    return buf.getvalue()
+
+
+def _zip_bytes(tmp_path: Path, member: bytes | None = None) -> bytes:
+    member = _workbook() if member is None else member
+    archive = tmp_path / "built.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as zf:
+        zf.writestr(retail.RETAIL_WORKBOOK_NAME, member)
+    return archive.read_bytes()
+
+
+def test_a_download_that_is_not_a_zip_never_reaches_the_cache(monkeypatch, tmp_path):
+    """The poisoning at the network end: an error page served with a 200, renamed
+    into the cache, would be the "archive" on every later run, failing the
+    extract each time until someone found and deleted it."""
+    page = _StreamedResponse(b"<html>Service temporarily unavailable</html>")
+    seen = _serve_downloads(monkeypatch, [page] * http.RETRIES)
+    dest = tmp_path / "online_retail_ii.zip"
+
+    with pytest.raises(RuntimeError, match="not a zip; it starts b'<html>"):
+        http.get_file(retail.RETAIL_ARCHIVE, dest, check=retail.whole_zip)
+    assert len(seen) == http.RETRIES
+    assert list(tmp_path.iterdir()) == []  # neither the file nor a temporary one
+
+
+def test_a_zip_with_a_damaged_stored_member_is_refused(tmp_path):
+    """`is_zipfile` reads only the directory at the end, so damage in the middle
+    passes it; the member's checksum does not."""
+    body = _zip_bytes(tmp_path, b"A" * 1000).replace(b"A" * 1000, b"A" * 500 + b"B" * 500)
+    damaged = tmp_path / "damaged.zip"
+    damaged.write_bytes(body)
+    assert zipfile.is_zipfile(damaged)
+    with pytest.raises(ValueError, match="damaged member"):
+        retail.whole_zip(damaged)
+
+
+def test_a_zip_with_a_damaged_compressed_member_is_refused(tmp_path):
+    """The real archive is deflated, and damage there can stop zlib before any
+    checksum is compared: `testzip` then raises `zlib.error`, which neither the
+    download's retry nor the cache check would catch unless `whole_zip` turns it
+    into a `ValueError`. Byte 0xFF opens a deflate block of the reserved type 3,
+    which zlib refuses outright."""
+    archive = tmp_path / "deflated.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(retail.RETAIL_WORKBOOK_NAME, b"a workbook " * 100)
+    body = bytearray(archive.read_bytes())
+    name_len, extra_len = struct.unpack("<HH", body[26:30])  # the local file header
+    body[30 + name_len + extra_len] = 0xFF
+    archive.write_bytes(bytes(body))
+
+    with pytest.raises(ValueError, match="not a whole zip"):
+        retail.whole_zip(archive)
+
+
+def test_a_download_is_retried_after_a_dropped_connection(monkeypatch, tmp_path):
+    body = _zip_bytes(tmp_path)
+    first, second = requests.ConnectionError("reset"), _StreamedResponse(body)
+    seen = _serve_downloads(monkeypatch, [first, second])
+    dest = tmp_path / "cache" / "online_retail_ii.zip"
+    dest.parent.mkdir()
+
+    assert http.get_file(retail.RETAIL_ARCHIVE, dest, check=retail.whole_zip) == dest
+    assert dest.read_bytes() == body
+    assert len(seen) == 2
+    assert second.closed
+    assert list(dest.parent.iterdir()) == [dest]
+
+
+def test_a_download_raises_a_client_error_at_once(monkeypatch, tmp_path):
+    seen = _serve_downloads(monkeypatch, [_StreamedResponse(b"", status=404)])
+    with pytest.raises(requests.HTTPError, match="404"):
+        http.get_file(retail.RETAIL_ARCHIVE, tmp_path / "online_retail_ii.zip")
+    assert len(seen) == 1
+
+
+def test_a_cached_archive_that_is_not_a_zip_is_downloaded_again(monkeypatch, tmp_path):
+    """The poisoning a check at download time cannot reach: a file already in
+    the cache, from before the check or any other route, is checked on read."""
+    monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path / "cache"))
+    live = tmp_path / "cache" / "live"
+    live.mkdir(parents=True)
+    (live / "online_retail_ii.zip").write_bytes(b"<html>cached error page</html>")
+    seen = _serve_downloads(monkeypatch, [_StreamedResponse(_zip_bytes(tmp_path))])
+
+    workbook_path = retail.retail_workbook()
+    assert workbook_path.read_bytes() == _workbook()
+    assert seen == [retail.RETAIL_ARCHIVE]
+
+
+def test_an_archive_already_extracted_is_not_checked_again(monkeypatch, tmp_path):
+    """Its extract is the proof it was whole, so the warm path, which every
+    retail load takes, skips reading 45 MB to check it."""
+    monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path / "cache"))
+    live = tmp_path / "cache" / "live"
+    live.mkdir(parents=True)
+    archive = live / "online_retail_ii.zip"
+    archive.write_bytes(_zip_bytes(tmp_path))
+    first = retail.retail_workbook()
+
+    monkeypatch.setattr(retail, "whole_zip", lambda path: pytest.fail("checked on the warm path"))
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("went to the network"))
+    hashed = []
+    digest = retail._content_digest
+    monkeypatch.setattr(retail, "_content_digest", lambda path: hashed.append(path) or digest(path))
+    assert retail.retail_workbook() == first
+    assert hashed == [archive], "the warm path reads the archive once, to key the extract"
+
+
+@pytest.mark.parametrize("left", [b"", b"PK\x03\x04 an unzip cut short"])
+def test_a_cached_extract_cut_short_is_extracted_again(monkeypatch, tmp_path, left):
+    """An unzip killed partway, before extracts were written whole, or a crash
+    that committed the rename before the data, left a short workbook under the
+    real name. The warm path served it on every load, because only the archive
+    was ever checked."""
+    monkeypatch.setenv("INGEST_CACHE_DIR", str(tmp_path / "cache"))
+    live = tmp_path / "cache" / "live"
+    live.mkdir(parents=True)
+    archive = live / "online_retail_ii.zip"
+    archive.write_bytes(_zip_bytes(tmp_path))
+    first = retail.retail_workbook()
+    first.write_bytes(left)
+
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("went to the network"))
+    assert retail.retail_workbook() == first
+    assert first.read_bytes() == _workbook()
+
+
+def test_a_reused_file_that_passes_its_check_is_not_fetched_again(monkeypatch, tmp_path):
+    dest = tmp_path / "online_retail_ii.zip"
+    dest.write_bytes(_zip_bytes(tmp_path))
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("went to the network"))
+    assert http.get_file(retail.RETAIL_ARCHIVE, dest, check=retail.whole_zip, reuse=True) == dest
+
+
+def test_get_file_refuses_reuse_under_fixtures(monkeypatch, tmp_path):
+    """A recorded file left at a live cache path passes the same check, so a later
+    live run with `reuse=True` would load fixture rows as live ones, all green.
+    Refused before the cache or the fixture is read."""
+    monkeypatch.setenv(fixtures.ENV_VAR, "1")
+    dest = tmp_path / "online_retail_ii.zip"
+    dest.write_bytes(_zip_bytes(tmp_path))
+    monkeypatch.setattr(fixtures, "path_for", lambda url: pytest.fail("read the fixture"))
+    with pytest.raises(ValueError, match="reuse=True"):
+        http.get_file(retail.RETAIL_ARCHIVE, dest, check=retail.whole_zip, reuse=True)
+
+
+def test_get_file_under_fixtures_un_gzips_and_checks_like_a_live_fetch(monkeypatch, tmp_path):
+    """Offline must refuse what live would: a recorded file is checked, and a
+    gzipped one is handed on as the URL serves it, as `get_bytes` does."""
+    monkeypatch.setenv(fixtures.ENV_VAR, "1")
+    recorded = tmp_path / "recorded.csv.gz"
+    recorded.write_bytes(gzip.compress(b"a,b\n1,2\n"))
+    monkeypatch.setattr(fixtures, "path_for", lambda url: recorded)
+
+    dest = tmp_path / "out.csv"
+    assert http.get_file("https://example.test/x.csv", dest).read_bytes() == b"a,b\n1,2\n"
+
+    def refuse(path):
+        raise ValueError("not what was asked for")
+
+    refused = tmp_path / "refused.csv"
+    with pytest.raises(ValueError, match="not what was asked for"):
+        http.get_file("https://example.test/x.csv", refused, check=refuse)
+    assert not refused.exists()
 
 
 def test_retail_yields_every_row_the_workbook_holds(retail_con):
@@ -2186,7 +2521,11 @@ def _eurostat_price_countries() -> set[str]:
     manifest either.
     """
     cube = json.loads(fixtures.path_for(eurostat.EU_ELEC_PRICES_API).read_text())
-    geos = {geo for geo in cube["dimension"]["geo"]["category"]["index"] if len(geo) == 2}
+    # The staging model's filter: two letters, and not `EA`, the euro area.
+    geos = {
+        geo for geo in cube["dimension"]["geo"]["category"]["index"]
+        if len(geo) == 2 and geo != "EA"
+    }  # fmt: skip
     iso2 = {EUROSTAT_GEO_TO_ISO2.get(geo, geo) for geo in geos}
 
     payload = json.loads(fixtures.path_for(worldbank.WB_COUNTRY_API).read_text())
@@ -2195,9 +2534,9 @@ def _eurostat_price_countries() -> set[str]:
         for row in payload[1]
         if (row.get("region") or {}).get("value") != "Aggregates"
     }
-    # The inner join drops `EA`; `len(geo) == 2` alone would keep it, since no
-    # country carries that ISO2. Matches the staging model's behavior.
-    return {by_iso2[code] for code in iso2 if code in by_iso2}
+    # Every code left must map, as the model's left join and `not_null` require:
+    # a KeyError here is a code Eurostat added that no country carries.
+    return {by_iso2[code] for code in iso2}
 
 
 def test_weather_countries_are_exactly_the_ones_eurostat_prices():

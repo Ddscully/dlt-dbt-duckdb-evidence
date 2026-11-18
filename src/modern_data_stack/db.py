@@ -35,10 +35,12 @@ def row(
     sql: str,
     params: Sequence[Any] | None = None,
 ) -> tuple[Any, ...]:
-    """The single row `sql` returns, as a tuple. Raises if it returned none.
+    """The single row `sql` returns, as a tuple. Raises unless there is exactly one.
 
-    No row means the caller passed a query this does not cover (`limit 1` over
-    an empty table, a `group by` matching nothing) — a call-site bug. A row of
+    No row, or several, means the caller passed a query this does not cover
+    (`limit 1` over an empty table, a `group by` matching nothing or more than
+    one group) — a call-site bug, and returning the first of several would hand
+    on one group's number as the answer. A row of
     NULLs is returned normally: `max(year)` over an empty table is one such row,
     and only the caller knows whether that is an error.
     """
@@ -46,8 +48,8 @@ def row(
     # `fetchall`, not `fetchone`: DuckDB 2.0 streams, and a result with a row
     # still unread owns the connection, so the next `con.sql()` raises.
     fetched = result.fetchall()
-    if not fetched:
-        raise ValueError(f"query returned no rows: {sql.strip()}")
+    if len(fetched) != 1:
+        raise ValueError(f"query returned {len(fetched) or 'no'} rows, not one: {sql.strip()}")
     return fetched[0]
 
 
