@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent import scenario
-from agent.metrics import GROUP_BY, TIME_GRAINS, SemanticLayer, load_semantic_layer
+from agent.metrics import SemanticLayer, load_semantic_layer, offered_as
 from modern_data_stack.bus_matrix import declared_grains
 from modern_data_stack.paths import dbt_manifest_path
 
@@ -118,23 +118,17 @@ def _metrics_reading(layer: SemanticLayer, alias: str) -> dict[str, set[str]]:
 
 
 def _grouped_by(layer: SemanticLayer, alias: str) -> list[str]:
-    """The `query_metric` groupings this model supplies."""
-    names = []
-    for key, ref in GROUP_BY.items():
-        entity, dimension = ref.split("__", 1)
-        for model in layer.manifest["semantic_models"]:
-            if model["node_relation"]["alias"] != alias:
-                continue
-            if key in TIME_GRAINS:
-                supplies = bool(model["measures"]) and bool(model.get("defaults"))
-            else:
-                primary = {e["name"] for e in model["entities"] if e["type"] == "primary"}
-                supplies = entity in primary and any(
-                    d["name"] == dimension for d in model["dimensions"]
-                )
-            if supplies:
-                names.append(key)
-    return names
+    """The `query_metric` groupings this model supplies: the time grains of a table
+    of measures, then the names the yml offers its own dimensions as."""
+    grains: list[str] = []
+    names: set[str] = set()
+    for model in layer.manifest["semantic_models"]:
+        if model["node_relation"]["alias"] != alias:
+            continue
+        if model["measures"] and model.get("defaults"):
+            grains += [grain for grain in layer.time_grains(model) if grain not in grains]
+        names |= {name for dimension in model["dimensions"] if (name := offered_as(dimension))}
+    return grains + sorted(names)
 
 
 def describe_model(catalog: Catalog, name: str) -> str:

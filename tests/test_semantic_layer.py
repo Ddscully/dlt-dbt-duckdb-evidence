@@ -22,7 +22,7 @@ semantic model sits beside the model node it reads:
   dimension, and not a time grain's name;
 * no entity or dimension reads a column classified `direct_identifier`.
 
-And every metric compiles, grouped by year and by region, because
+And every metric compiles, alone, grouped by each name it offers, because
 `agent/metrics.py` drives MetricFlow's engine, which is not a documented API and
 moves with dbt-core: an upgrade that breaks it fails here, not in an answer.
 """
@@ -210,15 +210,19 @@ def test_no_entity_or_dimension_reads_a_direct_identifier(semantic_models):
     assert not problems, "\n".join(problems)
 
 
-def test_every_metric_compiles_by_year_and_by_region():
+def test_every_metric_compiles_by_each_grouping_it_offers():
     from metricflow.engine.metricflow_engine import MetricFlowQueryRequest
 
-    from agent.metrics import GROUP_BY, load_semantic_layer
+    from agent.metrics import load_semantic_layer
 
+    # Each metric alone: a request for all of them joins them all, and would
+    # pass on the strength of whichever one reads the asserted table.
     layer = load_semantic_layer(semantic_manifest_path)
-    for group_by in ("year", "region"):
-        request = MetricFlowQueryRequest.create(
-            metric_names=list(layer.metrics), group_by_names=[GROUP_BY[group_by]]
-        )
-        sql = layer.engine.explain(request).sql_statement.sql
-        assert "fct_retail_order_line" in sql
+    for metric in layer.metrics:
+        tables = {model["node_relation"]["alias"] for model in layer.models([metric])}
+        offered = layer.offered([metric])
+        assert offered, f"{metric} can be grouped by nothing"
+        for name, ref in offered.items():
+            request = MetricFlowQueryRequest.create(metric_names=[metric], group_by_names=[ref])
+            sql = layer.engine.explain(request).sql_statement.sql
+            assert all(table in sql for table in tables), (metric, name)

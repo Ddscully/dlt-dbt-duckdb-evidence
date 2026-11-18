@@ -127,6 +127,29 @@ def test_a_filter_on_region(layer):
     assert table.rows == (((), (4.5,)),)
 
 
+def test_a_place_with_sales_and_no_returns_answers_zero(layer):
+    # France bought (I2) and returned nothing. The values a filter accepts come
+    # from every metric of the table, not from returns_gbp's own rows.
+    table = _query(layer, LINES, ["returns_gbp"], (), where={"country": "France"})
+    assert table.rows == (((), (0.0,)),)
+
+
+def test_top_ranks_the_groups_and_judges_the_overcount_on_all_of_them(layer):
+    from agent.metrics import render
+
+    table = _query(layer, LINES, ["net_revenue_gbp", "customers"], ["country"], top=2)
+    assert table.rows == (
+        (("United Kingdom",), (9.5, 1)),  # 10 - 1 + 0.5; I4 has no customer
+        (("United States",), (4.5, 1)),
+    )
+    assert table.ranked == (2, 3)
+    # The two rows kept hold 2 customers, the total; all three hold 3. The
+    # overcount is judged before ranking, or it would be missed.
+    assert table.total == (16.5, 2)
+    assert table.overcounted == ("customers",)
+    assert "top 2 of 3" in render(table).splitlines()[0]
+
+
 def test_a_period_covered_in_part_is_named(layer):
     from agent.metrics import coverage_note
 
@@ -159,6 +182,9 @@ def test_a_period_covered_in_part_is_named(layer):
             'the values are "Europe & Central Asia", "North America"',
         ),
         ({"metrics": ["orders"], "years": (2020, 2021)}, "the data covers"),
+        # top ranks places within one period, never periods.
+        ({"metrics": ["orders"], "group_by": ["year"], "top": 2}, "top ranks"),
+        ({"metrics": ["orders"], "top": 2}, "top ranks"),
     ],
 )
 def test_a_refusal_names_the_choices(layer, kwargs, message):
