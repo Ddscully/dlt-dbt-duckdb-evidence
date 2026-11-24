@@ -154,10 +154,19 @@ def refuse_what_the_loaders_skip(modules: Iterable[ModuleType]) -> None:
         )
 
 
-refuse_what_the_loaders_skip(
-    importlib.import_module(found.name)
-    for found in pkgutil.walk_packages(defs_package.__path__, f"{defs_package.__name__}.")
-)
+def defs_modules() -> list[ModuleType]:
+    """Every module the loaders below read: the package itself, whose
+    `__init__.py` they read first, then each module and subpackage under it."""
+    return [
+        defs_package,
+        *(
+            importlib.import_module(found.name)
+            for found in pkgutil.walk_packages(defs_package.__path__, f"{defs_package.__name__}.")
+        ),
+    ]
+
+
+refuse_what_the_loaders_skip(defs_modules())
 
 defs = dg.Definitions(
     # Every asset, asset spec and check a module under `orchestration/defs/` holds

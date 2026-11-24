@@ -418,7 +418,7 @@ materialize-select selection: where dbt-parse
 [group('dagster')]
 materialize-preview selection: dbt-parse
     uv run --group orchestration dagster asset list \
-        -m orchestration.definitions --select '{{ selection }}'
+        -m orchestration.definitions --select {{ quote(selection) }}
 
 # `dbt-parse` first, or the location fails to load instead of reporting what is
 # unregistered — which also makes this no check on a *running* service
