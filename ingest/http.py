@@ -121,7 +121,7 @@ def _fetch[T](
                 raise
             last = exc
             backoff(url, attempt, retries, exc)
-    raise RuntimeError(f"failed to fetch {what} from {url}: {last}")
+    raise RuntimeError(f"failed to fetch {what} from {url}: {last}") from last
 
 
 def get_json(url: str, *, timeout: int = 120, retries: int = RETRIES) -> dict | list:

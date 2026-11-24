@@ -100,6 +100,21 @@ def test_a_defs_module_holding_what_the_loaders_skip_fails_the_load(stray):
         refuse_what_the_loaders_skip([module])
 
 
+def test_the_refusal_reads_the_package_init_too(monkeypatch):
+    """The loaders read `orchestration/defs/__init__.py` before the modules under
+    it, so a schedule left there is skipped like one in `defs/ingest.py`. Walking
+    only the modules under the package would let that one through."""
+    from orchestration import defs as defs_package
+    from orchestration.definitions import defs_modules, refuse_what_the_loaders_skip
+
+    stray = dg.ScheduleDefinition(
+        name="s", cron_schedule="0 1 * * *", target=dg.AssetSelection.all()
+    )
+    monkeypatch.setattr(defs_package, "stray", stray, raising=False)
+    with pytest.raises(dg.DagsterInvalidDefinitionError, match=r"orchestration\.defs\.stray: only"):
+        refuse_what_the_loaders_skip(defs_modules())
+
+
 def test_every_partition_mapping_resolves():
     """The check `dg list defs` leaves out, which `just validate` runs as a second line.
 

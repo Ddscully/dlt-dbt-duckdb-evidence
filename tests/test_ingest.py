@@ -111,9 +111,11 @@ def test_get_json_raises_on_persistent_http_error(monkeypatch):
     flows into the warehouse.
     """
     seen = _mock_get(monkeypatch, [FakeResponse(status=500)] * http.RETRIES)
-    with pytest.raises(RuntimeError, match="failed to fetch JSON"):
+    with pytest.raises(RuntimeError, match="failed to fetch JSON") as raised:
         http.get_json("https://example.test/x")
     assert len(seen) == http.RETRIES  # retried the configured number of times
+    # The last attempt's own error, traceback and all, stays on the one raised.
+    assert isinstance(raised.value.__cause__, requests.HTTPError)
 
 
 def test_get_json_raises_on_non_json_body(monkeypatch):
