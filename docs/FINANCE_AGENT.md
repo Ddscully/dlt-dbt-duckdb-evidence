@@ -30,8 +30,8 @@ writes the answer; the tools compute every figure in it. There are four:
   returns and FX, in bars that sum to the change exactly
   ([0014](decisions/0014-the-revenue-bridge-bars.md)).
 - **`query_metric`** (`agent/metrics.py`): totals and breakdowns of the retail
-  metrics defined in dbt's semantic layer, by year, quarter, month, country or
-  region, with an `all` row ([below](#the-metrics)).
+  metrics defined in dbt's semantic layer, by any period or place their table
+  offers, or ranked with `top`, with an `all` row ([below](#the-metrics)).
 - **`describe_model`** (`agent/catalog.py`): what one row of a retail mart is,
   and each column's type, additivity label and description, read from the dbt
   manifest, so a model can tell `quantity` (sum it) from `unit_price` (never).
@@ -183,7 +183,7 @@ year  net_revenue_gbp  orders  customers
 2010     9,168,065.90  20,625      4,205
 2011     9,032,384.97  18,916      4,215
 all     18,981,992.57  41,361      5,853
-customers is a distinct count, and its rows add up to more than "all": one can be counted in several rows.
+customers is a distinct count, and its rows can add up to more than "all": one can be counted in several rows.
 
 Partly covered: 2009 (1 Dec to 31 Dec only), 2011 (1 Jan to 9 Dec only). To compare periods, use explain_change, which aligns them.
 ```
@@ -197,10 +197,21 @@ What the tool adds to MetricFlow, which does none of it:
   one day and in one country.
 - **Money is printed to the penny.** Float sums differ between runs in the ninth
   significant figure, and a model quotes whatever digits it is shown.
-- **Only `year`, `quarter`, `month`, `country` and `region` can be grouped by**,
-  and a `where` value is checked against the countries and regions that have
-  sales before it reaches the SQL. More than 60 rows is refused, with a request
-  to narrow it.
+- **What a request can group or filter by is declared in the yml**: a dimension
+  with `config: meta: {offered_as: …}` (`country`, `region`), and the time grains
+  no finer than its table's own (`year`, `quarter`, `month` for invoice lines). A
+  `where` value is checked, before it reaches the SQL, against the values the
+  table has rows for, asked with every metric that reads it: returns in a
+  country with sales and none returned read 0.00, not a refusal
+  ([0024](decisions/0024-query-metric-takes-its-choices-from-the-yml.md)).
+- **One table per request.** MetricFlow would join two tables' metrics on the
+  date alone, where a table with no rows that year reads as zero.
+- **`top` ranks one breakdown by place** by the first metric, says how many
+  groups it left out, and judges a distinct count's overcount on all of them,
+  not only those kept. Asked for the five countries with the most revenue in
+  2011 without it, `granite4.1:8b` read 36 rows and listed the right five in the
+  wrong order. More than 60 rows is refused otherwise, with a request to narrow
+  it or rank it.
 - **A period the data covers only in part is named** in a note the loop appends
   verbatim, below.
 
@@ -369,5 +380,7 @@ lone name bare.
 `_retail_metrics.yml` is in `query_metric`'s schema after the next
 `just dbt-parse`, because the schema's choices are read from the manifest. It
 has to follow the rules `tests/test_semantic_layer.py` holds, which are in the
-`contracts-and-data-quality` skill: a measure is a bare column, and a sum reads
-only an `additive` one.
+`contracts-and-data-quality` skill: a measure is a bare column, a sum reads
+only an `additive` one, a null is filled only over a column a `not_null` test
+holds, and a ratio's inputs over nullable columns are filtered alike. So is a
+grouping yml: a dimension with `offered_as` is in the schema after the parse.

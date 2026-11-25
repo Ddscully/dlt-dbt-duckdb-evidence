@@ -20,7 +20,7 @@ credentials, no bill.
 [The practices, indexed](./docs/PRACTICES.md) ·
 [What is not done yet](#what-this-project-has-and-has-not-done-yet)
 
-**509 dbt tests** (469 data, 40 unit) · an enforced schema contract on every
+**510 dbt tests** (470 data, 40 unit) · an enforced schema contract on every
 mart model · the whole pipeline run offline on every pull request · the sources
 fetched live weekly, and the site rebuilt from them whenever its code changes
 

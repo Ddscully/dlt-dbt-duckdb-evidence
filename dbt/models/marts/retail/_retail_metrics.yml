@@ -8,9 +8,17 @@
 # them:
 #   - every measure is a bare column of its model, so its label can be looked up;
 #     a subset is chosen with the metric's `filter:`, never with a measure `expr`;
-#   - `agg: sum` only over a column labelled `additive`;
+#   - `agg: sum` only over a column labelled `additive`, or `semi_additive` with
+#     a `non_additive_dimension` on the time dimension;
+#   - `fill_nulls_with` only over a column a `not_null` test holds, where a null
+#     can only mean "no rows", which for a sale is zero;
+#   - an input of a ratio or derived metric that reads a column that can be null
+#     carries a filter, so numerator and denominator count the same rows;
 #   - no entity or dimension reads a `direct_identifier` column: `customer_id` is
 #     counted, never grouped by.
+#
+# `query_metric` offers a dimension only when it says `config: meta:
+# {offered_as: <name>}`, here `country` and `region`.
 #
 # Every simple metric has `fill_nulls_with: 0`: a group with no returns returned
 # nothing, and a return rate of "unknown" where the answer is 0%.
@@ -66,8 +74,14 @@ semantic_models:
     dimensions:
       - name: country_name
         type: categorical
+        config:
+          meta:
+            offered_as: country
       - name: region
         type: categorical
+        config:
+          meta:
+            offered_as: region
 
 metrics:
   - name: net_revenue_gbp

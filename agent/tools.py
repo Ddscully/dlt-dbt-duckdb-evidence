@@ -205,6 +205,17 @@ def _years(value) -> tuple[int, int] | None:
         raise ValueError(f"years is [first, last] or a single year, not {value!r}") from None
 
 
+def _top(value) -> int | None:
+    """`5` or `"5"`, as small models send either; never `2.7` read as 2, or `true` as 1."""
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdecimal():
+        return int(value)
+    raise ValueError(f"top is a whole number of groups, not {value!r}")
+
+
 def _catalog_tools(connect: Connect, catalog: Catalog) -> list[Tool]:
     layer = catalog.layer
 
@@ -221,6 +232,7 @@ def _catalog_tools(connect: Connect, catalog: Catalog) -> list[Tool]:
             raise ValueError(
                 f'where is an object, e.g. {{"region": "North America"}}, not {where!r}'
             )
+        top = _top(args.get("top"))
         with connect() as con:
             table = metrics.query_metric(
                 con,
@@ -229,6 +241,7 @@ def _catalog_tools(connect: Connect, catalog: Catalog) -> list[Tool]:
                 group_by=_names(args.get("group_by") or []),
                 years=_years(args.get("years")),
                 where=where,
+                top=top,
             )
         return ToolResult(metrics.render(table), metrics.coverage_note(table))
 
@@ -252,6 +265,8 @@ def _catalog_tools(connect: Connect, catalog: Catalog) -> list[Tool]:
         f"{name}: {' '.join(spec.get('description', '').split())}"
         for name, spec in sorted(layer.metrics.items())
     )
+    # Every name any metric can be grouped by; query_metric checks each request's own.
+    offered = layer.offered()
     query_metric_schema = {
         "type": "function",
         "function": {
@@ -269,7 +284,7 @@ def _catalog_tools(connect: Connect, catalog: Catalog) -> list[Tool]:
                     },
                     "group_by": {
                         "type": "array",
-                        "items": {"type": "string", "enum": list(metrics.GROUP_BY)},
+                        "items": {"type": "string", "enum": list(offered)},
                         "description": "at most one of year, quarter and month",
                     },
                     "years": {
@@ -279,8 +294,19 @@ def _catalog_tools(connect: Connect, catalog: Catalog) -> list[Tool]:
                     },
                     "where": {
                         "type": "object",
-                        "properties": {name: {"type": "string"} for name in metrics.FILTERS},
+                        "properties": {
+                            name: {"type": "string"}
+                            for name in offered
+                            if name not in metrics.TIME_GRAINS
+                        },
                         "description": "an exact country name or World Bank region",
+                    },
+                    "top": {
+                        "type": "integer",
+                        "description": (
+                            "keep only the N largest groups, ranked by the first metric; "
+                            "with a place, not with year, quarter or month"
+                        ),
                     },
                 },
                 "required": ["metrics"],

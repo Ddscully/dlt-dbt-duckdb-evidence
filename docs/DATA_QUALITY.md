@@ -200,7 +200,11 @@ labels' first consumer that aggregates on its own. MetricFlow sums whatever a
 measure names and never reads `meta`, so `tests/test_semantic_layer.py` holds
 the yml to the labels: every measure is a bare column, so its label can be
 looked up, a `sum` reads only an `additive` one, and no entity or dimension
-reads a `direct_identifier` column. Distinct counts are the other half:
+reads a `direct_identifier` column. It holds the yml to the `not_null` tests
+too: a null is filled with zero only over a column one holds, where a null can
+only mean "no rows", and a ratio's inputs over nullable columns are filtered to
+the same rows ([0024](decisions/0024-query-metric-takes-its-choices-from-the-yml.md)).
+Distinct counts are the other half:
 MetricFlow does not roll them up, so `agent/metrics.py` takes a grouped
 query's total from a second, ungrouped one
 ([0015](decisions/0015-metrics-in-the-semantic-layer.md)).

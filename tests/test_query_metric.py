@@ -127,6 +127,66 @@ def test_a_filter_on_region(layer):
     assert table.rows == (((), (4.5,)),)
 
 
+def test_a_place_with_sales_and_no_returns_answers_zero(layer):
+    # France bought (I2) and returned nothing. The values a filter accepts come
+    # from every metric of the table, not from returns_gbp's own rows.
+    table = _query(layer, LINES, ["returns_gbp"], (), where={"country": "France"})
+    assert table.rows == (((), (0.0,)),)
+
+
+def test_top_ranks_the_groups_and_judges_the_overcount_on_all_of_them(layer):
+    from agent.metrics import render
+
+    table = _query(layer, LINES, ["net_revenue_gbp", "customers"], ["country"], top=2)
+    assert table.rows == (
+        (("United Kingdom",), (9.5, 1)),  # 10 - 1 + 0.5; I4 has no customer
+        (("United States",), (4.5, 1)),
+    )
+    assert table.ranked == (2, 3)
+    # The two rows kept hold 2 customers, the total; all three hold 3. The
+    # overcount is judged before ranking, or it would be missed.
+    assert table.total == (16.5, 2)
+    assert table.overcounted == ("customers",)
+    text = render(table)
+    assert "top 2 of 3" in text.splitlines()[0]
+    assert "not only the 2 shown" in text
+
+
+def test_top_with_no_group_left_out_does_not_say_one_was(layer):
+    from agent.metrics import render
+
+    table = _query(layer, LINES, ["net_revenue_gbp"], ["country"], top=5)
+    assert table.ranked == (3, 3)
+    text = render(table)
+    assert text.splitlines()[0].endswith(", ranked by net_revenue_gbp")
+    assert "top" not in text
+    assert "not only" not in text
+
+
+@pytest.mark.parametrize(("top", "kept"), [(2, 2), ("2", 2), (2.0, 2)])
+def test_the_tool_takes_top_as_a_number_or_its_digits(catalog, top, kept):
+    from contextlib import nullcontext
+
+    from agent.tools import warehouse_tools
+
+    con = warehouse(LINES)
+    tools = {tool.name: tool for tool in warehouse_tools(lambda: nullcontext(con), catalog)}
+    result = tools["query_metric"].run({"metrics": "orders", "group_by": "country", "top": top})
+    assert f"top {kept} of 3" in result.text.splitlines()[0]
+
+
+@pytest.mark.parametrize("top", [2.7, True, "2.7", "two", [2]])
+def test_the_tool_refuses_a_top_it_would_have_to_round(catalog, top):
+    from contextlib import nullcontext
+
+    from agent.tools import warehouse_tools
+
+    con = warehouse(LINES)
+    tools = {tool.name: tool for tool in warehouse_tools(lambda: nullcontext(con), catalog)}
+    with pytest.raises(ValueError, match="top is a whole number"):
+        tools["query_metric"].run({"metrics": "orders", "group_by": "country", "top": top})
+
+
 def test_a_period_covered_in_part_is_named(layer):
     from agent.metrics import coverage_note
 
@@ -159,6 +219,9 @@ def test_a_period_covered_in_part_is_named(layer):
             'the values are "Europe & Central Asia", "North America"',
         ),
         ({"metrics": ["orders"], "years": (2020, 2021)}, "the data covers"),
+        # top ranks places within one period, never periods.
+        ({"metrics": ["orders"], "group_by": ["year"], "top": 2}, "top ranks"),
+        ({"metrics": ["orders"], "top": 2}, "top ranks"),
     ],
 )
 def test_a_refusal_names_the_choices(layer, kwargs, message):
