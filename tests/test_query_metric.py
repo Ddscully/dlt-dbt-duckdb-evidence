@@ -147,7 +147,44 @@ def test_top_ranks_the_groups_and_judges_the_overcount_on_all_of_them(layer):
     # overcount is judged before ranking, or it would be missed.
     assert table.total == (16.5, 2)
     assert table.overcounted == ("customers",)
-    assert "top 2 of 3" in render(table).splitlines()[0]
+    text = render(table)
+    assert "top 2 of 3" in text.splitlines()[0]
+    assert "not only the 2 shown" in text
+
+
+def test_top_with_no_group_left_out_does_not_say_one_was(layer):
+    from agent.metrics import render
+
+    table = _query(layer, LINES, ["net_revenue_gbp"], ["country"], top=5)
+    assert table.ranked == (3, 3)
+    text = render(table)
+    assert text.splitlines()[0].endswith(", ranked by net_revenue_gbp")
+    assert "top" not in text
+    assert "not only" not in text
+
+
+@pytest.mark.parametrize(("top", "kept"), [(2, 2), ("2", 2), (2.0, 2)])
+def test_the_tool_takes_top_as_a_number_or_its_digits(catalog, top, kept):
+    from contextlib import nullcontext
+
+    from agent.tools import warehouse_tools
+
+    con = warehouse(LINES)
+    tools = {tool.name: tool for tool in warehouse_tools(lambda: nullcontext(con), catalog)}
+    result = tools["query_metric"].run({"metrics": "orders", "group_by": "country", "top": top})
+    assert f"top {kept} of 3" in result.text.splitlines()[0]
+
+
+@pytest.mark.parametrize("top", [2.7, True, "2.7", "two", [2]])
+def test_the_tool_refuses_a_top_it_would_have_to_round(catalog, top):
+    from contextlib import nullcontext
+
+    from agent.tools import warehouse_tools
+
+    con = warehouse(LINES)
+    tools = {tool.name: tool for tool in warehouse_tools(lambda: nullcontext(con), catalog)}
+    with pytest.raises(ValueError, match="top is a whole number"):
+        tools["query_metric"].run({"metrics": "orders", "group_by": "country", "top": top})
 
 
 def test_a_period_covered_in_part_is_named(layer):

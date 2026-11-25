@@ -205,6 +205,17 @@ def _years(value) -> tuple[int, int] | None:
         raise ValueError(f"years is [first, last] or a single year, not {value!r}") from None
 
 
+def _top(value) -> int | None:
+    """`5` or `"5"`, as small models send either; never `2.7` read as 2, or `true` as 1."""
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdecimal():
+        return int(value)
+    raise ValueError(f"top is a whole number of groups, not {value!r}")
+
+
 def _catalog_tools(connect: Connect, catalog: Catalog) -> list[Tool]:
     layer = catalog.layer
 
@@ -221,12 +232,7 @@ def _catalog_tools(connect: Connect, catalog: Catalog) -> list[Tool]:
             raise ValueError(
                 f'where is an object, e.g. {{"region": "North America"}}, not {where!r}'
             )
-        top = args.get("top")
-        if top is not None:  # a small model sends "5" as often as 5
-            try:
-                top = int(top)
-            except (TypeError, ValueError):
-                raise ValueError(f"top is a whole number of groups, not {top!r}") from None
+        top = _top(args.get("top"))
         with connect() as con:
             table = metrics.query_metric(
                 con,

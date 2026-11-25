@@ -47,13 +47,16 @@ two refusals' wording.
 - **Coverage is where each measure's column has a value**, widened to whole
   periods of the table's grain, and the `years` filter names that grain.
 - **One table per request**; metrics from two are refused with a request to ask
-  separately.
+  separately. So a ratio or derived metric reads one table too: its inputs
+  cannot be asked for separately, and the guard refuses one that spans two.
 - **`top` ranks one breakdown by place** in Python, by the first metric, after
   the overcount of a distinct count is judged on every row.
-- **Three more guard rules**: a `semi_additive` column is summed only with a
+- **More guard rules**: a `semi_additive` column is summed only with a
   `non_additive_dimension` on the time dimension; `fill_nulls_with` reads only a
   column a `not_null` test holds; an input of a ratio or derived metric over a
-  nullable column carries a filter.
+  nullable column carries a filter; a table with measures is timed by its
+  `defaults.agg_time_dimension` alone, at a day, month, quarter or year, the
+  periods coverage is widened to.
 
 ## Rejected
 

@@ -137,6 +137,13 @@ account of the same ground is `docs/DATA_QUALITY.md`.
     finer than the table's own. Metrics from two tables are refused in one
     request, because MetricFlow joins them on the date alone
     ([0024](../../../docs/decisions/0024-query-metric-takes-its-choices-from-the-yml.md)).
+    So **every metric reads one semantic model**, a ratio's inputs included:
+    a single metric's inputs cannot be asked for in separate calls.
+  - **A table with measures is timed by `defaults: agg_time_dimension` alone**,
+    at `day`, `month`, `quarter` or `year`. Without one the agent's tool schema
+    fails to build and neither the loop nor the MCP server starts; at `week`,
+    coverage and the `years` filter read each week as a day. A measure's own
+    `agg_time_dimension` is refused, because the tool never reads it.
   - A joined dimension is `<entity>__<dimension>` — `country__region`, not
     `order_line__country__region` — and the compiled SQL names
     `"warehouse"."marts".…`, so an in-memory test database must be attached as

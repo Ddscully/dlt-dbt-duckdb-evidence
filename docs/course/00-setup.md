@@ -24,7 +24,7 @@ DuckLake landing zone `data/course/lakehouse/`, which holds `raw`. Delete
 `data/course/` and run it again.
 
 You should see it finish on `PASS=552 WARN=0 ERROR=0 SKIP=0 NO-OP=11
-TOTAL=562`. The eleven no-ops are the exposures, which dbt resolves and does not
+REUSED=0 TOTAL=563`. The eleven no-ops are the exposures, which dbt resolves and does not
 build.
 
 ### The four recipes

@@ -183,7 +183,7 @@ year  net_revenue_gbp  orders  customers
 2010     9,168,065.90  20,625      4,205
 2011     9,032,384.97  18,916      4,215
 all     18,981,992.57  41,361      5,853
-customers is a distinct count, and its rows add up to more than "all": one can be counted in several rows.
+customers is a distinct count, and its rows can add up to more than "all": one can be counted in several rows.
 
 Partly covered: 2009 (1 Dec to 31 Dec only), 2011 (1 Jan to 9 Dec only). To compare periods, use explain_change, which aligns them.
 ```

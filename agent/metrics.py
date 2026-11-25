@@ -496,9 +496,14 @@ def render(table: MetricTable) -> str:
     else:
         period = f"{table.years[0]} to {table.years[1]}"
     by = f" by {', '.join(table.group_by)}" if table.group_by else ""
-    ranked = ""
+    # "top 3 of 3" would promise groups left out where there are none.
+    ranked, left_out = "", None
     if table.ranked is not None:
-        ranked = f", top {table.ranked[0]} of {table.ranked[1]} by {table.metrics[0]}"
+        kept, there = table.ranked
+        if kept < there:
+            ranked, left_out = f", top {kept} of {there} by {table.metrics[0]}", table.ranked
+        else:
+            ranked = f", ranked by {table.metrics[0]}"
     lines = [f"{', '.join(table.metrics)}{by}, {period}{ranked}"]
 
     # A null label is a row whose key found nothing to join: under `country` or
@@ -527,12 +532,13 @@ def render(table: MetricTable) -> str:
             for i, (cell, width) in enumerate(zip(row, widths, strict=True))
         ]
         lines.append("  ".join(cells).rstrip())
-    if table.ranked is not None:
-        kept, there = table.ranked
+    if left_out is not None:
+        kept, there = left_out
         lines.append(f'"all" is the total over all {there} groups, not only the {kept} shown.')
+    # "can": judged on every group, so under `top` the rows shown may not exceed "all".
     for metric in table.overcounted:
         lines.append(
-            f'{metric} is a distinct count, and its rows add up to more than "all": '
+            f'{metric} is a distinct count, and its rows can add up to more than "all": '
             "one can be counted in several rows."
         )
     return "\n".join(lines)

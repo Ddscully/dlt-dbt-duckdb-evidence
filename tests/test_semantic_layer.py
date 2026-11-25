@@ -20,7 +20,14 @@ semantic model sits beside the model node it reads:
   a filter is there, not that it is the right one; that is review's job;
 * each name `query_metric` offers (`config.meta.offered_as`) is one categorical
   dimension, and not a time grain's name;
-* no entity or dimension reads a column classified `direct_identifier`.
+* no entity or dimension reads a column classified `direct_identifier`;
+* a table with measures is timed by `defaults.agg_time_dimension` alone, at a
+  grain `query_metric` can widen to whole periods: without one, building the
+  tool's schema fails and the agent does not start; at `week`, coverage and the
+  `years` filter would read each week as a day;
+* every metric reads one table, because `query_metric` answers one table per
+  request: a ratio across two would be refused with advice to ask for its
+  inputs separately, which a single metric cannot follow.
 
 And every metric compiles, alone, grouped by each name it offers, because
 `agent/metrics.py` drives MetricFlow's engine, which is not a documented API and
@@ -207,6 +214,52 @@ def test_no_entity_or_dimension_reads_a_direct_identifier(semantic_models):
                     for column in identifiers
                     if re.search(rf"\b{column}\b", expr)
                 ]
+    assert not problems, "\n".join(problems)
+
+
+def test_a_table_with_measures_is_timed_at_a_grain_query_metric_can_widen(semantic_models):
+    from agent.metrics import GRAINS, TIME_GRAINS
+
+    # `agent.metrics._period` widens a day, a month, a quarter or a year, and
+    # `SemanticLayer.grain` and `_coverage` read the default alone.
+    widened = [grain for grain in GRAINS if grain == "day" or grain in TIME_GRAINS]
+    problems = []
+    for name, semantic_model, _ in semantic_models:
+        if not semantic_model["measures"]:
+            continue
+        default = (semantic_model.get("defaults") or {}).get("agg_time_dimension")
+        dimension = next((d for d in semantic_model["dimensions"] if d["name"] == default), {})
+        grain = (dimension.get("type_params") or {}).get("time_granularity")
+        if default is None:
+            problems.append(f"{name} has measures and no defaults: agg_time_dimension")
+        elif grain not in widened:
+            problems.append(
+                f"{name} is timed by {default} at grain {grain}; query_metric widens "
+                + ", ".join(widened)
+            )
+        problems += [
+            f"{name}.{measure['name']} sets its own agg_time_dimension, which "
+            "query_metric ignores: time the table with its defaults alone"
+            for measure in semantic_model["measures"]
+            if measure.get("agg_time_dimension")
+        ]
+    assert not problems, "\n".join(problems)
+
+
+def test_every_metric_reads_one_table(manifest):
+    table_of = {
+        measure["name"]: semantic_model["name"]
+        for semantic_model in manifest["semantic_models"].values()
+        for measure in semantic_model["measures"]
+    }
+    problems = []
+    for metric in manifest["metrics"].values():
+        tables = sorted({table_of[ref["name"]] for ref in metric["type_params"]["input_measures"]})
+        if len(tables) > 1:
+            problems.append(
+                f"{metric['name']} reads {' and '.join(tables)}: query_metric answers one "
+                "table per request, so give it inputs from one semantic model"
+            )
     assert not problems, "\n".join(problems)
 
 
