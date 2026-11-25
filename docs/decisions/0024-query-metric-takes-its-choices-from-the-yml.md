@@ -1,6 +1,6 @@
 # 0024. `query_metric` takes its groupings, filter values and coverage from the semantic layer, and a null is filled only where the column cannot be null
 
-Status: accepted 2026-11-18
+Status: accepted 2026-11-18 (#176)
 
 ## Context
 
